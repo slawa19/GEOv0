@@ -27,7 +27,7 @@ class RunLifecycle:
         lock,
         runs: dict[str, RunRecord],
         set_active_run_id: Callable[[str, str], None],
-        clear_active_run_id: Optional[Callable] = None,  # (owner_id: str = "", run_id: str = "") -> None
+        clear_active_run_id: Callable[..., None],  # (*, owner_id: str, run_id: str) -> None
         utc_now,
         new_run_id: Callable[[], str],
         get_scenario_raw: Callable[[str], dict[str, Any]],
@@ -42,8 +42,8 @@ class RunLifecycle:
         get_max_active_runs: Callable[[], int],
         get_max_run_records: Callable[[], int],
         logger,
-        get_active_run_id_for_owner: Optional[Callable[[str], Optional[str]]] = None,
-        get_max_active_runs_per_owner: Optional[Callable[[], int]] = None,
+        get_active_run_id_for_owner: Callable[[str], Optional[str]],
+        get_max_active_runs_per_owner: Callable[[], int],
     ) -> None:
         self._lock = lock
         self._runs = runs
@@ -119,7 +119,7 @@ class RunLifecycle:
         """F-028-5: a run re-entering `running` from an inactive state passes the owner and global limits of create."""
         if str(run.state) in ("running", "paused", "stopping"):
             return  # already counted as active
-        max_per_owner = int(self._get_max_active_runs_per_owner() or 0) if self._get_max_active_runs_per_owner else 1
+        max_per_owner = int(self._get_max_active_runs_per_owner() or 0)
         if run.owner_id and max_per_owner > 0:
             count, active_run_id = self._count_active_runs_for_owner_locked(run.owner_id)
             if count >= max_per_owner:
@@ -246,21 +246,18 @@ class RunLifecycle:
             # Per-owner limit check (§6.3): owner may have at most
             # SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER active runs (default: 1).
             if owner_id:
-                max_per_owner = 1
-                if self._get_max_active_runs_per_owner is not None:
-                    try:
-                        max_per_owner = int(self._get_max_active_runs_per_owner() or 0)
-                    except Exception:
-                        max_per_owner = 1
+                try:
+                    max_per_owner = int(self._get_max_active_runs_per_owner() or 0)
+                except Exception:
+                    max_per_owner = 1
 
                 if max_per_owner > 0:
                     count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
-                    mapped_run_id: Optional[str] = None
-                    if self._get_active_run_id_for_owner is not None:
-                        try:
-                            mapped_run_id = self._get_active_run_id_for_owner(owner_id)
-                        except Exception:
-                            mapped_run_id = None
+                    mapped_run_id: Optional[str]
+                    try:
+                        mapped_run_id = self._get_active_run_id_for_owner(owner_id)
+                    except Exception:
+                        mapped_run_id = None
 
                     # The active mapping is the primary source of truth for "has an active run".
                     # But if it points to a run that is no longer active (not in _runs, or
@@ -268,7 +265,7 @@ class RunLifecycle:
                     # enforcing the per-owner limit.
                     if mapped_run_id:
                         existing_mapped = self._runs.get(mapped_run_id)
-                        _terminal_states = ("stopped", "error", "finished")
+                        _terminal_states = ("stopped", "error")
                         _is_stale = (
                             existing_mapped is None
                             or str(getattr(existing_mapped, "state", "") or "") in _terminal_states
@@ -282,22 +279,18 @@ class RunLifecycle:
                                 existing_mapped is not None,
                                 str(getattr(existing_mapped, "state", None)) if existing_mapped else "N/A",
                             )
-                            if self._clear_active_run_id is not None:
-                                try:
-                                    self._clear_active_run_id(owner_id=owner_id, run_id=mapped_run_id)
-                                except Exception:
-                                    self._logger.exception(
-                                        "simulator.run.stale_mapping_clear_failed owner_id=%s mapped_run_id=%s",
-                                        owner_id,
-                                        mapped_run_id,
-                                    )
+                            try:
+                                self._clear_active_run_id(owner_id=owner_id, run_id=mapped_run_id)
+                            except Exception:
+                                self._logger.exception(
+                                    "simulator.run.stale_mapping_clear_failed owner_id=%s mapped_run_id=%s",
+                                    owner_id,
+                                    mapped_run_id,
+                                )
                             # Recompute count without the now-cleared stale mapping.
                             count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
                         else:
-                            # Mapping is valid: ensure count reflects it (handles edge cases
-                            # where the run exists in _runs but wasn't counted above).
-                            if mapped_run_id not in self._runs:
-                                count = max(count, 1)
+                            # Mapping is valid (the run is in _runs, so the scan above saw it).
                             if most_recent_run_id is None:
                                 most_recent_run_id = mapped_run_id
 
@@ -415,21 +408,20 @@ class RunLifecycle:
                 run.stopped_at = self._utc_now()
 
         # Release per-owner active run slot.
-        if self._clear_active_run_id is not None:
-            try:
-                self._clear_active_run_id(owner_id=run.owner_id, run_id=run_id)
-            except Exception:
-                self._logger.exception(
-                    "simulator.run.clear_active_run_id_failed run_id=%s — "
-                    "owner mapping may remain stale; will be auto-cleaned on next create_run()",
-                    run_id,
-                )
-                self._logger.warning(
-                    "simulator.run.stale_mapping_risk owner_id=%s run_id=%s — "
-                    "clear_active_run_id raised; stale mapping will be detected in create_run()",
-                    run.owner_id,
-                    run_id,
-                )
+        try:
+            self._clear_active_run_id(owner_id=run.owner_id, run_id=run_id)
+        except Exception:
+            self._logger.exception(
+                "simulator.run.clear_active_run_id_failed run_id=%s — "
+                "owner mapping may remain stale; will be auto-cleaned on next create_run()",
+                run_id,
+            )
+            self._logger.warning(
+                "simulator.run.stale_mapping_risk owner_id=%s run_id=%s — "
+                "clear_active_run_id raised; stale mapping will be detected in create_run()",
+                run.owner_id,
+                run_id,
+            )
 
         self._publish_run_status(run_id)
 
@@ -482,11 +474,10 @@ class RunLifecycle:
             # the restarted run (§FIX-CR2).
             if run.owner_id:
                 existing: Optional[str] = None
-                if self._get_active_run_id_for_owner is not None:
-                    try:
-                        existing = self._get_active_run_id_for_owner(run.owner_id)
-                    except Exception:
-                        existing = None
+                try:
+                    existing = self._get_active_run_id_for_owner(run.owner_id)
+                except Exception:
+                    existing = None
                 if existing and existing != run_id:
                     raise ConflictException(
                         "Owner already has another active run",
