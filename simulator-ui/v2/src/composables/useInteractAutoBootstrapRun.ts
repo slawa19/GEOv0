@@ -33,7 +33,7 @@ export function autostartDecision(runId: string | null | undefined, status: RunS
  * error on screen (`startRun` records it) with Start under "Подробнее" as the way to try again.
  *
  * The run is started with the existing `startRun` - not paused, at the person's stored intensity (the default 30 when
- * none is stored; the caller resets a stored 0). When the person is already in a manual action at that moment (a panel
+ * none is stored; a stored 0 is dropped when it is read, `useSimulatorApp.ts`, 043 S3). When the person is already in a manual action at that moment (a panel
  * is open, a participant chosen - decision 3), the run is started paused instead, so no automatic payment runs over it.
  *
  * Until S2 this file was the Interact bootstrap: `?ui=interact` only, `intensityPercent: 0, pauseImmediately: true`.

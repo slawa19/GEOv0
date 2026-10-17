@@ -69,7 +69,7 @@ describe('the line popup', () => {
     const app = createApp({
       render: () => h(EdgeDetailPopup as Component, {
         phase: state.phase, state, unit: 'UAH', figuresSource: { kind: 'row' }, used: '0.00', limit: '10.00', available: '10.00', status: 'active',
-        busy: false, forceHidden: false, close: () => undefined,
+        busy: false, close: () => undefined,
       }),
     })
     app.mount(host)

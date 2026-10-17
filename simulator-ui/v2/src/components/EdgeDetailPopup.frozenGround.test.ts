@@ -47,7 +47,6 @@ function mountPopup(figuresSource: TrustlineFiguresSource) {
         available: '88',
         status: 'active',
         busy: false,
-        forceHidden: false,
         figuresSource,
         close: () => undefined,
       }),

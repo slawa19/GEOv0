@@ -25,7 +25,6 @@ type PersistedKey =
   | 'geo.sim.quality'
   | 'geo.sim.labelsLod'
   | 'geo.uiTheme'
-  | 'geo.sim.v2.fxDebugRun'
   | 'geo.sim.v2.runId'
 
 type UsePersistedSimulatorPrefsDeps = {
@@ -165,7 +164,7 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
 
 // ---------------------------------------------------------------------------
 // useSimulatorStorage — lightweight composable for ad-hoc storage operations
-// used by SimulatorAppRoot (theme, mode-switch helpers, fxDebugRun flag).
+// used by SimulatorAppRoot (theme, the analytics / "Подробнее" / onboarding flags).
 // Unlike usePersistedSimulatorPrefs it has no reactive watchers and requires
 // no layout/quality dependencies.
 // ---------------------------------------------------------------------------
@@ -206,9 +205,8 @@ export function useSimulatorStorage(storage?: StorageLike) {
   }
 
   /**
-   * Analytics panel visibility (spec 007, T705). Stored through the same `read01`/`write01`
-   * mechanism as the DevTools dropdown next to it in the bottom bar, so the toggle survives a
-   * reload the same way — no second preference layer was introduced for it.
+   * Analytics panel visibility (spec 007, T705). Stored through the `read01`/`write01`
+   * mechanism, so the toggle survives a reload — no second preference layer was introduced for it.
    *
    * A single key, not one per UI mode: the panel only exists in real mode, so a demo/real split
    * would have one half that can never be written.
@@ -230,10 +228,6 @@ ull, the caller defaults it); remembered in this browser, applied without
    */
   const ONBOARDING_DISMISSED_KEY = 'geo.sim.v2.onboarding.dismissed'
 
-  const DEVTOOLS_OPEN_REAL_KEY = 'geo.sim.v2.devtools.open.real'
-  const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
-  const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
-
   /**
    * Read persisted UI theme (null if absent). A value the app no longer offers (`shadcn`, `library`, anything
    * unknown; 039 B3) is normalised to `saas` and written back here, so it is rewritten once: the next read finds a
@@ -250,21 +244,6 @@ ull, the caller defaults it); remembered in this browser, applied without
   /** Persist UI theme selection. */
   function writeUiTheme(theme: UiThemeId) {
     _storage.setItem('geo.uiTheme', theme)
-  }
-
-  /** Returns true when an active FX Debug run was persisted. */
-  function isFxDebugRun(): boolean {
-    return _storage.getItem('geo.sim.v2.fxDebugRun') === '1'
-  }
-
-  /**
-   * Clear the persisted FX Debug run state (runId + fxDebugRun flag).
-   * Called when exiting Demo UI to prevent a stale fixtures-run snapshot on next load.
-   */
-  function clearFxDebugRunState() {
-    if (!isFxDebugRun()) return
-    _storage.removeItem('geo.sim.v2.fxDebugRun')
-    _storage.removeItem('geo.sim.v2.runId')
   }
 
   function readAnalyticsPanelOpen(): boolean | null {
@@ -288,35 +267,9 @@ ull, the caller defaults it); remembered in this browser, applied without
     storage01.write01(ONBOARDING_DISMISSED_KEY, v)
   }
 
-  function readDevtoolsOpenReal(): boolean | null {
-    return storage01.read01(DEVTOOLS_OPEN_REAL_KEY)
-  }
-  function writeDevtoolsOpenReal(v: boolean) {
-    storage01.write01(DEVTOOLS_OPEN_REAL_KEY, v)
-  }
-
-  function readDevtoolsOpenDemo(): boolean | null {
-    return storage01.read01(DEVTOOLS_OPEN_DEMO_KEY)
-  }
-  function writeDevtoolsOpenDemo(v: boolean) {
-    storage01.write01(DEVTOOLS_OPEN_DEMO_KEY, v)
-  }
-
-  function readDevtoolsOpenRealSnapshot(): boolean | null {
-    return storage01.read01(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY)
-  }
-  function writeDevtoolsOpenRealSnapshot(v: boolean) {
-    storage01.write01(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY, v)
-  }
-  function clearDevtoolsOpenRealSnapshot() {
-    storage01.removeKey(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY)
-  }
-
   return {
     readUiTheme,
     writeUiTheme,
-    isFxDebugRun,
-    clearFxDebugRunState,
 
     // Analytics panel visibility (spec 007, T705).
     readAnalyticsPanelOpen,
@@ -329,14 +282,5 @@ ull, the caller defaults it); remembered in this browser, applied without
     // 043 S2: the onboarding hint does not come back once dismissed.
     readOnboardingDismissed,
     writeOnboardingDismissed,
-
-    // DevTools panel prefs (Demo vs Real) + snapshot for reload-based demo enter/exit.
-    readDevtoolsOpenReal,
-    writeDevtoolsOpenReal,
-    readDevtoolsOpenDemo,
-    writeDevtoolsOpenDemo,
-    readDevtoolsOpenRealSnapshot,
-    writeDevtoolsOpenRealSnapshot,
-    clearDevtoolsOpenRealSnapshot,
   }
 }

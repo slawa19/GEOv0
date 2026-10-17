@@ -43,15 +43,10 @@ type Props = {
    */
   figuresSource: TrustlineFiguresSource
 
-  /** When true, the popup is forced hidden (parent shows TrustlineManagementPanel instead). */
-  forceHidden?: boolean
-
   close: () => void
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  forceHidden: false,
-})
+const props = defineProps<Props>()
 
 /**
  * `F-013-7`. Отсутствие основания = оснований нет (`canActOnTrustlineFigures(undefined) === false`):
@@ -113,17 +108,6 @@ const emit = defineEmits<{
   (e: 'closeLine'): void
   (e: 'sendPayment'): void
 }>()
-
-// UX: show the small EDGE popup as a standalone quick-info overlay when
-// the user clicks on an edge on the canvas. Requires phase = editing-trustline
-// and an edge anchor (set by edge click).
-// The popup is hidden when the full TrustlineManagementPanel is shown instead
-// (i.e. when the user came from NodeCard ✏️ or ActionBar or clicked "Change Limit").
-// This is controlled by the parent via the `forceHidden` prop.
-const open = computed(() => {
-  if (props.forceHidden) return false
-  return true
-})
 
 const popupStyle = computed(() =>
   // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
@@ -195,8 +179,6 @@ const utilizationWidth = computed(() => `${utilizationPct.value ?? 0}%`)
 
 const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm } = useDestructiveConfirmation({
   disarmOn: [
-    // When popup closes (including forceHidden), cancel the confirmation state.
-    { source: open, when: (isOpen) => !isOpen },
     // When switching the selected trustline, cancel the confirmation state.
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // When the UI becomes busy, cancel the confirmation state.
@@ -217,7 +199,6 @@ function onCloseLine() {
 
 <template>
   <div
-    v-if="open"
     class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"
     data-testid="edge-detail-popup"
     aria-label="Edge detail popup"

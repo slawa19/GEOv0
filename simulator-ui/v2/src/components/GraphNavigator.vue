@@ -111,7 +111,7 @@ function inspectEdge(): void {
         class="ds-btn ds-btn--secondary"
         type="button"
         :disabled="selectedEdgeKey === '' || edgeInspectDisabled"
-        :title="edgeInspectDisabled ? 'Edge details are available in real Interact mode.' : ''"
+        :title="edgeInspectDisabled ? 'Edge details need the live network (server source) and no action in progress.' : ''"
         @click="inspectEdge"
       >
         Inspect edge

@@ -34,7 +34,6 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
     available: '10.00',
     status: 'active',
     busy: false,
-    forceHidden: false,
     close: () => undefined,
   }
 
@@ -50,23 +49,12 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
 }
 
 describe('EdgeDetailPopup', () => {
-  it('renders when forceHidden=false', async () => {
-    const { app, host } = mountPopup({ forceHidden: false })
+  it('renders', async () => {
+    const { app, host } = mountPopup({})
     await nextTick()
 
     const el = host.querySelector('[data-testid="edge-detail-popup"]')
     expect(el).toBeTruthy()
-
-    app.unmount()
-    host.remove()
-  })
-
-  it('does NOT render when forceHidden=true (TrustlineManagementPanel is shown instead)', async () => {
-    const { app, host } = mountPopup({ forceHidden: true })
-    await nextTick()
-
-    const el = host.querySelector('[data-testid="edge-detail-popup"]')
-    expect(el).toBeFalsy()
 
     app.unmount()
     host.remove()

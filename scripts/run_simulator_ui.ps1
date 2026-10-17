@@ -205,7 +205,7 @@ if (Test-TcpOpen $HostName $selectedPort) {
         Write-Host 'GEO Simulator UI already running.'
         Write-Host "Open in browser: $url"
         Write-Host ''
-        Write-Host "Demo link: ${url}?mode=demo" -ForegroundColor Cyan
+        Write-Host "Demo link: ${url}?mode=fixtures" -ForegroundColor Cyan
         Write-Host ''
         exit 0
       }

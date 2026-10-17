@@ -55,7 +55,6 @@ function mountPopup(overrides: Props = {}) {
     available: '88',
     status: 'active',
     busy: false,
-    forceHidden: false,
     close: () => undefined,
   }
 

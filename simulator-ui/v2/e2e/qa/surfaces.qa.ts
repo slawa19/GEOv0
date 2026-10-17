@@ -459,7 +459,7 @@ test('matrix [hud] menu-admin: when its focused control is disabled under the fo
   release()
 })
 
-for (const id of ['menu-admin', 'menu-dev-tools']) {
+for (const id of ['menu-admin']) {
   test(`matrix [hud] ${id} left open, then a node card opened from the canvas: Escape and Tab belong to the card, not to the menu`, async ({ page }) => {
     // The other side of the rule above (038 S2, D2): the focus is on `body` here too, but because the user went
     // elsewhere - a card opened from the canvas has its focus on `body` by declaration - not because it fell out.

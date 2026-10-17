@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
-import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
-import { demoToolsAllowed } from '../utils/demoToolsAllowed'
 import HudBar from './common/HudBar.vue'
 
 type Props = {
@@ -31,15 +29,6 @@ type Props = {
   refreshArtifacts: () => void
   downloadArtifact: (name: string) => void
 
-  // dev tools (variant B)
-  isWebDriver: boolean
-  isTestMode: boolean
-  isE2eScreenshots: boolean
-
-  isDemoUi: boolean
-  isExiting: boolean
-  toggleDemoUi: () => void
-
   /**
    * Analytics overlay surface (spec 007, T705). The state is owned by `useSimulatorApp` because
    * the panel's mount point and its poll gate both read it; the bar only shows and flips it.
@@ -50,7 +39,7 @@ type Props = {
   /**
    * 043 S1: the one "Подробнее" toggle (owned by the root). Off: the bottom row is the legend, the total debt (slot
    * `summary`) and "Reset view". On: the row of service controls above it - EQ, Layout, Scene, Quality, Labels,
-   * Refresh, Analytics, Artifacts, Dev Tools and "Inspect graph" (slot `navigator`). Hidden means not rendered.
+   * Refresh, Analytics, Artifacts and "Inspect graph" (slot `navigator`). Hidden means not rendered.
    */
   detailsOpen?: boolean
 }
@@ -63,28 +52,6 @@ const quality = defineModel<string>('quality', { required: true })
 const labelsLod = defineModel<string>('labelsLod', { required: true })
 const scene = defineModel<SceneId>('scene', { required: true })
 
-const isDevToolsVisible = computed(() => demoToolsAllowed(props))
-
-const simulatorStorage = useSimulatorStorage()
-
-function readDevToolsOpenForCurrentMode(): boolean {
-  if (props.isDemoUi) {
-    const persisted = simulatorStorage.readDevtoolsOpenDemo()
-    if (persisted != null) return persisted
-
-    // Enter demo → open by default.
-    // Persist immediately so it survives reloads until the user toggles manually.
-    simulatorStorage.writeDevtoolsOpenDemo(true)
-    return true
-  }
-
-  const persisted = simulatorStorage.readDevtoolsOpenReal()
-  if (persisted != null) return persisted
-
-  return false
-}
-
-const devToolsOpen = ref(readDevToolsOpenForCurrentMode())
 const artifactsOpen = ref(false)
 
 const {
@@ -94,36 +61,6 @@ const {
   onToggle: onArtifactsToggle,
   onDetailsKeydown: onArtifactsDetailsKeydown,
 } = useHudDropdownFocus(artifactsOpen)
-
-const {
-  detailsRef: devToolsDetailsRef,
-  summaryRef: devToolsSummaryRef,
-  surfaceRef: devToolsSurfaceRef,
-  onToggle: onDevToolsDropdownToggle,
-  onDetailsKeydown: onDevToolsDetailsKeydown,
-} = useHudDropdownFocus(devToolsOpen)
-
-watch(
-  () => props.isDemoUi,
-  () => {
-    // Defensive: if demo flag ever changes without full reload, re-initialize from persisted prefs.
-    devToolsOpen.value = readDevToolsOpenForCurrentMode()
-  },
-)
-
-watch(
-  devToolsOpen,
-  (val) => {
-    // Persist separately for real vs demo.
-    if (props.isDemoUi) simulatorStorage.writeDevtoolsOpenDemo(val)
-    else simulatorStorage.writeDevtoolsOpenReal(val)
-  },
-  { flush: 'sync' },
-)
-
-function onDevToolsToggle(ev: Event) {
-  onDevToolsDropdownToggle(ev)
-}
 </script>
 
 <template>
@@ -261,36 +198,6 @@ function onDevToolsToggle(ev: Event) {
           </div>
         </details>
 
-        <details
-          v-if="isDevToolsVisible"
-          ref="devToolsDetailsRef"
-          :open="devToolsOpen"
-          @keydown.capture="onDevToolsDetailsKeydown"
-          @toggle="onDevToolsToggle"
-          class="ds-ov-details bb-details"
-          aria-label="Dev tools"
-        >
-          <summary ref="devToolsSummaryRef" class="ds-panel ds-ov-metric ds-row bb-summary">
-            <span class="ds-badge ds-badge--warn">Dev</span>
-            <span class="ds-label bb-fade-90">Tools</span>
-          </summary>
-          <div
-            ref="devToolsSurfaceRef"
-            class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right ds-ov-dropdown--fit-content bb-devtools-dropdown"
-            tabindex="-1"
-          >
-            <div class="ds-row bb-row bb-devtools-row">
-              <button
-                class="ds-btn ds-btn--secondary ds-btn--sm"
-                type="button"
-                :disabled="isDemoUi && isExiting"
-                @click="toggleDemoUi"
-              >
-                {{ isDemoUi ? (isExiting ? 'Exiting…' : 'Exit Demo') : 'Enter Demo' }}
-              </button>
-            </div>
-          </div>
-        </details>
       </div>
 
       <div v-if="$slots.navigator" class="bb-navigator"><slot name="navigator" /></div>
@@ -363,15 +270,6 @@ function onDevToolsToggle(ev: Event) {
   gap: var(--ds-space-2, 8px);
 }
 
-.bb-devtools-dropdown {
-  --ds-ov-dropdown-vw-inset: var(--ds-bb-devtools-maxw-inset);
-}
-
-.bb-devtools-row {
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-
 .bb-stack {
   gap: var(--ds-space-2, 8px);
 }
@@ -382,10 +280,6 @@ function onDevToolsToggle(ev: Event) {
 
 .bb-fade-85 {
   opacity: var(--ds-bb-fade-85-opacity);
-}
-
-.bb-fade-90 {
-  opacity: var(--ds-bb-fade-90-opacity);
 }
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */

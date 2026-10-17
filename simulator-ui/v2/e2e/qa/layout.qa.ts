@@ -28,7 +28,6 @@ const SERVICE: Array<[string, string]> = [
   ['quality', 'select[aria-label="Quality"]'],
   ['labels', 'select[aria-label="Labels"]'],
   ['analytics toggle', '[data-testid="bottombar-analytics-toggle"]'],
-  ['Dev Tools menu', 'details[aria-label="Dev tools"] > summary'],
   ['Inspect graph', '.graph-navigator'],
   ['full metrics', '[aria-label="System metrics"]'],
 ]

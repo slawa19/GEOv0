@@ -67,6 +67,22 @@ function scenarioTitle(s: { name?: string | null; label?: string } | undefined):
   return s?.name?.trim() || s?.label?.trim() || ''
 }
 
+/** The text of a scenario's option: "<name> (<id>)", or the id when the API gives no name. */
+function scenarioOptionText(s: { scenario_id: string; name?: string | null; label?: string }): string {
+  const title = scenarioTitle(s)
+  return title ? `${title} (${s.scenario_id})` : s.scenario_id
+}
+
+/**
+ * 043 S3 (Codex §15, P2): the Scenario select is narrower than its longest option at desktop sizes; the full text of
+ * the chosen option is its `title`, so nothing of the name is lost to a pointer or to assistive tech.
+ */
+const selectedScenarioText = computed(() => {
+  const id = String(ctx.selectedScenarioId.value ?? '')
+  const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
+  return s ? scenarioOptionText(s) : ''
+})
+
 /** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
 const networkName = computed(() => {
   if (ctx.apiMode.value !== 'real') return 'офлайн-демо'
@@ -213,16 +229,7 @@ const adminStopAllBtnClass = computed(() => {
 })
 
 /** Toggle state for the admin panel (details element). */
-const advancedPanelOpen = ref(false)
 const adminPanelOpen = ref(false)
-
-const {
-  detailsRef: advancedDetailsRef,
-  summaryRef: advancedSummaryRef,
-  surfaceRef: advancedSurfaceRef,
-  onToggle: onAdvancedToggle,
-  onDetailsKeydown: onAdvancedDetailsKeydown,
-} = useHudDropdownFocus(advancedPanelOpen)
 
 const {
   detailsRef: adminDetailsRef,
@@ -341,7 +348,7 @@ function onApplyIntensity() {
         </div>
       </HudBar>
 
-      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Top bar" data-testid="top-details-row">
+      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" aria-label="Top bar" data-testid="top-details-row">
         <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
             <div class="ds-row tb-theme-row" aria-label="Theme">
@@ -367,14 +374,15 @@ function onApplyIntensity() {
           <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
-              class="ds-select"
+              class="ds-select tb-scenario-select"
               :value="ctx.selectedScenarioId.value"
+              :title="selectedScenarioText || undefined"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
             >
               <option value="">— select —</option>
               <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
-                {{ scenarioTitle(s) ? `${scenarioTitle(s)} (${s.scenario_id})` : s.scenario_id }}
+                {{ scenarioOptionText(s) }}
               </option>
             </select>
             <button
@@ -421,54 +429,28 @@ function onApplyIntensity() {
               Stop
             </button>
 
-            <details
-              ref="advancedDetailsRef"
-              class="ds-ov-details"
-              aria-label="Advanced"
-              :open="advancedPanelOpen"
-              @keydown.capture="onAdvancedDetailsKeydown"
-              @toggle="onAdvancedToggle"
-            >
-              <summary
-                ref="advancedSummaryRef"
-                class="ds-panel ds-ov-metric ds-row tb-adv-summary"
-                aria-label="Advanced settings"
+            <!-- 043 S3 (decision 5): the tempo sits in the row itself; the "Advanced ⚙" menu that held only it is gone. -->
+            <div class="ds-row tb-adv-row" aria-label="Intensity">
+              <span class="ds-label">Intensity</span>
+              <input
+                class="ds-input tb-intensity-input"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                :value="ctx.intensityPercent.value"
+                aria-label="Intensity percent"
+                @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
+              />
+              <button
+                class="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                :disabled="!isRunActive"
+                @click="onApplyIntensity"
               >
-                <span class="ds-badge ds-badge--info">⚙</span>
-                <span class="ds-label">Advanced</span>
-              </summary>
-
-              <div
-                ref="advancedSurfaceRef"
-                class="ds-panel ds-ov-surface ds-ov-dropdown"
-                aria-label="Advanced dropdown"
-                tabindex="-1"
-              >
-                <div class="ds-stack tb-adv-stack">
-                  <div class="ds-row tb-adv-row" aria-label="Intensity">
-                    <span class="ds-label">Intensity</span>
-                    <input
-                      class="ds-input tb-intensity-input"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      :value="ctx.intensityPercent.value"
-                      aria-label="Intensity percent"
-                      @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
-                    />
-                    <button
-                      class="ds-btn ds-btn--secondary ds-btn--sm"
-                      type="button"
-                      :disabled="!isRunActive"
-                      @click="onApplyIntensity"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </details>
+                Apply
+              </button>
+            </div>
 
             <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar tb-fade-92" aria-label="No scenarios">
               <span class="ds-badge ds-badge--warn">No scenarios</span>
@@ -660,6 +642,39 @@ function onApplyIntensity() {
   gap: var(--ds-space-2, 8px);
 }
 
+/*
+  043 S3: the service row keeps its status cluster (SSE, Run, TX, Admin) on the right of its first line. The run
+  controls in the middle (scenario, Start/Stop, the tempo that left the "Advanced" menu) take the rest of the line and
+  wrap inside themselves, instead of pushing the cluster onto a line of its own: there the Admin summary landed on the
+  left, and its right-anchored menu, opened while the summary was still on the right, ended past the left edge (stand,
+  `menu-admin` in `saas` at 1366x768: x 8.5 against a pad of 14).
+*/
+.tb-details-row > .hud-bar__center {
+  flex: 1 1 0;
+  /*
+    Codex §15 (P2 on the rule above, 2026-10-17): a zero basis alone hid the middle's content from the row's own wrapping,
+    and its widest unbreakable item (the Scenario select, as wide as its longest option) then spilled over the theme and
+    the status cluster. The middle counts its min-content: the row wraps the cluster before anything overlaps, and the
+    min-content is kept small by the cap on the select below.
+  */
+  min-width: min-content;
+}
+
+/* The Scenario select at desktop sizes: capped, its text cut by the control; the whole option is its `title`. */
+.tb-scenario-select {
+  max-width: 18rem;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* ...and the tempo wraps as a whole, never between its label, its field and Apply (narrow screens wrap: below). */
+@media (min-width: 501px) {
+  .tb-details-row .tb-adv-row {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+}
+
 .tb-network-name,
 .tb-network-state {
   display: inline-flex;
@@ -701,14 +716,6 @@ function onApplyIntensity() {
 .tb-icon-28 {
   height: var(--ds-tb-icon-size);
   width: var(--ds-tb-icon-size);
-}
-
-.tb-adv-summary {
-  gap: var(--ds-space-2, 8px);
-}
-
-.tb-adv-stack {
-  gap: var(--ds-space-2, 8px);
 }
 
 .tb-adv-row {
@@ -829,18 +836,6 @@ function onApplyIntensity() {
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
 @media (max-width: 500px) {
-  /* Segmented control: allow wrapping inside */
-  :deep(.ds-segmented) {
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  /* Each segment button: shrink to fit */
-  :deep(.ds-segment) {
-    min-width: 0;
-    flex-shrink: 1;
-  }
-
   /* Theme row: allow wrapping */
   .tb-theme-row {
     flex-wrap: wrap;

@@ -57,12 +57,9 @@ type MockUseSimulatorAppOpts = {
 }
 
 // ---------------------------------------------------------------------------
-// Shared simulatorStorage stub (used by SimulatorAppRoot for demo enter/exit).
+// Shared simulatorStorage stub (the preference flags SimulatorAppRoot reads and writes).
 // ---------------------------------------------------------------------------
 const __GEO_TEST_SIM_STORAGE = {
-  isFxDebugRun: vi.fn(() => false),
-  clearFxDebugRunState: vi.fn(),
-
   readUiTheme: vi.fn<() => string | null>(() => null),
   writeUiTheme: vi.fn(),
 
@@ -74,14 +71,6 @@ const __GEO_TEST_SIM_STORAGE = {
   writeDetailsOpen: vi.fn<(isOpen: boolean) => void>(),
   readOnboardingDismissed: vi.fn<() => boolean | null>(() => null),
   writeOnboardingDismissed: vi.fn<(dismissed: boolean) => void>(),
-
-  readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
-  writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
-  readDevtoolsOpenDemo: vi.fn<() => boolean | null>(() => null),
-  writeDevtoolsOpenDemo: vi.fn<(isOpen: boolean) => void>(),
-  readDevtoolsOpenRealSnapshot: vi.fn<() => boolean | null>(() => null),
-  writeDevtoolsOpenRealSnapshot: vi.fn<(isOpen: boolean) => void>(),
-  clearDevtoolsOpenRealSnapshot: vi.fn(),
 } as const
 
 // Vitest 4 widened the bare `vi.fn()` type to `Mock<Procedure | Constructable>`, which is not
@@ -279,13 +268,12 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         }
       }
 
-      const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'real' ? 'real' : 'fixtures')
-      const isDemoUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'demo')
-      // 043 S2: the one screen - the shipped rule, not a restatement (`ui=interact` is ignored by the product).
-      const isLiveUi = computed(() => actual.liveScreenPolicy(apiMode.value === 'real', isDemoUi.value))
+      const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'fixtures' ? 'fixtures' : 'real')
+      // 043 S2/S3: the one screen is the server source (`useSimulatorApp.ts` isLiveUi = isRealMode); `ui=interact` and
+      // `ui=demo` are ignored by the product.
+      const isLiveUi = computed(() => apiMode.value === 'real')
       const isTestMode = computed(() => {
-        // Default to true for most interaction tests, but allow overriding for
-        // DevTools/Demo UI wiring tests (DevTools are hidden in test mode).
+        // Default to true for most interaction tests; `testMode=0` overrides it.
         const v = (qs().get('testMode') || '').toLowerCase().trim()
         return !(v === '0' || v === 'false')
       })
@@ -535,7 +523,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
         // flags
         isDemoFixtures: computed(() => false),
-        isDemoUi,
         isLiveUi,
         isTestMode,
         isWebDriver: computed(() => false),
@@ -3766,7 +3753,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('EdgeDetailPopup: hidden when TrustlineManagementPanel is visible (no duplicate windows)', async () => {
     // Enter via ActionBar so useFullTrustlineEditor=true → TrustlineManagementPanel shown,
-    // EdgeDetailPopup hidden via forceHidden prop.
+    // and no edge-detail window is opened (the root never mounts EdgeDetailPopup outside one).
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setUrl('/?mode=real&ui=interact')
 
@@ -3787,7 +3774,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     phaseRef.value = 'editing-trustline'
     await nextTick()
 
-    // EdgeDetailPopup should NOT render (forceHidden=true because useFullTrustlineEditor=true).
+    // EdgeDetailPopup should NOT render (no edge-detail window while the full editor is open).
     const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
     expect(btn).toBeFalsy()
 
@@ -5261,112 +5248,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 })
 
-describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
-  // 043 S1: Dev Tools live behind "Подробнее".
-  beforeEach(() => storedDetails(true))
-  afterEach(() => storedDetails(null))
-
-  it('enter demo: snapshots real devtools open state; URL reload does not keep devtools param', async () => {
-    const simStorage = getSimStorage()
-
-    // reset
-    simStorage.writeDevtoolsOpenRealSnapshot.mockClear()
-    simStorage.writeDevtoolsOpenReal.mockClear()
-    simStorage.clearDevtoolsOpenRealSnapshot.mockClear()
-
-    // Pretend real devtools was open.
-    simStorage.readDevtoolsOpenReal.mockReturnValue(true)
-
-    // Add a legacy param that must be scrubbed.
-    setUrl('/?mode=real&ui=interact&devtools=1&testMode=0')
-
-    // Prevent real navigation in happy-dom.
-    // Prevent real navigation in happy-dom by intercepting href setter.
-    const nav = stubLocationHrefSetter()
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = mountSimulatorAppRoot(host)
-    try {
-      await nextTick()
-
-      const devDetails = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement | null
-      expect(devDetails).toBeTruthy()
-      devDetails!.open = true
-
-      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Enter Demo')) as
-        | HTMLButtonElement
-        | undefined
-      expect(btn).toBeTruthy()
-      btn!.click()
-      await nextTick()
-
-      // Snapshot saved.
-      expect(simStorage.writeDevtoolsOpenRealSnapshot).toHaveBeenCalledWith(true)
-
-      // And navigation URL must not keep devtools param.
-      const nextHref = String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')
-      const u = new URL(nextHref)
-      expect(u.searchParams.get('devtools')).toBe(null)
-    } finally {
-      app.unmount()
-      host.remove()
-
-      nav.restore()
-    }
-  })
-
-  it('exit demo: restores real state from snapshot and clears snapshot; URL reload does not keep devtools param', async () => {
-    const simStorage = getSimStorage()
-
-    simStorage.writeDevtoolsOpenRealSnapshot.mockClear()
-    simStorage.writeDevtoolsOpenReal.mockClear()
-    simStorage.clearDevtoolsOpenRealSnapshot.mockClear()
-
-    // Setup: in demo UI, with snapshot present.
-    simStorage.readDevtoolsOpenRealSnapshot.mockReturnValue(false)
-
-    setUrl('/?mode=real&ui=demo&debug=1&devtools=1&testMode=0')
-
-    const nav = stubLocationHrefSetter()
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = mountSimulatorAppRoot(host)
-    try {
-      await nextTick()
-
-      const devDetails = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement | null
-      expect(devDetails).toBeTruthy()
-      devDetails!.open = true
-
-      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Exit Demo')) as
-        | HTMLButtonElement
-        | undefined
-      expect(btn).toBeTruthy()
-      btn!.click()
-      await nextTick()
-
-      // Restore + clear.
-      expect(simStorage.writeDevtoolsOpenReal).toHaveBeenCalledWith(false)
-      expect(simStorage.clearDevtoolsOpenRealSnapshot).toHaveBeenCalledTimes(1)
-
-      const nextHref = String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')
-      const u = new URL(nextHref)
-      expect(u.searchParams.get('ui')).toBe(null)
-      expect(u.searchParams.get('debug')).toBe(null)
-      expect(u.searchParams.get('devtools')).toBe(null)
-    } finally {
-      app.unmount()
-      host.remove()
-
-      nav.restore()
-    }
-  })
-})
-
 // ---------------------------------------------------------------------------
 // Analytics overlay surface (spec 007, T705)
 // ---------------------------------------------------------------------------
@@ -5464,7 +5345,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
 
       expect(analyticsDock(host)).toBeTruthy()
       expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
-      // Same mechanism as the DevTools dropdown next to it: written through useSimulatorStorage.
+      // Same mechanism as the «Подробнее» flag: written through useSimulatorStorage.
       expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(true)
 
       analyticsToggle(host).click()
