@@ -433,9 +433,10 @@ defineExpose({
       <!-- 045 S2: the figures of the line as one line; values through " · ". -->
       <div v-if="isEdit" class="ds-help tl-stats" aria-label="Trustline stats" data-testid="tl-stats">
         Used <span class="ds-mono" data-testid="tl-stats-used">{{ renderOrDash(effectiveUsed) }}</span>
-        / Limit <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}
-        <span class="ds-muted" aria-hidden="true">·</span>
-        <span class="ds-mono" data-testid="tl-stats-available">{{ availableText }}</span>
+        / Limit <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span
+          class="ds-mono"
+          data-testid="tl-stats-available"
+        >{{ availableText }}</span>
       </div>
 
       <div v-if="isCreate" class="ds-controls__row ds-controls__row--compact">
@@ -525,16 +526,18 @@ defineExpose({
         given; editing a line is [Cancel][Close TL][Update]. A disabled button says why in its `title`.
       -->
       <div class="ds-row ds-row--actions tl-actions">
+        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busy" data-testid="trustline-cancel" @click="cancel">Cancel</button>
+
         <template v-if="isEdit">
           <button
-            class="ds-btn ds-btn--primary tl-primary"
+            v-if="closeArmed"
+            class="ds-btn ds-btn--ghost"
             type="button"
-            :disabled="busy || !updateValid"
-            :title="updateTitle"
-            data-testid="trustline-update"
-            @click="onUpdate"
+            :disabled="busy"
+            data-testid="trustline-close-cancel"
+            @click="disarmClose"
           >
-            {{ busy ? 'Updating…' : 'Update' }}
+            Cancel close
           </button>
 
           <button
@@ -549,20 +552,20 @@ defineExpose({
           </button>
 
           <button
-            v-if="closeArmed"
-            class="ds-btn ds-btn--ghost"
+            class="ds-btn ds-btn--primary"
             type="button"
-            :disabled="busy"
-            data-testid="trustline-close-cancel"
-            @click="disarmClose"
+            :disabled="busy || !updateValid"
+            :title="updateTitle"
+            data-testid="trustline-update"
+            @click="onUpdate"
           >
-            Cancel close
+            {{ busy ? 'Updating…' : 'Update' }}
           </button>
         </template>
 
         <button
           v-else
-          class="ds-btn ds-btn--primary tl-primary"
+          class="ds-btn ds-btn--primary"
           type="button"
           :disabled="busy || !isCreate || !createValid"
           :title="createTitle"
@@ -571,8 +574,6 @@ defineExpose({
         >
           {{ busy ? 'Creating…' : 'Create' }}
         </button>
-
-        <button class="ds-btn ds-btn--ghost tl-cancel" type="button" :disabled="busy" data-testid="trustline-cancel" @click="cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -586,28 +587,6 @@ defineExpose({
 .tl-actions {
   justify-content: flex-end;
 }
-
-/*
-  045 S2: [Cancel][Primary] on screen, the primary still FIRST in the DOM - the Tab order and the first focus of a window
-  (WindowShell focuses the first focusable control) stay what they were: Enter on a freshly opened clearing window still
-  confirms, Tab from the amount still reaches Confirm before Cancel. Only the visual order moves, by `order`.
-  Editing a line: [Cancel][Close TL (Cancel close)][Update].
-*/
-.tl-stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: var(--ds-space-1, 4px);
-}
-
-.tl-cancel {
-  order: -1;
-}
-
-.tl-primary {
-  order: 1;
-}
-
 
 @media (max-width: 520px) {
   .tl-stats {

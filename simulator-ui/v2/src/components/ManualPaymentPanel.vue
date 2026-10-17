@@ -713,12 +713,13 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           </div>
         </template>
         <div v-else class="ds-help ds-muted" data-testid="mp-result-no-routes">{{ interactText('resultNoRoutes') }}</div>
+        <!-- 045 S2 (decision 3): [Close][Another], in this order in the DOM as on screen. -->
         <div class="ds-row ds-row--actions">
-          <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-result-another" @click="dismissPaymentResult?.()">
-            {{ interactText('resultAnother') }}
-          </button>
           <button class="ds-btn ds-btn--ghost" type="button" data-testid="mp-result-close" @click="cancel()">
             {{ interactText('resultClose') }}
+          </button>
+          <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-result-another" @click="dismissPaymentResult?.()">
+            {{ interactText('resultAnother') }}
           </button>
         </div>
       </div>
@@ -820,12 +821,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         -->
         <div class="ds-help mp-info" data-testid="mp-info">
           <span data-testid="mp-direct-capacity-help" :title="interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ interactText('directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
-          <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
+          {{ ' ' }}<span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
           <template v-if="estimate">
-            <span class="ds-muted" aria-hidden="true">·</span>
-            <span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></span>
-            <span class="ds-muted" aria-hidden="true">·</span>
-            <span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><template v-if="estimate.state === 'received' && estimate.maxAvailable != null">{{ ' ' }}<span class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></template></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
           </template>
         </div>
       </template>
@@ -899,6 +898,15 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <!-- 045 S2: [Cancel][Confirm] in one row; Confirm is there from the first step, disabled until the payment can be sent. -->
       <div class="ds-row ds-row--actions mp-actions">
         <button
+          class="ds-btn ds-btn--ghost"
+          type="button"
+          data-testid="manual-payment-cancel"
+          :disabled="busy"
+          @click="cancel"
+        >
+          Cancel
+        </button>
+        <button
           v-if="!unknownOutcome"
           class="ds-btn ds-btn--primary"
           type="button"
@@ -909,15 +917,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           @click="onConfirm"
         >
           {{ busy ? 'Sending…' : 'Confirm' }}
-        </button>
-        <button
-          class="ds-btn ds-btn--ghost mp-cancel"
-          type="button"
-          data-testid="manual-payment-cancel"
-          :disabled="busy"
-          @click="cancel"
-        >
-          Cancel
         </button>
       </div>
       </template>
@@ -934,29 +933,17 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
   justify-content: flex-end;
 }
 
-/*
-  045 S2: [Cancel][Primary] on screen, the primary still FIRST in the DOM - the Tab order and the first focus of a window
-  (WindowShell focuses the first focusable control) stay what they were: Enter on a freshly opened clearing window still
-  confirms, Tab from the amount still reaches Confirm before Cancel. Only the visual order moves, by `order`.
-*/
-.mp-cancel {
-  order: -1;
-}
-
 .mp-line-direction > summary {
   cursor: pointer;
 }
 
-/* 045 S2: the one information line - its figures are flex items, so the space between them is a gap, not template whitespace. */
-.mp-info {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: var(--ds-space-1, 4px);
-}
-
+/*
+  045 S2 (decision 1, the third size: meta 10.5): where a figure comes from is meta text - the existing token
+  `--ds-typo-section-label-font-size`, 10.5 px under the windows' compact density (tokens.css); no new name.
+*/
+.mp-info [data-figures-source],
 .mp-source {
-  margin-left: 4px;
+  font-size: var(--ds-typo-section-label-font-size);
 }
 
 /* Visually hidden, still read by a screen reader: the live region that announces the list the form opened. */
