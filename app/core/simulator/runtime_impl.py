@@ -772,9 +772,5 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
     `app.core.simulator.runtime` to keep imports stable.
     """
 
-    def _db_enabled(self) -> bool:
-        """Whether simulator DB persistence is enabled in the current process."""
-        return simulator_storage.db_enabled()
-
 
 runtime = SimulatorRuntime()
