@@ -260,7 +260,7 @@
   --ds-tb-fade-92-opacity: 0.92;
 
   /* DS overlays (Interact panels) */
-  --ds-controls-label-rail-w: 110px;
+  --ds-controls-label-rail-w: 72px;
   --ds-controls-field-max-w: 360px;
   --ds-controls-interact-select-trigger-max-w: 280px;
   --ds-controls-interact-select-surface-max-w: 360px;
@@ -268,14 +268,14 @@
   --ds-ov-panel-minw: 320px;
   --ds-ov-panel-maxw: 560px;
   --ds-ov-panel-maxw-inset: calc(var(--ds-wm-clamp-pad, 12px) * 2);
-  --ds-ov-panel-compact-pad: 12px;
+  --ds-ov-panel-compact-pad: 10px;
   --ds-ov-dropdown-default-minw: 320px;
   --ds-ov-dropdown-default-maxw: 520px;
   --ds-ov-dropdown-default-maxh: 520px;
   --ds-ov-dropdown-default-maxh-vh: 70vh;
   --ds-ov-dropdown-narrow-minw: 260px;
 
-  --ds-ov-node-card-w: 320px;
+  --ds-ov-node-card-w: auto;
   --ds-ov-node-card-maxw: 400px;
   --ds-ov-node-card-avatar-size: 36px;
   --ds-ov-node-card-body-gap: 8px;
@@ -348,9 +348,6 @@
   --ds-app-clearing-premium-pop-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
   /* Components */
-  --ds-mpp-min-h: 188px;
-
-  --ds-cp-min-h: 240px;
   --ds-cp-spinner-size: 12px;
   --ds-cp-spinner-spin-dur: 0.9s;
   --ds-cp-cycles-max-h: 140px;
@@ -465,20 +462,44 @@
 }
 
 [data-density='compact'] {
-  /* Noticeably tighter vertical rhythm + smaller control heights (without changing font sizes) */
+  /*
+    The one size scale of the pop-up windows (spec 045, decision 1): the product sets this density on the window
+    layer `.wm-layer` (SimulatorAppRoot.vue); the HUD bars stay comfortable. Step 8, panel padding 10, control and
+    button 28, label rail 72 (`--ds-controls-label-rail-w`), heading 13, label/control/button 12 - in both themes.
+  */
   --ds-space-1: 4px;
   --ds-space-2: 8px;
-  --ds-space-3: 12px;
-  --ds-space-4: 14px;
+  --ds-space-3: 8px;
+  --ds-space-4: 10px;
 
   --ds-ov-stack-row-min-h: 38px;
 
-  --ds-density-control-height-delta: -4px;
+  --ds-typo-panel-heading-font-size: 13px;
+  --ds-typo-label-font-size: 12px;
+  --ds-typo-control-font-size: 12px;
+  --ds-typo-button-font-size: 12px;
+
+  /* One height in both themes: the theme bases (34 saas, 32 hud) are replaced, not shifted. */
+  --ds-control-height-base: 28px;
+  --ds-button-height-base: 28px;
+  --ds-density-control-height-delta: 0px;
   --ds-density-control-padding-x-delta: -1px;
-  --ds-density-button-height-delta: -4px;
+  --ds-density-button-height-delta: 0px;
   --ds-density-button-padding-x-delta: -2px;
   --ds-density-input-spin-width-delta: -2px;
   --ds-density-input-spin-padding-right-delta: -4px;
+
+  /*
+    The derived sizes are computed where they are declared (`:root`), so a density set on an element BELOW the root
+    changes nothing unless they are declared again here (measured 2026-10-17: until 045 S1 the hud base 32 never
+    reached a control either - both themes drew 34).
+  */
+  --ds-control-height: calc(var(--ds-control-height-base) + var(--ds-density-control-height-delta));
+  --ds-control-padding-x: calc(var(--ds-control-padding-x-base) + var(--ds-density-control-padding-x-delta));
+  --ds-button-height: calc(var(--ds-button-height-base) + var(--ds-density-button-height-delta));
+  --ds-button-padding-x: calc(var(--ds-button-padding-x-base) + var(--ds-density-button-padding-x-delta));
+  --ds-input-spin-width: calc(18px + var(--ds-density-input-spin-width-delta));
+  --ds-input-spin-padding-right: calc(18px + var(--ds-density-input-spin-padding-right-delta));
 }
 
 /* Motion */
