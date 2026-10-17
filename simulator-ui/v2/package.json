@@ -20,6 +20,7 @@
     "test:e2e:qa:video": "playwright test --config=e2e/qa/playwright.video.config.ts",
     "test:e2e:qa:gate": "node e2e/qa/run-stand.mjs gate",
     "test:e2e:qa:report": "node e2e/qa/run-stand.mjs full",
+    "test:e2e:live": "playwright test --config=e2e/playwright.live.config.ts",
     "test:e2e:update": "playwright test --update-snapshots"
   },
   "dependencies": {

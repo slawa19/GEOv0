@@ -68,7 +68,7 @@ import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { useAdminRunsPanel } from './useAdminRunsPanel'
 import { useFxDebugControls } from './useFxDebugControls'
-import { useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
+import { AUTOSTART_DEFAULT_INTENSITY_PERCENT, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
@@ -172,7 +172,11 @@ export type SimulatorAppApi = {
 
   isDemoFixtures: ComputedRef<boolean>
   isDemoUi: ComputedRef<boolean>
-  isInteractUi: ComputedRef<boolean>
+  /**
+   * 043 S2: the ONE screen - the network lives and the protocol actions are at hand on the same page. True for the
+   * server source outside Demo UI (`liveScreenPolicy`); there is no `?ui=interact` / Auto-Run split any more.
+   */
+  isLiveUi: ComputedRef<boolean>
   isTestMode: ComputedRef<boolean>
   isWebDriver: boolean
   isE2eScreenshots: ComputedRef<boolean>
@@ -188,6 +192,7 @@ export type SimulatorAppApi = {
     | 'refreshScenarios'
     | 'startRun'
     | 'pause'
+    | 'pauseForManualAction'
     | 'resume'
     | 'stop'
     | 'applyIntensity'
@@ -333,6 +338,16 @@ export type SimulatorAppApi = {
  */
 export function __analyticsPanelVisibilityPolicy(realMode: boolean, panelOpen: boolean): boolean {
   return realMode && panelOpen
+}
+
+/**
+ * 043 S2 (decision 2): the one screen - a live network with the protocol actions at hand - exists for the server
+ * source outside Demo UI. Until S2 this was two URL modes, Interact (`?ui=interact`) and Auto-Run (no `ui`), split by a
+ * page reload. Exported for the same reason as the analytics policy above: the root's mock calls it instead of
+ * re-stating it.
+ */
+export function liveScreenPolicy(realMode: boolean, demoUi: boolean): boolean {
+  return realMode && !demoUi
 }
 
 /**
@@ -510,8 +525,9 @@ export function useSimulatorApp(opts?: {
     if (env === 'real') return 'real'
     if (env === 'fixtures') return 'fixtures'
     if (env === 'demo') return 'fixtures'
-    // Default to fixtures so UI can run without backend by default.
-    return 'fixtures'
+    // 043 S2 (decision 2): opening the demo is a live run on the server. The offline snapshot is a choice - the
+    // "Источник" select under "Подробнее" (`?mode=fixtures`) or `VITE_API_MODE=fixtures` - not the default.
+    return 'real'
   })
 
   const isRealMode = computed(() => apiMode.value === 'real')
@@ -549,14 +565,9 @@ export function useSimulatorApp(opts?: {
     }
   })
 
-  const isInteractUi = computed(() => {
-    try {
-      const ui = toLower(new URLSearchParams(window.location.search).get('ui'))
-      return ui === 'interact'
-    } catch {
-      return false
-    }
-  })
+  // 043 S2: one reactive mode instead of `?ui=interact` (Interact) and its absence (Auto-Run). `?ui=interact` in an old
+  // link is ignored: the same screen opens.
+  const isLiveUi = computed(() => liveScreenPolicy(isRealMode.value, isDemoUi.value))
 
   const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100-realistic-v2'
 
@@ -727,11 +738,7 @@ export function useSimulatorApp(opts?: {
   )
   watch(
     () => real.intensityPercent,
-    (v) => {
-      // Interact UI must force intensity=0 locally, but should NOT clobber the user's Auto-Run preference.
-      if (isInteractUi.value && apiMode.value === 'real') return
-      lsSet('geo.sim.v2.intensityPercent', String(v))
-    },
+    (v) => lsSet('geo.sim.v2.intensityPercent', String(v)),
   )
   watch(
     () => real.runId,
@@ -919,6 +926,32 @@ export function useSimulatorApp(opts?: {
       })
     },
   })
+  /**
+   * 043 S2 (decision 3; external review 2026-10-17): every EXPLICIT entry or choice of a manual action pauses the run -
+   * starting a flow (the action bar, a node card, a line's popup: all call these), picking a participant on the canvas,
+   * choosing a sender, recipient, creditor, debtor or line in a panel. Wrapped here, at the one object every caller
+   * reaches (the root's panels, the canvas, the window controller), so an entry does not depend on what changed in
+   * the state: until this round a watched "some flow is open" boolean missed a second entry made in the same tick, a
+   * choice inside an open panel and the full editor of a line. A cleared field (`null`: Escape-back, the window
+   * controller) is not an entry. Internal transitions of the flow call the FSM directly and are not wrapped.
+   */
+  {
+    const entries = [
+      'startPaymentFlow', 'startPaymentFlowWithFrom', 'startTrustlineFlow', 'startTrustlineFlowWithFrom', 'startClearingFlow',
+      'selectNode', 'selectEdge', 'setPaymentFromPid', 'setPaymentToPid', 'setTrustlineFromPid', 'setTrustlineToPid',
+      'selectTrustline',
+    ] as const
+    const target = interactMode as unknown as Record<string, (...a: unknown[]) => unknown>
+    for (const name of entries) {
+      const inner = target[name]!
+      target[name] = (...a: unknown[]) => {
+        const out = inner(...a)
+        const cleared = a.length === 1 && a[0] === null
+        if (!cleared && out !== false) noteManualAction()
+        return out
+      }
+    }
+  }
   const systemBalance = useSystemBalance(snapshotRef).balance
 
   // `fxAndRender` is initialized later (it needs layout + camera), but layout/resize
@@ -1348,12 +1381,12 @@ export function useSimulatorApp(opts?: {
   const edgeHover = pickingAndHover.edgeHover
 
   const isInteractPickingPhase = computed(() => {
-    if (!isInteractUi.value) return false
+    if (!isLiveUi.value) return false
     return !!interactMode.isPickingPhase.value
   })
 
   const isInteractCanvasNodePickPhase = computed(() => {
-    if (!isInteractUi.value) return false
+    if (!isLiveUi.value) return false
     return !!interactMode.isCanvasNodePickPhase.value
   })
 
@@ -1398,7 +1431,12 @@ export function useSimulatorApp(opts?: {
       },
       // 037 C: an empty click cancels what is being filled in, not a held result (see `cancelFromCanvas`).
       cancelInteract: () => interactMode.cancelFromCanvas(),
-      selectNode,
+      // 043 S2 (fix-delta 1): a click on a participant is an explicit act - it pauses every time, the same participant
+      // clicked again after "Поток" too (the selection does not change then, so no watch of it can see the act).
+      selectNode: (nodeId) => {
+        selectNode(nodeId)
+        if (nodeId) noteManualAction()
+      },
     })
   }
 
@@ -1420,7 +1458,12 @@ export function useSimulatorApp(opts?: {
 
     pickNodeAt,
     getLayoutNodeById: (id) => layoutIndex.value.nodeById.get(id) ?? null,
-    setSelectedNodeId: selectNode,
+    // 043 S2 (adversarial 1-A): pressing on a participant to drag it is an explicit act - it pauses like a click (the
+    // click the browser fires after a drag is suppressed, so the canvas click entry never runs for a drag).
+    setSelectedNodeId: (id) => {
+      selectNode(id)
+      if (id) noteManualAction()
+    },
     clearHoveredEdge,
 
     clientToScreen,
@@ -1456,7 +1499,7 @@ export function useSimulatorApp(opts?: {
     },
     clearHoveredEdge,
     onEdgeClick: (edge, ptr) => {
-      if (!isInteractUi.value) return false
+      if (!isLiveUi.value) return false
       if (apiMode.value !== 'real') return false
 
       // Interact UI: edge click opens trustline editing.
@@ -1650,37 +1693,37 @@ export function useSimulatorApp(opts?: {
   handleRealSceneContextChange = realMode.handleSceneContextChange
   resetStaleRunOwner = realMode.resetStaleRun
 
-  // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence),
-  // reset to a sensible default so a newly started run actually produces events.
-  if (!isInteractUi.value && isRealMode.value && real.intensityPercent === 0) {
-    real.intensityPercent = 30
+  // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence, which forced and stored 0),
+  // reset to a sensible default so a newly started run actually produces events. (043 S3 removes this with a one-off
+  // clean-up of the stored 0; decision 5.)
+  if (isRealMode.value && real.intensityPercent === 0) {
+    real.intensityPercent = AUTOSTART_DEFAULT_INTENSITY_PERCENT
   }
 
-  // Interact UI contract: intensity must be forced to 0% (local-only).
-  // Do this early (affects next started run) and also best-effort apply to an active run.
-  if (isInteractUi.value && apiMode.value === 'real') {
-    real.intensityPercent = 0
+  // 043 S2: the Interact contract "intensity forced to 0, local-only" (`33563ba2`) is gone with the mode. What keeps the
+  // automatic payments out of a person's way now is the pause on a manual action (decision 3, below).
+
+  /**
+   * 043 S2 (decision 3): "ручной режим должен останавливать все платежи". An explicit manual action pauses the run
+   * (`/pause`): the entries wrapped where `interactMode` is created, a participant chosen (below), and the full line
+   * editor of the root (`realActions.pauseForManualAction`). Resumed only by an explicit act of the person - "Поток" or
+   * Resume under "Подробнее"; confirm, cancel, Escape and a closed panel never resume. Triggered by the ACT, not while
+   * an action lasts: a person who brings the flow back with a panel open gets it, until their next act.
+   */
+  /**
+   * 043 S2 (fix-delta 2): the evidence of a manual act comes ONLY from the explicit entries that call this - never from
+   * state. A selection made by loading (the `?focus=` deep link, a snapshot load) is not an act: it neither pauses a
+   * running run nor makes the opening start its run paused. Until this round a watch of `selectedNodeId` and the
+   * predicate below read the selection, and a deep link paused a run nobody touched.
+   */
+  let manualEntryHappened = false
+  function noteManualAction(): void {
+    manualEntryHappened = true
+    if (!isLiveUi.value) return
+    void realMode.pauseForManualAction()
   }
-
-  let interactIntensityAppliedForRunId: string | null = null
-  watch(
-    () => [isInteractUi.value, isRealMode.value, real.runId, real.runStatus?.run_id ?? null] as const,
-    ([isInteract, isReal, runId, statusRunId]) => {
-      if (!isInteract || !isReal) return
-
-      // Ensure local state (and persisted pref) is always 0.
-      if (real.intensityPercent !== 0) real.intensityPercent = 0
-
-      // If a run is active, also enforce backend intensity (idempotent).
-      // Guard: only apply after we have validated/loaded run_status for this runId.
-      // This avoids spamming /intensity with a stale persisted runId after DB reset/restart.
-      if (runId && runId === statusRunId && runId !== interactIntensityAppliedForRunId) {
-        interactIntensityAppliedForRunId = runId
-        void realMode.applyIntensity()
-      }
-    },
-    { immediate: true, flush: 'post' },
-  )
+  /** For the opening's start (`useInteractAutoBootstrapRun.ts`): has the person already acted on this page? */
+  const isManualActionActive = () => manualEntryHappened
 
   const fxDebugControls = useFxDebugControls({
     isFxDebugEnabled,
@@ -1725,35 +1768,32 @@ export function useSimulatorApp(opts?: {
     )
   }
 
-  // ── Interact UI: auto-bootstrap demo run (no manual Start required) ───
-  // Goal: let users open `?mode=real&ui=interact` on a clean system and
-  // immediately experiment with payments/trustlines/clearing without first
-  // starting a scenario in Auto-Run.
-  const interactAutoBootstrap = useInteractAutoBootstrapRun({
-    isInteractUi: () => isInteractUi.value,
-    isRealMode: () => isRealMode.value,
+  // ── 043 S2 (decision 2): opening the demo is a live run ─────────────
+  // One attempt, when the opening is over (the scene is on screen, so the boot has read the stored or the active run
+  // and its status): no run, or an ended one - start the selected scenario with the existing `startRun`, not paused;
+  // a live run - leave it as it is (a paused one stays paused). See `useInteractAutoBootstrapRun.ts`.
+  const liveAutostart = useInteractAutoBootstrapRun({
+    isLiveUi: () => isLiveUi.value,
+    isManualActionActive,
     real,
     realMode: {
-      refreshScenarios: realMode.refreshScenarios,
       startRun: (o) => realMode.startRun(o),
     },
   })
 
-  if (isInteractUi.value && isRealMode.value) {
-    const stopAutoBootstrap = watch(
-      () => !state.loading && !real.runId,
-      async (ready) => {
-        if (!ready) return
+  if (isLiveUi.value) {
+    const stopAutostartWatch = watch(
+      () => !state.loading,
+      async (opened) => {
+        if (!opened) return
+        stopAutostartWatch()
         try {
-          await interactAutoBootstrap.ensureSerialized()
+          await liveAutostart.onOpened()
         } catch (err) {
-          // Best-effort: user can still start a run manually if needed.
-          console.warn('[auto-bootstrap] best-effort failed:', err)
+          // `startRun` records its own errors; this is anything else on the way (e.g. the scenario catalogue).
+          console.warn('[autostart] failed:', err)
           __autoBootstrapMaybeFillUiError({ real, state, err })
         }
-
-        // Stop only after we successfully attached/created a run.
-        if (real.runId) stopAutoBootstrap()
       },
       { flush: 'post' },
     )
@@ -1840,7 +1880,7 @@ export function useSimulatorApp(opts?: {
     // flags
     isDemoFixtures,
     isDemoUi,
-    isInteractUi,
+    isLiveUi,
     isTestMode,
     isWebDriver,
     isE2eScreenshots,
@@ -1863,6 +1903,8 @@ export function useSimulatorApp(opts?: {
       refreshScenarios: realMode.refreshScenarios,
       startRun: realMode.startRun,
       pause: realMode.pause,
+      // 043 S2: the entry the root makes without a flow transition (the full line editor of a line's popup).
+      pauseForManualAction: async () => noteManualAction(),
       resume: realMode.resume,
       stop: realMode.stop,
       applyIntensity: realMode.applyIntensity,

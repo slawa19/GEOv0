@@ -96,8 +96,25 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   201 + 8 + 4 + 4 = 217. No test left or changed scope; seven entries (four menus, `top-bar-auto-run`,
  *   `graph-navigator`, `analytics-panel`) now first hold that their surface is NOT rendered on the first view
  *   (`bootEntry`, `details.hiddenByDefault`) and then turn "Подробнее" on.
+ * - 2026-10-16 (043 S2 - one screen, autostart, the pause on a manual action): gate 122 -> 127, full 217 -> 222. One new
+ *   file, `one-screen.qa.ts`, five tests in the gate (advisor's decision 2026-10-16: the new S2 tests go into the stand
+ *   gate): (b) a first visit starts a live run at intensity 30 and its payment is drawn; (c) "Send Payment" pauses until
+ *   "Поток", cancel does not resume; (c) a participant chosen pauses; (c) a run somebody paused is not resumed or
+ *   doubled at opening; (d) zero navigations into the manual flow. 122 + 5 = 127; full 217 + 5 = 222. No test left or
+ *   changed scope; the matrix lost its `ui` field (one screen: every entry opens the same address), not an entry.
+ * - 2026-10-17 (043 S2, review round): gate 127 -> 128, full 222 -> 223. One test of `one-screen.qa.ts`: a start the server
+ *   refuses by its global limit of runs shows the Russian line chosen by the page's own `lang` (`index.html`), and the
+ *   three actions are disabled without a run (external review, Gemini B3/B4).
+ * - 2026-10-17 (043 S2, the owner's decision on review item B2): gate 128 -> 129, full 223 -> 224. One test of
+ *   `one-screen.qa.ts`: Send Payment opens its window in the right rail under the top bar, the three actions do not
+ *   move when the flow locks them, focus goes into the window.
+ * - 2026-10-17 (043 S2, Codex fix-delta): gate 129 -> 133, full 224 -> 228. Four tests of `one-screen.qa.ts`: the same
+ *   participant clicked again after "Поток" pauses again; a `?focus=` deep link pauses no running run and does not make
+ *   the opening start paused (two tests); a right-rail window stays under the top stack when "Подробнее" opens after it.
+ * - 2026-10-17 (043 S2, the internal adversarial pass, 1-A): gate 133 -> 134, full 228 -> 229. One test of
+ *   `one-screen.qa.ts`: dragging a participant in the living flow pauses it.
  */
-export const EXPECTED = { gate: 122, full: 217 }
+export const EXPECTED = { gate: 134, full: 229 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

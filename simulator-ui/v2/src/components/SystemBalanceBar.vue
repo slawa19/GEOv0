@@ -53,7 +53,7 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
       </div>
 
       <div v-if="showDebt" class="ds-panel ds-ov-metric">
-        <span class="ds-label">Total Debt</span>
+        <span class="ds-label">Общий долг</span>
         <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 

@@ -39,7 +39,7 @@ describe('SystemBalanceBar', () => {
     const { app, host } = mountSystemBalanceBar({ compact: true })
     await nextTick()
 
-    expect(host.textContent).toContain('Total Debt')
+    expect(host.textContent, '043 S2 (review B7): the label of the approved first view').toContain('Общий долг')
     expect(host.textContent).not.toContain('Utilization')
     expect(host.textContent).not.toContain('Available Capacity')
     expect(host.textContent).not.toContain('Trustlines')
@@ -55,7 +55,7 @@ describe('SystemBalanceBar', () => {
     await nextTick()
     const text = metrics.host.textContent ?? ''
     for (const label of ['Available Capacity', 'Trustlines', 'Participants', 'Utilization']) expect(text).toContain(label)
-    expect(text).not.toContain('Total Debt')
+    expect(text).not.toContain('Общий долг')
     // Its own accessible name: the bottom row's total debt stays the one "System balance" on the page.
     expect(metrics.host.querySelector('[aria-label="System metrics"]')).not.toBeNull()
     expect(metrics.host.querySelector('[aria-label="System balance"]')).toBeNull()
@@ -64,7 +64,7 @@ describe('SystemBalanceBar', () => {
 
     const full = mountSystemBalanceBar()
     await nextTick()
-    for (const label of ['Total Debt', 'Available Capacity', 'Trustlines', 'Participants', 'Utilization']) expect(full.host.textContent).toContain(label)
+    for (const label of ['Общий долг', 'Available Capacity', 'Trustlines', 'Participants', 'Utilization']) expect(full.host.textContent).toContain(label)
     full.app.unmount()
     full.host.remove()
   })

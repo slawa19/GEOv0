@@ -154,6 +154,9 @@ function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: P
 }
 
 function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
+  // 043 S2 (decision 3; review C2): opening a participant's card is a manual act - the double click, "Inspect graph",
+  // the dev hook all come here - and it pauses even when the participant is already the selected one.
+  void realActions.pauseForManualAction()
   if (windowController) {
     windowController.uiOpenOrUpdateNodeCard(o)
     return
@@ -259,13 +262,30 @@ function readPublishedStackHeightPx(el: HTMLElement | null): number | null {
   return Math.round(height)
 }
 
+/** 043 S2 (fix-delta 3): the open interact window was placed by the action bar (see `followTopStackWithRightRailAnchor`). */
+let rightRailAnchorActive = false
+
 function applyPublishedTopStackHeightPx(nextPx: number): void {
   const host = getHostEl()
   if (!host) return
 
   host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
   wm.setGeometry({ dockedRightTopPx: nextPx })
+  followTopStackWithRightRailAnchor()
   wm.reclampAll()
+}
+
+/**
+ * 043 S2 (fix-delta 3): a window of the action bar sits in the right rail UNDER the top stack - and the stack grows when
+ * "Подробнее" opens after the window did. The anchor is taken again from the live stack whenever this publisher sees
+ * the stack change; the window controller passes a changed anchor to the window manager, which moves the window and
+ * clamps it inside the viewport. Only the action bar's anchor follows: a node card's or a line's stays where it was put.
+ */
+function followTopStackWithRightRailAnchor(): void {
+  if (!rightRailAnchorActive || !wmPanelOpenAnchor.value) return
+  const next = getActionBarAnchor()
+  const cur = wmPanelOpenAnchor.value
+  if (next && (next.x !== cur.x || next.y !== cur.y)) wmPanelOpenAnchor.value = next
 }
 
 function applyPublishedBottomStackHeightPx(nextPx: number): void {
@@ -336,7 +356,7 @@ const {
   // flags
   isDemoFixtures,
   isDemoUi,
-  isInteractUi,
+  isLiveUi,
   isTestMode,
   isWebDriver,
   isE2eScreenshots,
@@ -473,7 +493,7 @@ const useFullTrustlineEditor = ref(false)
 // E2 (P0): consolidate WM bridging watchers in a single controller composable.
 const ctl = useWindowController({
   apiMode,
-  isInteractUi,
+  isLiveUi,
   interactPhase,
   isFullEditor: useFullTrustlineEditor,
   interactState: interact.mode.state,
@@ -559,19 +579,8 @@ watch(
   },
 )
 
-const isInteractActivePhase = computed(() => {
-  if (!isInteractUi.value) return false
-  return toLower(interactPhase.value) !== 'idle'
-})
-
-const activeSegment = computed(() =>
-  apiMode.value !== 'real' ? 'sandbox' : isInteractUi.value ? 'interact' : 'auto'
-)
-
  const topBarCtx: TopBarContext = {
    apiMode,
-   activeSegment,
-   isInteractUi,
    isTestMode,
 
    uiTheme,
@@ -600,9 +609,6 @@ const activeSegment = computed(() =>
  }
 
  provideTopBarContext(topBarCtx)
-
-/** True when running in Auto-Run mode (real API, non-interact, non-demo). */
-const isAutoRunUi = computed(() => apiMode.value === 'real' && !isInteractUi.value && !isDemoUi.value)
 
 /** True when initial data has loaded (or we already have a snapshot from a previous load). */
 const dataReady = computed(() => !state.loading || !!state.snapshot)
@@ -637,7 +643,13 @@ onUnmounted(() => {
   resetOverlayGeometryPublishers()
 })
 
+/**
+ * The actions have no run to act on: none is attached (a refused or failed start, a stopped run reset, the opening's
+ * start still in flight) or the run has ended. 043 S2 (review B4): until then "no run" left the three actions enabled
+ * and the person got the raw "No active run_id" of the action instead of a disabled button with its reason.
+ */
 const interactRunTerminal = computed(() => {
+  if (!real.runId) return true
   const st = toLower(real.runStatus?.state)
   return st === 'stopped' || st === 'error'
 })
@@ -748,9 +760,8 @@ function getActionBarAnchor(): Point | null {
   const host = hostEl.value
   if (!host) return null
 
-  // IMPORTANT: WM anchors must be in host-relative coordinates.
-  // Prefer measuring the actual ActionBar element so interact panels open near the toolbar,
-  // not at the far right edge of the viewport.
+  // IMPORTANT: WM anchors must be in host-relative coordinates. The ActionBar and the top stack are measured for the
+  // TOP of the window (under every row of the stack); its side is the right rail (043 S2, below).
   const hostRect = host.getBoundingClientRect()
   const actionBarContainer = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
   if (!actionBarContainer) {
@@ -764,13 +775,14 @@ function getActionBarAnchor(): Point | null {
   const barEl = (actionBarContainer.querySelector('.hud-bar') as HTMLElement | null) ?? actionBarContainer
   const r = barEl.getBoundingClientRect()
 
-  // Anchor at the left edge under the bar so the panel opens near ActionBar,
-  // not docked to the far right.
   // 043 S1: the ActionBar is in the FIRST row of the top stack; with "Подробнее" on, rows follow it. The panel opens
   // under the whole stack, never over those rows (until 043 S1 the ActionBar was the stack's last row).
   const stack = host.querySelector('.ds-ov-top-stack')
   const stackBottom = stack instanceof HTMLElement ? stack.getBoundingClientRect().bottom - hostRect.top : Number.NEGATIVE_INFINITY
-  const x = r.left - hostRect.left
+  // 043 S2 (owner's decision on review item B2, 2026-10-17; mockup-s3): the window of an action opens in the RIGHT
+  // RAIL under the top bar ("Подробнее" is above it), not over the centre of the graph. The anchor is the right edge
+  // of the host; the window manager clamps the window inside the viewport, so it lands flush right.
+  const x = hostRect.width
   const y = Math.max(r.bottom - hostRect.top, Number.isFinite(stackBottom) ? stackBottom : Number.NEGATIVE_INFINITY)
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }
@@ -812,6 +824,8 @@ function captureInteractFlowOpener(
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
+  // 043 S2 (review C1): the same selection as a double click on the canvas (`openNodeCardFromCanvasDblClick`), then the card.
+  state.selectedNodeId = nodeId
   uiOpenOrUpdateNodeCard({ nodeId, anchor: getNodeScreenCenter(nodeId) })
 }
 
@@ -890,7 +904,7 @@ function focusBottleneckTarget(target: BottleneckTarget): void {
 }
 
 function inspectEdgeFromNavigator(link: GraphLink): void {
-  if (apiMode.value !== 'real' || !isInteractUi.value || interact.mode.busy.value) return
+  if (apiMode.value !== 'real' || !isLiveUi.value || interact.mode.busy.value) return
 
   const anchor = navigatorEdgeAnchor(link)
   if (!interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)) return
@@ -966,29 +980,18 @@ function toggleDemoUi() {
   else enterDemoUi()
 }
 
-function goSandbox() {
-  if (isInteractActivePhase.value) interact.mode.cancel()
+/**
+ * 043 S2: the source of the scene - the server (a live run) or the offline snapshot - is the "Источник" select under
+ * "Подробнее" (decision 2). Switching it replaces the whole data pipeline, so it reloads the page with `?mode=`; it is
+ * the one switch of this screen that still navigates (the Sandbox / Auto-Run / Interact segment and its three reloads
+ * are gone). Entering a manual action never navigates (reproducer (d)).
+ */
+function setSource(next: 'real' | 'fixtures') {
+  if (next === apiMode.value) return
+  if (toLower(interactPhase.value) !== 'idle') interact.mode.cancel()
   setQueryAndReload((sp) => {
-    sp.set('mode', 'fixtures')
+    sp.set('mode', next)
     sp.delete('ui')
-    sp.delete('debug')
-  })
-}
-
-function goAutoRun() {
-  if (isInteractActivePhase.value) interact.mode.cancel()
-  setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.delete('ui')
-    sp.delete('debug')
-  })
-}
-
-function goInteract() {
-  if (isInteractUi.value) return
-  setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.set('ui', 'interact')
     sp.delete('debug')
   })
 }
@@ -1006,6 +1009,8 @@ function goInteract() {
 
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
+  // 043 S2: opening the full editor is a manual action of its own (no flow transition happens): it pauses the run.
+  void realActions.pauseForManualAction()
   // Focus the limit editor in TrustlineManagementPanel via template ref.
   // Defensive: template refs rendered through TransitionGroup / repeated windows may resolve
   // either to a single instance or to an array of instances.
@@ -1020,6 +1025,8 @@ function onEdgeDetailCloseLine() {
   // `F-013-7`: отключённая кнопка — это видимость гарда, а не гард: этот обработчик
   // вызывается по событию от попапа, и решение о мутации принимается здесь же, где известно основание.
   if (!canActOnTrustlineFigures(wmEdgeDetailFiguresSource.value)) return
+  // 043 S2 (review C2): closing a line from its popup is a manual act of its own.
+  void realActions.pauseForManualAction()
   captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
     focusOwnerType: 'edge-detail',
     preferFallback: true,
@@ -1068,6 +1075,7 @@ function startFlowFromNodeCard(opts: {
   wmEdgePopupAnchor.value = null
   // Snapshot NodeCard node screen center BEFORE phase changes.
   const snapshot = snapshotNodeCenter()
+  rightRailAnchorActive = false
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
   // H-1 coexistence: NodeCard is an inspector window and must coexist with interact.
@@ -1082,6 +1090,7 @@ function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void 
   wmEdgePopupAnchor.value = null
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
   const snapshot = getActionBarAnchor()
+  rightRailAnchorActive = true
   if (opts.openEditor) useFullTrustlineEditor.value = true
 
   // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.
@@ -1145,15 +1154,17 @@ function onActionStartClearingFlow() {
 
 /**
  * 043 S1: the one onboarding hint (decision 1; a static line until the tour of 034 S9). Shown while a scene is on
- * screen until the first action of this page: its own close button, "Подробнее", a participant selected, or any
- * interact flow started. Not remembered across loads: the spec gives this slice one new stored key, and it is the
- * Details toggle's. Not in the offline screenshot mode (isE2eScreenshots), which has its own minimal controls.
+ * screen until the first action: its own close button, "Подробнее", a participant selected, or any manual flow
+ * started. 043 S2: remembered in this browser (`readOnboardingDismissed`) - once gone, it does not come back on the next
+ * load. Not in the offline screenshot mode (isE2eScreenshots), which has its own minimal controls.
  */
-const onboardingDismissed = ref(false)
+const onboardingDismissed = ref(simulatorStorage.readOnboardingDismissed() ?? false)
 const showOnboardingHint = computed(() => !onboardingDismissed.value && !isE2eScreenshots.value && !!state.snapshot)
-const onboardingCanAct = computed(() => apiMode.value === 'real' && isInteractUi.value)
+const onboardingCanAct = computed(() => isLiveUi.value)
 function dismissOnboarding(): void {
+  if (onboardingDismissed.value) return
   onboardingDismissed.value = true
+  simulatorStorage.writeOnboardingDismissed(true)
 }
 watch(detailsOpen, dismissOnboarding)
 watch(() => state.selectedNodeId, (id) => { if (id) dismissOnboarding() })
@@ -1237,15 +1248,12 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :edge="hoveredEdge"
       :style="edgeTooltipStyle"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
-      :interact-mode="isInteractUi"
+      :interact-mode="isLiveUi"
     />
 
     <TopBar
       :details-open="detailsOpen"
       @toggle-details="toggleDetails"
-      @go-sandbox="goSandbox"
-      @go-auto-run="goAutoRun"
-      @go-interact="goInteract"
       @set-ui-theme="setUiTheme"
       @refresh-scenarios="realActions.refreshScenarios"
       @start-run="realActions.startRun"
@@ -1260,10 +1268,10 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:intensity-percent="realActions.setIntensityPercent"
     >
-      <!-- 043 S1: the three protocol actions in the first row (Interact only until S2). -->
+      <!-- 043 S2: the three protocol actions in the first row of the one screen (server source). -->
       <template #actions>
         <ActionBar
-          v-if="dataReady && apiMode === 'real' && isInteractUi"
+          v-if="dataReady && isLiveUi"
           :phase="interactPhase"
           :busy="interact.mode.busy.value"
           :cancelling="interact.mode.cancelling?.value ?? false"
@@ -1278,7 +1286,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       <!-- 043 S1: the full metrics, below the rows, while Details is on (the total debt is in the bottom bar).
            No snapshot - no balance (034 S8, review C3): unknown debts are not zero debts. -->
       <SystemBalanceBar
-        v-if="detailsOpen && dataReady && (isInteractUi || isAutoRunUi) && state.snapshot"
+        v-if="detailsOpen && dataReady && isLiveUi && state.snapshot"
         :balance="interact.systemBalance"
         :equivalent="sceneEq"
         variant="metrics"
@@ -1355,13 +1363,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :is-pinned="isNodePinned(String(win.data.nodeId))"
           :pin="() => pinNode(String(win.data.nodeId))"
           :unpin="() => unpinNode(String(win.data.nodeId))"
-          :interact-mode="isInteractUi"
-          :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
-          :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"
-          :interact-busy="isInteractUi ? interact.mode.busy.value : undefined"
-          :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
-          :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
-          :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
+          :interact-mode="isLiveUi"
+          :interact-trustlines="isLiveUi ? interact.mode.trustlines.value : undefined"
+          :trustlines-loading="isLiveUi ? interact.mode.trustlinesLoading.value : undefined"
+          :interact-busy="isLiveUi ? interact.mode.busy.value : undefined"
+          :on-interact-send-payment="isLiveUi ? onInteractSendPayment : undefined"
+          :on-interact-new-trustline="isLiveUi ? onInteractNewTrustline : undefined"
+          :on-interact-edit-trustline="isLiveUi ? onInteractEditTrustline : undefined"
           @close="() => {
             wm.close(win.id, 'action')
           }"
@@ -1448,7 +1456,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
       :api-mode="apiMode"
-      :active-segment="activeSegment"
+      :set-source="setSource"
       :is-demo-fixtures="isDemoFixtures"
       :equivalent-options="equivalentOptions"
       :show-reset-view="showResetView"
@@ -1475,7 +1483,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       </template>
 
       <!-- 043 S1: the compact total debt, always in the bottom row. -->
-      <template v-if="dataReady && (isInteractUi || isAutoRunUi) && state.snapshot" #summary>
+      <template v-if="dataReady && isLiveUi && state.snapshot" #summary>
         <SystemBalanceBar :balance="interact.systemBalance" :equivalent="sceneEq" variant="debt" />
       </template>
 
@@ -1484,7 +1492,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         <GraphNavigator
           :nodes="state.snapshot?.nodes ?? []"
           :links="state.snapshot?.links ?? []"
-          :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
+          :edge-inspect-disabled="apiMode !== 'real' || !isLiveUi || interact.mode.busy.value"
           @inspect-node="inspectNodeFromNavigator"
           @inspect-edge="inspectEdgeFromNavigator"
         />
@@ -1549,20 +1557,20 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 
     <!-- BUG-6: Error toast for Interact Mode (auto-dismiss 4s). -->
     <SuccessToast
-      v-if="isInteractUi"
+      v-if="isLiveUi"
       :message="interact.mode.successMessage"
       @dismiss="interact.mode.successMessage.value = null"
     />
 
     <ErrorToast
-      v-if="isInteractUi"
+      v-if="isLiveUi"
       :message="interact.mode.state.error"
       @dismiss="interact.mode.state.error = null"
     />
 
     <!-- BUG-5: Interact Mode inline history log. -->
     <div
-      v-if="isInteractUi && interact.mode.history.length > 0"
+      v-if="isLiveUi && interact.mode.history.length > 0"
       class="ds-ov-bottom sar-interact-history-overlay"
     >
       <InteractHistoryLog :entries="interact.mode.history" :max-visible="3" />

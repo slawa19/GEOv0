@@ -461,6 +461,17 @@ async function activateButton(page: Page, name: string) {
   await button.press('Enter')
 }
 
+/**
+ * 043 S2 (decision 2, 2026-10-17): opening the demo starts a run by itself, so a page of this matrix opens with the run
+ * of the opening already living. Where a test needs the state the person had before S2 (no live run, Start offered),
+ * it stops that run the way a person does - Stop under "Подробнее" - instead of a test-only switch in the product.
+ */
+async function stopTheOpeningsRun(page: Page) {
+  await expect(page.getByLabel('Run state'), 'the opening started its run').toContainText('running')
+  await activateButton(page, 'Stop')
+  await expect(page.getByLabel('Run state')).toContainText('stopped')
+}
+
 async function chooseOverlayOption(
   page: Page,
   triggerName: string,
@@ -516,6 +527,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
 
     await page.goto('/?mode=real&e2eReal=1')
     await waitReady(page)
+    // 043 S2: the stale run fell back (the opening then started a new run, which this test stops to look at the preview).
+    await stopTheOpeningsRun(page)
     const navigator = page.getByRole('region', { name: 'Graph navigator' })
     await navigator.getByText('Inspect graph', { exact: true }).click()
     await expect(navigator.getByLabel('Node').locator('option')).toHaveCount(2)
@@ -530,10 +543,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await page.goto('/?mode=real&e2eReal=1')
     await waitReady(page)
 
-    await activateButton(page, 'Start')
-    await expect(page.getByLabel('Run state')).toContainText('running')
-    await activateButton(page, 'Stop')
-    await expect(page.getByLabel('Run state')).toContainText('stopped')
+    // 043 S2: the first Start of this test is the opening's own (decision 2); then Stop -> Start as before.
+    await stopTheOpeningsRun(page)
 
     await activateButton(page, 'Start')
     await expect(page.getByLabel('Run state')).toContainText('running')
@@ -551,7 +562,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     const mock = await installRealMocks(page)
     await page.goto('/?mode=real&e2eReal=1')
     await waitReady(page)
-    await activateButton(page, 'Start')
+    // 043 S2: the run is the opening's own (decision 2), not a Start press.
     await expect(page.getByLabel('Run state')).toContainText('running')
     await expect.poll(() => page.evaluate(() => window.localStorage.getItem('geo.sim.v2.runId'))).toBe('phase5-run-1')
     await page.goto('/?mode=real&ui=interact&e2eReal=1')
@@ -588,7 +599,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 028 F-028-51 (T2884): a payment refusal reads as the client's text, not the server's `message`. The "(available now:
     // 0.00 UAH)" part comes only from the answer's `details.max_available`, so this fails if the mock's `details` are lost
     // and the text would otherwise be reached through the code alone (029 T2990, finding 4).
-    await expect(page.getByLabel('Error notification')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
+    // 043 S2 (review B3, 2026-10-17): the page is Russian (`index.html` lang="ru"), so the refusal is in its Russian form.
+    await expect(page.getByLabel('Error notification')).toContainText('Нет маршрута платежа между этими участниками (сейчас доступно: 0.00 UAH).')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 
@@ -680,7 +692,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
         .poll(() => hudHeader.evaluate((element) => getComputedStyle(element, '::before').animationName))
         .toBe('none')
 
-      await activateButton(page, 'Start')
+      // 043 S2: the run is the opening's own (decision 2), not a Start press.
+      await expect(page.getByLabel('Run state')).toContainText('running')
       await page.goto('/?mode=real&ui=interact&e2eReal=1')
       await waitReady(page)
       await activateButton(page, 'Run Clearing')

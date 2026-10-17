@@ -9,7 +9,11 @@ import HudBar from './common/HudBar.vue'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
-  activeSegment: 'sandbox' | 'auto' | 'interact'
+  /**
+   * 043 S2 (decision 2): "Источник" - the server (a live run) or the offline snapshot. The root switches it (a reload:
+   * the data pipeline is replaced). Optional only so that a mount without it shows no select.
+   */
+  setSource?: (source: 'real' | 'fixtures') => void
 
   isDemoFixtures: boolean
   /** 028 F-028-47 (C1): the equivalents the API names (`equivalentOptions`). */
@@ -150,6 +154,20 @@ function onDevToolsToggle(ev: Event) {
         </select>
       </div>
 
+      <div v-if="props.setSource" class="ds-row bb-row" aria-label="Source">
+        <span class="ds-label">Источник</span>
+        <select
+          class="ds-select"
+          aria-label="Источник"
+          data-testid="source-select"
+          :value="apiMode"
+          @change="props.setSource?.(($event.target as HTMLSelectElement).value === 'fixtures' ? 'fixtures' : 'real')"
+        >
+          <option value="real">Сервер</option>
+          <option value="fixtures">Снимок без сервера</option>
+        </select>
+      </div>
+
       <div v-if="apiMode !== 'real'" class="ds-row bb-row" aria-label="Scene">
         <span class="ds-label">Scene</span>
         <select v-model="scene" class="ds-select" aria-label="Scene">
@@ -198,7 +216,6 @@ function onDevToolsToggle(ev: Event) {
         </button>
 
         <details
-          v-if="activeSegment === 'auto'"
           ref="artifactsDetailsRef"
           :open="artifactsOpen"
           class="ds-ov-details bb-details"

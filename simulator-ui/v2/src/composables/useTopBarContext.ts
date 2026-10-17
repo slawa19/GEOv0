@@ -5,9 +5,8 @@ import type { UiThemeId } from '../types/uiPrefs'
 
 export type TopBarContext = {
   // mode + env
+  /** 043 S2: the one screen has no mode segment; the source (server or offline snapshot) is all that differs. */
   apiMode: Readonly<Ref<'fixtures' | 'real'>>
-  activeSegment: Readonly<Ref<'sandbox' | 'auto' | 'interact'>>
-  isInteractUi: Readonly<Ref<boolean>>
   /** True when UI runs in automation/deterministic mode (VITE_TEST_MODE=1). */
   isTestMode: Readonly<Ref<boolean | undefined>>
 
