@@ -1312,6 +1312,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @after-leave="(el) => { const id = parseInt((el as HTMLElement).dataset?.winId ?? ''); if (id) wm.finishClose(id) }"
       tag="div"
       class="wm-layer"
+      data-density="compact"
       aria-label="Window layer"
       :css="!isTestMode"
     >

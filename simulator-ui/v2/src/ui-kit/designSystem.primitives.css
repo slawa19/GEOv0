@@ -104,6 +104,8 @@
 .ds-help {
   margin: 0;
   color: var(--ds-text-3);
+  /* 045 S1 (F-045-5): a hint is set at the label size; without it it took the 15 px of the body, larger than its label. */
+  font-size: var(--ds-typo-label-font-size);
 }
 
 [data-theme='shadcn'] .ds-help {
@@ -116,7 +118,7 @@
 
 [data-theme='hud'] .ds-help {
   font-family: var(--ds-font-mono);
-  font-size: 0.78rem;
+  font-size: var(--ds-typo-label-font-size);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -328,6 +330,8 @@
   text-transform: uppercase;
   display: flex;
   align-items: center;
+  /* 045 S1 (F-045-11): the marker and the title sit together on the left; `space-between` of the base rule pushed the title right. */
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 

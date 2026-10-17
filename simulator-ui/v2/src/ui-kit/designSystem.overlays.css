@@ -49,22 +49,22 @@
 
   /* WM constraints — keep aligned with DS overlay max widths to avoid first-frame jump */
   --ds-wm-interact-minw: var(--ds-ov-panel-minw, 320px);
-  --ds-wm-interact-minh: 220px;
-  --ds-wm-interact-prefw-trustline: 380px;
-  --ds-wm-interact-prefw-payment: 440px;
-  --ds-wm-interact-prefw-wide: var(--ds-ov-panel-maxw, 560px);
+  --ds-wm-interact-minh: 120px;
+  --ds-wm-interact-prefw-trustline: 360px;
+  --ds-wm-interact-prefw-payment: 360px;
+  --ds-wm-interact-prefw-wide: 360px;
   --ds-wm-interact-prefh-loading: 260px;
   --ds-wm-interact-prefh-confirm: 360px;
   --ds-wm-interact-prefh-picking: 420px;
 
-  --ds-wm-edge-detail-minw: 340px;
+  --ds-wm-edge-detail-minw: 320px;
   --ds-wm-edge-detail-minh: 200px;
-  --ds-wm-edge-detail-prefw: 420px;
+  --ds-wm-edge-detail-prefw: 320px;
   --ds-wm-edge-detail-prefh: 320px;
 
   --ds-wm-node-card-minw: 320px;
   --ds-wm-node-card-minh: 180px;
-  --ds-wm-node-card-prefw: 360px;
+  --ds-wm-node-card-prefw: 320px;
   --ds-wm-node-card-prefh: 260px;
 
   /* WM stacking: group priority bases (inside WM layer only) */
@@ -218,6 +218,15 @@ details[open].ds-ov-details > summary::after {
 
   min-width: var(--ds-ov-panel-minw);
   max-width: min(var(--ds-ov-panel-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
+}
+
+/*
+  Inside a window of the window manager the shell is the box: the inset above is meant for a panel placed in the
+  viewport, and in a shell it left a dead strip on the right (spec 045, F-045-1 and F-045-9; measured 22 and 40 px).
+*/
+.ws-shell .ds-ov-panel,
+.ws-shell .ds-ov-node-card {
+  max-width: 100%;
 }
 
 .ds-ov-panel--compact .ds-panel__header,
