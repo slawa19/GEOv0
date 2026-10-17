@@ -1316,9 +1316,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       aria-label="Window layer"
       :css="!isTestMode"
     >
-      <!-- NB: @close is dead in frameless mode (no ws-close button rendered).
-           Close is handled by child components (legacy ×, Cancel, Close).
-           Keeping the handler for forward-compatibility if framed mode is re-enabled. -->
+      <!-- Frameless: WindowShell renders no close button; each window closes from its own controls (×, Cancel, Close). -->
         <WindowShell
         v-for="win in wm.windows.value"
         :key="win.id"
@@ -1327,7 +1325,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         :aria-label="wmSurfaceDescriptorFor(win).ariaLabel"
         :title="wmSurfaceDescriptorFor(win).title"
         :frameless="true"
-        @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow('action') : wm.close(win.id, 'action')"
         @focus="wm.focus(win.id)"
         @measured="(s) => {
           wm.updateMeasuredSize(win.id, s)
