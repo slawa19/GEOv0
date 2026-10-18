@@ -316,9 +316,16 @@ class Settings(BaseSettings):
     CLEARING_PERIODIC_ENABLED: bool = False
     CLEARING_PERIODIC_INTERVAL_SECONDS: int = 300
 
-    # Integrity checkpoints
+    # Integrity checkpoints and the debt reconciliation after them (`app/core/maintenance_jobs.py`). The loop runs
+    # once at process start and then every interval after the previous run completes.
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
-    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300
+    # 2026-10-18, programme 047 `T4701`, owner decision «B»: once a day, was 300 s. No class of discrepancy is caught
+    # by the periodic run that one run does not catch (047 F-047-3); each run reads the equivalent's whole history
+    # (044 stage 2: ~6.5 KB of memory per operation). An operator who touched the database runs
+    # `scripts/reconcile_debts.py` instead of waiting (`docs/ru/runbook-integrity-hold.md` §3). The freshness policy
+    # of a stored result follows this value (`result_freshness_threshold`, 2 x interval + 5 min). A deployment may set
+    # another value; `INTEGRITY_CHECKPOINT_ENABLED=false` would also drop the start-up run.
+    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 86400
     # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
     # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
     INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
