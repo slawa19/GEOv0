@@ -179,7 +179,7 @@ export const ru = {
   clearing: {
     panelAria: 'Окно клиринга',
     runTitle: 'Клиринг',
-    confirmHelp: 'Сервер выполнит клиринг: взаимно погасит долги по замкнутым цепочкам.',
+    confirmHelp: 'Сервер погасит долги по замкнутым цепочкам.',
     confirm: 'Запустить',
     runningShort: 'Выполняется…',
     resultTitle: 'Итог клиринга',
