@@ -28,7 +28,8 @@ import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
-import { resetFxRendererCaches, spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
+import { resetFxRendererCaches, spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
+import { getLinkTermination } from '../render/linkGeometry'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
@@ -72,7 +73,7 @@ import { useInteractMode } from './useInteractMode'
 import { participantDisplayIdFor, shownScenarioIdOf } from './useParticipantDisplay'
 import { useSystemBalance } from './useSystemBalance'
 
-import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
+import { CLEARING_EFFECT_MS, useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
 import { useRealTxFx } from './realFx/useRealTxFx'
 import { createLivePathDelivery, usePlaylistWorkbench, type PlaylistWorkbench } from './usePlaylistWorkbench'
 
@@ -571,7 +572,6 @@ export function useSimulatorApp(opts?: {
     sourcePath: '',
     snapshot: null,
     selectedNodeId: null,
-    flash: 0,
   })
 
   const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
@@ -1050,9 +1050,6 @@ export function useSimulatorApp(opts?: {
     getLayoutNodeById: (id) => getLayoutNodeByIdLive(id) ?? undefined,
     sizeForNode,
     getCameraZoom: () => camera.zoom,
-    setFlash: (v) => {
-      state.flash = v
-    },
     layoutVersion: layoutCoordinator.layoutVersion,
     isWebDriver: () => isWebDriver,
     getLayoutNodes: getLayoutNodesLive,
@@ -1083,10 +1080,7 @@ export function useSimulatorApp(opts?: {
     getCamera: () => camera,
     isTestMode: () => isTestMode.value,
     getQuality: () => quality.value,
-    getFlash: () => state.flash,
-    setFlash: (v) => {
-      state.flash = v
-    },
+    isGpuLikely: () => gpuAccelLikely.value,
     pruneActiveEdges: fxOverlays.pruneActiveEdges,
     pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
@@ -1141,23 +1135,41 @@ export function useSimulatorApp(opts?: {
   const scheduleTimeout = fxOverlays.scheduleTimeout
   const clearScheduledTimeouts = fxOverlays.clearScheduledTimeouts
 
+  /**
+   * 039 slice C: the visible length of a line on screen, between its link terminations at the current zoom - what
+   * the beam and the clearing spark keep one speed by (`txRoutePlan.ts`). null when a node is not laid out.
+   */
+  function edgeLengthPx(from: string, to: string): number | null {
+    const a = getLayoutNodeById(from)
+    const b = getLayoutNodeById(to)
+    if (!a || !b) return null
+    const zoom = Math.max(0.01, Number(camera.zoom) || 1)
+    const s = getLinkTermination(a, b, 1 / zoom)
+    const sx = s.x
+    const sy = s.y
+    const e = getLinkTermination(b, a, 1 / zoom)
+    return Math.hypot(e.x - sx, e.y - sy) * zoom
+  }
+
   const realClearingFx = useRealClearingFx({
     fxState,
     isTestMode,
     isWebDriver,
     keyEdge,
     seedFn: fnv1a,
-    clearingColor: vizMapping.fx.clearing_debt,
+    // Read at spawn time: `vizMapping.fx` is replaced on a theme change (039 slice C, BACKLOG 039-5 (zh)).
+    clearingColor: () => vizMapping.fx.clearing_debt,
+    sparkCoreColor: () => vizMapping.fx.tx_spark.core,
     addActiveNode,
     addActiveEdge,
     pushClearingAmountOverlay,
+    clearingLabelLifeMs: () => vizMapping.motion.clearingLabelMs,
     scheduleTimeout,
     getLayoutNodeById,
-    setFlash: (v) => {
-      state.flash = v
-    },
+    edgeLengthPx,
     spawnEdgePulses,
     spawnNodeBursts,
+    spawnSparks,
   })
 
   runClearingFxImpl = realClearingFx.runClearingFx
@@ -1297,17 +1309,17 @@ export function useSimulatorApp(opts?: {
     resolveTxDirection,
     keyEdge,
     seedFn: fnv1a,
-    txSparkColorCore: vizMapping.fx.tx_spark.core,
-    txSparkColorTrail: vizMapping.fx.tx_spark.trail,
-    clearingDebtColor: vizMapping.fx.clearing_debt,
+    fxColors: () => ({ txSparkCore: vizMapping.fx.tx_spark.core, txSparkTrail: vizMapping.fx.tx_spark.trail, clearingDebt: vizMapping.fx.clearing_debt }),
     fxColorForNode,
+    edgeLengthPx,
+    txLabelLifeMs: () => vizMapping.motion.txLabelMs,
     scheduleTimeout,
     pushFloatingLabelWhenReady,
   })
 
   const pushTxAmountLabel = realTxFx.pushTxAmountLabel
   const runRealTxFx = realTxFx.runRealTxFx
-  const clampRealTxTtlMs = realTxFx.clampRealTxTtlMs
+  const routeArrivalMs = realTxFx.routeArrivalMs
 
   // ── 042 T4205: the offline effects workbench ─────────────
   // The recorded playlists of the offline snapshot, played through the live event path with the FX functions above
@@ -1324,7 +1336,7 @@ export function useSimulatorApp(opts?: {
     runRealTxFx,
     runRealClearingDoneFx,
     pushTxAmountLabel,
-    clampRealTxTtlMs,
+    routeArrivalMs,
     scheduleTimeout,
   })
   const playlistWorkbench = usePlaylistWorkbench({
@@ -1337,6 +1349,8 @@ export function useSimulatorApp(opts?: {
     // A playback is a new "run" for the effect caches (a replayed clearing is not deduplicated against the last one);
     // an ended one invalidates its pending beam legs and receiver burst.
     fx: { resetTxFx: () => realTxFx.resetRateLimiter(), resetClearingDedup: () => resetClearingFxDedupImpl() },
+    // One duration source (039 slice C, P-3): the effects say how long they last.
+    effects: { tx: realTxFx.routeEffectMs, clearingMs: CLEARING_EFFECT_MS },
   })
   playlistWorkbenchActivePlayback = playlistWorkbench.activePlaybackId
 
@@ -1680,7 +1694,7 @@ export function useSimulatorApp(opts?: {
     realPatchApplier,
     pushTxAmountLabel,
     runRealTxFx,
-    clampRealTxTtlMs,
+    routeArrivalMs,
     runRealClearingDoneFx,
     scheduleTimeout,
     wakeUp,

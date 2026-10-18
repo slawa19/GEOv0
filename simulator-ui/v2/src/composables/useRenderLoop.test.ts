@@ -49,9 +49,9 @@ const TEST_MAPPING: VizMapping = {
     tx_spark: { core: '#000', trail: '#000' },
     clearing_credit: '#000',
     clearing_debt: '#000',
-    flash: { clearing: { from: '#000', to: '#000' } },
     glint: '#000',
   },
+  motion: { txLabelMs: 2600, clearingLabelMs: 4200 },
 }
 
 function makePosMap() {
@@ -141,8 +141,6 @@ function makeLoop(overrides: Partial<RenderLoopDeps> = {}) {
     getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
     isTestMode: () => false,
     getQuality: () => 'low',
-    getFlash: () => 0,
-    setFlash: () => undefined,
     pruneFloatingLabels: () => undefined,
     drawBaseGraph: () => makePosMap(),
     renderFxFrame: () => undefined,
@@ -394,8 +392,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'low',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
@@ -446,8 +442,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'low',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
@@ -499,8 +493,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'low',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
@@ -554,8 +546,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'high',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph,
       renderFxFrame,
@@ -604,8 +594,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'high',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
@@ -690,8 +678,6 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'low',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: vi.fn<DrawBaseGraph>((_ctx, opts) => {
         // Inject our cachedPos map into the render path.
@@ -745,8 +731,6 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
       getQuality: () => 'low',
-      getFlash: () => 0,
-      setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: vi.fn<DrawBaseGraph>((_ctx, opts) => {
         // Seed with cachedPos only once; subsequent frames use same map.

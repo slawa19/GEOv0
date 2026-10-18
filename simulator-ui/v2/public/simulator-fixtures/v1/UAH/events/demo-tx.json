@@ -4,6 +4,10 @@
     "ts": "2026-01-07T20:33:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0017_81af14c1",
+    "amount": "38.93",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -50,6 +54,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0036_3fcd1ce4",
+    "amount": "33.30",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -118,6 +126,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0036_3fcd1ce4",
+    "amount": "26.17",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -186,6 +198,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0002_3c6ef362",
+    "amount": "29.42",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -232,6 +248,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0003_daa66d13",
+    "amount": "30.64",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -278,6 +298,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0004_78dde6c4",
+    "amount": "31.37",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -324,6 +348,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0005_17156075",
+    "amount": "27.62",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -370,6 +398,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0006_b54cda26",
+    "amount": "35.33",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -416,6 +448,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0007_538453d7",
+    "amount": "28.61",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -462,6 +498,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0036_3fcd1ce4",
+    "amount": "32.89",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -508,6 +548,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0037_de049695",
+    "amount": "26.40",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -554,6 +598,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0038_7c3c1046",
+    "amount": "29.50",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -600,6 +648,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0039_1a7389f7",
+    "amount": "27.20",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -646,6 +698,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0040_b8ab03a8",
+    "amount": "27.76",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -692,6 +748,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0041_56e27d59",
+    "amount": "27.44",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -738,6 +798,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0042_f519f70a",
+    "amount": "30.74",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -784,6 +848,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0043_935170bb",
+    "amount": "37.58",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -830,6 +898,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0044_3188ea6c",
+    "amount": "28.83",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -876,6 +948,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0045_cfc0641d",
+    "amount": "31.93",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -922,6 +998,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0046_6df7ddce",
+    "amount": "37.38",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {

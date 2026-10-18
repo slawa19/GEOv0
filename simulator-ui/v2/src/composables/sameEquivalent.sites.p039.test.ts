@@ -91,13 +91,13 @@ describe('039 R11 sites - the delayed receiver label (`executeRealEventIntents`)
   function run(sceneEq: string | null | 'no-getter', labelEq: string) {
     const trace: string[] = []
     executeRealEventIntents(
-      [{ type: 'tx-label-delayed', role: 'receiver', nodeId: 'B', signedAmount: '+1', unit: labelEq, throttleMs: 0, delayMs: 10, runId: 'run_1', equivalent: labelEq }],
+      [{ type: 'tx-label-delayed', role: 'receiver', nodeId: 'B', signedAmount: '+1', unit: labelEq, throttleMs: 0, txEvent: { event_id: 'e1', ts: '2026-02-01T00:00:00Z', type: 'tx.updated', equivalent: labelEq, ttl_ms: 10, edges: [{ from: 'A', to: 'B' }] }, runId: 'run_1', equivalent: labelEq }],
       {
         getActiveRunId: () => 'run_1',
         ...(sceneEq === 'no-getter' ? {} : { getSceneEquivalent: () => sceneEq }),
         refreshSnapshot: vi.fn(), runRealTxFx: vi.fn(), runRealClearingDoneFx: vi.fn(),
         pushTxAmountLabel: () => trace.push('label'), onReceiverGuardDropped: () => trace.push('dropped'),
-        clampRealTxTtlMs: () => 10, scheduleTimeout: (fn) => fn(),
+        routeArrivalMs: () => 10, scheduleTimeout: (fn) => fn(),
       },
     )
     return trace

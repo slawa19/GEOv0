@@ -43,6 +43,9 @@ async function bootClocked(page: Page, snap: QaSnapshot, beforeLoad?: (page: Pag
   if (!devHook) await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 1000))
   await page.clock.runFor(3600) // IDLE_DELAY_MS 3000 + hold + one idle period: the loop is in deep sleep
   await stepToFrameBoundary(page) // the one phase mechanism of the stand (`stand.ts`); these counts hold at any `CLOCK_PHASE_MS`
+  // ... and at any speed of the boot: the frames are on the grid of `performance.now()`, whose offset from `Date.now()`
+  // the boot decides (2026-10-18, `stepToFrameBoundary`). Counter-check that the step landed on that grid.
+  expect(await page.evaluate(() => performance.now() % 16), 'precondition: the clock stands on the frame grid of performance.now()').toBe(0)
 }
 
 // Awaited (2026-10-12, 039 slice A): a count taken after frames that the product has not read yet is a count of
@@ -98,7 +101,8 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   await push(page, [payment(l.source, l.target)])
   await page.clock.runFor(48)
   const c = await loopCounters(page)
-  // The whole life of the effect and the way back to sleep: flight 1200, receiver burst 420, hold 250, idle 3000, slack.
+  // The whole life of the effect and the way back to sleep: the flight (039 slice C: one leg, at most a few hundred ms,
+  // and a 360 ms fade - until then 1200), receiver burst 420, hold 250, idle 3000, slack.
   await page.clock.runFor(1200 + 420 + 250 + 500)
   // Idle cadence now (4 fps, nothing but the base graph on screen): the next 250 ms hold exactly one pass.
   const i0 = await loopCounters(page)
@@ -113,6 +117,9 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
     drawsAsleep: b.draws - a.draws, rafAsleep: b.calls - a.calls, drawsIn48msAfterEvent: c.draws - b.draws,
     drawsForOnePayment: d.draws - b.draws, drawsAsleepAgain: e.draws - d.draws, rafAsleepAgain: e.calls - d.calls,
     idlePasses: i1.draws - i0.draws, commandsInAStaticFrame: i1.cmds - i0.cmds, commandsForOnePayment: d.cmds - b.cmds, commandsAsleep: b.cmds - a.cmds,
+    // 039 slice C, criterion 8: the base canvas's own stroke and drawImage calls in the same one static pass.
+    baseStrokesInAStaticFrame: (i1.baseByMethod.stroke ?? 0) - (i0.baseByMethod.stroke ?? 0),
+    baseDrawImagesInAStaticFrame: (i1.baseByMethod.drawImage ?? 0) - (i0.baseByMethod.drawImage ?? 0),
   }
   console.log('[038 budget] sleep', JSON.stringify(row))
   hold(row.drawsAsleep, BUDGETS.DRAWS_IN_2S_DEEP_SLEEP)
@@ -124,6 +131,9 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   // The volume of drawing: a count of passes does not see a pass that draws twice as much.
   expect(row.commandsAsleep, 'nothing is drawn on the canvases in deep sleep').toBe(0)
   expect(row.idlePasses, 'precondition: exactly one pass of the loop in the measured idle period').toBe(1)
+  // Glow sprites and strokes first (039 slice C): they name WHAT changed, the total below only that something did.
+  hold(row.baseDrawImagesInAStaticFrame, BUDGETS.BASE_DRAW_IMAGES_IN_A_STATIC_FRAME)
+  hold(row.baseStrokesInAStaticFrame, BUDGETS.BASE_STROKES_IN_A_STATIC_FRAME)
   hold(row.commandsInAStaticFrame, BUDGETS.DRAW_COMMANDS_IN_A_STATIC_FRAME)
   hold(row.commandsForOnePayment, BUDGETS.DRAW_COMMANDS_FOR_ONE_PAYMENT_FROM_SLEEP)
 })
@@ -200,8 +210,13 @@ test('budget: one period of the named load is one pass per frame of a recorded d
   const warm = await onePeriod(page, 'budget-warm')
   const offScreenWarm = await page.evaluate(() => (window as unknown as { __qaShadow: { offScreen: number } }).__qaShadow.offScreen)
 
+  const byMethod = (a: Record<string, number>, b: Record<string, number>) =>
+    Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].sort().map((m) => [m, (b[m] ?? 0) - (a[m] ?? 0)]))
   const row = {
-    drawsInOnePeriod: after.draws - before.draws, commandsInOnePeriod: after.cmds - before.cmds, peak, backdropUnderLoad, shadow, drained,
+    drawsInOnePeriod: after.draws - before.draws, commandsInOnePeriod: after.cmds - before.cmds,
+    // Diagnostic, not judged: where the commands are (base / FX canvas, by method), to compare two runs that disagree.
+    base: byMethod(before.baseByMethod, after.baseByMethod), fx: byMethod(before.fxByMethod, after.fxByMethod),
+    peak, backdropUnderLoad, shadow, drained,
     drawsAsleepAfter: d1.draws - d0.draws, warm: { draws: warm.after.draws - warm.before.draws, commands: warm.after.cmds - warm.before.cmds, offScreenShadowBlurSets: offScreenWarm },
   }
   console.log('[038 budget] one period of the load', JSON.stringify(row))
@@ -238,18 +253,23 @@ test('budget: at a sustained 10 fps the FX budget falls, the particle cap follow
   test.skip(!devHook, NEEDS_HOOK)
   await bootClocked(page, snapshot)
 
-  // 60 fps, FX on screen: three clearings 480 ms apart put more live objects on the scene than the low-FPS cap allows.
+  // 60 fps, FX on screen: five clearings 300 ms apart put more live objects on the scene than the low-FPS cap allows.
+  // 039 slice C (2026-10-18, P-4): it was three clearings 480 ms apart. A clearing's lines now pulse for 1.6 s (+30 %
+  // afterglow) after its spark went round, not 4.2 s from the start, and its nodes no longer burst all at once - so the
+  // same three left 90 objects alive, under the cap of 135, and the cap had nothing to cut. The load is made denser to
+  // keep the DEMAND above the cap: what this test judges is the cap, not the size of one clearing's effect.
   let n = 0
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     await push(page, [clearing((n += 1))])
-    await page.clock.runFor(480)
+    await page.clock.runFor(300)
   }
   const fast = await readFx(page)
 
-  // 10 fps for 8 s: one frame per 100 ms; a clearing every second keeps the demand above the cap.
+  // 10 fps for 8 s: one frame per 100 ms; a clearing every 400 ms keeps the demand above the cap (039 slice C: every
+  // second until then - see the warm-up above for why).
   const slow: FxRead[] = []
   for (let f = 0; f < 80; f += 1) {
-    if (f % 10 === 0) await push(page, [clearing((n += 1))])
+    if (f % 4 === 0) await push(page, [clearing((n += 1))])
     await page.clock.fastForward(100)
     slow.push(await readFx(page))
   }
@@ -288,7 +308,8 @@ test('budget: at a sustained 10 fps the FX budget falls, the particle cap follow
 test('budget: a flood of amount labels stops at the cap', async ({ page }) => {
   await bootClocked(page, snapshot)
   // Two waves of payments from every participant to a neighbour, 600 ms apart: 200 sender labels and the receivers'
-  // (340 ms later, the lower TTL clamp) inside the 1900 ms a label lives - well above the cap of 120.
+  // (when each one-leg beam arrives, at the floor of 450 ms or so - 039 slice C; `ttl_ms: 340` below times nothing any
+  // more) inside the 2600 ms a label lives - well above the cap of 120.
   const adj = new Map<string, string>()
   for (const l of snapshot.links) {
     if (!adj.has(l.source)) adj.set(l.source, l.target)

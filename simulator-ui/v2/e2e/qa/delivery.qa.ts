@@ -55,7 +55,7 @@ test('a frame late in transport is not outrun by the fake clock: the first frame
 
   expect(await sparksOnTheFirstFrame(page, true), 'pushEvent returned only after the product took the frame: the frame stepped next draws its spark').toBeGreaterThan(0)
 
-  // Let that beam end (its lifetime is 1200 ms), then the counter-check on the same page.
+  // Let that beam end (039 slice C: a 1-edge beam moves at most a few hundred ms and fades for 360), then the counter-check on the same page.
   await frames(page, 150)
   expect((await fxCounts(page)).sparks, 'the first beam is over').toBe(0)
   expect(await sparksOnTheFirstFrame(page, false), 'counter-check: written and stepped at once, the late frame IS outrun - the hold does delay it').toBe(0)

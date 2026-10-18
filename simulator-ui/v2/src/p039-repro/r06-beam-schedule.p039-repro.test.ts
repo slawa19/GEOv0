@@ -16,15 +16,19 @@
  * LIMITS. A schedule is not what is seen: alpha decays inside every leg (`renderFrame.ts`), so a longer leg alone does
  * not make the handoff visible. Nothing here knows the length of an edge: "constant speed" cannot be judged at this tier.
  *
- * SLICE C (motion) must turn the two `red` tests green: then replace `red` by `it`.
+ * SLICE C (motion) must turn the two `red` tests green: then replace `red` by `it`. DONE 2026-10-18 (039 slice C): the
+ * schedule is `composables/realFx/txRoutePlan.ts` - a floor of 450 ms a leg, one speed, the last leg eased; both cases
+ * are `it` now. The harness gives every edge 150 screen px (the plan's input); "constant speed" is asserted with
+ * unequal lengths in `txRoutePlan.test.ts`.
  */
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
-import { REAL_TX_FX_DEFAULT, useRealTxFx } from '../composables/realFx/useRealTxFx'
+import { BEAM_LEG_MIN_MS } from '../composables/realFx/txRoutePlan'
+import { useRealTxFx } from '../composables/realFx/useRealTxFx'
 import { createFxState } from '../render/fxRenderer'
 import type { TxUpdatedEvent } from '../types'
-import { measured, red } from './p039'
+import { measured } from './p039'
 
 /** See the header: a sampled leg duration at which the oracle's unrelaxed motion limits held, not a measured minimum. */
 const SAMPLED_LEG_MS = 400
@@ -40,8 +44,8 @@ function schedule(k: number, ttl_ms = 1200) {
   const fx = useRealTxFx({
     fxState, isTestMode: ref(false), isWebDriver: false, intensityScale: () => 1,
     resolveTxDirection: (i) => ({ from: i.from ?? '', to: i.to ?? '', edges: i.edges }),
-    keyEdge: (a, b) => `${a}>${b}`, seedFn: (s) => s.length, txSparkColorCore: '#fff', txSparkColorTrail: '#0ff', clearingDebtColor: '#f00',
-    fxColorForNode: (_id, fallback) => fallback,
+    keyEdge: (a, b) => `${a}>${b}`, seedFn: (s) => s.length, fxColors: () => ({ txSparkCore: '#fff', txSparkTrail: '#0ff', clearingDebt: '#f00' }),
+    fxColorForNode: (_id, fallback) => fallback, edgeLengthPx: () => 150, txLabelLifeMs: () => 2600,
     scheduleTimeout: (fn, delayMs) => { timers.push({ at: now + delayMs, fn }) },
     pushFloatingLabelWhenReady: () => undefined, nowMs: () => now,
   })
@@ -49,7 +53,8 @@ function schedule(k: number, ttl_ms = 1200) {
   fx.runRealTxFx({ event_id: `evt-${k}`, ts: '2026-02-01T00:00:00Z', type: 'tx.updated', equivalent: 'UAH', from: 'A', to: NODES[k]!, ttl_ms, edges } as TxUpdatedEvent)
   for (const t of timers.sort((a, b) => a.at - b.at)) { now = t.at; t.fn() }
   timers = []
-  const legs = fxState.sparks.map((s) => ({ edge: `${s.source}>${s.target}`, startMs: s.startedAtMs - 1000, lifeMs: s.ttlMs }))
+  // The life of a leg is how long its head MOVES (`moveMs`); the last leg then fades out at the receiver (039 slice C).
+  const legs = fxState.sparks.map((s) => ({ edge: `${s.source}>${s.target}`, startMs: s.startedAtMs - 1000, lifeMs: s.moveMs ?? s.ttlMs }))
   const receiverBurstAtMs = Math.max(...fxState.nodeBursts.map((b) => b.startedAtMs - 1000))
   return { legs, receiverBurstAtMs, totalMs: Math.max(...legs.map((l) => l.startMs + l.lifeMs)) }
 }
@@ -60,17 +65,17 @@ describe('039 R6 - the schedule of a beam over a route', () => {
       const s = schedule(k)
       return { edges: k, legMs: s.legs.map((l) => l.lifeMs), totalMs: s.totalMs, receiverBurstAtMs: s.receiverBurstAtMs }
     })
-    measured('R6 schedule', { sampledLegMs: SAMPLED_LEG_MS, routeTtlMinMs: REAL_TX_FX_DEFAULT.ttlMinMs, ttlMaxMs: REAL_TX_FX_DEFAULT.ttlMaxMs, specBudgetPerLegMs: 450, rows })
+    measured('R6 schedule', { sampledLegMs: SAMPLED_LEG_MS, legFloorMs: BEAM_LEG_MIN_MS, specBudgetPerLegMs: 450, rows })
     for (const r of rows) expect(r.legMs, `counter-check: a ${r.edges}-edge route spawns one spark per edge`).toHaveLength(r.edges)
   })
 
-  red('no leg of a 6-edge route lives less than 400 ms (today: 200 ms)', 'shortest leg of a 6-edge route, ms', () => {
+  it('no leg of a 6-edge route lives less than 400 ms (until 039 slice C: 200 ms)', () => {
     const s = schedule(6)
     expect(s.legs.length, 'coverage: legs scheduled for a 6-edge route').toBe(6)
     expect(Math.min(...s.legs.map((l) => l.lifeMs)), 'shortest leg of a 6-edge route, ms').toBeGreaterThanOrEqual(SAMPLED_LEG_MS)
   })
 
-  red('a route of more edges takes longer, it is not squeezed into the time of one edge (today: 1200 ms whatever the length)', 'whole 6-edge route, ms', () => {
+  it('a route of more edges takes longer, it is not squeezed into the time of one edge (until 039 slice C: 1200 ms whatever the length)', () => {
     const one = schedule(1).totalMs
     const six = schedule(6).totalMs
     expect(six, `whole 6-edge route, ms (1-edge route: ${one})`).toBeGreaterThan(one)

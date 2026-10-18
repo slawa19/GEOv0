@@ -22,7 +22,7 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { CHORD_CLEAR_PX, CORRIDOR_PX, MOTION_LIMITS, NODE_CLEAR_PX, chordSeen, expectChordTold, offRouteVerdict, probeFrame, routeGeomOf, watchFlight } from './oracle.js'
+import { CHORD_CLEAR_PX, CORRIDOR_PX, MOTION_LIMITS, NODE_CLEAR_PX, chordSeen, expectChordTold, offRouteVerdict, probeFrame, routeGeomOf, watchUntilGone } from './oracle.js'
 import { OPEN_ROUTE, boot, distToSegment, frames, fxCounts, openRouteSnapshot, pushEvent, txUpdated, type Pt } from './stand.js'
 
 const NOTHING = 'nothing painted off the route'
@@ -70,7 +70,8 @@ test('chord, pixels: on an open six-leg route the oracle accepts the beam on its
 
   // 1. The payment as the product draws it: leg after leg. Property 3 accepts it.
   await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
-  const onRoute = await watchFlight(page, g, 76, 0) // 1216 ms: the whole beam and one frame more; no screenshots (P5 is not asked)
+  // The whole beam (039 slice C: as long as its legs, not a fixed 1216 ms); no screenshots (P5 is not asked).
+  const onRoute = await watchUntilGone(page, g, { shotEvery: 0 })
   const painted = g.edges.map((e) => onRoute.filter((p) => p.edges[e.name]!.px > 0).length)
   expect(offRouteVerdict(onRoute), `P3 accepts the beam on its route ${g.ids.join(' > ')}`).toBe(NOTHING)
   expect(painted.every((n) => n > 0), `counter-check: every leg of the route was painted in some frame (frames per leg: ${painted.join(', ')}) - "nothing off the route" is not "nothing at all"`).toBe(true)
@@ -79,7 +80,7 @@ test('chord, pixels: on an open six-leg route the oracle accepts the beam on its
 
   // 2. The same payment as one straight beam sender > receiver, judged against the same six-leg route. Property 3 refuses it.
   await pushEvent(page, txUpdated([g.ids[0]!, g.ids[g.ids.length - 1]!], '10.00', { amount_flyout: false }))
-  const onChord = await watchFlight(page, g, 76, 0)
+  const onChord = await watchUntilGone(page, g, { shotEvery: 0 })
   const off = onChord.filter((p) => p.offRoute > 0)
   const verdict = offRouteVerdict(onChord)
   const row = {

@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { GraphSnapshot } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { CLEARING_EFFECT_MS } from './realFx/useRealClearingFx'
 import {
-  CLEARING_EFFECT_MS,
   PLAYLIST_GAP_PAD_MS,
   PLAYLISTS,
   createLivePathDelivery,
@@ -43,6 +43,11 @@ const done = (id: string, eq = 'UAH') => ({
   cycle_edges: [{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }],
 })
 const META = { id: 'p', label: 'P' }
+/**
+ * The effect lengths the player is given (039 slice C: asked of the effects, not read from the wire). Here a payment's
+ * is its `ttl_ms`, so the cases below can name it; in the app it is the route plan's (`useRealTxFx.ts`, `routeEffectMs`).
+ */
+const EFFECTS = { tx: (e: { ttl_ms?: number }) => e.ttl_ms ?? 1200, clearingMs: CLEARING_EFFECT_MS }
 
 function parsed(raw: unknown[], eq = 'UAH'): LoadedPlaylist {
   const r = parsePlaylist(raw, META, eq, 'mem:p.json')
@@ -89,6 +94,68 @@ describe('042 T4205: the committed recordings are playable on the live event pat
       expect(result.offered.map((p) => p.id)).toEqual(['demo-tx'])
       expect(result.empty).toEqual(['demo-clearing'])
     }
+  })
+
+  // 039 slice C (2026-10-18): the recordings carried no `amount` and no `cleared_amount` since 029 S4, so the workbench
+  // never showed an amount label. The amounts were added from the recorded patches by one rule, held here: a payment's
+  // amount is the receiver's net balance increase in its node patch (= the sender's decrease; nobody else moves), a
+  // clearing's the sum over its cycles of the reduction of `used` common to every line of the cycle. Both replayed from
+  // the snapshot in playlist order, in atoms of precision 2. The edge `used` deltas of a payment are NOT its amount:
+  // they differ leg to leg and from the node patches (inherited inconsistent patches; spec 039, Changelog).
+  it('every recorded amount follows from the recorded patches by the rule of 2026-10-18', () => {
+    const atoms = (p: { net_balance_atoms?: string | null; net_sign?: number | null }) => Number(p.net_balance_atoms) * (p.net_sign ?? 0)
+    const money = (cents: number) => (cents / 100).toFixed(2)
+    let payments = 0
+    let clearings = 0
+    for (const eq of ['EUR', 'HOUR', 'UAH']) {
+      const snap = readJson(`${FIXTURES}${eq}/snapshot.json`) as GraphSnapshot
+      for (const id of ['demo-tx', 'demo-clearing']) {
+        const used = new Map(snap.links.map((l) => [`${l.source}>${l.target}`, Math.round(Number(l.used) * 100)]))
+        const net = new Map(snap.nodes.map((n) => [n.id, atoms(n)]))
+        for (const e of readJson(`${FIXTURES}${eq}/events/${id}.json`) as Array<Record<string, any>>) {
+          const lineDelta = new Map<string, number>()
+          for (const p of e.edge_patch ?? []) {
+            const k = `${p.source}>${p.target}`
+            const v = Math.round(Number(p.used) * 100)
+            lineDelta.set(k, v - used.get(k)!)
+            used.set(k, v)
+          }
+          const moved = new Map<string, number>()
+          for (const p of e.node_patch ?? []) {
+            const v = atoms(p)
+            if (v !== net.get(p.id)) moved.set(p.id, v - net.get(p.id)!)
+            net.set(p.id, v)
+          }
+          if (e.type === 'tx.updated') {
+            payments += 1
+            const [first, last] = [e.edges[0], e.edges[e.edges.length - 1]]
+            expect([e.from, e.to], `${eq}/${id} ${e.event_id}: from/to are the route's ends`).toEqual([first.from, last.to])
+            expect([...moved.keys()].sort(), `${eq}/${id} ${e.event_id}: only sender and receiver move`).toEqual([e.from, e.to].sort())
+            expect(moved.get(e.from)).toBe(-moved.get(e.to)!)
+            expect(e.amount, `${eq}/${id} ${e.event_id}`).toBe(money(moved.get(e.to)!))
+            expect(e.amount_flyout).toBe(true)
+          } else if (e.type === 'clearing.done') {
+            clearings += 1
+            const left = e.cycle_edges.map((x: { from: string; to: string }) => [x.from, x.to] as const)
+            let total = 0
+            let cycles = 0
+            while (left.length) {
+              const cyc = [left.shift()!]
+              while (cyc[cyc.length - 1]![1] !== cyc[0]![0]) {
+                const i = left.findIndex((x: readonly [string, string]) => x[0] === cyc[cyc.length - 1]![1])
+                expect(i, `${eq}/${id}: the cycle lines close cycles`).toBeGreaterThanOrEqual(0)
+                cyc.push(left.splice(i, 1)[0]!)
+              }
+              cycles += 1
+              total += Math.min(...cyc.map(([a, b]) => -lineDelta.get(`${a}>${b}`)!))
+            }
+            expect([e.cleared_cycles, e.cleared_amount], `${eq}/${id} ${e.event_id}`).toEqual([cycles, money(total)])
+          }
+        }
+      }
+    }
+    // Anti-vacuum: the 44 recorded payments (UAH 20, EUR 4, HOUR 20) and the one recorded clearing were all judged.
+    expect({ payments, clearings }).toEqual({ payments: 44, clearings: 1 })
   })
 })
 
@@ -140,7 +207,7 @@ describe('the player', () => {
     vi.useFakeTimers()
     const delivered: Array<[string, string]> = []
     const onPlaybackStart = vi.fn()
-    const p = createPlaylistPlayer({ deliver: (e, id) => delivered.push([e.event_id, id]), onPlaybackStart })
+    const p = createPlaylistPlayer({ deliver: (e, id) => delivered.push([e.event_id, id]), effects: EFFECTS, onPlaybackStart })
     const pl = parsed([tx('t1', 'UAH', 1000), done('c1'), tx('t2')])
     p.play(pl)
     expect(onPlaybackStart).toHaveBeenCalledTimes(1)
@@ -159,7 +226,7 @@ describe('the player', () => {
   it('stop halts the playback and drops its id (a pending receiver label of it is dropped by the live path)', () => {
     vi.useFakeTimers()
     const delivered: string[] = []
-    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id) })
+    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id), effects: EFFECTS })
     p.play(parsed([tx('t1'), tx('t2')]))
     expect(p.activePlaybackId()).toMatch(/^playlist:UAH:p:/)
     p.stop()
@@ -172,7 +239,7 @@ describe('the player', () => {
   it('a second play is a new playback (new id, caches reset again)', () => {
     const ids: string[] = []
     const onPlaybackStart = vi.fn()
-    const p = createPlaylistPlayer({ deliver: (_e, id) => ids.push(id), onPlaybackStart, timers: { setTimeout: () => 1, clearTimeout: () => undefined } })
+    const p = createPlaylistPlayer({ deliver: (_e, id) => ids.push(id), effects: EFFECTS, onPlaybackStart, timers: { setTimeout: () => 1, clearTimeout: () => undefined } })
     const pl = parsed([tx('t1'), tx('t2')])
     p.play(pl)
     p.play(pl)
@@ -182,7 +249,7 @@ describe('the player', () => {
 
   it('step delivers one event at a time and wraps to the first after the last', () => {
     const delivered: string[] = []
-    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id) })
+    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id), effects: EFFECTS })
     const pl = parsed([tx('t1'), tx('t2')])
     p.step(pl)
     expect(p.state).toMatchObject({ cursorId: 'p', position: 1, total: 2, playingId: null })
@@ -192,10 +259,13 @@ describe('the player', () => {
     expect(p.state.position).toBe(1)
   })
 
-  it('gapAfterMs: a payment its ttl plus the pad, a clearing its pulse length plus the pad', () => {
+  // RECORD OF A DELIBERATE CHANGE (039 slice C, 2026-10-18): until then a payment was spaced by its wire `ttl_ms` and
+  // a clearing by a literal 4200 kept in this module - two more copies of durations the effects own (P-3 of spec 039).
+  it('gapAfterMs: a payment its effect length plus the pad, a clearing its effect length plus the pad - both asked of the effects', () => {
     const [a, b] = parsed([tx('t1', 'UAH', 900), done('c1')]).events
-    expect(gapAfterMs(a!)).toBe(900 + PLAYLIST_GAP_PAD_MS)
-    expect(gapAfterMs(b!)).toBe(CLEARING_EFFECT_MS + PLAYLIST_GAP_PAD_MS)
+    const effects = { tx: () => 1777, clearingMs: 3333 }
+    expect(gapAfterMs(a!, effects)).toBe(1777 + PLAYLIST_GAP_PAD_MS)
+    expect(gapAfterMs(b!, effects)).toBe(3333 + PLAYLIST_GAP_PAD_MS)
   })
 })
 
@@ -206,7 +276,6 @@ function mkState(eq: string): SimulatorAppState {
     sourcePath: 'mem',
     snapshot: { equivalent: eq, generated_at: '2026-01-11T00:00:00Z', nodes: [{ id: 'A' }, { id: 'B' }], links: [] },
     selectedNodeId: null,
-    flash: 0,
   } as unknown as SimulatorAppState
 }
 
@@ -235,7 +304,7 @@ function mkDelivery(state: SimulatorAppState, active: () => string | null) {
     runRealTxFx: fx.runRealTxFx,
     runRealClearingDoneFx: fx.runRealClearingDoneFx,
     pushTxAmountLabel: fx.pushTxAmountLabel,
-    clampRealTxTtlMs: (t) => Number(t),
+    routeArrivalMs: (e) => e.ttl_ms,
     scheduleTimeout: (fn) => fx.scheduled.push(fn),
   })
   return { deliver, fx }
@@ -292,6 +361,7 @@ describe('usePlaylistWorkbench', () => {
       base: '/f',
       deliver: vi.fn(),
       fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
+      effects: EFFECTS,
     })
     await flush()
     expect(fetchJson).not.toHaveBeenCalled()
@@ -308,6 +378,7 @@ describe('usePlaylistWorkbench', () => {
       base: '/f',
       deliver,
       fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
+      effects: EFFECTS,
       timers: { setTimeout: () => 1, clearTimeout: () => undefined },
     })
     await flush()
@@ -351,10 +422,9 @@ describe('the workbench on the real effect functions', () => {
       resolveTxDirection,
       keyEdge,
       seedFn: () => 1,
-      txSparkColorCore: '#fff',
-      txSparkColorTrail: '#fff',
-      clearingDebtColor: '#f80',
+      fxColors: () => ({ txSparkCore: '#fff', txSparkTrail: '#fff', clearingDebt: '#f80' }),
       fxColorForNode: (_id, fb) => fb,
+      txLabelLifeMs: () => 2600,
       scheduleTimeout,
       pushFloatingLabelWhenReady: vi.fn(),
       spawnSparks,
@@ -366,14 +436,16 @@ describe('the workbench on the real effect functions', () => {
       isWebDriver: false,
       keyEdge,
       seedFn: () => 1,
-      clearingColor: '#f80',
+      clearingColor: () => '#f80',
+      sparkCoreColor: () => '#fff',
       addActiveNode: vi.fn(),
       addActiveEdge: vi.fn(),
+      clearingLabelLifeMs: () => 4200,
       scheduleTimeout,
       getLayoutNodeById: () => null,
-      setFlash: vi.fn(),
       spawnEdgePulses,
       spawnNodeBursts,
+      spawnSparks,
     })
     const state = mkState('UAH')
     let active: () => string | null = () => null
@@ -387,7 +459,7 @@ describe('the workbench on the real effect functions', () => {
       runRealTxFx: txFx.runRealTxFx,
       runRealClearingDoneFx: (e) => clearingFx.runRealClearingDoneFx(e),
       pushTxAmountLabel: txFx.pushTxAmountLabel,
-      clampRealTxTtlMs: txFx.clampRealTxTtlMs,
+      routeArrivalMs: txFx.routeArrivalMs,
       scheduleTimeout,
     })
     const sceneIdentity = vueRef<unknown>(1)
@@ -399,6 +471,7 @@ describe('the workbench on the real effect functions', () => {
       base: '/f',
       deliver,
       fx: { resetTxFx: txFx.resetRateLimiter, resetClearingDedup: clearingFx.resetDedup },
+      effects: { tx: txFx.routeEffectMs, clearingMs: CLEARING_EFFECT_MS },
       timers: { setTimeout: () => 1, clearTimeout: () => undefined },
     })
     active = () => wb.activePlaybackId()
@@ -430,7 +503,8 @@ describe('the workbench on the real effect functions', () => {
     const burstsBefore = b.spawnNodeBursts.mock.calls.length
     b.runPending()
     expect(b.spawnSparks).toHaveBeenCalledTimes(3)
-    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore + 1)
+    // 039 slice C: the two intermediate nodes light up as the beam leaves them, the receiver when it arrives.
+    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore + 2 + 1)
   })
 
   it('a replaced scene stops the playback and its pending legs', async () => {
@@ -447,16 +521,37 @@ describe('the workbench on the real effect functions', () => {
     const b = await mkBench({ 'demo-clearing': [done('c1')] })
     b.wb.step('demo-clearing')
     b.wb.step('demo-clearing')
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+    // 039 slice C: a clearing starts with its spark going round the cycle (the first leg at once); the pulses come
+    // after the loop, on a timer - and the fresh playback of the wrap cancels the pending tail of the first, as it
+    // cancels the pending legs of a payment.
+    expect(b.spawnSparks).toHaveBeenCalledTimes(2)
+    b.runPending()
+    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(1)
+  })
+
+  it('Stop during a clearing (039 slice C): the rest of its loop, its pulses and its amount are not drawn', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1'), done('c2')] })
+    b.wb.play('demo-clearing')
+    expect(b.spawnSparks, 'the first leg of the loop, at once').toHaveBeenCalledTimes(1)
+    b.wb.stop()
+    b.runPending()
+    expect({ sparks: b.spawnSparks.mock.calls.length, pulses: b.spawnEdgePulses.mock.calls.length }).toEqual({ sparks: 1, pulses: 0 })
+  })
+
+  it('counter-check: without Stop the same clearing goes round and then pulses', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1'), done('c2')] })
+    b.wb.play('demo-clearing')
+    b.runPending()
+    expect({ sparks: b.spawnSparks.mock.calls.length, pulses: b.spawnEdgePulses.mock.calls.length }).toEqual({ sparks: 2, pulses: 1 })
   })
 
   it('a duplicated event id within one playback is delivered once (the live replay owner\'s rule); a new playback replays it', async () => {
     const b = await mkBench({ 'demo-clearing': [done('c1'), done('c1')] })
     b.wb.step('demo-clearing')
     b.wb.step('demo-clearing') // the same id again, same playback: refused as a duplicate
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(1)
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1)
     b.wb.step('demo-clearing') // the wrap: a fresh playback may replay the id
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+    expect(b.spawnSparks).toHaveBeenCalledTimes(2)
   })
 
   it('choosing another playlist while one plays stops it (its pending legs too) and shows the new one\'s position', async () => {

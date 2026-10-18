@@ -124,7 +124,6 @@ function mk() {
     sourcePath: '',
     snapshot: makeSnapshot(),
     selectedNodeId: null,
-    flash: 0,
   })
   const snapshotRef = computed(() => state.snapshot)
   const runId = ref(RUN_ID)

@@ -14,8 +14,7 @@ export function useAppRenderLoop(opts: {
   getCamera: () => { panX: number; panY: number; zoom: number }
   isTestMode: () => boolean
   getQuality: () => 'low' | 'med' | 'high'
-  getFlash: () => number
-  setFlash: (v: number) => void
+  isGpuLikely?: () => boolean
   pruneActiveEdges: (nowMs: number) => void
   pruneActiveNodes: (nowMs: number) => void
   pruneFloatingLabels: (nowMs: number) => void
@@ -51,8 +50,7 @@ export function useAppRenderLoop(opts: {
     getCamera: opts.getCamera,
     isTestMode: opts.isTestMode,
     getQuality: opts.getQuality,
-    getFlash: opts.getFlash,
-    setFlash: opts.setFlash,
+    isGpuLikely: opts.isGpuLikely,
     pruneActiveEdges: opts.pruneActiveEdges,
     pruneActiveNodes: opts.pruneActiveNodes,
     pruneFloatingLabels: opts.pruneFloatingLabels,

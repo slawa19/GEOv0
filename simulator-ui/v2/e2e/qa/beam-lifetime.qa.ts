@@ -25,31 +25,46 @@ async function aliveSparks(page: Page): Promise<string[]> {
   })
 }
 
+/** The frame at which the beam reaches the receiver: the end of the head's motion on the last leg (FX state). */
+async function lastArrival(page: Page, t0: number): Promise<number | null> {
+  return page.evaluate((t0) => {
+    const sp = (window as unknown as { __geoSim: { fxState: { sparks: Array<{ startedAtMs: number; ttlMs: number; moveMs?: number; motion?: string }> } } }).__geoSim.fxState.sparks
+    const last = sp.find((s) => s.motion === 'arrive')
+    return last ? Math.ceil((last.startedAtMs - t0 + (last.moveMs ?? last.ttlMs)) / 16) : null
+  }, t0)
+}
+
 const receiverLabel = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.floating-label-inner')].some((el) => (el.textContent ?? '').trim().startsWith('+')))
 
-test('a snapshot refresh of the scene on screen in the middle of a flight does not cut the beam: 3 edges of 3, and the label at 1200 ms', async ({ page }) => {
+// 039 slice C (2026-10-18, P-4): until then the route took 1200 ms and the label was expected at frames 75-77. The
+// label is now expected when THIS beam arrives (the end of the head's motion on its last leg, read from FX state).
+test('a snapshot refresh of the scene on screen in the middle of a flight does not cut the beam: 3 edges of 3, and the label when the beam arrives', async ({ page }) => {
   const fail: SceneFail = { other: false, all: false }
   await bootTwoScenarios(page, fail)
   const g = await pickRingRoute(page, RING, 3)
+  const t0 = await page.evaluate(() => performance.now())
   await pushEvent(page, txUpdated(g.ids, '10.00'))
   const seen: string[] = []
   let labelAtFrame: number | null = null
+  let arrivalFrame: number | null = null
   let readsAtRefresh = -1
-  for (let f = 1; f <= 80; f += 1) {
-    if (f === 13) { // inside the first leg (400 ms = 25 frames)
+  for (let f = 1; f <= 200; f += 1) {
+    if (f === 13) { // inside the first leg (at least 450 ms = 28 frames)
       readsAtRefresh = fail.reads ?? 0
       await pushEvent(page, { type: 'topology.changed', payload: { added_nodes: [], removed_nodes: [], added_edges: [], removed_edges: [] } })
     }
     await frames(page, 1)
     for (const s of await aliveSparks(page)) if (seen[seen.length - 1] !== s) seen.push(s)
+    arrivalFrame ??= await lastArrival(page, t0)
     if (labelAtFrame === null && (await receiverLabel(page))) labelAtFrame = f
   }
-  const row = { seen, labelAtFrame, sceneReadsDuringFlight: (fail.reads ?? 0) - readsAtRefresh }
+  const row = { seen, labelAtFrame, arrivalFrame, sceneReadsDuringFlight: (fail.reads ?? 0) - readsAtRefresh }
   console.log('[038 refresh/same-scene]', JSON.stringify(row))
   expect(row.sceneReadsDuringFlight, 'counter-check: the scene WAS read again during the flight').toBeGreaterThan(0)
   expect(seen, 'every edge of the route is flown').toEqual(g.edges.map((e) => e.name))
-  expect(labelAtFrame, 'and the receiver label comes when the beam arrives').toBeGreaterThanOrEqual(75)
-  expect(labelAtFrame).toBeLessThanOrEqual(77)
+  expect(arrivalFrame, 'counter-check: the last leg was flown').not.toBeNull()
+  expect(labelAtFrame, 'and the receiver label comes when the beam arrives').toBeGreaterThanOrEqual(arrivalFrame!)
+  expect(labelAtFrame).toBeLessThanOrEqual(arrivalFrame! + 2)
 })
 
 test('a change of scene in the middle of a flight ends the beam: no leg, no burst and no label of the old payment on the new scene', async ({ page }) => {
@@ -68,7 +83,7 @@ test('a change of scene in the middle of a flight ends the beam: no leg, no burs
   let maxBursts = 0
   let maxLabels = 0
   let maxPainted = 0
-  for (let f = 0; f < 90; f += 1) { // past the whole route time of the old payment
+  for (let f = 0; f < 200; f += 1) { // past the whole route time of the old payment (039 slice C: 3 legs of at least 450 ms)
     await frames(page, 1)
     const c = await fxCounts(page)
     maxSparksInState = Math.max(maxSparksInState, c.sparks)

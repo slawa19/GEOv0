@@ -15,9 +15,14 @@
  * Test mode is on (the default config: physics off, deterministic layout), and `navigator.webdriver` is cleared for this
  * file: the product reads it as "screenshot stand" and then spawns no FX at all (`render/fxRenderer/spawn.ts`).
  *
- * WHAT IT DOES NOT SEE: the timing of the effects against their CSS (the QA stand's business), the amount labels (the
- * recorded payments carry no amount), a production build (no dev hook), the equivalents other than UAH (the offline
- * screen shows UAH only while `VITE_DEMO_FIXTURES=1`).
+ * The amount labels are read too (2026-10-18, 039 slice C): the recordings carried no `amount` / `cleared_amount` until
+ * that day, so the workbench never showed one; the amounts now come from the recorded patches (rule:
+ * `usePlaylistWorkbench.test.ts`, spec 039 Changelog). Until then this header said "the amount labels (the recorded
+ * payments carry no amount)" under what the test does not see.
+ *
+ * WHAT IT DOES NOT SEE: the timing of the effects against their CSS (the QA stand's business), where on screen a label
+ * stands, a production build (no dev hook), the equivalents other than UAH (the offline screen shows UAH only while
+ * `VITE_DEMO_FIXTURES=1`).
  */
 import { expect, test, type Page } from '@playwright/test'
 
@@ -70,6 +75,15 @@ const fxPointsLit = (page: Page, kind: Seg) =>
     return { lit, live: segs.length, sampled }
   }, [NODE_CLEAR_PX, kind] as const)
 
+/** Texts of the amount labels on screen (DOM over the canvas). */
+const labelTexts = (page: Page) => page.locator('.floating-label').allTextContents().then((t) => t.map((x) => x.replace(/\s+/g, ' ').trim()))
+
+/** The label texts seen so far: a label lives its CSS fade, a poll may come after the first one is gone. */
+const seenLabels = async (page: Page, seen: Set<string>) => {
+  for (const t of await labelTexts(page)) seen.add(t)
+  return [...seen]
+}
+
 async function openWorkbench(page: Page) {
   const apiCalls: string[] = []
   // The backend's prefix only: a glob `**/api/**` would also catch the dev server's own modules (`/src/api/*.ts`).
@@ -100,6 +114,10 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
       }, { timeout: 8_000, intervals: [50] })
       .toBeGreaterThan(0)
     expect(last.live, 'a spark of the played payment is in the FX state').toBeGreaterThan(0)
+    // The first recorded payment, U0003 -> U0017, 38.93: the sender's label at once, the receiver's when the beam arrives.
+    const seen = new Set<string>()
+    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('-38.93 UAH')
+    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('+38.93 UAH')
 
     await page.getByRole('button', { name: 'Стоп', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Проиграть', exact: true })).toBeVisible()
@@ -120,6 +138,8 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
       .toBeGreaterThan(0)
     // The recorded clearing names 5 cycles of 3 lines: every line of it pulses.
     expect(last.live).toBe(15)
+    // Then its amount, 121.00 (the sum over the five cycles, `cleared_amount`), as the clearing's label.
+    await expect.poll(() => labelTexts(page), { timeout: 8_000, intervals: [50] }).toContain('−121.00 UAH')
     expect(apiCalls, 'the workbench makes no request to a server').toEqual([])
   })
 

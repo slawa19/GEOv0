@@ -53,7 +53,7 @@ const person = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({ id, 
 const snapshotOf = (equivalent: string, nodes: GraphNode[]): GraphSnapshot => ({ equivalent, generated_at: TS, nodes, links: nodes.length > 1 ? [{ source: nodes[0]!.id, target: nodes[1]!.id, trust_limit: '100', used: '5', available: '95', status: 'active' }] : [] })
 
 function stand(first: GraphSnapshot = snapshotOf('UAH', [person('A'), person('B', { net_sign: -1 })])) {
-  const state = reactive({ loading: false, error: '', sourcePath: '', snapshot: null as GraphSnapshot | null, selectedNodeId: null as string | null, flash: 0 })
+  const state = reactive({ loading: false, error: '', sourcePath: '', snapshot: null as GraphSnapshot | null, selectedNodeId: null as string | null })
   const layout = { nodes: [] as LayoutNode[], links: [] as LayoutLink[] }
   /** As `forceLayout` does: NEW layout objects, copies of the snapshot's. */
   const relayout = () => {

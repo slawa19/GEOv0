@@ -67,7 +67,6 @@ describe('F-034-D1: the debt of a line that is not active', () => {
         sourcePath: '',
         snapshot: snapshot.value,
         selectedNodeId: null,
-        flash: 0,
       } satisfies SimulatorAppState,
     }
     const event: AcceptedSimulatorEvent = {
