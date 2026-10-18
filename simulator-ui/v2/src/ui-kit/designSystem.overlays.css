@@ -59,12 +59,14 @@
   --ds-wm-interact-prefh-picking: 420px;
 
   --ds-wm-edge-detail-minw: 320px;
-  --ds-wm-edge-detail-minh: 200px;
+  /* 045 S3: 200 -> 60 and 180 -> 60 (node card), under the shortest inspector (a card without Interact: head and statistics,
+     about 70 px); a floor above the window is an invisible shell over the canvas (F-045-12). > 0 - the WM refuses 0. */
+  --ds-wm-edge-detail-minh: 60px;
   --ds-wm-edge-detail-prefw: 320px;
   --ds-wm-edge-detail-prefh: 320px;
 
   --ds-wm-node-card-minw: 320px;
-  --ds-wm-node-card-minh: 180px;
+  --ds-wm-node-card-minh: 60px;
   --ds-wm-node-card-prefw: 320px;
   --ds-wm-node-card-prefh: 260px;
 
@@ -228,6 +230,26 @@ details[open].ds-ov-details > summary::after {
 .ws-shell .ds-ov-panel,
 .ws-shell .ds-ov-node-card {
   max-width: 100%;
+}
+
+/*
+  045 S3, BACKLOG 045-2 (measured 2026-10-18): the "0" seen on a window is a node the CANVAS draws under it, not a label
+  above it - `document.elementsFromPoint` at the mark gives the window (.ws-shell z 1000002 in .wm-layer z 42), then the
+  canvas; no label layer. The saas surfaces are translucent (`--ds-surface-2` alpha 0.78, `--ds-surface-1` 0.62), so
+  the graph shows through a window; hud's are opaque. Inside a window the same surface is laid over the page colour (what an
+  empty canvas shows), so a window looks as before over an empty canvas and hides what is drawn under it. Saas only:
+  hud is opaque already, shadcn and library are frozen. The gradients repeat `.ds-panel--elevated` (primitives.css).
+*/
+[data-theme='saas'] .ws-shell .ds-panel--elevated {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.05), transparent 26%),
+    radial-gradient(900px 300px at 30% 0%, var(--ds-gridline), transparent 60%),
+    linear-gradient(var(--ds-surface-2), var(--ds-surface-2)),
+    var(--ds-page-bg);
+}
+
+[data-theme='saas'] .ws-shell .ds-ov-surface {
+  background: linear-gradient(var(--ds-surface-1), var(--ds-surface-1)), var(--ds-page-bg);
 }
 
 .ds-ov-panel--compact .ds-panel__header,
@@ -508,63 +530,68 @@ details[open].ds-ov-details > summary::after {
   gap: var(--ds-ov-node-card-body-gap);
 }
 
-/* Service actions: top-right overlay, does not consume layout height. */
+/* Service actions (pin, close): the end of the head line. */
 .ds-ov-node-card__service {
   display: flex;
   gap: 2px;
   align-items: center;
-  justify-content: flex-end;
-  align-self: flex-end;
 }
 
-/* ---- Identity (avatar + name/meta/balance + actions) -------------------- */
+/* ---- Head: one line (045 S3) - name and role, balance and its equivalent, service actions ---- */
 
 .ds-ov-node-card__identity {
-  display: grid;
-  grid-template-columns: var(--ds-ov-node-card-avatar-size) minmax(0, 1fr) auto;
-  column-gap: 8px;
+  display: flex;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.ds-ov-node-card__text {
+.ds-ov-node-card__who {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
-[data-theme='hud'] .ds-ov-node-card__text {
-  gap: 0px;
-}
-
-.ds-ov-node-card__text .ds-node-card__name,
-.ds-ov-node-card__text .ds-node-card__meta {
+.ds-ov-node-card__who-line {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The type and status of the participant (045 S3 round, Codex P2): visible meta text under the name. */
+.ds-ov-node-card__meta {
+  font-size: var(--ds-typo-section-label-font-size);
+  line-height: 1.3;
+  color: var(--ds-text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ds-ov-node-card__right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+.ds-ov-node-card__name {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ds-typo-panel-heading-font-size);
+  font-weight: 600;
+  color: var(--ds-text-1);
 }
 
-[data-theme='hud'] .ds-ov-node-card__right {
-  gap: 0px;
+/* The equivalent of the balance: meta text, once per card. */
+.ds-ov-node-card__unit {
+  font-size: var(--ds-typo-section-label-font-size);
+  color: var(--ds-text-3);
+  white-space: nowrap;
 }
 
-.ds-ov-node-card__avatar {
-  width: var(--ds-ov-node-card-avatar-size);
-  height: var(--ds-ov-node-card-avatar-size);
-}
-
-/* Balance inline with meta - its colour is the data colour of the node's role or freeze (inline, from the resolved palette) */
+/* Balance in the head line - its colour is the data colour of the node's role or freeze (inline, from the resolved palette) */
 .ds-ov-node-card__balance {
   font-family: var(--ds-typo-numeric-font-family);
-  font-size: 1.1rem;
+  font-size: var(--ds-typo-panel-heading-font-size);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -605,40 +632,21 @@ details[open].ds-ov-details > summary::after {
   box-shadow: var(--ds-focus-ring-btn);
 }
 
-/* ---- Divider ------------------------------------------------------------ */
-
-.ds-ov-node-card__divider {
-  border: none;
-  border-top: 1px solid var(--ds-border-subtle);
-  margin: 0;
-}
-
-/* ---- Stats (3-column, label above value) -------------------------------- */
+/* ---- Statistics: one line "Out X · In Y · Degree N" (045 S3) ---------------- */
 
 .ds-ov-node-card__stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 3px 10px;
-}
-
-.ds-ov-node-card__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 0px;
-  min-width: 0;
-}
-
-.ds-ov-node-card__stat .ds-value {
+  font-size: var(--ds-typo-label-font-size);
+  color: var(--ds-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* ---- Theme: HUD --------------------------------------------------------- */
-
-[data-theme='hud'] .ds-ov-node-card__divider {
-  border-color: rgba(0, 229, 255, 0.15);
+.ds-ov-node-card__stats .ds-value {
+  color: var(--ds-text-1);
 }
+
+/* ---- Theme: HUD --------------------------------------------------------- */
 
 [data-theme='hud'] .ds-ov-node-card__action-btn {
   font-family: var(--ds-font-mono);

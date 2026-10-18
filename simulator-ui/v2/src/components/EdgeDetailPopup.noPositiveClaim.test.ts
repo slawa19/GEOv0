@@ -75,11 +75,16 @@ async function withPopup(overrides: Props, fn: (host: HTMLElement) => void | Pro
   }
 }
 
-/** Значения сетки в порядке шаблона: Used, Limit, Available, Status. */
+/**
+ * Числа линии в порядке шаблона: Used, Limit, Available, Status. 045 S3 (2026-10-18): сетка стала одной строкой
+ * (`edge-stats`), статус — в строке полосы, эквивалент — один раз в заголовке (`edge-unit`), поэтому числа читаются
+ * по их `data-testid`, а эквивалент — отдельно.
+ */
 function gridValues(host: HTMLElement): string[] {
-  const grid = host.querySelector('.popup__grid')
-  expect(grid, 'сетка чисел исчезла из разметки целиком — это другой компонент, а не другой текст').toBeTruthy()
-  return Array.from(grid!.querySelectorAll('.ds-value')).map((el) => (el.textContent ?? '').trim())
+  const ids = ['edge-used', 'edge-limit', 'edge-available', 'edge-status']
+  const els = ids.map((id) => host.querySelector(`[data-testid="${id}"]`))
+  expect(els.every(Boolean), 'числа линии исчезли из разметки целиком — это другой компонент, а не другой текст').toBe(true)
+  return els.map((el) => (el!.textContent ?? '').trim())
 }
 
 function utilization(host: HTMLElement) {
@@ -127,7 +132,7 @@ describe('RT-013-7p: edge-detail не утверждает ничего о ли�
       expect(
         gridValues(host),
         'попап печатает числа снапшота как состояние линии, про которую бэкенд ответил, что её нет',
-      ).toEqual(['— UAH', '— UAH', '— UAH', '—'])
+      ).toEqual(['—', '—', '—', '—'])
 
       const util = utilization(host)
       expect(
@@ -179,7 +184,7 @@ describe('RT-013-7p: edge-detail не утверждает ничего о ли�
     ['упал', FAILED],
   ])('на источнике «%s» попап тоже не утверждает ничего о линии', async (_label, source) => {
     await withPopup({ figuresSource: source }, (host) => {
-      expect(gridValues(host)).toEqual(['— UAH', '— UAH', '— UAH', '—'])
+      expect(gridValues(host)).toEqual(['—', '—', '—', '—'])
       expect(utilization(host).label).toBe('—%')
       expect(
         debtSentence(host),
@@ -201,7 +206,8 @@ describe('RT-013-7p: edge-detail не утверждает ничего о ли�
       expect(
         gridValues(host),
         'починка выродилась в «не показывать ничего никогда»: живой ответ бэкенда тоже погашен',
-      ).toEqual(['12 UAH', '100 UAH', '88 UAH', 'active'])
+      ).toEqual(['12', '100', '88', 'active'])
+      expect(host.querySelector('[data-testid="edge-unit"]')?.textContent?.trim(), 'эквивалент чисел назван один раз, в заголовке').toBe('UAH')
       expect(utilization(host).label).toBe('12%')
       expect(utilization(host).valuenow).toBe('12')
       expect(
@@ -223,7 +229,7 @@ describe('RT-013-7p: edge-detail не утверждает ничего о ли�
       expect(
         gridValues(host),
         'заморозка — устаревание, а не отсутствие: окно-контекст погасило числа, ради которых оно висит',
-      ).toEqual(['12 UAH', '100 UAH', '88 UAH', 'active'])
+      ).toEqual(['12', '100', '88', 'active'])
       expect(utilization(host).label).toBe('12%')
       expect(debtSentence(host)).toContain('12 UAH')
     })
