@@ -272,9 +272,9 @@ export async function installSseShim(page: Page): Promise<void> {
 export async function installRafCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number>; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
     }
-    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
+    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, baseByMethod: {}, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
     // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
     // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
@@ -295,7 +295,12 @@ export async function installRafCounter(page: Page): Promise<void> {
     for (const m of ['stroke', 'fill', 'fillRect', 'strokeRect', 'fillText', 'strokeText', 'drawImage', 'putImageData']) {
       const real = proto[m]!
       proto[m] = function (this: CanvasRenderingContext2D, ...a: unknown[]) {
-        if ((this.canvas as HTMLCanvasElement).classList?.contains('canvas')) w.__qaRaf.cmds += 1
+        const cl = (this.canvas as HTMLCanvasElement).classList
+        if (cl?.contains('canvas')) {
+          w.__qaRaf.cmds += 1
+          // 039 slice C: the same calls of the BASE canvas by method (criterion 8: stroke and drawImage a pass).
+          if (!cl.contains('canvas-fx')) w.__qaRaf.baseByMethod[m] = (w.__qaRaf.baseByMethod[m] ?? 0) + 1
+        }
         return real.apply(this, a)
       }
     }
@@ -319,11 +324,12 @@ export async function installRafCounter(page: Page): Promise<void> {
 /**
  * `calls`: registrations of a callback (weak: any caller). `draws`: completed PASSES of the render loop (one clear of
  * the base canvas each) - not how much a pass draws. `cmds`: calls of drawing methods on the on-screen canvases.
+ * `baseByMethod`: the same calls of the base canvas only, by method name (039 slice C).
  */
-export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number }> {
+export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number> }> {
   return page.evaluate(() => {
-    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number } }).__qaRaf
-    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds }
+    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number> } }).__qaRaf
+    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds, baseByMethod: { ...q.baseByMethod } }
   })
 }
 

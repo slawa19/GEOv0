@@ -114,6 +114,9 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
     drawsAsleep: b.draws - a.draws, rafAsleep: b.calls - a.calls, drawsIn48msAfterEvent: c.draws - b.draws,
     drawsForOnePayment: d.draws - b.draws, drawsAsleepAgain: e.draws - d.draws, rafAsleepAgain: e.calls - d.calls,
     idlePasses: i1.draws - i0.draws, commandsInAStaticFrame: i1.cmds - i0.cmds, commandsForOnePayment: d.cmds - b.cmds, commandsAsleep: b.cmds - a.cmds,
+    // 039 slice C, criterion 8: the base canvas's own stroke and drawImage calls in the same one static pass.
+    baseStrokesInAStaticFrame: (i1.baseByMethod.stroke ?? 0) - (i0.baseByMethod.stroke ?? 0),
+    baseDrawImagesInAStaticFrame: (i1.baseByMethod.drawImage ?? 0) - (i0.baseByMethod.drawImage ?? 0),
   }
   console.log('[038 budget] sleep', JSON.stringify(row))
   hold(row.drawsAsleep, BUDGETS.DRAWS_IN_2S_DEEP_SLEEP)
@@ -125,6 +128,9 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   // The volume of drawing: a count of passes does not see a pass that draws twice as much.
   expect(row.commandsAsleep, 'nothing is drawn on the canvases in deep sleep').toBe(0)
   expect(row.idlePasses, 'precondition: exactly one pass of the loop in the measured idle period').toBe(1)
+  // Glow sprites and strokes first (039 slice C): they name WHAT changed, the total below only that something did.
+  hold(row.baseDrawImagesInAStaticFrame, BUDGETS.BASE_DRAW_IMAGES_IN_A_STATIC_FRAME)
+  hold(row.baseStrokesInAStaticFrame, BUDGETS.BASE_STROKES_IN_A_STATIC_FRAME)
   hold(row.commandsInAStaticFrame, BUDGETS.DRAW_COMMANDS_IN_A_STATIC_FRAME)
   hold(row.commandsForOnePayment, BUDGETS.DRAW_COMMANDS_FOR_ONE_PAYMENT_FROM_SLEEP)
 })
