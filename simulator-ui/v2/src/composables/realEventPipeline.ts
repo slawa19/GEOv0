@@ -7,7 +7,7 @@ import type { RunStatus, TopologyChangedEvent } from '../api/simulatorTypes'
 import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
-import { runStatusErrorText } from '../utils/runErrorClassification'
+import { runStatusErrorLine, writeRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
 
@@ -121,6 +121,8 @@ export type RealEventDraft = {
     runId: string | null
     runStatus: RunStatus | null
     lastError: string
+    /** 046 wave 1: the value of the error line (`useSimulatorRealMode.ts` `lastErrorLine`). */
+    lastErrorLine?: RunErrorLine | null
     runStats: {
       attempts: number
       committed: number
@@ -342,7 +344,8 @@ export function applyAcceptedRealEvent(
       queue_depth: event.queue_depth ?? draft.real.runStatus?.queue_depth ?? 0,
     }
     draft.real.runStatus = status
-    draft.real.lastError = runStatusErrorText(status, deps.isUserFacingRunError)
+    // 046 wave 1: the line as a value with its text (`writeRunErrorLine`), so a language switch can render it again.
+    writeRunErrorLine(draft.real, runStatusErrorLine(status, deps.isUserFacingRunError))
     if (typeof status.attempts_total === 'number') draft.real.runStats.attempts = status.attempts_total
     if (typeof status.committed_total === 'number') draft.real.runStats.committed = status.committed_total
     if (typeof status.rejected_total === 'number') draft.real.runStats.rejected = status.rejected_total

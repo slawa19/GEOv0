@@ -6,6 +6,7 @@ import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
+import { setUiLocale } from '../i18n/locale'
 import { connectSse } from '../api/sse'
 import {
   createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, setIntensity, stopRun, adminStopAllRuns,
@@ -183,6 +184,47 @@ describe('044 stage 2 (BACKLOG 043-19): a tempo of 0 typed by hand starts no sil
   })
 })
 
+// §15 Codex P2 (046 wave 1, 2026-10-18): the lines of tempo 0 and of the idle stop are kept in the error line; a switch of
+// the language remakes them from their cause (they were stored translated and stayed in the old language).
+describe('046 wave 1: the tempo-0 and idle-stop lines follow a language switch', () => {
+  afterEach(() => setUiLocale('en'))
+
+  it('tempo 0: RU -> EN -> RU', async () => {
+    storedRun('R_OLD', 'stopped')
+    vi.mocked(createRun).mockRejectedValueOnce(new ApiError('HTTP 503 for /simulator/runs', { status: 503 }))
+    setUiLocale('ru')
+    const app = boot()
+    await settle()
+    app.realActions.setIntensityPercent(0)
+    await app.realActions.startRun()
+    await settle()
+    expect(app.real.lastError).toBe('Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.')
+    setUiLocale('en')
+    await settle()
+    expect(app.real.lastError).toBe('A tempo of 0 makes no payments: enter a tempo from 1 to 100. To stop the payments, pause.')
+    setUiLocale('ru')
+    await settle()
+    expect(app.real.lastError).toBe('Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.')
+  })
+
+  it('the idle stop (made by the run status pipeline): RU -> EN', async () => {
+    storedRun('R1', 'running')
+    let endStream: () => void = () => undefined
+    vi.mocked(connectSse).mockImplementationOnce(() => new Promise<void>((resolve) => { endStream = resolve }))
+    setUiLocale('ru')
+    const app = boot()
+    await settle()
+    runs.set('R1', 'stopped')
+    vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => ({ ...status(id), stop_source: 'server', stop_reason: 'idle_no_subscribers' })) as never)
+    endStream()
+    await settle()
+    expect(app.real.lastError).toBe('Прогон остановлен сервером: его долго никто не смотрел. Чтобы запустить снова, перезагрузите страницу.')
+    setUiLocale('en')
+    await settle()
+    expect(app.real.lastError).toBe('The server stopped the run: nobody watched it for a long time. To start again, reload the page.')
+  })
+})
+
 describe('044 stage 2 (decision 2): a run the server stopped for idleness says so', () => {
   it('an open tab whose stream ends on a run stopped by the idle stop: a readable line, not a raw reason', async () => {
     storedRun('R1', 'running')
@@ -198,7 +240,9 @@ describe('044 stage 2 (decision 2): a run the server stopped for idleness says s
       endStream()
       await settle()
       expect(app.real.runStatus?.state).toBe('stopped')
-      expect(app.real.lastError).toBe('Прогон остановлен сервером: его долго никто не смотрел. Запустить снова — Start в «Подробнее» или перезагрузка страницы.')
+      // 2026-10-18 (merge into 046 wave 1): from the dictionary (`runLine.idleStopped`); the way back named is the reload -
+      // the earlier text pointed at Start under «Подробнее», mixing the languages.
+      expect(app.real.lastError).toBe('Прогон остановлен сервером: его долго никто не смотрел. Чтобы запустить снова, перезагрузите страницу.')
       expect(createRun, 'an open tab does not start a run behind the person').not.toHaveBeenCalled()
     } finally {
       document.documentElement.lang = ''
