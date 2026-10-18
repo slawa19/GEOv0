@@ -212,13 +212,20 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
   })
 
   // 048 S1 (decision 5), reproducer (д): the workbench is the developer's - the offline source AND `?debug=1`. A
-  // visitor's "Подробнее" on the offline source has no playlist (red before S1: it had). The counter-check is every test
-  // above: the same page with `?debug=1` shows it (`openWorkbench`).
+  // visitor's "Подробнее" on the offline source has no playlist (red before S1: it had). The counter-check is in the test
+  // itself (merged with 039 T3935, which offers a playlist only with its own start snapshot): the same page with
+  // `?debug=1`, in the same test, does offer the row - so the absence is the gate's, not "nothing to offer".
   test('048 S1: without ?debug=1 the offline "Подробнее" has no playlist workbench', async ({ page }) => {
     await page.goto('/?mode=fixtures')
     await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
     await page.locator('[data-testid="details-toggle"]').click()
     await expect(page.locator('[data-testid="bottom-details-row"]'), 'the service row is open').toBeVisible()
     await expect(page.locator('[data-testid="playlist-workbench"]')).toHaveCount(0)
+
+    await page.goto('/?mode=fixtures&debug=1')
+    await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
+    const details = page.locator('[data-testid="details-toggle"]')
+    if ((await details.getAttribute('aria-expanded')) !== 'true') await details.click()
+    await expect(page.locator('[data-testid="playlist-workbench"]'), 'counter-check: with ?debug=1 the same page offers it').toBeVisible()
   })
 })

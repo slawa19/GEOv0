@@ -163,9 +163,13 @@ for (const theme of THEMES) {
         // true while the middle needed two lines. S1 removed the catalogue refresh and Pause/Resume from the middle, which
         // now fits one line (centerH 74 -> 34 at 1366x768), and the row got SHORTER (rowH 78 -> 66, both themes and
         // languages, measured on b8a9c7f6 and on S1): the stacked column is now the tallest part by itself. The intent
-        // held instead: the column is two controls tall, no more, and the row has no line beyond its tallest part.
+        // held instead: the column is two controls tall, no more, and the whole row is no taller than those two lines
+        // (an absolute bound from the measured control height: a wrap of the middle onto a second line - the CI failure
+        // of 39143700381 in its new form - makes the row taller than the column, which a bound relative to the tallest
+        // part would let through). Not vacuous: mutations in the 048 Changelog (an extra control in the column, the
+        // tempo or the Scenario wrapped onto lines of their own) turn them red.
         expect(cols.modeH, 'the left column is two controls tall, not more').toBeLessThanOrEqual(2 * cols.themeH + 8)
-        expect(cols.rowH, 'the row is as tall as its tallest part - no extra line').toBeLessThanOrEqual(Math.max(cols.modeH, cols.centerH) + 6)
+        expect(cols.rowH, 'the row is two lines of controls tall at most - nothing wraps onto a line of its own').toBeLessThanOrEqual(2 * cols.themeH + 14)
       }
       await page.setViewportSize({ width: 1366, height: 768 })
       await frame(page, `${theme}-${lang}-2-scenario-locked`)
