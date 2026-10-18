@@ -763,6 +763,14 @@ jobs:
           PW_E2E_PORT: "24731"
         run: npm --prefix admin-ui run test:e2e:smoke
 
+      # TEMPORARY (041 T4111, 2026-10-18): diagnostic for the hypothesis that the old Playwright ports 41731-41738
+      # (inside the ephemeral range) were taken by an outgoing connection of this job. Removed by a revert commit
+      # after one run's log is read. Not a check; it never fails the job.
+      - name: Diagnostic - who holds the old Playwright port range
+        run: |
+          cat /proc/sys/net/ipv4/ip_local_port_range
+          sudo ss -tanp | grep -E ':4173[0-9]' || echo "no socket on 4173x"
+
       - name: Run Simulator UI v2 smoke on its isolated port
         env:
           PW_E2E_PORT: "24732"
