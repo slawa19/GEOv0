@@ -20,16 +20,23 @@ equivalent instead of a shallow depth; the graph, the threshold and the assertio
 
 What this does not see: a loop held for less than the threshold, any other route, and how long the planner process
 itself works (it shares one worker with clearing passes).
+
+The test of a plan that is slow FOR THE PLANNER (below) no longer uses this fixed threshold: since 041 `T4112`
+(2026-10-18) it measures a control on the same runner and derives its own, under a ceiling - see its constants.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from decimal import Decimal
+from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import update
@@ -101,20 +108,28 @@ async def _dense_graph_with_one_short_cycle(db_session) -> tuple[Equivalent, set
     return eq, {str(d.id) for d in triangle}
 
 
-async def _worst_scheduling_delay(stop: asyncio.Event) -> float:
-    """The longest time one `asyncio.sleep(0)` took to come back: how long anything else on the loop waited."""
+class _Hold(NamedTuple):
+    """`worst`: the longest time one `asyncio.sleep(0)` took to come back - how long anything else on the loop
+    waited; `at`: when that gap began, seconds into the window; `window`: how long the probe ran."""
 
-    worst = 0.0
-    last = time.perf_counter()
+    worst: float
+    at: float
+    window: float
+
+
+async def _worst_scheduling_delay(stop: asyncio.Event) -> _Hold:
+    worst = at = 0.0
+    last = started = time.perf_counter()
     while not stop.is_set():
         await asyncio.sleep(0)
         now = time.perf_counter()
-        worst = max(worst, now - last)
+        if now - last > worst:
+            worst, at = now - last, last - started
         last = now
-    return worst
+    return _Hold(worst, at, last - started)
 
 
-async def _get_while_measuring_the_loop(client, url: str, headers) -> tuple[object, float]:
+async def _get_while_measuring_the_loop(client, url: str, headers) -> tuple[object, _Hold]:
     stop = asyncio.Event()
     probe = asyncio.create_task(_worst_scheduling_delay(stop))
     await asyncio.sleep(0)
@@ -122,8 +137,8 @@ async def _get_while_measuring_the_loop(client, url: str, headers) -> tuple[obje
         response = await client.get(url, headers=headers)
     finally:
         stop.set()
-        worst = await probe
-    return response, worst
+        hold = await probe
+    return response, hold
 
 
 def _debt_id_sets(cycles) -> set[frozenset[str]]:
@@ -140,13 +155,15 @@ async def test_the_deepest_cycle_search_does_not_hold_the_event_loop(client, db_
 
     # Anti-vacuum for the instrument: a request on a three-debt equivalent stays under the threshold, so the
     # database, the planner process and the probe itself are not what the assertion below measures.
-    control, control_delay = await _get_while_measuring_the_loop(
+    control, control_hold = await _get_while_measuring_the_loop(
         client, f"/api/v1/clearing/cycles?equivalent={small_code}", user["headers"])
+    control_delay = control_hold.worst
     assert control.status_code == 200 and len(control.json()["cycles"]) == 1, control.text
     assert control_delay < _LOOP_DELAY_THRESHOLD_SECONDS, f"the control request held the loop {control_delay:.3f} s"
 
-    response, delay = await _get_while_measuring_the_loop(
+    response, hold = await _get_while_measuring_the_loop(
         client, f"/api/v1/clearing/cycles?equivalent={dense_code}", user["headers"])
+    delay = hold.worst
     assert response.status_code == 200, response.text
     offered = _debt_id_sets(response.json()["cycles"])
     assert frozenset(triangle) in offered, "the admissible cycle is not offered: an empty answer is not a fix"
@@ -214,7 +231,43 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 
 # ------------------------------------------------------------------------- a plan that is slow FOR THE PLANNER
 
-_PLAN_SECONDS = 0.6
+#: 041 `T4112`, 2026-10-18. The threshold of the test below is `min(control x k + c, ceiling)`, the control being the
+#: same request on this runner with the plan coming back at once. Why each number:
+#:
+#: * WHY NOT THE FIXED 0.25 s: on ubuntu CI the test failed twice on branches with no backend change - 0.478 s (run
+#:   39031477460, 2026-10-17) and 0.454 s (run 39116205045, 2026-10-18), plan 0.6 s. In both the GET answered ~1.08 s
+#:   after the login, i.e. the hold ran IN SERIES with the 0.6 s plan, not during it. Its cause is not established:
+#:   32 busy processes on a 16-thread Windows machine did not reproduce it (largest hold 0.094 s).
+#: * `_PLAN_SECONDS` 0.6 -> 2.0: with the defect (the loop waits for the worker synchronously, `worker.result()`)
+#:   the loop is held for the plan's time - measured 0.606 s at 0.6 s, only 1.27x the CI noise, so no threshold could
+#:   tell them apart. At 2.0 s the defect holds it 2.003-2.006 s, idle and under the load above.
+#: * `c` = 0.75 s: above both CI points by 0.27 s. It, not the control, is what absorbs them: nothing shows that a
+#:   control would have seen that hold.
+#: * `k` = 3: locally the hold of the measured request was at most 2.1x its control (0.0099 / 0.0047 s), 1.3x under
+#:   the load above (0.030 / 0.023 s; controls up to 0.12 s with a cold worker). The term matters only where the route
+#:   itself holds the loop for tens of milliseconds.
+#: * ceiling = 1.0 s: half the defect's hold (2.0 s), 1.0 s of margin. A control stalled on purpose (2.0 s), or held
+#:   1.15 s by a cold worker under load with the defect in place, gives exactly the ceiling and the defect still fails.
+#:
+#: What this no longer sees here: a hold between 0.25 s and the threshold (0.75 s at least). The deepest-search test
+#: above keeps the fixed 0.25 s.
+_PLAN_SECONDS = 2.0
+_HOLD_CONTROL_FACTOR = 3.0
+_HOLD_CONTROL_OFFSET_SECONDS = 0.75
+_HOLD_CEILING_SECONDS = 1.0
+
+
+def _hold_threshold(control: float) -> float:
+    return min(control * _HOLD_CONTROL_FACTOR + _HOLD_CONTROL_OFFSET_SECONDS, _HOLD_CEILING_SECONDS)
+
+
+def _record_hold(**measured) -> None:
+    """The last run's numbers, green or red, in one file under the runner's artifact root (overwritten each run)."""
+
+    root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT") or ".local-run/test-runs/direct-pytest/artifacts")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "p035_a1_loop_hold.json").write_text(
+        json.dumps({k: round(v, 4) if isinstance(v, float) else v for k, v in measured.items()}), encoding="utf-8")
 
 
 class _Handed(list):
@@ -273,36 +326,53 @@ async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_th
     cannot tell a plan computed in the worker from one computed on the loop. Here the plan takes `_PLAN_SECONDS` in
     the worker, and the two effects are asserted, not the form:
 
-    (a) while the plan runs, the loop is not held (same probe, same threshold);
+    (a) while the plan runs, the loop is not held longer than a threshold derived from a CONTROL on this runner;
     (b) the answer is what CAME BACK from the worker - its cycles are rotated, which no recomputation produces.
+
+    The control is the same request on the same graph, through the same probe and the same worker, whose plan comes
+    back at once: it measures what the route itself holds on this runner, at this moment, with no plan in flight. It
+    also warms the worker, so the measured request does not start one.
     """
 
     eq, _triangle = await _dense_graph_with_one_short_cycle(db_session)
     code = eq.code
+    url = f"/api/v1/clearing/cycles?equivalent={code}"
     user = await register_and_login(client, "P035A1Slow")
     plan = await flow_planner.plan_for_equivalent(db_session, code)
     planned = {frozenset(str(edge.debt_id) for edge in cycle.edges) for cycle in plan.cycles}
-    _slow_the_planner(monkeypatch, lambda _pool: _PLAN_SECONDS)
+    plan_seconds = [0.0]
+    _slow_the_planner(monkeypatch, lambda _pool: plan_seconds[0])
 
+    control_response, control = await _get_while_measuring_the_loop(client, url, user["headers"])
+    assert control_response.status_code == 200, control_response.text
+    assert _debt_id_sets(control_response.json()["cycles"]) == planned, "the control is not the same request"
+
+    plan_seconds[0] = _PLAN_SECONDS
     started = time.perf_counter()
-    response, delay = await _get_while_measuring_the_loop(
-        client, f"/api/v1/clearing/cycles?equivalent={code}", user["headers"])
+    response, hold = await _get_while_measuring_the_loop(client, url, user["headers"])
     elapsed = time.perf_counter() - started
+    threshold = _hold_threshold(control.worst)
+    measured = (
+        f"actual={hold.worst:.3f} s (from {hold.at:.3f} s into a {hold.window:.3f} s window), "
+        f"control={control.worst:.3f} s, threshold=min(control x k + c, ceiling)={threshold:.3f} s "
+        f"with k={_HOLD_CONTROL_FACTOR}, c={_HOLD_CONTROL_OFFSET_SECONDS} s, ceiling={_HOLD_CEILING_SECONDS} s, "
+        f"plan={_PLAN_SECONDS} s"
+    )
+    _record_hold(actual=hold.worst, actual_at=hold.at, window=hold.window, control=control.worst,
+                 control_window=control.window, threshold=threshold, k=_HOLD_CONTROL_FACTOR,
+                 c=_HOLD_CONTROL_OFFSET_SECONDS, ceiling=_HOLD_CEILING_SECONDS, plan=_PLAN_SECONDS, elapsed=elapsed)
 
     assert response.status_code == 200, response.text
     cycles = response.json()["cycles"]
     assert _debt_id_sets(cycles) == planned and len(cycles) > 1
-    # Anti-vacuum: the plan really was in flight under the probe for longer than the threshold.
-    assert elapsed >= _PLAN_SECONDS > _LOOP_DELAY_THRESHOLD_SECONDS, elapsed
+    # Anti-vacuum: the plan really was in flight under the probe for longer than ANY threshold the control can give.
+    assert elapsed >= _PLAN_SECONDS > _HOLD_CEILING_SECONDS >= threshold, (elapsed, measured)
     canonical = [cycle for cycle in cycles if cycle[0]["debt_id"] == min(edge["debt_id"] for edge in cycle)]
     assert canonical == [], (
         f"{len(canonical)} of {len(cycles)} cycles are in the planner's canonical rotation: the answer was "
         f"recomputed, it is not the plan that came back from the worker"
     )
-    assert delay < _LOOP_DELAY_THRESHOLD_SECONDS, (
-        f"GET /clearing/cycles held the event loop while the plan ran: actual={delay:.3f} s, "
-        f"threshold={_LOOP_DELAY_THRESHOLD_SECONDS} s"
-    )
+    assert hold.worst < threshold, f"GET /clearing/cycles held the event loop while the plan ran: {measured}"
 
 
 # ------------------------------------------------------------------ diagnostics and a clearing pass, side by side
