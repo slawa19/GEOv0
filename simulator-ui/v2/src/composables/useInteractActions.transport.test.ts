@@ -66,7 +66,9 @@ describe('item 1: the request id survives the Interact path', () => {
     expect(clearingRefusalText(error, 'UAH', 'en')).toContain('(ref: req-409)')
   })
 
-  it('a refusal the client has no text for keeps the server message and gets the ref too', async () => {
+  // 046 wave 2 (decision 3): was "keeps the server message" - a code the client has no text for is told by the general
+  // text WITH the code (the server's English is no longer shown); the reference is kept.
+  it('a refusal the client has no text for shows the general text with its code and gets the ref too', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -80,8 +82,8 @@ describe('item 1: the request id survives the Interact path', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const text = paymentRefusalText(await call, 'UAH', 'en')
-    expect(text).toContain('server words')
-    expect(text).toContain('(ref: req-new)')
+    expect(text).toBe('The action failed (SOMETHING_NEW). (ref: req-new)')
+    expect(text).not.toContain('server words')
   })
 
   it('counter-check: no id, no ref', async () => {

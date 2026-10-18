@@ -1,6 +1,7 @@
 import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
+import { t } from '../i18n/t'
 import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
 import { paymentOutcomeUnknown } from './interact/paymentIntent'
 import {
@@ -45,6 +46,11 @@ export type InteractActionError = {
    * an unusable 2xx, 408/5xx) and the server did not say the key is spent. The payment may have been made.
    */
   outcomeUnknown?: boolean
+  /**
+   * 046 wave 2: `message` is the client's own text in the language of the interface (the "no answer" of a mutation), not
+   * the server's - `actionErrorText` shows it instead of the text of `code`.
+   */
+  clientMessage?: boolean
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
@@ -196,7 +202,7 @@ export function useInteractActions(opts: {
 
   function requireRunId(): string {
     const id = opts.runId.value.trim()
-    if (!id) throw mapToInteractActionError(new Error('No active run_id'))
+    if (!id) throw mapToInteractActionError(new Error(t('actionError.noRun')))
     return id
   }
 
@@ -214,6 +220,7 @@ export function useInteractActions(opts: {
       // technical timeout line that reads like a failed request.
       if (e instanceof ApiError && e.outcomeUnknown) {
         mapped.message = actionOutcomeUnknownText(e.timeoutMs)
+        mapped.clientMessage = true
       }
 
       // If the run no longer exists, stop issuing run-scoped calls.

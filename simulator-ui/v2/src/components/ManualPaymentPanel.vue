@@ -10,7 +10,8 @@ import type {
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecision'
-import { interactText } from '../i18n/interactStrings'
+import { participantStatusText, paymentStatusText } from '../i18n/statusText'
+import { t, tn } from '../i18n/t'
 import { compareMoney, formatMoney } from '../utils/money'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
@@ -143,13 +144,13 @@ const figuresSource = computed<'server' | 'loading' | 'failed' | 'snapshot'>(() 
 const figuresSourceText = computed(() => {
   switch (figuresSource.value) {
     case 'server':
-      return interactText('sourceServer')
+      return t('payment.sourceServer')
     case 'loading':
-      return interactText('sourceLoading')
+      return t('payment.sourceLoading')
     case 'failed':
-      return interactText('sourceFailed')
+      return t('payment.sourceFailed')
     default:
-      return interactText('sourceSnapshot')
+      return t('payment.sourceSnapshot')
   }
 })
 
@@ -171,17 +172,17 @@ const exceedsEstimate = computed(() => {
 const shortestText = computed(() => {
   const e = estimate.value
   if (!e) return null
-  if (e.state === 'loading') return interactText('estimateLoading')
-  if (e.state === 'failed') return interactText('estimateFailed')
-  return e.hops === 1 ? interactText('shortestOneStep') : interactText('shortestSteps', { n: e.hops })
+  if (e.state === 'loading') return t('payment.estimateLoading')
+  if (e.state === 'failed') return t('payment.estimateFailed')
+  return tn('payment.shortestSteps', e.hops)
 })
 
 const estimateText = computed(() => {
   const e = estimate.value
   if (!e) return null
-  if (e.state === 'loading') return interactText('estimateLoading')
-  if (e.state === 'failed') return interactText('estimateFailed')
-  if (e.maxAvailable == null) return interactText('estimateNotEstimated')
+  if (e.state === 'loading') return t('payment.estimateLoading')
+  if (e.state === 'failed') return t('payment.estimateFailed')
+  if (e.maxAvailable == null) return t('payment.estimateNotEstimated')
   return `${formatMoney(e.maxAvailable, equivalentPrecision(props.unit))} ${props.unit}`
 })
 
@@ -216,8 +217,16 @@ function routeChain(hops: Array<{ fromName: string; toName: string }>): string {
   return [hops[0].fromName, ...hops.map((h) => h.toName)].join(' → ')
 }
 
-const confirmInlineWarning = computed<string | null>(() => {
-  if (props.busy) return null
+/**
+ * 046 decision 4: a comma typed for the decimal point is read as one (`parseAmountStringOrNull`, MP-4) - and SAID, with the
+ * amount as it will be sent, so that "1,000" meant as a thousand is seen as 1.000 before Confirm. Never silent.
+ */
+const commaNote = computed<string | null>(() => {
+  if (!amount.value.includes(',') || amountNormalized.value == null) return null
+  return t('common.commaRead', { amount: amountNormalized.value, unit: props.unit })
+})
+
+const otherInlineWarning = computed<string | null>(() => {
   // 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
   const stepHint = amountStepHint(amountNormalized.value, props.unit)
   if (stepHint) return stepHint
@@ -225,17 +234,24 @@ const confirmInlineWarning = computed<string | null>(() => {
   // the direct line is only one of the ways the payment can go. Non-blocking either way - the server decides.
   if (estimateMax.value != null) {
     return exceedsEstimate.value
-      ? interactText('estimateExceeded', { max: formatMoney(estimateMax.value, equivalentPrecision(props.unit)), unit: props.unit })
+      ? t('payment.estimateExceeded', { max: formatMoney(estimateMax.value, equivalentPrecision(props.unit)), unit: props.unit })
       : null
   }
   if (!exceedsCapacity.value) return null
   // Non-blocking warning: allow confirm, but set expectations.
-  return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`
+  return t('payment.exceedsDirect', { capacity: props.availableCapacity ?? '—', unit: props.unit })
+})
+
+/** The warning line under the amount: the comma note (when there is one) and the other warning, as whole sentences. */
+const confirmInlineWarning = computed<string | null>(() => {
+  if (props.busy) return null
+  const parts = [commaNote.value, otherInlineWarning.value].filter((x): x is string => !!x)
+  return parts.length ? parts.join(' ') : null
 })
 
 /**
  * BACKLOG 037-5 (b): what the participants list says about a party that is not active (a scenario's `frozen`, the stored
- * `suspended`, `left`, `deleted`), in the server's own word. Said only NEXT TO the server's "no routes" answer and as a fact
+ * `suspended`, `left`, `deleted`), by its closed set (046: `participantStatus.*`; an unknown status as it came). Said only NEXT TO the server's "no routes" answer and as a fact
  * of its own: the list and the routes are two answers, and this panel does not derive one from the other. A party the list
  * has no record of, or without a status, gets no statement.
  */
@@ -243,7 +259,12 @@ function notActiveNote(pid: string | null | undefined, role: 'sender' | 'recipie
   const id = String(pid ?? '').trim()
   const status = String((props.participants ?? []).find((p) => p.pid === id)?.status ?? '').trim()
   if (!id || !status || isActiveStatus(status)) return ''
-  return ` Selected ${role} is not active (status: ${status}); a participant that is not active takes no part in payments.`
+  return t(role === 'sender' ? 'payment.senderNotActive' : 'payment.recipientNotActive', { status: participantStatusText(status) })
+}
+
+/** Whole sentences of one message, joined by a space (no fragment of a sentence is glued to another). */
+function sentences(...parts: string[]): string {
+  return parts.filter((x) => x !== '').join(' ')
 }
 
 const isPickFrom = computed(() => props.phase === 'picking-payment-from')
@@ -255,11 +276,11 @@ const confirmDisabledReason = computed<string | null>(() => {
   if (props.busy) return null
 
   const rawTrimmed = amount.value.trim()
-  if (!rawTrimmed) return 'Enter a positive amount.'
+  if (!rawTrimmed) return t('payment.enterPositive')
 
-  if (amountNormalized.value == null) return "Invalid amount format. Use digits and '.' for decimals."
+  if (amountNormalized.value == null) return t('common.invalidAmount')
 
-  if (!amountPositive.value) return 'Enter a positive amount.'
+  if (!amountPositive.value) return t('payment.enterPositive')
 
   // Phase 2.5 multi-hop: exceeding direct capacity must NOT block confirm.
   // It is expressed as a non-blocking warning (see confirmInlineWarning).
@@ -267,10 +288,10 @@ const confirmDisabledReason = computed<string | null>(() => {
   const from = (props.state.fromPid ?? '').trim()
   const to = (props.state.toPid ?? '').trim()
   if (from && to && from === to) {
-    return 'You cannot send a payment to yourself.'
+    return t('payment.selfPayment')
   }
   if (from && to && props.canSendPayment === false) {
-    return `Backend reports no payment routes between selected participants.${notActiveNote(from, 'sender')}${notActiveNote(to, 'recipient')}`
+    return sentences(t('payment.noRoutesBetween'), notActiveNote(from, 'sender'), notActiveNote(to, 'recipient'))
   }
 
   return null
@@ -293,8 +314,8 @@ const open = computed(() => {
 /** 045 S2: why Confirm is disabled, as its `title` (no dead button). The visible reason line stays the confirm step's own. */
 const confirmTitle = computed<string | undefined>(() => {
   if (props.busy || canConfirm.value) return undefined
-  if (isPickFrom.value) return interactText('confirmNeedsParties')
-  if (isPickTo.value) return interactText(props.state.fromPid ? 'confirmNeedsRecipient' : 'confirmNeedsParties')
+  if (isPickFrom.value) return t('payment.needsParties')
+  if (isPickTo.value) return t(props.state.fromPid ? 'payment.needsRecipient' : 'payment.needsParties')
   return confirmDisabledReason.value ?? undefined
 })
 
@@ -420,11 +441,11 @@ function nameOf(pid: string | null | undefined): string {
 function titleText() {
   // A payment of unknown result is FROZEN: the header describes it, not the live fields (an edge or a node card may have set others).
   const frozen = unknownOutcome.value
-  if (frozen) return `Manual payment: ${frozen.fromName} → ${frozen.toName}`
+  if (frozen) return t('payment.titlePair', { from: frozen.fromName, to: frozen.toName })
   const from = props.state.fromPid
   const to = props.state.toPid
-  if (from && to) return `Manual payment: ${nameOf(from)} → ${nameOf(to)}`
-  return 'Manual payment'
+  if (from && to) return t('payment.titlePair', { from: nameOf(from), to: nameOf(to) })
+  return t('payment.title')
 }
 
 // 045 S2: who pays whom is the title (names, from the fields as they are now) and the sum is the amount field: the confirm step
@@ -490,7 +511,7 @@ const toListUpdating = computed(() => {
 })
 
 function noRoutesFromSenderText(): string {
-  return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).${notActiveNote(props.state.fromPid, 'sender')}`
+  return sentences(t('payment.noRoutesFromSender', { hops: paymentTargetsMaxHopsLabel.value }), notActiveNote(props.state.fromPid, 'sender'))
 }
 
 const toInlineHelpText = computed<string | null>(() => {
@@ -501,20 +522,20 @@ const toInlineHelpText = computed<string | null>(() => {
   if (targets === undefined) {
     if (routesLoading.value) {
       const last = toListWhileUpdating.value
-      if (!last) return 'Routes are updating; a recipient can be chosen once the server answers.'
+      if (!last) return t('payment.routesUpdatingWait')
       // An EMPTY last answer is the server's "no routes", not a list: the same text as for the known-empty list, marked as updating.
-      if (last.size === 0) return `${noRoutesFromSenderText()} Routes are updating.`
-      return 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.'
+      if (last.size === 0) return sentences(noRoutesFromSenderText(), t('payment.routesUpdating'))
+      return t('payment.routesUpdatingLastAnswer')
     }
     if (props.paymentTargetsLastError || props.trustlinesLastError) {
-      return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
+      return t('payment.routesFailedUnreachable')
     }
     return null
   }
   if (targets.size === 0) return noRoutesFromSenderText()
 
   if (props.trustlinesLastError) {
-    return 'Routes update failed; showing fallback data. Some recipients may be missing.'
+    return t('payment.routesFailedMissing')
   }
   return null
 })
@@ -578,7 +599,7 @@ watch(
     const from = (props.state.fromPid ?? '').trim()
     if (from && to === from) {
       props.setToPid?.(null)
-      toSelectionInvalidWarning.value = 'You cannot send a payment to yourself. Please select a different recipient.'
+      toSelectionInvalidWarning.value = t('payment.selfPaymentReselect')
       return
     }
 
@@ -587,7 +608,7 @@ watch(
 
     if (!targets.has(to)) {
       props.setToPid?.(null)
-      toSelectionInvalidWarning.value = 'Selected recipient is no longer available. Please re-select.'
+      toSelectionInvalidWarning.value = t('payment.recipientGone')
     }
   },
 )
@@ -618,7 +639,7 @@ function onFromSelected(v: string | null) {
   const first = firstPass.from
   firstPass.from = false
   if (!v || !first || unknownOutcome.value || props.busy) return
-  nextChoice.value = interactText('nextChoiceRecipient')
+  nextChoice.value = t('payment.nextChoiceRecipient')
   toSelect.value?.openWithFocus()
 }
 
@@ -673,30 +694,30 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
     :class="rootClass"
     :style="rootStyle"
     data-testid="manual-payment-panel"
-    aria-label="Manual payment panel"
+    :aria-label="t('payment.panelAria')"
     aria-keyshortcuts="Escape"
   >
     <div class="ds-panel__header">
-      <div class="ds-h2" :title="interactText('escHint')">{{ titleText() }}</div>
+      <div class="ds-h2" :title="t('common.escHint')">{{ titleText() }}</div>
     </div>
 
     <div class="ds-panel__body ds-stack">
       <div v-if="success" ref="resultEl" class="ds-stack" tabindex="-1" role="status" data-testid="mp-result">
-        <div class="ds-h2" data-testid="mp-result-title">{{ interactText('resultTitle') }}</div>
+        <div class="ds-h2" data-testid="mp-result-title">{{ t('payment.resultTitle') }}</div>
         <div class="ds-row ds-row--space">
-          <div class="ds-label">{{ interactText('resultPaymentId') }}</div>
+          <div class="ds-label">{{ t('payment.resultPaymentId') }}</div>
           <div class="ds-value ds-mono" data-testid="mp-result-payment-id">{{ success.paymentId }}</div>
         </div>
         <div class="ds-row ds-row--space">
-          <div class="ds-label">{{ interactText('resultStatus') }}</div>
-          <div class="ds-value ds-mono" data-testid="mp-result-status">{{ success.status }}</div>
+          <div class="ds-label">{{ t('payment.resultStatus') }}</div>
+          <div class="ds-value ds-mono" data-testid="mp-result-status">{{ paymentStatusText(success.status) }}</div>
         </div>
         <div class="ds-row ds-row--space">
-          <div class="ds-label">{{ interactText('resultAmount') }}</div>
+          <div class="ds-label">{{ t('payment.resultAmount') }}</div>
           <div class="ds-value ds-mono" data-testid="mp-result-amount">{{ moneyText(success.amount, success.equivalent) }}</div>
         </div>
         <div class="ds-row ds-row--space">
-          <div class="ds-label">{{ interactText('resultParties') }}</div>
+          <div class="ds-label">{{ t('payment.resultParties') }}</div>
           <div class="ds-value" data-testid="mp-result-parties">{{ success.fromName }} → {{ success.toName }}</div>
         </div>
         <template v-if="routes.length">
@@ -707,22 +728,22 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
             :data-testid="`mp-result-route-${index + 1}`"
           >
             <div class="ds-label">
-              {{ routes.length > 1 ? interactText('resultRoutes', { n: index + 1, total: routes.length }) : interactText('resultRoute') }}:
+              {{ routes.length > 1 ? t('payment.resultRoutes', { n: index + 1, total: routes.length }) : t('payment.resultRoute') }}:
               <span class="ds-mono" data-testid="mp-result-route-chain">{{ routeChain(route.hops) }}</span>
             </div>
             <div v-for="(hop, hopIndex) in route.hops" :key="hopIndex" class="ds-help ds-mono" data-testid="mp-result-hop">
-              {{ interactText('resultRouteStep', { from: hop.fromName, to: hop.toName, amount: formatMoney(hop.amount, equivalentPrecision(success.equivalent)), unit: success.equivalent }) }}
+              {{ t('payment.resultRouteStep', { from: hop.fromName, to: hop.toName, amount: formatMoney(hop.amount, equivalentPrecision(success.equivalent)), unit: success.equivalent }) }}
             </div>
           </div>
         </template>
-        <div v-else class="ds-help ds-muted" data-testid="mp-result-no-routes">{{ interactText('resultNoRoutes') }}</div>
+        <div v-else class="ds-help ds-muted" data-testid="mp-result-no-routes">{{ t('payment.resultNoRoutes') }}</div>
         <!-- 045 S2 (decision 3): [Close][Another], in this order in the DOM as on screen. -->
         <div class="ds-row ds-row--actions">
           <button class="ds-btn ds-btn--ghost" type="button" data-testid="mp-result-close" @click="cancel()">
-            {{ interactText('resultClose') }}
+            {{ t('payment.resultClose') }}
           </button>
           <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-result-another" @click="dismissPaymentResult?.()">
-            {{ interactText('resultAnother') }}
+            {{ t('payment.resultAnother') }}
           </button>
         </div>
       </div>
@@ -730,15 +751,15 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <template v-if="!success">
       <template v-if="!unknownOutcome">
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
-        <label id="mp-from-label" class="ds-label" for="mp-from__trigger">From</label>
+        <label id="mp-from-label" class="ds-label" for="mp-from__trigger">{{ t('payment.fromLabel') }}</label>
         <OverlaySelect
           id="mp-from"
           :model-value="state.fromPid ?? null"
           :options="fromOptions"
           :disabled="busy"
           labelledBy="mp-from-label"
-          triggerLabel="From participant"
-          :placeholder="interactText('pickPlaceholder')"
+          :triggerLabel="t('payment.fromTrigger')"
+          :placeholder="t('common.pickPlaceholder')"
           @update:model-value="onFromChange($event ?? '')"
           @selected="onFromSelected"
         />
@@ -746,8 +767,8 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label id="mp-to-label" class="ds-label" for="mp-to__trigger">
-          To
-          <span v-if="toListUpdating" class="ds-muted ds-mono"> (updating…)</span>
+          {{ t('payment.toLabel') }}
+          <span v-if="toListUpdating" class="ds-muted ds-mono"> {{ t('payment.updating') }}</span>
         </label>
         <OverlaySelect
           id="mp-to"
@@ -756,10 +777,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           :options="toOptions"
           :disabled="busy || !state.fromPid || toKnownEmpty"
           labelledBy="mp-to-label"
-          triggerLabel="To participant"
+          :triggerLabel="t('payment.toTrigger')"
           describedBy="mp-to-help"
-          surfaceLabel="To participant options"
-          :placeholder="interactText('pickPlaceholder')"
+          :surfaceLabel="t('payment.toSurface')"
+          :placeholder="t('common.pickPlaceholder')"
           @update:model-value="onToChange($event ?? '')"
           @selected="onToSelected"
           @update:open="onToOpenChange"
@@ -789,12 +810,12 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <template v-if="isConfirm">
         <!-- Closed by default: the full sentence is long and the confirm step is already the tallest one on a phone. Always in the DOM. -->
         <details v-if="startedFromLine" class="ds-help ds-muted mp-line-direction" data-testid="mp-line-direction">
-          <summary>{{ interactText('lineDirectionTitle') }}</summary>
-          <div data-testid="mp-line-direction-note">{{ interactText('lineDirectionNote') }}</div>
+          <summary>{{ t('payment.lineDirectionTitle') }}</summary>
+          <div data-testid="mp-line-direction-note">{{ t('payment.lineDirectionNote') }}</div>
         </details>
 
         <div class="ds-controls__row ds-controls__row--compact">
-          <label class="ds-label" for="mp-amount">Amount</label>
+          <label class="ds-label" for="mp-amount">{{ t('payment.amountLabel') }}</label>
           <div class="ds-controls__suffix mp-amount-row">
             <input
               id="mp-amount"
@@ -823,11 +844,11 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           server's `payment-targets` answer, NOT from the line figures. The explanations are the `title` of their figure.
         -->
         <div class="ds-help mp-info" data-testid="mp-info">
-          <span data-testid="mp-direct-capacity-help" :title="interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ interactText('directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
+          <span data-testid="mp-direct-capacity-help" :title="t('payment.directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ t('payment.directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
           {{ ' ' }}<span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
           <template v-if="estimate">
-            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><template v-if="estimate.state === 'received' && estimate.maxAvailable != null">{{ ' ' }}<span class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></template></span>
-            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-estimate">{{ t('payment.estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><template v-if="estimate.state === 'received' && estimate.maxAvailable != null">{{ ' ' }}<span class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ t('payment.estimateSource') }}</span>)</span></template></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-shortest" :title="t('payment.shortestNote', { title: t('payment.shortestTitle'), note: t('payment.routeNote') })"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
           </template>
         </div>
       </template>
@@ -847,17 +868,17 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <div v-if="state.error && !unknownOutcome" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
 
       <div v-if="unknownOutcome" class="ds-alert ds-alert--warn ds-stack" data-testid="mp-outcome-unknown">
-        <div class="ds-label">{{ interactText('unknownTitle') }}</div>
+        <div class="ds-label">{{ t('payment.unknownTitle') }}</div>
         <div class="ds-help ds-mono" data-testid="mp-outcome-unknown-intent">
-          {{ interactText('unknownFrozen', { amount: unknownOutcome.amount, unit: unknownOutcome.equivalent, from: unknownOutcome.fromName, to: unknownOutcome.toName }) }}
+          {{ t('payment.unknownFrozen', { amount: unknownOutcome.amount, unit: unknownOutcome.equivalent, from: unknownOutcome.fromName, to: unknownOutcome.toName }) }}
         </div>
         <!-- What the last attempt said (the error text) replaces the generic sentence, so the same thing is not shown twice. -->
         <template v-if="!confirmingDiscard">
           <div class="ds-help" data-testid="mp-outcome-unknown-message">{{ state.error || unknownOutcome.message }}</div>
           <div v-if="unknownOutcome.runMismatch" class="ds-help" data-testid="mp-outcome-other-run">
-            {{ interactText('unknownOtherRun') }}
+            {{ t('payment.unknownOtherRun') }}
           </div>
-          <div v-else class="ds-help ds-muted">{{ interactText('unknownRetryHint') }}</div>
+          <div v-else class="ds-help ds-muted">{{ t('payment.unknownRetryHint') }}</div>
         </template>
         <div v-if="!confirmingDiscard" class="ds-row ds-row--actions">
           <button
@@ -867,7 +888,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
             :disabled="busy || unknownOutcome.runMismatch"
             @click="retryPayment?.()"
           >
-            {{ interactText('unknownRetry') }}
+            {{ t('payment.unknownRetry') }}
           </button>
           <button
             class="ds-btn ds-btn--ghost"
@@ -876,11 +897,11 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
             :disabled="busy"
             @click="confirmingDiscard = true"
           >
-            {{ interactText('unknownDiscard') }}
+            {{ t('payment.unknownDiscard') }}
           </button>
         </div>
         <template v-else>
-          <div class="ds-help" data-testid="mp-discard-warning">{{ interactText('unknownDiscardWarning') }}</div>
+          <div class="ds-help" data-testid="mp-discard-warning">{{ t('payment.unknownDiscardWarning') }}</div>
           <div class="ds-row ds-row--actions">
             <button
               class="ds-btn ds-btn--ghost"
@@ -889,10 +910,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
               :disabled="busy"
               @click="discardUnresolvedPayment?.()"
             >
-              {{ interactText('unknownDiscardConfirm') }}
+              {{ t('payment.unknownDiscardConfirm') }}
             </button>
             <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-discard-keep" @click="confirmingDiscard = false">
-              {{ interactText('unknownDiscardKeep') }}
+              {{ t('payment.unknownDiscardKeep') }}
             </button>
           </div>
         </template>
@@ -907,7 +928,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           :disabled="busy"
           @click="cancel"
         >
-          Cancel
+          {{ t('common.cancel') }}
         </button>
         <button
           v-if="!unknownOutcome"
@@ -919,7 +940,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           @keydown="onConfirmKeydown"
           @click="onConfirm"
         >
-          {{ busy ? 'Sending…' : 'Confirm' }}
+          {{ busy ? t('payment.sending') : t('payment.confirm') }}
         </button>
       </div>
       </template>

@@ -6,7 +6,8 @@ import SystemBalanceBar from '../components/SystemBalanceBar.vue'
 import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecision'
 import { useEdgeTooltip } from '../composables/useEdgeTooltip'
 import { useInteractMode } from '../composables/useInteractMode'
-import { PAYMENT_REFUSAL_REASONS, clearingRefusalText, paymentRefusalText } from './paymentRefusalText'
+import { t } from '../i18n/t'
+import { ACTION_ERROR_CODES, PAYMENT_REFUSAL_REASONS, actionErrorText, clearingRefusalText, paymentRefusalText } from './paymentRefusalText'
 
 const refusal = (code: string, details: Record<string, unknown>) => ({ status: 409, code, message: 'server text', details })
 
@@ -23,7 +24,9 @@ describe('F-028-51: the human text of a payment refusal', () => {
     runId: computed(() => 'run_1'), equivalent: computed(() => 'UAH'), snapshot: ref(null) })
     im.startPaymentFlow(); im.selectNode('alice'); im.selectNode('bob')
     await im.confirmPayment('5.00')
-    expect(im.state.error).toBe('Недостаточно ёмкости: сейчас можно отправить не больше 0.50 UAH.')
+    // 046 wave 2: the Russian text is the dictionary's (not hand-built here); the amount keeps its dot.
+    expect(im.state.error).toBe(t('refusal.insufficientCapacityMax', { max: '0.50', eq: 'UAH' }, 'ru'))
+    expect(im.state.error).toBe('Недостаточно доступного лимита: сейчас можно отправить не больше 0.50 UAH.')
   })
   it('every reason of the server set has its own text in both languages (anti-vacuum: not the generic one)', () => {
     // The set of `app/core/payments/service.py` PAYMENT_REFUSAL_REASONS / openapi PaymentRefusalDetails.reason.
@@ -38,15 +41,51 @@ describe('F-028-51: the human text of a payment refusal', () => {
       for (const t of texts) expect(t).not.toBe(generic)
     }
   })
-  it('names the details: precision, no-route maximum; unknown reason -> the code text; no code -> the message', () => {
+  it('names the details: precision, no-route maximum; unknown reason -> the code text; a coded answer -> its code', () => {
     expect(paymentRefusalText(refusal('INVALID_AMOUNT', { reason: 'amount_precision_exceeded', precision: 2,
       equivalent: 'HOUR' }), 'UAH', 'en')).toBe('HOUR allows at most 2 decimal places.')
     expect(paymentRefusalText(refusal('NO_ROUTE', { reason: 'no_route', max_available: '0' }), 'UAH', 'en'))
       .toBe('No payment route between these participants (available now: 0.00 UAH).')
     expect(paymentRefusalText(refusal('NO_ROUTE', { reason: 'future_reason' }), 'UAH', 'en'))
       .toBe(paymentRefusalText(refusal('NO_ROUTE', {}), 'UAH', 'en'))
-    expect(paymentRefusalText({ status: 404, code: 'RUN_NOT_FOUND', message: 'Run not found' }, 'UAH', 'en'))
+    // 046 wave 2: an action code is told by the dictionary (its English is the server's fixed message), not by `message`.
+    expect(paymentRefusalText({ status: 404, code: 'RUN_NOT_FOUND', message: 'server words' }, 'UAH', 'en'))
       .toBe('Run not found')
+    expect(paymentRefusalText({ status: 404, code: 'RUN_NOT_FOUND', message: 'server words' }, 'UAH', 'ru'))
+      .toBe(t('actionError.RUN_NOT_FOUND', {}, 'ru'))
+  })
+})
+
+describe('046 wave 2 (decision 3): an action error is told by its code, by a closed set', () => {
+  it('every code of the set has its own text in both languages, none of them the general one or a Latin word in ru', () => {
+    expect([...ACTION_ERROR_CODES].sort()).toEqual(['ACCESS_DENIED', 'ACTIONS_DISABLED', 'CLEARING_FAILED',
+      'CLEARING_INTERRUPTED', 'CLEARING_REFUSED', 'CONFLICT', 'ENGINE_TIMEOUT', 'EQUIVALENT_NOT_FOUND', 'INVALID_AMOUNT',
+      'INVALID_JSON', 'INVALID_REQUEST', 'PARTICIPANT_NOT_FOUND', 'PAYMENT_REJECTED', 'RUN_NOT_FOUND',
+      'RUN_PERIMETER_UNAVAILABLE', 'RUN_TERMINAL', 'TIMEOUT', 'TRUSTLINE_EXISTS', 'TRUSTLINE_NOT_FOUND',
+      'TRUSTLINE_USED_UNAVAILABLE', 'USED_EXCEEDS_NEW_LIMIT'])
+    for (const locale of ['en', 'ru'] as const) {
+      const general = actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, locale)
+      const texts = ACTION_ERROR_CODES.map((code) => actionErrorText({ status: 409, code, message: 'server words' }, locale))
+      expect(new Set(texts).size).toBe(ACTION_ERROR_CODES.length)
+      for (const text of texts) {
+        expect(text).not.toBe(general)
+        expect(text).not.toContain('server words')
+        if (locale === 'ru') expect(text).not.toMatch(/[A-Za-z]/)
+      }
+    }
+  })
+  it('an unknown code: the general text WITH the code, in both languages; the server message is not shown', () => {
+    expect(actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' }, 'en')).toBe('The action failed (HTTP_500).')
+    expect(actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' }, 'ru'))
+      .toBe(t('actionError.unknown', { code: 'HTTP_500' }, 'ru'))
+  })
+  it('kept as they are: no code, the UNKNOWN of the mapper, and a coded error whose message the client wrote', () => {
+    expect(actionErrorText(new Error('boom'), 'ru')).toBe('boom')
+    expect(actionErrorText({ status: 500, message: 'Trustlines are down' }, 'ru')).toBe('Trustlines are down')
+    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: 'client words' }, 'ru')).toBe('client words')
+    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Ответ не получен', clientMessage: true }, 'ru')).toBe('Ответ не получен')
+    // Counter-check: the same TIMEOUT without the mark is told by its code.
+    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Request timed out' }, 'ru')).toBe(t('actionError.TIMEOUT', {}, 'ru'))
   })
 })
 
@@ -94,10 +133,12 @@ describe('031 item 17: the human text of a clearing refusal', () => {
     expect(en.state.error).toBe(
       'Clearing refused: the database holds debts finer than the accounting step of UAH. Reseed the database.')
   })
-  it('anti-vacuum: another clearing answer keeps its own message', async () => {
+  it('anti-vacuum: another clearing answer is told by its own code, not as the step refusal', async () => {
+    // 046 wave 2 (decision 3): was "keeps its own message" - the server's English is no longer shown for a coded answer.
     const im = runClearingRefused({ status: 409, code: 'CLEARING_INTERRUPTED', message: 'interrupted', details: { reason: 'retry_budget' } })
     await im.confirmClearing()
-    expect(im.state.error).toBe('interrupted')
-    expect(clearingRefusalText(refusal('CLEARING_REFUSED', { reason: 'future_reason' }), 'UAH', 'en')).toBe('server text')
+    expect(im.state.error).toBe('Clearing pass interrupted before the plan was exhausted')
+    expect(clearingRefusalText(refusal('CLEARING_REFUSED', { reason: 'future_reason' }), 'UAH', 'en')).toBe('Clearing refused')
+    expect(clearingRefusalText(refusal('CLEARING_REFUSED', { reason: 'future_reason' }), 'UAH', 'ru')).toBe(t('actionError.CLEARING_REFUSED', {}, 'ru'))
   })
 })

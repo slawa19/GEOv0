@@ -3,6 +3,8 @@ import { computed } from 'vue'
 
 import type { BottleneckItem, BottleneckTarget } from '../api/simulatorTypes'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
+import { en } from '../i18n/en'
+import { t, type MessageKey } from '../i18n/t'
 
 const props = defineProps<{
   items: BottleneckItem[]
@@ -53,13 +55,32 @@ function severityModifier(score: number): string {
   return 'ds-badge--ok'
 }
 
+/**
+ * 046 wave 2 (decision 3): what a bottleneck is and what to do about it, by its `reason_code` - a closed set (the wire
+ * decoder admits only these six) - from the dictionary, in the language of the interface. The server's English `label`
+ * and `suggested_action` are no longer shown. A code outside the set (the decoder would have refused it; kept for a
+ * caller that does not decode) gets the general title with the code and no advice. The code stays on the item
+ * (`data-reason-code`, the `title` of the reason) for correlation.
+ */
+function knownReason(code: string): boolean {
+  return Object.hasOwn(en.bottlenecks.reason, code)
+}
+
+function reasonTitle(code: string): string {
+  return knownReason(code) ? t(`bottlenecks.reason.${code}` as MessageKey) : t('bottlenecks.unknownReason', { code })
+}
+
+function reasonAction(code: string): string {
+  return knownReason(code) ? t(`bottlenecks.action.${code}` as MessageKey) : ''
+}
+
 const list = computed<BottleneckItem[]>(() => props.items ?? [])
 </script>
 
 <template>
   <div class="bnl" :data-count="list.length">
     <p v-if="list.length === 0" class="bnl__empty ds-muted" data-state="empty">
-      No bottlenecks reported
+      {{ t('bottlenecks.empty') }}
     </p>
     <ul v-else class="bnl__list">
       <li
@@ -75,17 +96,16 @@ const list = computed<BottleneckItem[]>(() => props.items ?? [])
             {{ scorePercent(item.score) }}
           </span>
         </div>
-        <div class="bnl__reason ds-section-label">{{ item.reason_code }}</div>
-        <p v-if="item.label" class="bnl__label ds-help">{{ item.label }}</p>
-        <p v-if="item.suggested_action" class="bnl__action ds-help">{{ item.suggested_action }}</p>
+        <div class="bnl__reason ds-section-label" :title="item.reason_code">{{ reasonTitle(item.reason_code) }}</div>
+        <p v-if="reasonAction(item.reason_code)" class="bnl__action ds-help">{{ reasonAction(item.reason_code) }}</p>
         <div class="bnl__actions">
           <button
             type="button"
             class="ds-btn ds-btn--ghost ds-btn--sm"
-            :aria-label="`Focus ${targetLabel(item.target)}`"
+            :aria-label="t('bottlenecks.focusAria', { target: targetLabel(item.target) })"
             @click="emit('focus-bottleneck', item.target)"
           >
-            Focus
+            {{ t('bottlenecks.focus') }}
           </button>
         </div>
       </li>
@@ -125,7 +145,6 @@ const list = computed<BottleneckItem[]>(() => props.items ?? [])
 }
 
 .bnl__empty,
-.bnl__label,
 .bnl__action {
   margin: 0;
 }

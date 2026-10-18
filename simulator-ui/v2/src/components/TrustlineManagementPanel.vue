@@ -10,8 +10,9 @@ import { amountStepHint } from '../config/equivalentPrecision'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
-import { interactText } from '../i18n/interactStrings'
-import { renderAvailable, renderOrDash } from '../utils/valueFormat'
+import { uiLocaleRef } from '../i18n/locale'
+import { t } from '../i18n/t'
+import { isOverLimit, renderOrDash } from '../utils/valueFormat'
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
@@ -90,7 +91,7 @@ const selectedTl = computed(() => {
 const noExistingLineFigures = computed(() => !canActOnTrustlineFigures(props.figuresSource))
 
 /** Источник не ответил вовсе — про это своё сообщение (`no-row` сюда НЕ попадает). */
-const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
+const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource, uiLocaleRef.value))
 
 /**
  * Источник ответил, и линии у пары нет — про это ОТДЕЛЬНОЕ сообщение (`tl-no-trustline` в шаблоне),
@@ -98,7 +99,7 @@ const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNoti
  * разными последствиями, и одно сообщение на оба вернуло бы находку `F-013-7` в текст после того,
  * как её убрали из кнопок.
  */
-const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource))
+const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource, uiLocaleRef.value))
 
 const effectiveData = computed(() => {
   // Fail closed: show nothing rather than presenting the snapshot's numbers as this trustline's.
@@ -227,8 +228,8 @@ const showPid = useParticipantDisplayId()
 const title = computed(() => {
   const from = props.state.fromPid
   const to = props.state.toPid
-  if (from && to) return `Trustline: ${showPid(from)} → ${showPid(to)}`
-  return 'Trustline'
+  if (from && to) return t('trustline.titlePair', { from: showPid(from), to: showPid(to) })
+  return t('trustline.title')
 })
 
 const isPickFrom = computed(() => props.phase === 'picking-trustline-from')
@@ -300,7 +301,9 @@ const fromOptions = computed(() => participantsSorted.value.map((participant) =>
 
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
-  label: labelOf(participant) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
+  label: isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim())
+    ? t('trustline.exists', { label: labelOf(participant) })
+    : labelOf(participant),
 })))
 
 const trustlineOptions = computed(() => trustlinesForFrom.value.map((trustline) => ({
@@ -340,29 +343,45 @@ const newLimitInput = ref<HTMLInputElement | null>(null)
 
 /** 045 S2: the one line of the edit step - "Used 12 / Limit 100 UAH · avail 88 UAH" (an excess over the limit reads as such). */
 const availableText = computed(() => {
-  const s = renderAvailable(effectiveAvailable.value)
-  return s.startsWith('over ') ? `${s} ${props.unit}` : `avail ${s} ${props.unit}`
+  const s = renderOrDash(effectiveAvailable.value)
+  return isOverLimit(s)
+    ? t('trustline.overLimit', { amount: s.slice(1), unit: props.unit })
+    : t('trustline.available', { amount: s, unit: props.unit })
 })
 
-const invalidAmountText = "Invalid amount format. Use digits and '.' for decimals."
+const invalidAmountText = computed(() => t('common.invalidAmount'))
+
+/** 046 decision 4: a comma typed for the decimal point is read as one - and said, with the limit as it will be sent. */
+const limitCommaNote = computed<string | null>(() => {
+  const raw = isEdit.value ? newLimit.value : limit.value
+  const normalized = isEdit.value ? updateLimitNormalized.value : createLimitNormalized.value
+  if (!raw.includes(',') || normalized == null) return null
+  return t('common.commaRead', { amount: normalized, unit: props.unit })
+})
+
+/** The hint under the limit: the comma note and the step hint, as whole sentences. */
+const limitHint = computed<string | null>(() => {
+  const parts = [limitCommaNote.value, limitStepHint.value].filter((x): x is string => !!x)
+  return parts.length ? parts.join(' ') : null
+})
 
 // 045 S2: a disabled primary button says why in its `title` (no dead button). Nothing while busy: the label says it.
 const createTitle = computed<string | undefined>(() => {
   if (props.busy || (isCreate.value && createValid.value)) return undefined
-  if (!(props.state.fromPid ?? '').trim() || !(props.state.toPid ?? '').trim()) return interactText('trustlineNeedsParties')
-  if (!limit.value.trim()) return interactText('trustlineNeedsLimit')
-  return invalidAmountText
+  if (!(props.state.fromPid ?? '').trim() || !(props.state.toPid ?? '').trim()) return t('trustline.needsParties')
+  if (!limit.value.trim()) return t('trustline.needsLimit')
+  return invalidAmountText.value
 })
 const lineGroundText = computed(() => sourceUnavailableText.value ?? noTrustlineText.value ?? undefined)
 const updateTitle = computed<string | undefined>(() => {
   if (props.busy || updateValid.value) return undefined
   if (noExistingLineFigures.value) return lineGroundText.value
-  if (!newLimit.value.trim()) return interactText('trustlineNeedsNewLimit')
-  return invalidAmountText
+  if (!newLimit.value.trim()) return t('trustline.needsNewLimit')
+  return invalidAmountText.value
 })
 const closeTitle = computed<string | undefined>(() => {
   if (props.busy) return undefined
-  if (closeRequested.value) return interactText('trustlineCloseRequested')
+  if (closeRequested.value) return t('trustline.closeAlreadyRequested')
   if (noExistingLineFigures.value) return lineGroundText.value
   return undefined
 })
@@ -381,48 +400,48 @@ defineExpose({
     :class="rootClass"
     :style="rootStyle"
     data-testid="trustline-panel"
-    aria-label="Trustline management panel"
+    :aria-label="t('trustline.panelAria')"
     aria-keyshortcuts="Escape"
   >
     <div class="ds-panel__header">
-      <div class="ds-h2" :title="interactText('escHint')">{{ title }}</div>
+      <div class="ds-h2" :title="t('common.escHint')">{{ title }}</div>
     </div>
 
     <div class="ds-panel__body ds-stack">
       <!-- 045 S3 (BACKLOG 045-1): From stays on the create step (decision 3: From -> To -> Limit); a change goes through
            `setTrustlineFromPid` of the interact state machine. -->
       <div v-if="participantsSorted.length && (isPickFrom || isCreate)" class="ds-controls__row ds-controls__row--compact">
-        <label id="tl-from-label" class="ds-label" for="tl-from__trigger">From</label>
+        <label id="tl-from-label" class="ds-label" for="tl-from__trigger">{{ t('trustline.fromLabel') }}</label>
           <OverlaySelect
           id="tl-from"
             :model-value="state.fromPid ?? null"
             :options="fromOptions"
           :disabled="busy"
               labelledBy="tl-from-label"
-              triggerLabel="Trustline from participant"
-              :placeholder="interactText('pickPlaceholder')"
+              :triggerLabel="t('trustline.fromTrigger')"
+              :placeholder="t('common.pickPlaceholder')"
             @update:model-value="onFromSelect"
           />
       </div>
 
       <div v-if="participantsSorted.length && (isPickTo || isCreate)" class="ds-controls__row ds-controls__row--compact">
-        <label id="tl-to-label" class="ds-label" for="tl-to__trigger">To</label>
+        <label id="tl-to-label" class="ds-label" for="tl-to__trigger">{{ t('trustline.toLabel') }}</label>
           <OverlaySelect
           id="tl-to"
             :model-value="state.toPid ?? null"
             :options="toOptions"
           :disabled="busy || !state.fromPid"
               labelledBy="tl-to-label"
-              :title="!state.fromPid && !busy ? 'Select \'From\' participant first' : undefined"
-              triggerLabel="Trustline to participant"
-              surfaceLabel="Trustline to participant options"
-              :placeholder="interactText('pickPlaceholder')"
+              :title="!state.fromPid && !busy ? t('trustline.toNeedsFrom') : undefined"
+              :triggerLabel="t('trustline.toTrigger')"
+              :surfaceLabel="t('trustline.toSurface')"
+              :placeholder="t('common.pickPlaceholder')"
             @update:model-value="onToSelect"
           />
       </div>
 
       <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row ds-controls__row--compact">
-        <label id="tl-pick-label" class="ds-label" for="tl-pick__trigger">Existing</label>
+        <label id="tl-pick-label" class="ds-label" for="tl-pick__trigger">{{ t('trustline.existingLabel') }}</label>
           <OverlaySelect
           id="tl-pick"
             :model-value="state.fromPid && state.toPid
@@ -431,23 +450,23 @@ defineExpose({
             :options="trustlineOptions"
           :disabled="busy"
               labelledBy="tl-pick-label"
-              title="Available only in edit/create mode"
-              triggerLabel="Pick existing trustline"
+              :title="t('trustline.existingTitle')"
+              :triggerLabel="t('trustline.existingTrigger')"
             @update:model-value="onTrustlineSelect"
           />
       </div>
 
       <!-- 045 S2: the figures of the line as one line; values through " · ". -->
-      <div v-if="isEdit" class="ds-help tl-stats" aria-label="Trustline stats" data-testid="tl-stats">
-        Used <span class="ds-mono" data-testid="tl-stats-used">{{ renderOrDash(effectiveUsed) }}</span>
-        / Limit <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span
+      <div v-if="isEdit" class="ds-help tl-stats" :aria-label="t('trustline.statsAria')" data-testid="tl-stats">
+        {{ t('trustline.statsUsed') }} <span class="ds-mono" data-testid="tl-stats-used">{{ renderOrDash(effectiveUsed) }}</span>
+        / {{ t('trustline.statsLimit') }} <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span
           class="ds-mono"
           data-testid="tl-stats-available"
         >{{ availableText }}</span>
       </div>
 
       <div v-if="isCreate" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="tl-limit">Limit</label>
+        <label class="ds-label" for="tl-limit">{{ t('trustline.limitLabel') }}</label>
         <div class="ds-controls__suffix tl-input-row">
           <input
             id="tl-limit"
@@ -467,11 +486,11 @@ defineExpose({
       </div>
 
       <div v-if="isCreate && limit.trim() && createLimitNormalized === null" class="ds-help tl-pick-help">
-        Invalid amount format. Use digits and '.' for decimals.
+        {{ invalidAmountText }}
       </div>
 
       <div v-if="isEdit" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="tl-new-limit">New limit</label>
+        <label class="ds-label" for="tl-new-limit">{{ t('trustline.newLimitLabel') }}</label>
         <div class="ds-controls__suffix tl-input-row">
           <input
             id="tl-new-limit"
@@ -492,9 +511,9 @@ defineExpose({
       </div>
 
       <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help">
-        Invalid amount format. Use digits and '.' for decimals.
+        {{ invalidAmountText }}
       </div>
-      <div v-else-if="limitStepHint" class="ds-help tl-pick-help" data-testid="tl-step-hint">{{ limitStepHint }}</div>
+      <div v-else-if="limitHint" class="ds-help tl-pick-help" data-testid="tl-step-hint">{{ limitHint }}</div>
 
       <div
         v-if="sourceUnavailableText"
@@ -522,10 +541,10 @@ defineExpose({
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
       <div v-if="isEdit && closeRequested" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-requested">
-        Close requested: limit stays 0; the line closes when its debt (used: {{ renderOrDash(effectiveUsed) }} {{ unit }}) is repaid.
+        {{ t('trustline.closeRequested', { used: renderOrDash(effectiveUsed), unit }) }}
       </div>
       <div v-else-if="isEdit && closeIsRequest" class="ds-help ds-mono" data-testid="tl-close-request-note">
-        Closing with debt (used: {{ renderOrDash(effectiveUsed) }} {{ unit }}) is a request: limit becomes 0, the line closes when the debt is repaid.
+        {{ t('trustline.closeRequestNote', { used: renderOrDash(effectiveUsed), unit }) }}
       </div>
 
       <!--
@@ -533,7 +552,7 @@ defineExpose({
         given; editing a line is [Cancel][Close TL][Update]. A disabled button says why in its `title`.
       -->
       <div class="ds-row ds-row--actions tl-actions">
-        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busy" data-testid="trustline-cancel" @click="cancel">Cancel</button>
+        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busy" data-testid="trustline-cancel" @click="cancel">{{ t('common.cancel') }}</button>
 
         <template v-if="isEdit">
           <button
@@ -544,7 +563,7 @@ defineExpose({
             data-testid="trustline-close-cancel"
             @click="disarmClose"
           >
-            Cancel close
+            {{ t('trustline.cancelClose') }}
           </button>
 
           <button
@@ -555,7 +574,7 @@ defineExpose({
             data-testid="trustline-close-btn"
             @click="onClose"
           >
-            {{ closeArmed ? 'Confirm close' : 'Close TL' }}
+            {{ closeArmed ? t('trustline.confirmClose') : t('trustline.close') }}
           </button>
 
           <button
@@ -566,7 +585,7 @@ defineExpose({
             data-testid="trustline-update"
             @click="onUpdate"
           >
-            {{ busy ? 'Updating…' : 'Update' }}
+            {{ busy ? t('trustline.updating') : t('trustline.update') }}
           </button>
         </template>
 
@@ -579,7 +598,7 @@ defineExpose({
           data-testid="trustline-create"
           @click="onCreate"
         >
-          {{ busy ? 'Creating…' : 'Create' }}
+          {{ busy ? t('trustline.creating') : t('trustline.create') }}
         </button>
       </div>
     </div>
