@@ -394,6 +394,9 @@ const {
 
   e2e,
 
+  // 042 T4205: the offline effects workbench
+  playlistWorkbench,
+
   // selection + overlays
   hoveredEdge,
   clearHoveredEdge,
@@ -1376,6 +1379,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-model:labelsLod="labelsLod"
       :api-mode="apiMode"
       :set-source="setSource"
+      :playlists="playlistWorkbench"
       :is-demo-fixtures="isDemoFixtures"
       :equivalent-options="equivalentOptions"
       :show-reset-view="showResetView"

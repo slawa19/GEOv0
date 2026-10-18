@@ -366,6 +366,7 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
 export const NATIVE_SELECTS = [
   'top bar: "UI theme"', 'top bar: "Scenario"',
   'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar: "Источник"', 'bottom bar (offline): "Scene"',
+  'bottom bar (offline): "Плейлист"', // 042 T4205; the stand runs the server source, where the workbench is not shown
   'graph navigator: "Node"', 'graph navigator: "Edge"',
 ]
 

@@ -1,9 +1,21 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
+import type { PlaylistWorkbenchOption } from '../composables/usePlaylistWorkbench'
 import HudBar from './common/HudBar.vue'
+
+type PlaylistWorkbenchProps = {
+  offered: readonly PlaylistWorkbenchOption[]
+  playingId: string | null
+  cursorId: string | null
+  position: number
+  total: number
+  play: (id: string) => void
+  step: (id: string) => void
+  stop: () => void
+}
 
 type Props = {
   apiMode: 'fixtures' | 'real'
@@ -12,6 +24,12 @@ type Props = {
    * the data pipeline is replaced). Optional only so that a mount without it shows no select.
    */
   setSource?: (source: 'real' | 'fixtures') => void
+
+  /**
+   * 042 T4205: the offline effects workbench - the recorded playlists of the offline snapshot, played through the live
+   * event path (`usePlaylistWorkbench.ts`). Shown on the offline source only, and only with a playlist it can play.
+   */
+  playlists?: PlaylistWorkbenchProps
 
   isDemoFixtures: boolean
   /** 028 F-028-47 (C1): the equivalents the API names (`equivalentOptions`). */
@@ -53,6 +71,20 @@ const labelsLod = defineModel<string>('labelsLod', { required: true })
 const scene = defineModel<SceneId>('scene', { required: true })
 
 const artifactsOpen = ref(false)
+
+// 042 T4205: the playlist the workbench acts on - the chosen one while it is offered, else the first offered.
+const playlistChoice = ref('')
+const offeredPlaylists = computed(() => (props.apiMode !== 'real' ? props.playlists?.offered ?? [] : []))
+const playlistId = computed({
+  get: () => offeredPlaylists.value.find((p) => p.id === playlistChoice.value)?.id ?? offeredPlaylists.value[0]?.id ?? '',
+  set: (id: string) => {
+    playlistChoice.value = id
+  },
+})
+const playlistPosition = computed(() => {
+  const pl = props.playlists
+  return pl && pl.cursorId === playlistId.value && pl.position > 0 ? `${pl.position} / ${pl.total}` : ''
+})
 
 const {
   detailsRef: artifactsDetailsRef,
@@ -132,6 +164,38 @@ const {
     </div>
 
     <div class="hud-bar__right" aria-label="Tools">
+      <div
+        v-if="props.playlists && offeredPlaylists.length"
+        class="ds-row bb-row"
+        aria-label="Playlist workbench"
+        data-testid="playlist-workbench"
+      >
+        <span class="ds-label">Плейлист</span>
+        <select v-model="playlistId" class="ds-select" aria-label="Плейлист">
+          <option v-for="p in offeredPlaylists" :key="p.id" :value="p.id">{{ p.label }} ({{ p.count }})</option>
+        </select>
+        <button
+          v-if="props.playlists.playingId === null"
+          class="ds-btn ds-btn--secondary ds-btn--sm"
+          type="button"
+          title="Проиграть записанные события по очереди"
+          @click="props.playlists.play(playlistId)"
+        >
+          Проиграть
+        </button>
+        <button v-else class="ds-btn ds-btn--secondary ds-btn--sm" type="button" @click="props.playlists.stop()">Стоп</button>
+        <button
+          v-if="props.playlists.playingId === null"
+          class="ds-btn ds-btn--ghost ds-btn--sm"
+          type="button"
+          title="Проиграть следующее записанное событие"
+          @click="props.playlists.step(playlistId)"
+        >
+          Шаг
+        </button>
+        <span v-if="playlistPosition" class="ds-value ds-mono" aria-label="Позиция плейлиста">{{ playlistPosition }}</span>
+      </div>
+
       <div v-if="apiMode === 'real'" class="ds-ov-btn-group" aria-label="Run tools">
         <button
           class="ds-btn ds-btn--ghost ds-btn--sm"

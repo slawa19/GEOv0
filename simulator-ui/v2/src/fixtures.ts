@@ -232,8 +232,13 @@ export async function loadJson<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
+/** The published root of the offline snapshots and their recorded playlists (`public/simulator-fixtures/v1`). */
+export function fixturesBase(): string {
+  return String(import.meta.env.VITE_FIXTURES_BASE ?? '/simulator-fixtures/v1')
+}
+
 export async function loadSnapshot(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
-  const base = String(import.meta.env.VITE_FIXTURES_BASE ?? '/simulator-fixtures/v1')
+  const base = fixturesBase()
   const sourcePath = `${base}/${encodeURIComponent(eq)}/snapshot.json`
   const raw = await loadJson<unknown>(sourcePath)
   const snapshot = validateSnapshot(raw, sourcePath)
