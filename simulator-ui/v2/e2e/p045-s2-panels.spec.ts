@@ -178,7 +178,8 @@ for (const theme of THEMES) {
         await page.locator('[data-testid="trustline-cancel"]').focus()
         await page.keyboard.press('Escape')
       }
-      await expect.poll(step, 'the create step').toBe('- tl-to__trigger tl-limit')
+      // 045 S3 (BACKLOG 045-1, 2026-10-18): the create step shows From as well (decision 3: From -> To -> Limit).
+      await expect.poll(step, 'the create step').toBe('tl-from__trigger tl-to__trigger tl-limit')
       await press()
       await expect.poll(step, 'Escape 1: back to the "To" step').toBe('- tl-to__trigger -')
       await press()
