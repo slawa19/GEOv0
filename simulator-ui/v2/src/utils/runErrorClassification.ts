@@ -18,9 +18,11 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  * codes decides as before. Not judged here: whether the server's message is fit for a person - it is printed as sent.
  */
 export function runStatusErrorText(
-  status: { state?: string | null; last_error?: RunError | null },
+  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
   isUserFacing: (code: string) => boolean,
 ): string {
+  // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
+  if (String(status.state ?? '').trim().toLowerCase() === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return idleStopText()
   const error = status.last_error
   if (!error) return ''
   const stopped = String(status.state ?? '').trim().toLowerCase() === 'error'
@@ -31,6 +33,16 @@ export function runStatusErrorText(
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)
   return `${error.code}: ${error.message}`
+}
+
+/** 044 stage 2: `stop_reason` of a run the server stopped because it had no SSE subscriber (`run_lifecycle.py`). */
+export const IDLE_STOP_REASON = 'idle_no_subscribers'
+
+/** 044 stage 2: the line of a run stopped by the idle stop. */
+export function idleStopText(locale: UiLocale = uiLocale()): string {
+  return locale === 'ru'
+    ? 'Прогон остановлен сервером: его долго никто не смотрел. Запустить снова — Start в «Подробнее» или перезагрузка страницы.'
+    : 'The server stopped the run: nobody watched it for a long time. To start again, use Start under "Подробнее" or reload the page.'
 }
 
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */

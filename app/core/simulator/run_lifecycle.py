@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from datetime import datetime
 from typing import Any, Callable, Optional
 
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.models import RunRecord
+from app.core.simulator.models import RunRecord, note_subscribers_locked
 from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import SseBroadcast
@@ -18,6 +19,9 @@ from app.utils.exceptions import NotFoundException
 
 #: The intensity of a run when neither the request nor the scenario's `settings.playback.intensity_percent` names one (036 B2).
 DEFAULT_RUN_INTENSITY_PERCENT = 30
+
+#: 044 stage 2 (decision 2): `stop_reason` of a run its heartbeat stopped because nobody watched it (`stop_source` "server").
+IDLE_STOP_REASON = "idle_no_subscribers"
 
 
 class RunLifecycle:
@@ -44,6 +48,7 @@ class RunLifecycle:
         logger,
         get_active_run_id_for_owner: Callable[[str], Optional[str]],
         get_max_active_runs_per_owner: Callable[[], int],
+        idle_now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._lock = lock
         self._runs = runs
@@ -65,6 +70,7 @@ class RunLifecycle:
         self._logger = logger
         self._get_active_run_id_for_owner = get_active_run_id_for_owner
         self._get_max_active_runs_per_owner = get_max_active_runs_per_owner
+        self._idle_now = idle_now
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
@@ -324,6 +330,8 @@ class RunLifecycle:
             self._artifacts.init_run_artifacts(run)
 
             self._runs[run_id] = run
+            # 044 stage 2: a new run has no subscriber yet - its idle window starts now.
+            note_subscribers_locked(run, self._idle_now())
             self._set_active_run_id(run_id, owner_id)
 
             # Start artifacts writer (best-effort; no-op if artifacts disabled).
@@ -365,12 +373,14 @@ class RunLifecycle:
                 pass
             elif run.state == "paused":
                 run.state = "running"
+                note_subscribers_locked(run, self._idle_now())  # 044 stage 2: a resume restarts the idle window
             elif run.state in ("stopping", "stopped"):
                 # Idempotent: keep stopped
                 pass
             else:
                 self._enforce_entry_limits_locked(run)
                 run.state = "running"
+                note_subscribers_locked(run, self._idle_now())
                 if run.owner_id:
                     self._set_active_run_id(run_id, run.owner_id)
 
@@ -524,6 +534,8 @@ class RunLifecycle:
             run.stopped_at = None
             run.state = "running"
             run.started_at = self._utc_now()
+            # 044 stage 2: the restarted run's idle window starts now.
+            note_subscribers_locked(run, self._idle_now())
 
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)

@@ -180,3 +180,49 @@ describe('044 stage 2 (BACKLOG 043-19): a tempo of 0 typed by hand starts no sil
     expect(app.real.lastError).toContain('A tempo of 0 makes no payments')
   })
 })
+
+describe('044 stage 2 (decision 2): a run the server stopped for idleness says so', () => {
+  it('an open tab whose stream ends on a run stopped by the idle stop: a readable line, not a raw reason', async () => {
+    storedRun('R1', 'running')
+    let endStream: () => void = () => undefined
+    vi.mocked(connectSse).mockImplementationOnce(() => new Promise<void>((resolve) => { endStream = resolve }))
+    document.documentElement.lang = 'ru'
+    try {
+      const app = boot()
+      await settle()
+      expect(app.real.runStatus?.state).toBe('running')
+      runs.set('R1', 'stopped')
+      vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => ({ ...status(id), stop_source: 'server', stop_reason: 'idle_no_subscribers' })) as never)
+      endStream()
+      await settle()
+      expect(app.real.runStatus?.state).toBe('stopped')
+      expect(app.real.lastError).toBe('Прогон остановлен сервером: его долго никто не смотрел. Запустить снова — Start в «Подробнее» или перезагрузка страницы.')
+      expect(createRun, 'an open tab does not start a run behind the person').not.toHaveBeenCalled()
+    } finally {
+      document.documentElement.lang = ''
+    }
+  })
+
+  it('counter-check: a run stopped by a person (user_stop) gets no such line; a returning visitor gets a new run', async () => {
+    storedRun('R1', 'stopped')
+    vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => ({ ...status(id), stop_source: 'server', stop_reason: 'idle_no_subscribers' })) as never)
+    const app = boot()
+    await settle()
+    expect(createRun, 'the returning visitor (page load) gets a live run: the stopped branch starts').toHaveBeenCalledTimes(1)
+    expect(app.real.runId).toBe('R_NEW')
+    scope?.stop()
+    window.localStorage.clear()
+    storedRun('R2', 'running')
+    let endStream: () => void = () => undefined
+    vi.mocked(connectSse).mockImplementationOnce(() => new Promise<void>((resolve) => { endStream = resolve }))
+    vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => status(id)) as never)
+    const other = boot()
+    await settle()
+    runs.set('R2', 'stopped')
+    vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => ({ ...status(id), stop_source: 'ui', stop_reason: 'user_stop' })) as never)
+    endStream()
+    await settle()
+    expect(other.real.runStatus?.state).toBe('stopped')
+    expect(other.real.lastError).toBe('')
+  })
+})
