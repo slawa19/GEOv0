@@ -11,8 +11,8 @@ declared default fails. The existing freshness test (`test_p030_s1_detection_pos
 test_f030_8_an_errored_or_stale_reconciliation_is_a_warning_and_holds_nothing`) ages its result by
 `result_freshness_threshold() + 60 s`, so it assumed no interval and needed no change.
 
-WHAT THIS DOES NOT SEE: the loop's waiting itself (no test runs `_integrity_loop` across an interval); the startup run
-is held by `test_integrity_checkpoints.py` and `test_background_task_supervision.py`.
+WHAT THIS DOES NOT SEE: the loop's waiting itself; the start-up run, its retry on a held lock and the interval wait
+are held by `tests/unit/test_p047_integrity_loop_startup_retry.py`.
 """
 
 from __future__ import annotations

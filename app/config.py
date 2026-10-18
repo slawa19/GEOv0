@@ -324,10 +324,13 @@ class Settings(BaseSettings):
     # (044 stage 2: ~6.5 KB of memory per operation). An operator who touched the database runs
     # `scripts/reconcile_debts.py` instead of waiting (`docs/ru/runbook-integrity-hold.md` §3). The freshness policy
     # of a stored result follows this value (`result_freshness_threshold`, 2 x interval + 5 min). A deployment may set
-    # another value; `INTEGRITY_CHECKPOINT_ENABLED=false` would also drop the start-up run.
+    # another value (an explicit 0 means 300 s, as before 047); `INTEGRITY_CHECKPOINT_ENABLED=false` would also drop
+    # the start-up run.
     INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 86400
     # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
-    # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
+    # 0 = auto: 300 s, independent of the interval since the 047 fix-delta (2026-10-18; it was max(30, interval), a day
+    # at the daily default, and a killed run's lock then silenced the replacement's start-up run for a day).
+    # `INTEGRITY_LOCK_TTL_DEFAULT_SECONDS` in `app/core/maintenance_jobs.py` holds the value and its limitation.
     INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
 
     # --- Guardrails ---

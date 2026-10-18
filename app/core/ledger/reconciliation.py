@@ -1069,7 +1069,8 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
       persisting state recomputes a different fingerprint from the stale one and is stored as a
       transition; and step 5c re-verifies in one snapshot before it holds anything.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
-      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/core/maintenance_jobs.py`) and never
+      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default 300 s since 047 - `max(30, interval)` before -,
+      `app/core/maintenance_jobs.py`) and never
       extends it, so a run longer than the TTL could overlap a second Redis-backed process. Acceptable
       for the single-worker v0.1 deployment; a renewable lease is registered as a follow-up and is not
       built here.

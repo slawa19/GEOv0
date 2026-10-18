@@ -76,20 +76,35 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tupl
     return True, None
 
 
-async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
+#: 047 fix-delta (2026-10-18, Codex §15 P1, class 1): the Redis lock's TTL when `INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`
+#: is unset. It was `max(30, interval)`; with the daily interval that is a day, and a process killed during its run left
+#: the lock for a day, so its replacement skipped the start-up run. 300 s is the recovery budget the 300 s cadence had -
+#: NOT a proven maximum duration of a run: a run longer than the TTL can still overlap one of another Redis-backed process
+#: (the limitation stated at `record_outcome`). An explicit TTL stays the deployment's choice.
+INTEGRITY_LOCK_TTL_DEFAULT_SECONDS = 300
+#: 047 fix-delta: how long the loop waits before it retries a start-up run that found the lock held.
+STARTUP_LOCK_RETRY_SECONDS = 30
+#: ... and for how long past the lock's TTL it keeps retrying before it gives up into the ordinary interval.
+STARTUP_LOCK_RETRY_MARGIN_SECONDS = 60
+
+
+def _integrity_lock_ttl_seconds() -> int:
+    ttl = int(settings.INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS)
+    return ttl if ttl > 0 else INTEGRITY_LOCK_TTL_DEFAULT_SECONDS
+
+
+async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool | None:
+    """One run of the checkpoints and the debt reconciliation under the distributed lock.
+
+    True - the run completed cleanly; False - it ran and recorded a failure; None (047 fix-delta) - it did NOT run,
+    because another holder has the lock, so the caller can tell a skipped run from one that happened."""
+
     from app.core.integrity import compute_and_store_integrity_checkpoints
     from app.db.session import AsyncSessionLocal
     from app.utils.distributed_lock import redis_distributed_lock
     from app.utils.exceptions import ConflictException
 
-    interval = int(
-        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
-    )
-    lock_ttl_seconds = int(
-        settings.INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS
-    )
-    if lock_ttl_seconds <= 0:
-        lock_ttl_seconds = max(30, interval)
+    lock_ttl_seconds = _integrity_lock_ttl_seconds()
 
     _emit_integrity_metric(f"{reason}_start")
     checkpoint_error: Exception | None = None
@@ -114,14 +129,14 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
         # A skipped run proves nothing: a recorded failure (checkpoints or reconciliation) is kept, with its
         # event, until a run of this job completes cleanly (024 `T2412.1`, §15 fix-delta P2-1).
         if _background_job_states(app).get("integrity", {}).get("status") == "failed":
-            return True
+            return None
         _record_background_job_event(
             app,
             name="integrity",
             status="running",
             event=f"{reason}_skipped_locked",
         )
-        return True
+        return None
     except Exception as error:
         logger.exception("integrity.checkpoints_failed reason=%s", reason)
         _emit_integrity_metric(f"{reason}_error")
@@ -154,18 +169,44 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
     return True
 
 
+async def _stopped_within(stop_event: asyncio.Event, seconds: float) -> bool:
+    """Wait up to `seconds` for the stop event: True if it was set, False if the time ran out."""
+
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=seconds)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
 async def _integrity_loop(app: FastAPI) -> None:
+    """The start-up run, then one run every interval after the previous run completes.
+
+    047 fix-delta (2026-10-18, Codex §15 P1): a start-up run that found the lock held - a run of another process, or
+    the lock a killed process left until its TTL - is retried every `STARTUP_LOCK_RETRY_SECONDS` for up to the lock's
+    TTL plus `STARTUP_LOCK_RETRY_MARGIN_SECONDS`, and only then does the loop give up into the ordinary interval, with
+    a recorded event. Until 047 the interval was 300 s and the next periodic run was the retry; at a daily interval it
+    is not. Periodic runs are not retried: a skipped periodic run means another holder is running one."""
+
     interval = int(
         settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
     )
-    await _run_integrity_checkpoints_once(app, reason="startup")
+    stop = app.state._bg_stop_event
+    ran = await _run_integrity_checkpoints_once(app, reason="startup")
+    retries = -(-(_integrity_lock_ttl_seconds() + STARTUP_LOCK_RETRY_MARGIN_SECONDS) // STARTUP_LOCK_RETRY_SECONDS)
+    while ran is None and retries > 0:
+        if await _stopped_within(stop, STARTUP_LOCK_RETRY_SECONDS):
+            return
+        retries -= 1
+        ran = await _run_integrity_checkpoints_once(app, reason="startup")
+    if ran is None and _background_job_states(app).get("integrity", {}).get("status") != "failed":
+        logger.error("integrity.startup_run_skipped_locked_gave_up interval_seconds=%d", interval)
+        _record_background_job_event(app, name="integrity", status="running", event="startup_skipped_locked_gave_up")
 
-    while not app.state._bg_stop_event.is_set():
-        try:
-            await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
+    while not stop.is_set():
+        if await _stopped_within(stop, interval):
             break
-        except asyncio.TimeoutError:
-            await _run_integrity_checkpoints_once(app, reason="periodic")
+        await _run_integrity_checkpoints_once(app, reason="periodic")
 
 
 async def _run_periodic_clearing_once(app: FastAPI) -> None:
