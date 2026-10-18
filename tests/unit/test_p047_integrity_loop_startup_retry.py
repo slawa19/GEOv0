@@ -357,4 +357,3 @@ async def test_an_attempt_that_times_out_is_retried_fast_then_every_ttl_and_degr
     assert seen.waits[:15] == FAST + [TTL] * 2 + [DAY], seen.waits
     assert all(d for _at, d in seen.degraded[:14]) and not seen.degraded[14][1], seen.degraded[:15]
     assert seen.app.state.background_jobs["integrity"]["event"] == "startup_success"
-
