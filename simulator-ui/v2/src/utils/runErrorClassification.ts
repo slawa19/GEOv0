@@ -69,3 +69,14 @@ export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, 
 export function noScenarioText(locale: UiLocale = uiLocale()): string {
   return locale === 'ru' ? 'На сервере нет сценариев: показать нечего.' : 'The server offers no scenario: there is nothing to show.'
 }
+
+/**
+ * 044 stage 2 (BACKLOG 043-19): the error line when Start or Apply is asked with a tempo below 1 (the field allows 0).
+ * A run at 0 makes no payment - a silent run that looks broken; it is refused with this hint instead, and the typed
+ * value is not replaced by another one behind the person's back. Stopping the payments is the pause.
+ */
+export function zeroIntensityText(locale: UiLocale = uiLocale()): string {
+  return locale === 'ru'
+    ? 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.'
+    : 'A tempo of 0 makes no payments: enter a tempo from 1 to 100. To stop the payments, pause.'
+}

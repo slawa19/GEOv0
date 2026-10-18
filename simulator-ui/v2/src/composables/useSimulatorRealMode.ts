@@ -32,7 +32,7 @@ import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
-import { noScenarioText, runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
+import { noScenarioText, runStatusErrorText, startRunErrorText, zeroIntensityText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -1135,6 +1135,12 @@ export function useSimulatorRealMode(opts: {
 
   async function startRunOnce(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
+    const intensityPercent = startOpts?.intensityPercent ?? real.intensityPercent
+    // 044 stage 2 (BACKLOG 043-19): a tempo below 1 starts no silent run; the hint says why.
+    if (!(intensityPercent >= 1)) {
+      real.lastError = zeroIntensityText()
+      return
+    }
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
     await ensureAnonSessionOnce()
@@ -1157,7 +1163,7 @@ export function useSimulatorRealMode(opts: {
             scenario_id: real.selectedScenarioId,
             // The only run mode there is (042 S2): no stored or UI-chosen mode feeds this request.
             mode: 'real',
-            intensity_percent: startOpts?.intensityPercent ?? real.intensityPercent,
+            intensity_percent: intensityPercent,
           },
         )
         real.runId = res.run_id
@@ -1343,6 +1349,11 @@ export function useSimulatorRealMode(opts: {
   async function applyIntensity() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    // 044 stage 2 (BACKLOG 043-19): 0 is not applied - the run would go on making no payment; the pause does that.
+    if (!(real.intensityPercent >= 1)) {
+      real.lastError = zeroIntensityText()
+      return
+    }
     try {
       real.runStatus = await setIntensity(
         { apiBase: real.apiBase, accessToken: real.accessToken },

@@ -65,7 +65,7 @@ import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { useAdminRunsPanel } from './useAdminRunsPanel'
-import { AUTOSTART_DEFAULT_INTENSITY_PERCENT, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
+import { defaultIntensityPercentFor, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
@@ -573,18 +573,20 @@ export function useSimulatorApp(opts?: {
   const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
   const ENV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_ACCESS_TOKEN ?? '').trim()
 
+  const initialAccessToken = lsGet(
+    'geo.sim.v2.accessToken',
+    ENV_ACCESS_TOKEN || (import.meta.env.DEV ? DEFAULT_DEV_ACCESS_TOKEN : ''),
+  )
   const real = reactive<RealModeState>({
     apiBase: normalizeApiBase(lsGet('geo.sim.v2.apiBase', String(import.meta.env.VITE_GEO_API_BASE ?? '/api/v1'))),
-    accessToken: lsGet(
-      'geo.sim.v2.accessToken',
-      ENV_ACCESS_TOKEN || (import.meta.env.DEV ? DEFAULT_DEV_ACCESS_TOKEN : ''),
-    ),
+    accessToken: initialAccessToken,
     loadingScenarios: false,
     scenarios: [] as ScenarioSummary[],
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
     intensityPercent: (() => {
-      const fallback = AUTOSTART_DEFAULT_INTENSITY_PERCENT
+      // 044 stage 2: the visitor's tempo (15) on a screen without an admin token, the operator's (30) with one.
+      const fallback = defaultIntensityPercentFor(initialAccessToken)
       const raw = lsGet('geo.sim.v2.intensityPercent', '')
       // 043 S3 (decision 5): a stored 0 is what the removed Interact mode forced and kept; it is dropped here, once per
       // stored value (the key is removed), instead of a reset after the pipeline is wired. A 0 a person stores by hand is
