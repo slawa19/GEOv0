@@ -770,9 +770,6 @@ jobs:
         run: |
           cat /proc/sys/net/ipv4/ip_local_port_range
           sudo ss -tanp | grep -E ':4173[0-9]' || echo "no socket on 4173x"
-          # The mechanism itself: local ports of this job's outgoing connections (uvicorn -> postgres and others)
-          # fall inside the ephemeral range printed above.
-          sudo ss -tanp state established | awk 'NR>1 {print $3, $4, $5}' | head -40
 
       - name: Run Simulator UI v2 smoke on its isolated port
         env:
