@@ -613,6 +613,8 @@ export function useSimulatorApp(opts?: {
     sseState: 'idle',
     lastEventId: null as string | null,
     lastError: '',
+    lastErrorLine: null,
+    retryableStartLine: null,
     artifacts: [] as ArtifactIndexItem[],
     artifactsLoading: false,
 

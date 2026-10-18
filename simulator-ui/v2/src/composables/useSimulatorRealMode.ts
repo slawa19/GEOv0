@@ -32,7 +32,17 @@ import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
-import { noScenarioText, runStatusErrorText, startRunErrorText, zeroIntensityText } from '../utils/runErrorClassification'
+import {
+  isGlobalLimitRefusal,
+  NO_SCENARIO_LINE,
+  rawRunErrorLine,
+  runStatusErrorLine,
+  startRunErrorLine,
+  writeRunErrorLine,
+  ZERO_INTENSITY_LINE,
+  type RunErrorLine,
+} from '../utils/runErrorClassification'
+import { uiLocaleRef } from '../i18n/locale'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -52,6 +62,18 @@ export type RealModeState = {
   sseState: string
   lastEventId: string | null
   lastError: string
+  /**
+   * 046 wave 1 (§15 Codex fix-delta): the VALUE of the error line - its cause (`RunErrorLine`: a dictionary key and its
+   * data, or a text kept as it came) - whose text in the current language is `lastError`. Written with `lastError` by
+   * `writeRunErrorLine`; a text written into `lastError` without it makes it null (the watcher below), so it never
+   * describes another text. Optional: a state built without it has text-only lines.
+   */
+  lastErrorLine?: RunErrorLine | null
+  /**
+   * 046 wave 1: the line of the last start the global limit of runs refused (`isGlobalLimitRefusal`), null otherwise.
+   * The top bar offers "Try again" while the line on screen is this same value (`startRetryOffered`, by identity).
+   */
+  retryableStartLine?: RunErrorLine | null
   artifacts: ArtifactIndexItem[]
   artifactsLoading: boolean
   runStats: {
@@ -414,7 +436,7 @@ export function useSimulatorRealMode(opts: {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
       if (!isCurrent()) return 'superseded'
       real.runStatus = st
-      real.lastError = runStatusErrorText(st, isUserFacingRunError)
+      writeRunErrorLine(real, runStatusErrorLine(st, isUserFacingRunError))
       return 'current'
     } catch (e: unknown) {
       if (!isCurrent()) return 'superseded'
@@ -566,13 +588,35 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
+  /**
+   * 046 wave 1 (§15 Codex P2 and its fix-delta): the error line in the language of the interface. The line is a value
+   * (`lastErrorLine`); its text (`lastError`) is rendered again on a switch. A text written into `lastError` alone - by
+   * any code that has only a text - is a line of its own: its value is forgotten at once (sync), so a stale value can
+   * never re-render over it. `writeRunErrorLine` writes the text first and the value after, so its own write survives.
+   */
+  watch(
+    () => real.lastError,
+    () => {
+      real.lastErrorLine = null
+    },
+    { flush: 'sync' },
+  )
+  watch(uiLocaleRef, (locale) => {
+    const line = real.lastErrorLine
+    if (line) writeRunErrorLine(real, line, locale)
+  })
+
   // The HUD copy of a scene-load error (034 S8, review C2): only this copy is removed, what the HUD showed before
   // (a run's own `last_error`) comes back, and an error written over the copy is left alone.
   // WHEN, precisely: not on recovery but when the NEXT load STARTS - `state.error` is emptied before the request is
   // answered - and the copy returns if that load fails. So while the request is in flight there is no warning.
-  let sceneErrorInHud: { text: string; displaced: string } | null = null
+  // 046 wave 1 (§15 Codex fix-delta P2): the line put aside is kept as its VALUE (`lastErrorLine`, or its text when it has
+  // none), so it comes back in the language of the moment it comes back - and as the same value, so a retry offer that
+  // stood beside it comes back too (`startRetryOffered` compares the value, not the text).
+  let sceneErrorInHud: { text: string; displaced: RunErrorLine } | null = null
   function showSceneError(text: string) {
-    sceneErrorInHud = { text, displaced: sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastError }
+    const displaced = sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastErrorLine ?? rawRunErrorLine(real.lastError)
+    sceneErrorInHud = { text, displaced }
     real.lastError = text
   }
 
@@ -582,7 +626,7 @@ export function useSimulatorRealMode(opts: {
     (e) => {
       if (!isRealMode.value) return
       if (e) return showSceneError(e)
-      if (sceneErrorInHud?.text === real.lastError) real.lastError = sceneErrorInHud.displaced
+      if (sceneErrorInHud?.text === real.lastError) writeRunErrorLine(real, sceneErrorInHud.displaced.kind === 'raw' && !sceneErrorInHud.displaced.text ? null : sceneErrorInHud.displaced)
       sceneErrorInHud = null
     },
     { flush: 'post' },
@@ -1138,7 +1182,7 @@ export function useSimulatorRealMode(opts: {
     const intensityPercent = startOpts?.intensityPercent ?? real.intensityPercent
     // 044 stage 2 (BACKLOG 043-19): a tempo below 1 starts no silent run; the hint says why.
     if (!(intensityPercent >= 1)) {
-      real.lastError = zeroIntensityText()
+      writeRunErrorLine(real, ZERO_INTENSITY_LINE)
       return
     }
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
@@ -1150,6 +1194,7 @@ export function useSimulatorRealMode(opts: {
     }
 
     real.lastError = ''
+    real.retryableStartLine = null
     startRunInProgress = true
     try {
       stopSse()
@@ -1216,7 +1261,9 @@ export function useSimulatorRealMode(opts: {
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       // The one place a failed start is written to the error line (every start goes through here).
-      real.lastError = startRunErrorText(e, getErrorMessage)
+      const line = startRunErrorLine(e) ?? rawRunErrorLine(getErrorMessage(e))
+      writeRunErrorLine(real, line)
+      real.retryableStartLine = isGlobalLimitRefusal(e) ? line : null
     } finally {
       startRunInProgress = false
       // A start that ended without a run, or with a run that has ended, leaves no pause to wait for (043 S2). A run
@@ -1357,7 +1404,7 @@ export function useSimulatorRealMode(opts: {
     if (!real.runId) return
     // 044 stage 2 (BACKLOG 043-19): 0 is not applied - the run would go on making no payment; the pause does that.
     if (!(real.intensityPercent >= 1)) {
-      real.lastError = zeroIntensityText()
+      writeRunErrorLine(real, ZERO_INTENSITY_LINE)
       return
     }
     try {
@@ -1482,7 +1529,7 @@ export function useSimulatorRealMode(opts: {
           // already holds its error).
           if (!real.runId && !real.selectedScenarioId) {
             state.loading = false
-            if (!real.lastError) real.lastError = noScenarioText()
+            if (!real.lastError) writeRunErrorLine(real, NO_SCENARIO_LINE)
           }
           // 043 S2 (external review 2026-10-17): the dev-only `?autostart=1` start that stood here is gone - the opening
           // of the one screen (`useInteractAutoBootstrapRun.ts`) is the single owner of a start nobody pressed.

@@ -150,8 +150,14 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   (18.4 and 18.2 s in run 39135012070). In "ran N (as expected M, failed F, ...)" of the verdict line,
  *   `as expected` counts the tests whose outcome was the expected one, so "ran 139 (as expected 138, failed 1)" on
  *   `c8d9efbc` was 139 recorded, one red (the budget) - not a mismatch of this number.
+ * - 2026-10-18 (046 wave 1, the language switch in the service row; merged after 039 C): gate 137 -> 141, full 231 -> 235
+ *   (on its own branch: 133 -> 137, 224 -> 228). `top-bar-long.qa.ts`
+ *   runs in both languages: +4 tests `[ru]` (the same two viewports and two themes, `?lang=ru`); the English four keep
+ *   their titles and now pass `?lang=en`. Forecast before the run: +4 x about 0.55 s (the four English ones measured
+ *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s locally; on CI, over 039 C's forecast of 532-586 s, about +3-4 s
+ *   (589-590 s at the slower runner) - under 600 s with a thin margin; no further `@extended` move (R3 rule) made.
  */
-export const EXPECTED = { gate: 137, full: 231 }
+export const EXPECTED = { gate: 141, full: 235 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

@@ -3,6 +3,7 @@ import type { WindowInstance } from '../composables/windowManager/types'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { provideWindowContainerEl } from '../composables/windowManager/windowContainerContext'
+import { t } from '../i18n/t'
 
 type Props = {
   instance: WindowInstance
@@ -260,14 +261,14 @@ function onShellKeydown(event: KeyboardEvent) {
     :data-win-active="props.instance.active ? '1' : '0'"
     :tabindex="focusContainmentEnabled ? -1 : undefined"
     :role="props.role"
-    :aria-label="props.ariaLabel ?? props.title ?? 'Window'"
+    :aria-label="props.ariaLabel ?? props.title ?? t('windowShell.window')"
     :style="shellStyle"
     @keydown="onShellKeydown"
     @pointerdown="onPointerDown"
   >
     <div v-if="effectiveShowHeader" class="ws-header" :data-title="props.title ? '1' : '0'">
       <div class="ws-title">{{ props.title ?? '' }}</div>
-      <button class="ws-close" type="button" aria-label="Close window" @click="onCloseClick">×</button>
+      <button class="ws-close" type="button" :aria-label="t('windowShell.closeWindow')" @click="onCloseClick">×</button>
     </div>
 
     <div class="ws-body">

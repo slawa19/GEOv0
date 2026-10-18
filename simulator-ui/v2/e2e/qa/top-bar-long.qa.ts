@@ -5,12 +5,19 @@
  * control of the row overlaps another, none leaves the viewport. At 1280x720 and 1366x768, in both themes, with the
  * Admin menu present (`menu-admin` holds where its menu opens).
  *
+ * 046 wave 1 (2026-10-18): the row holds the language switch right after the theme, and runs in both languages
+ * (`?lang=en`, `?lang=ru`). By the owner's narrowing of that day only the SWITCH (its label "Язык") and the stop reason
+ * change with the language; the other texts of the row stay English literals until their review. The stop summary is
+ * now the stop reason in words (`runStop.*`): the free-text reason below is outside the closed set, so it reads as the
+ * general text with the value, cut at 64 characters as before.
+ *
  * LIMITS: the controls compared are the leaves of the row (selects, buttons, inputs, badges, labels, the stop summary,
  * the Admin summary), not their containers; a control clipped by `overflow` inside its own box (an ellipsis) is not an
  * overlap. Chromium without a GPU, the stand's mock backend.
  */
 import { expect, test, type Page, type Route } from '@playwright/test'
 
+import { t } from '../../src/i18n/t'
 import { boot, DETAILS_TOGGLE, RUN_ID, ringSnapshot, SCENARIO_ID } from './stand.js'
 import { THEMES } from './surfaceMatrix.js'
 
@@ -41,7 +48,7 @@ type Box = { name: string; x: number; y: number; w: number; h: number }
 const leaves = (page: Page) => page.evaluate(() => {
   const row = document.querySelector('[data-testid="top-details-row"]')
   if (!row) return [] as Array<{ name: string; x: number; y: number; w: number; h: number }>
-  const sel = 'select, button, input, summary, .ds-badge, .ds-label, [aria-label="Stop reason"] .ds-value'
+  const sel = 'select, button, input, summary, .ds-badge, .ds-label, [data-testid="stop-reason"] .ds-value'
   return [...row.querySelectorAll<HTMLElement>(sel)]
     .filter((el) => !el.closest('.ds-ov-dropdown')) // the content of an open menu is a surface over the row, not a control of it
     .filter((el) => !el.parentElement?.closest(sel)) // a badge inside a summary is part of it
@@ -70,25 +77,36 @@ function problems(boxes: Box[], vw: number, vh: number): string[] {
   return out
 }
 
+const LANGS = ['en', 'ru'] as const
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+for (const lang of LANGS) {
 for (const vp of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
   for (const theme of THEMES) {
-    test(`043 S3 [${theme}] ${vp.width}x${vp.height}: the service row with the longest scenario and stop summary - no control overlaps another or leaves the screen`, async ({ page }, info) => {
+    // The English titles are the 043 S3 ones, unchanged; the Russian run carries its language in the title.
+    test(`043 S3 [${theme}]${lang === 'ru' ? ' [ru]' : ''} ${vp.width}x${vp.height}: the service row with the longest scenario and stop summary - no control overlaps another or leaves the screen`, async ({ page }, info) => {
       await page.setViewportSize(vp)
-      await boot(page, { snapshot: ringSnapshot(), clock: false, sseShim: false, awaitLayout: false, query: `&theme=${theme}`, beforeLoad: longInputs })
+      await boot(page, { snapshot: ringSnapshot(), clock: false, sseShim: false, awaitLayout: false, query: `&theme=${theme}&lang=${lang}`, beforeLoad: longInputs })
+      await expect(page.locator('html')).toHaveAttribute('lang', lang)
       await page.locator(DETAILS_TOGGLE).click()
       const scenario = page.locator('select[aria-label="Scenario"]')
       // Anti-vacuum: the long inputs are on screen - the option and the cut stop summary - and the Admin summary is there.
       await expect(scenario.locator('option:checked')).toHaveText(`${LONG_SCENARIO} (${SCENARIO_ID})`)
-      await expect(page.locator('[aria-label="Stop reason"] .ds-value')).toHaveText(/^operator: .{40,}/)
+      const generalText = t('runStop.unknown', { code: LONG_REASON }, lang)
+      await expect(page.locator('[data-testid="stop-reason"] .ds-value')).toHaveText(new RegExp(`^${escapeRe(generalText.slice(0, 40))}.{10,}`))
       await expect(page.locator('summary[aria-label="Admin"]')).toBeVisible()
+      // 046 wave 1: the language switch is a control of this row, measured with the rest.
+      await expect(page.locator('[data-testid="language-switch"] .ds-label')).toHaveText(t('locale.switcherLabel', undefined, lang))
       const boxes = await leaves(page)
       info.annotations.push({ type: 'boxes', description: JSON.stringify(boxes.map((b) => ({ ...b, x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) }))) })
-      console.log(`[043 S3 top-bar-long] ${theme} ${vp.width}x${vp.height} ${JSON.stringify(boxes.map((b) => [b.name, Math.round(b.x), Math.round(b.y), Math.round(b.w), Math.round(b.h)]))}`)
+      console.log(`[043 S3 top-bar-long] ${theme} ${lang} ${vp.width}x${vp.height} ${JSON.stringify(boxes.map((b) => [b.name, Math.round(b.x), Math.round(b.y), Math.round(b.w), Math.round(b.h)]))}`)
       expect(boxes.length, 'anti-vacuum: the row has its controls').toBeGreaterThan(8)
+      expect(boxes.some((b) => b.name.startsWith('select[Interface language]') || b.name.startsWith('select[Язык интерфейса]')), 'anti-vacuum: the switch is among the measured controls').toBe(true)
       expect.soft(problems(boxes, vp.width, vp.height), 'controls of the service row overlap or leave the viewport').toEqual([])
       // Nothing of the scenario's name is lost when the select is narrower than it: the full option text is its title.
       await expect.soft(scenario).toHaveAttribute('title', `${LONG_SCENARIO} (${SCENARIO_ID})`)
-      await page.screenshot({ path: info.outputPath(`top-bar-long-${theme}-${vp.width}x${vp.height}.png`) })
+      await page.screenshot({ path: info.outputPath(`top-bar-long-${theme}-${lang}-${vp.width}x${vp.height}.png`) })
     })
   }
+}
 }
