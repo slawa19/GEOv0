@@ -114,5 +114,3 @@ export type ClearingDoneEvent = {
   node_patch?: NodePatch[]
   edge_patch?: EdgePatch[]
 }
-
-export type DemoEvent = TxUpdatedEvent | ClearingDoneEvent

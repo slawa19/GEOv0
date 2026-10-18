@@ -1,4 +1,4 @@
-import { createApp, h, nextTick, ref } from 'vue'
+import { createApp, h, nextTick, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import type { SceneId } from '../scenes'
 
@@ -164,5 +164,88 @@ describe('BottomBar — analytics surface toggle (spec 007, T705)', () => {
 
     app.unmount()
     host.remove()
+  })
+})
+
+describe('BottomBar — the offline effects workbench (042 T4205)', () => {
+  function workbench(over: Record<string, unknown> = {}) {
+    const wb = reactive({
+      offered: [
+        { id: 'demo-tx', label: 'Платежи', count: 20 },
+        { id: 'demo-clearing', label: 'Клиринг', count: 1 },
+      ],
+      selectedId: 'demo-tx',
+      select: vi.fn((id: string) => {
+        wb.selectedId = id
+      }),
+      playingId: null as string | null,
+      cursorId: null as string | null,
+      position: 0,
+      total: 0,
+      play: vi.fn(),
+      step: vi.fn(),
+      stop: vi.fn(),
+      ...over,
+    })
+    return wb
+  }
+  const buttons = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).map((b) => b.textContent?.trim())
+
+  it('offline: offers the playable playlists; "Проиграть" and "Шаг" act on the chosen one', async () => {
+    const wb = workbench()
+    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: wb } })
+    await nextTick()
+
+    const select = host.querySelector('select[aria-label="Плейлист"]') as HTMLSelectElement
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Платежи (20)', 'Клиринг (1)'])
+    expect(buttons(host)).toEqual(['Проиграть', 'Шаг'])
+
+    select.value = 'demo-clearing'
+    select.dispatchEvent(new Event('change'))
+    await nextTick()
+    // The choice is the workbench's: it is asked to select (and so to stop a playback), not kept in the bar.
+    expect(wb.select).toHaveBeenCalledWith('demo-clearing')
+    ;(Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).find((b) => b.textContent?.trim() === 'Проиграть') as HTMLButtonElement).click()
+    expect(wb.play).toHaveBeenCalledWith('demo-clearing')
+    ;(Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).find((b) => b.textContent?.trim() === 'Шаг') as HTMLButtonElement).click()
+    expect(wb.step).toHaveBeenCalledWith('demo-clearing')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('while a playlist plays: "Стоп" only, and the position of the played playlist', async () => {
+    const wb = workbench({ playingId: 'demo-tx', cursorId: 'demo-tx', position: 3, total: 20 })
+    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: wb } })
+    await nextTick()
+
+    expect(buttons(host)).toEqual(['Стоп'])
+    expect(host.querySelector('[aria-label="Позиция плейлиста"]')?.textContent).toBe('3 / 20')
+    ;(host.querySelector('[data-testid="playlist-workbench"] button') as HTMLButtonElement).click()
+    expect(wb.stop).toHaveBeenCalledTimes(1)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('is absent on the server source, and offline when no playlist can be played (no control that does nothing)', async () => {
+    const real = await mountBottomBar({ propOverrides: { apiMode: 'real' as const, playlists: workbench() } })
+    await nextTick()
+    expect(real.host.querySelector('[data-testid="playlist-workbench"]')).toBeNull()
+    real.app.unmount()
+    real.host.remove()
+
+    const none = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: workbench({ offered: [] }) } })
+    await nextTick()
+    expect(none.host.querySelector('[data-testid="playlist-workbench"]')).toBeNull()
+    // Counter-check: the same mount with an offered playlist shows it (the absence above is not a broken selector).
+    none.app.unmount()
+    none.host.remove()
+    const some = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: workbench() } })
+    await nextTick()
+    expect(some.host.querySelector('[data-testid="playlist-workbench"]')).not.toBeNull()
+    some.app.unmount()
+    some.host.remove()
   })
 })

@@ -191,10 +191,8 @@ HUD — это **не отдельный CSS зоопарк**, а:
 | WM inspector window | `inspector-card` | `fixed-width-auto-height` or `bounded-intrinsic` | WindowManager | WM policy | measured/fallback | `--ds-z-panel` within WM stack |
 | Top HUD stack | `hud-bar` | `stretch` | root top stack | stack container | content/min-row token | `--ds-z-top` |
 | Bottom HUD stack | `hud-bar` | `stretch` | root bottom stack | stack container | content/min-row token | `--ds-z-bottom` |
-| TopBar Advanced dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
 | TopBar Admin dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
 | BottomBar Artifacts dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
-| BottomBar DevTools dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
 | Toast | `notification-toast` | `intrinsic` | bottom stack offset | DS toast clamp tokens | content | `--ds-z-alert` |
 | InteractHistoryLog | `bottom-overlay` | `intrinsic` | root bottom overlay | content | content | `--ds-z-bottom` |
 | DevPerfOverlay | `dev-overlay` | `intrinsic` | fixed corner | DS overlay max-width contract | content/max-height token | `--ds-z-dev` |

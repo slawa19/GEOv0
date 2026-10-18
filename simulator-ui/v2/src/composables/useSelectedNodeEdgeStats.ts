@@ -6,7 +6,6 @@ import { addMoney, formatMoney } from '../utils/money'
 type SelectedNodeEdgeStats = {
   inLimitText: string
   outLimitText: string
-  degree: number
 }
 
 type UseSelectedNodeEdgeStatsDeps = {
@@ -31,17 +30,14 @@ type UseSelectedNodeEdgeStatsReturn = {
 export function computeNodeEdgeStats(snapshot: GraphSnapshot, id: string): SelectedNodeEdgeStats {
   let inLimit = '0'
   let outLimit = '0'
-  let degree = 0
 
   for (const l of snapshot.links) {
     if (l.source === id) {
       outLimit = addMoney(outLimit, l.trust_limit)
-      degree += 1
       continue
     }
     if (l.target === id) {
       inLimit = addMoney(inLimit, l.trust_limit)
-      degree += 1
     }
   }
 
@@ -50,7 +46,6 @@ export function computeNodeEdgeStats(snapshot: GraphSnapshot, id: string): Selec
   return {
     inLimitText: formatMoney(inLimit, precision),
     outLimitText: formatMoney(outLimit, precision),
-    degree,
   }
 }
 
