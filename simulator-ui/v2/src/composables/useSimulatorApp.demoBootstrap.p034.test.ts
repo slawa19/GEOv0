@@ -122,7 +122,8 @@ describe('F-034-D7: a token-less visitor and the opening run', () => {
 
     expect(app.real.accessToken, 'precondition: the visitor has no token').toBe('')
     expect(createRun).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 30 })
+    // 044 stage 2: a token-less visitor's run starts at the visitor tempo 15 (the operator's default stays 30).
+    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 15 })
     expect(pauseRun, 'not paused').not.toHaveBeenCalled()
   })
 })

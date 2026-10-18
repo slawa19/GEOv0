@@ -223,14 +223,15 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       const app = boot()
       await settle()
       expect(app.real.runId).toBeNull()
-      expect(app.real.lastError).toBe('Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова — Start в «Подробнее».')
+      // 044 stage 2: the text names the number of places from `details.max_active_runs` (1 here).
+      expect(app.real.lastError).toBe('Сейчас занято единственное место: демо смотрит 1 человек. Попробуйте через минуту — Start в «Подробнее».')
     } finally {
       document.documentElement.lang = ''
     }
     scope?.stop()
     const en = boot()
     await settle()
-    expect(en.real.lastError).toBe('Someone is already watching the demo on this server; try again later. To start again, use Start under "Подробнее".')
+    expect(en.real.lastError).toBe('The only place is taken right now: 1 person is watching the demo. Try again in a minute - Start under "Подробнее".')
   })
 
   it('counter-check: a 409 of another kind (owner_active_exists) and a non-409 error keep their old text', async () => {

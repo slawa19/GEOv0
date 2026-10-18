@@ -48,6 +48,9 @@ services:
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       SIMULATOR_SESSION_SECRET: "${SIMULATOR_SESSION_SECRET:-}"
       SIMULATOR_CSRF_ORIGIN_ALLOWLIST: "${SIMULATOR_CSRF_ORIGIN_ALLOWLIST:-}"
+      # 044 stage 2: one run per visitor, N = 10 on one process (measured); idle runs stop after 600 s.
+      SIMULATOR_MAX_ACTIVE_RUNS: "${SIMULATOR_MAX_ACTIVE_RUNS:-10}"
+      SIMULATOR_RUN_IDLE_STOP_SEC: "${SIMULATOR_RUN_IDLE_STOP_SEC:-600}"
       # Periodic clearing (programme 023, R1): a SEPARATE hub deployment sets CLEARING_PERIODIC_ENABLED=true.
       # Off by default; never on a database shared with the simulator (the runner refuses there).
       CLEARING_PERIODIC_ENABLED: "${CLEARING_PERIODIC_ENABLED:-false}"

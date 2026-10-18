@@ -262,6 +262,10 @@ class Settings(BaseSettings):
     SIMULATOR_SSE_SUB_QUEUE_MAX: int = 500
     SIMULATOR_SSE_MAX_CONNECTIONS: int = 50
     SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN: int = 10
+    # 044 stage 2 (decision 2): a run with no SSE subscriber for this long is stopped by its own heartbeat, reason
+    # `idle_no_subscribers` (paused runs too; data and artifacts stay). Counted from the last subscriber leaving or the
+    # run (re)entering `running`, whichever is later. 0 disables.
+    SIMULATOR_RUN_IDLE_STOP_SEC: int = 600
     # None: the runtime's own default (`app/core/simulator/runtime_utils.py`, `REAL_MAX_*_DEFAULT`).
     SIMULATOR_REAL_MAX_IN_FLIGHT: int | None = None
     SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES: int | None = None

@@ -122,7 +122,7 @@ test('(b) a start refused by the global limit of runs: a Russian line from the r
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   expect(await page.evaluate(() => document.documentElement.lang), 'the language the page declares (?lang=ru, written by i18n/locale.ts)').toBe('ru')
   await expect(page.locator('[role="alert"][aria-label="Error"]'), 'the refusal in the interface language')
-    .toContainText('Демо уже кто-то смотрит на этом сервере', { timeout: 15_000 })
+    .toContainText('Сейчас занято единственное место', { timeout: 15_000 })
   expect(creates, 'one attempt').toBe(1)
   // No run: the three actions are there and disabled (B4), so no raw "No active run_id" can be reached.
   for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) await expect(page.getByTestId(id), `${id} without a run`).toBeDisabled()

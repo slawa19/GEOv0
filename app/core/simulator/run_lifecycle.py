@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from datetime import datetime
 from typing import Any, Callable, Optional
 
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.models import RunRecord
+from app.core.simulator.models import RunRecord, note_subscribers_locked
 from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import SseBroadcast
@@ -18,6 +19,9 @@ from app.utils.exceptions import NotFoundException
 
 #: The intensity of a run when neither the request nor the scenario's `settings.playback.intensity_percent` names one (036 B2).
 DEFAULT_RUN_INTENSITY_PERCENT = 30
+
+#: 044 stage 2 (decision 2): `stop_reason` of a run its heartbeat stopped because nobody watched it (`stop_source` "server").
+IDLE_STOP_REASON = "idle_no_subscribers"
 
 
 class RunLifecycle:
@@ -44,6 +48,7 @@ class RunLifecycle:
         logger,
         get_active_run_id_for_owner: Callable[[str], Optional[str]],
         get_max_active_runs_per_owner: Callable[[], int],
+        idle_now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._lock = lock
         self._runs = runs
@@ -65,6 +70,12 @@ class RunLifecycle:
         self._logger = logger
         self._get_active_run_id_for_owner = get_active_run_id_for_owner
         self._get_max_active_runs_per_owner = get_max_active_runs_per_owner
+        self._idle_now = idle_now
+        # 044 stage 2 (Codex §15, two rounds): records whose cleanup is in progress - a pruning pass ending their events
+        # writer, or a `stop` from its first await to its last (writer drain, final upsert, artifacts finalize, final
+        # metrics flush). Such a record looks writer-less (`stop_events_writer` detaches before it awaits the drain) and
+        # must not be dropped meanwhile. A count per run: two cleanups of one run may overlap.
+        self._cleanup_in_progress: dict[str, int] = {}
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
@@ -107,7 +118,8 @@ class RunLifecycle:
         active = self._count_active_runs_locked()
         if active >= max_active:
             raise ConflictException(
-                "Global active runs limit reached",
+                # 044 stage 2 (decision 3): the message names the number of places; `details` keep their shape.
+                f"Global active runs limit reached: all {max_active} places are taken",
                 details={
                     "conflict_kind": "global_active_limit",
                     "max_active_runs": max_active,
@@ -129,37 +141,94 @@ class RunLifecycle:
                 )
         self._enforce_active_run_limit_locked()
 
-    def _prune_run_records_locked(self) -> None:
+    @staticmethod
+    def _has_live_task(task: Optional[asyncio.Task[None]]) -> bool:
+        return task is not None and not task.done()
+
+    def _ended_overflow_locked(self) -> list[RunRecord]:
+        """The ended records (`stopped` and, 044 stage 2, `error`) to drop for `SIMULATOR_MAX_RUN_RECORDS`, oldest first,
+        as many as the registry is over the limit. A record whose heartbeat still runs is never one of them."""
+
         max_records = int(self._get_max_run_records() or 0)
-        if max_records <= 0:
-            return
-        if len(self._runs) <= max_records:
-            return
-
-        # Prefer pruning stopped runs first (oldest first).
-        def _has_live_task(task: Optional[asyncio.Task[None]]) -> bool:
-            return task is not None and not task.done()
-
-        stopped: list[RunRecord] = [
+        if max_records <= 0 or len(self._runs) <= max_records:
+            return []
+        ended = [
             r
             for r in self._runs.values()
-            if str(getattr(r, "state", "")) == "stopped"
-            and not _has_live_task(getattr(r, "_heartbeat_task", None))
-            and not _has_live_task(getattr(r, "_artifact_events_task", None))
+            if str(getattr(r, "state", "")) in ("stopped", "error")
+            and not self._has_live_task(getattr(r, "_heartbeat_task", None))
         ]
 
         def _sort_key(r: RunRecord):
             ts = getattr(r, "stopped_at", None) or getattr(r, "started_at", None)
             return (ts is None, ts)
 
-        stopped.sort(key=_sort_key)
+        ended.sort(key=_sort_key)
+        return ended[: len(self._runs) - max_records]
 
-        while len(self._runs) > max_records and stopped:
-            r = stopped.pop(0)
+    def _prune_run_records_locked(self) -> None:
+        """Drop the oldest ended records over the limit whose events writer has ended (044 stage 2: `error` records
+        too - until then they were never dropped). A dropped record's owner mapping is cleared with it: `fail_run` leaves
+        the mapping of an `error` run in place (admin stop-all and the 409 of `restart` read it), and a mapping to a
+        record that no longer exists would answer for a run nobody can reach."""
+
+        for r in self._ended_overflow_locked():
+            if self._has_live_task(getattr(r, "_artifact_events_task", None)) or r.run_id in self._cleanup_in_progress:
+                continue  # `prune_ended_runs` ends it first; never dropped with a writer still running or draining
+            if self._runs.get(r.run_id) is not r:
+                continue
+            del self._runs[r.run_id]
+            if r.owner_id:
+                self._clear_active_run_id(owner_id=r.owner_id, run_id=r.run_id)
+
+    def pin_cleanup_locked(self, run_id: str) -> None:
+        """044 stage 2: the record is not dropped by a pruning pass until the matching `unpin_cleanup_locked`."""
+        self._cleanup_in_progress[run_id] = self._cleanup_in_progress.get(run_id, 0) + 1
+
+    def unpin_cleanup_locked(self, run_id: str) -> None:
+        left = self._cleanup_in_progress.get(run_id, 0) - 1
+        if left > 0:
+            self._cleanup_in_progress[run_id] = left
+        else:
+            self._cleanup_in_progress.pop(run_id, None)
+
+    async def prune_ended_runs(self) -> None:
+        """044 stage 2 (stage 0 finding (n)): the pruning pass also when a run ends, not only on create. An `error` run
+        keeps its events writer (`fail_run` does not stop it), so the writers of the records about to be dropped are
+        ended first, outside the lock; then the records are dropped under it."""
+
+        with self._lock:
+            candidates = [
+                (r, int(r._launch_epoch))
+                for r in self._ended_overflow_locked()
+                if self._has_live_task(getattr(r, "_artifact_events_task", None)) and r.run_id not in self._cleanup_in_progress
+            ]
+        for r, epoch in candidates:
+            # 044 stage 2 (Codex §15): the list was taken before earlier awaits; a candidate the owner resumed or
+            # restarted meanwhile (it left the ended state, or a new launch began) keeps its writer. Re-checked under
+            # the lock right before the detach, which `stop_events_writer` does before its first await.
+            with self._lock:
+                still_ended = (
+                    self._runs.get(r.run_id) is r
+                    and str(r.state) in ("stopped", "error")
+                    and int(r._launch_epoch) == epoch
+                    and r.run_id not in self._cleanup_in_progress
+                )
+                if still_ended:
+                    self.pin_cleanup_locked(r.run_id)
+            if not still_ended:
+                continue
             try:
-                del self._runs[r.run_id]
+                await self._artifacts.stop_events_writer(r.run_id)
+            except NotFoundException:
+                continue
             except Exception:
-                break
+                self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", r.run_id)
+            finally:
+                with self._lock:
+                    self.unpin_cleanup_locked(r.run_id)
+        with self._lock:
+            self._prune_run_records_locked()
 
     def _start_heartbeat_locked(self, run: RunRecord) -> None:
         run._heartbeat_task = asyncio.create_task(
@@ -323,6 +392,8 @@ class RunLifecycle:
             self._artifacts.init_run_artifacts(run)
 
             self._runs[run_id] = run
+            # 044 stage 2: a new run has no subscriber yet - its idle window starts now.
+            note_subscribers_locked(run, self._idle_now())
             self._set_active_run_id(run_id, owner_id)
 
             # Start artifacts writer (best-effort; no-op if artifacts disabled).
@@ -338,6 +409,7 @@ class RunLifecycle:
 
         await simulator_storage.upsert_run(run)
         await simulator_storage.sync_artifacts(run)
+        await self.prune_ended_runs()  # the `error` records the locked pass above had to leave (their writer ran)
         return run_id
 
     async def pause(self, run_id: str) -> RunStatus:
@@ -364,14 +436,20 @@ class RunLifecycle:
                 pass
             elif run.state == "paused":
                 run.state = "running"
+                note_subscribers_locked(run, self._idle_now())  # 044 stage 2: a resume restarts the idle window
             elif run.state in ("stopping", "stopped"):
                 # Idempotent: keep stopped
                 pass
             else:
                 self._enforce_entry_limits_locked(run)
                 run.state = "running"
+                note_subscribers_locked(run, self._idle_now())
                 if run.owner_id:
                     self._set_active_run_id(run_id, run.owner_id)
+            if run.state == "running":
+                # 044 stage 2 (Codex §15): a run resumed while a pruning pass ended its writer gets one again
+                # (idempotent: a live writer is kept), so its events are not dropped with a `None` queue.
+                self._artifacts.start_events_writer(run_id)
 
         await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
@@ -523,6 +601,8 @@ class RunLifecycle:
             run.stopped_at = None
             run.state = "running"
             run.started_at = self._utc_now()
+            # 044 stage 2: the restarted run's idle window starts now.
+            note_subscribers_locked(run, self._idle_now())
 
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)

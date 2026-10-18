@@ -177,6 +177,10 @@ class RunRecord:
 
     _event_seq: int = 0
     _subs: list[_Subscription] = field(default_factory=list)
+    # 044 stage 2: since when (the runtime's monotonic idle clock) the run has had no SSE subscriber; None while it has
+    # one. Written only through `note_subscribers_locked` (create, restart, resume, subscribe, unsubscribe, overflow
+    # close, shutdown); read by the heartbeat's idle stop.
+    _no_subscribers_since: Optional[float] = None
     _heartbeat_task: Optional[asyncio.Task[None]] = None
 
     # Best-effort in-memory replay buffer for SSE reconnects.
@@ -284,6 +288,13 @@ class RunRecord:
         default_factory=dict
     )
     _trust_drift_config: TrustDriftConfig | None = None
+
+
+def note_subscribers_locked(run: Any, now: float) -> None:
+    """044 stage 2: record the run's subscriber state after a change - None while it has a subscriber, else `now` (the
+    idle window starts). The caller holds the runtime lock."""
+
+    run._no_subscribers_since = None if run._subs else float(now)
 
 
 def bump_topology_epoch(run: Any, equivalent: Any, creditor_pid: Any, debtor_pid: Any) -> None:
