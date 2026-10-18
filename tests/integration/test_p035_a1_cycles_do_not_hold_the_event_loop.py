@@ -21,8 +21,8 @@ equivalent instead of a shallow depth; the graph, the threshold and the assertio
 What this does not see: a loop held for less than the threshold, any other route, and how long the planner process
 itself works (it shares one worker with clearing passes).
 
-The test of a plan that is slow FOR THE PLANNER (below) no longer uses this fixed threshold: since 041 `T4112`
-(2026-10-18) it measures a control on the same runner and derives its own, under a ceiling - see its constants.
+The test of a plan that is slow FOR THE PLANNER (below) applies the same threshold, since 041 `T4112` (2026-10-18)
+only to the part of each loop gap that overlaps the plan's own time in flight - see its docstring.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_scenarios import register_and_login
 from tests.p023_support import remaining_debts
-from tests.p035_support import held_rotated_plan, slow_rotated_plan
+from tests.p035_support import held_rotated_plan, stamped_slow_rotated_plan
 
 _LAYERS = 12
 _WIDTH = 3
@@ -108,25 +108,35 @@ async def _dense_graph_with_one_short_cycle(db_session) -> tuple[Equivalent, set
     return eq, {str(d.id) for d in triangle}
 
 
+#: Gaps shorter than this are not kept in `_Hold.gaps`: two orders below the threshold, they cannot matter to it.
+_GAP_KEPT_ABOVE_SECONDS = 0.01
+
+
 class _Hold(NamedTuple):
     """`worst`: the longest time one `asyncio.sleep(0)` took to come back - how long anything else on the loop
-    waited; `at`: when that gap began, seconds into the window; `window`: how long the probe ran."""
+    waited; `at`: when that gap began, seconds into the window; `window`: how long the probe ran; `started`: the
+    window's start and `gaps`: `(start, length)` of every gap above `_GAP_KEPT_ABOVE_SECONDS`, on `perf_counter`."""
 
     worst: float
     at: float
     window: float
+    started: float
+    gaps: tuple[tuple[float, float], ...]
 
 
 async def _worst_scheduling_delay(stop: asyncio.Event) -> _Hold:
     worst = at = 0.0
+    gaps = []
     last = started = time.perf_counter()
     while not stop.is_set():
         await asyncio.sleep(0)
         now = time.perf_counter()
         if now - last > worst:
             worst, at = now - last, last - started
+        if now - last > _GAP_KEPT_ABOVE_SECONDS:
+            gaps.append((last, now - last))
         last = now
-    return _Hold(worst, at, last - started)
+    return _Hold(worst, at, last - started, started, tuple(gaps))
 
 
 async def _get_while_measuring_the_loop(client, url: str, headers) -> tuple[object, _Hold]:
@@ -231,34 +241,33 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 
 # ------------------------------------------------------------------------- a plan that is slow FOR THE PLANNER
 
-#: 041 `T4112`, 2026-10-18. The threshold of the test below is `min(control x k + c, ceiling)`, the control being the
-#: same request on this runner with the plan coming back at once. Why each number:
+#: 041 `T4112`, 2026-10-18, after the Codex review of `4dcc6413`. The test below judges, with the module's fixed
+#: `_LOOP_DELAY_THRESHOLD_SECONDS`, only the part of each loop gap that OVERLAPS THE PLAN'S TIME IN FLIGHT: from its
+#: hand-over to the pool (stamped in this process just before `submit`) to the end of the plan in the worker (stamped
+#: there, `tests/p035_support.py::stamped_slow_rotated_plan`; same clock, see that docstring).
 #:
-#: * WHY NOT THE FIXED 0.25 s: on ubuntu CI the test failed twice on branches with no backend change - 0.478 s (run
-#:   39031477460, 2026-10-17) and 0.454 s (run 39116205045, 2026-10-18), plan 0.6 s. In both the GET answered ~1.08 s
-#:   after the login, i.e. the hold ran IN SERIES with the 0.6 s plan, not during it. Its cause is not established:
-#:   32 busy processes on a 16-thread Windows machine did not reproduce it (largest hold 0.094 s).
-#: * `_PLAN_SECONDS` 0.6 -> 2.0: with the defect (the loop waits for the worker synchronously, `worker.result()`)
-#:   the loop is held for the plan's time - measured 0.606 s at 0.6 s, only 1.27x the CI noise, so no threshold could
-#:   tell them apart. At 2.0 s the defect holds it 2.003-2.006 s, idle and under the load above.
-#: * `c` = 0.75 s: above both CI points by 0.27 s. It, not the control, is what absorbs them: nothing shows that a
-#:   control would have seen that hold.
-#: * `k` = 3: locally the hold of the measured request was at most 2.1x its control (0.0099 / 0.0047 s), 1.3x under
-#:   the load above (0.030 / 0.023 s; controls up to 0.20 s with a cold worker). The term matters only where the route
-#:   itself holds the loop for tens of milliseconds.
-#: * ceiling = 1.0 s: half the defect's hold (2.0 s), 1.0 s of margin. A control stalled on purpose (2.0 s), or held
-#:   1.15 s by a cold worker under load with the defect in place, gives exactly the ceiling and the defect still fails.
-#:
-#: What this no longer sees here: a hold between 0.25 s and the threshold (0.75 s at least). The deepest-search test
-#: above keeps the fixed 0.25 s.
-_PLAN_SECONDS = 2.0
-_HOLD_CONTROL_FACTOR = 3.0
-_HOLD_CONTROL_OFFSET_SECONDS = 0.75
-_HOLD_CEILING_SECONDS = 1.0
+#: * Why: on ubuntu CI the test failed twice on branches with no backend change, 0.478 s (run 39031477460,
+#:   2026-10-17) and 0.454 s (run 39116205045, 2026-10-18), against the whole-request 0.25 s. Where in the request
+#:   those gaps lay was not recorded; their cause is not established. 32 busy processes on a 16-thread Windows
+#:   machine did not reproduce them (largest gap 0.094 s with a warm worker). From now on the failure message and
+#:   `p035_a1_loop_hold.json` give every gap's position against the plan's stamps.
+#: * `_PLAN_SECONDS` stays 0.6 s (the value of 035): a synchronous wait for the worker overlaps the plan by its whole
+#:   time (measured 0.606 s), and a 0.5 s partial wait during it fits inside the plan too. A longer plan only widens
+#:   the span in which runner noise is judged.
+#: * NOT JUDGED HERE, and said in the failure message: (1) gaps outside the plan's time in flight - authentication,
+#:   the snapshot read, building and serializing the answer. The same route on the same graph is judged over the
+#:   WHOLE request at the same 0.25 s by the deepest-search test above. (2) The cold start of the diagnostic pool:
+#:   the request runs on a FRESH pool whose worker was started just before it by a direct submission, so the first
+#:   request after pool creation is the subject, but the creation of the pool and its first `submit()` are not. The
+#:   first `submit()` itself holds the loop while the worker process is created - measured 2026-10-18 on Windows at
+#:   6-9 ms idle and 0.34-1.04 s under 32 busy processes (BACKLOG 035-16). Judging it here would fail this test on a
+#:   loaded runner for a reason that is not the one it guards; its time is recorded instead.
+_PLAN_SECONDS = 0.6
 
 
-def _hold_threshold(control: float) -> float:
-    return min(control * _HOLD_CONTROL_FACTOR + _HOLD_CONTROL_OFFSET_SECONDS, _HOLD_CEILING_SECONDS)
+def _overlap(gap: tuple[float, float], start: float, end: float) -> float:
+    gap_start, length = gap
+    return max(0.0, min(gap_start + length, end) - max(gap_start, start))
 
 
 def _record_hold(**measured) -> None:
@@ -274,12 +283,14 @@ class _Handed(list):
     def __init__(self) -> None:
         super().__init__()
         self.futures: list[Future] = []
+        self.at: list[float] = []
 
 
-def _slow_the_planner(monkeypatch, delay_of):
-    """Every `plan_clearing` handed to ANY process pool runs `slow_rotated_plan` in the worker instead: it sleeps
-    `delay_of(pool)` seconds there and returns the real plan with every cycle rotated by one edge. Returns the list
-    of pools that were handed a plan, in order; its `futures` are the worker futures, in the same order."""
+def _slow_the_planner(monkeypatch, delay_seconds: float, stamp_path: str):
+    """Every `plan_clearing` handed to ANY process pool runs `stamped_slow_rotated_plan` in the worker instead: it
+    sleeps `delay_seconds` there, returns the real plan with every cycle rotated by one edge and writes its own start
+    and end to `stamp_path`. Returns the list of pools that were handed a plan, in order; its `futures` are the worker
+    futures and its `at` the `perf_counter` of each hand-over, taken before the pool's own `submit`."""
 
     handed = _Handed()
     submit = ProcessPoolExecutor.submit
@@ -288,7 +299,8 @@ def _slow_the_planner(monkeypatch, delay_of):
         if fn is not flow_planner.plan_clearing:
             return submit(self, fn, *args, **kwargs)
         handed.append(self)
-        handed.futures.append(submit(self, slow_rotated_plan, delay_of(self), *args, **kwargs))
+        handed.at.append(time.perf_counter())
+        handed.futures.append(submit(self, stamped_slow_rotated_plan, stamp_path, delay_seconds, *args, **kwargs))
         return handed.futures[-1]
 
     monkeypatch.setattr(ProcessPoolExecutor, "submit", _slow_submit)
@@ -320,59 +332,73 @@ async def _until_ended(workers) -> None:
 
 @pytest.mark.asyncio
 async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_the_answer_is_the_workers(
-    client, db_session, monkeypatch
+    client, db_session, monkeypatch, tmp_path
 ):
     """The dense graph above is heavy for the retired DFS and trivial for the planner (0.001 s), so the test above
     cannot tell a plan computed in the worker from one computed on the loop. Here the plan takes `_PLAN_SECONDS` in
     the worker, and the two effects are asserted, not the form:
 
-    (a) while the plan runs, the loop is not held longer than a threshold derived from a CONTROL on this runner;
+    (a) while the plan is in flight - handed over, then computed in the worker - no loop gap overlaps that time by
+        `_LOOP_DELAY_THRESHOLD_SECONDS` or more (what is not judged, and why: the comment above `_PLAN_SECONDS`);
     (b) the answer is what CAME BACK from the worker - its cycles are rotated, which no recomputation produces.
 
-    The control is the same request on the same graph, through the same probe and the same worker, whose plan comes
-    back at once: it measures what the route itself holds on this runner, at this moment, with no plan in flight. It
-    also warms the worker, so the measured request does not start one.
+    The mechanism is asserted with timestamps: the plan was handed over inside the probe's window and ran in the
+    worker for `_PLAN_SECONDS` before the answer arrived.
     """
 
     eq, _triangle = await _dense_graph_with_one_short_cycle(db_session)
     code = eq.code
-    url = f"/api/v1/clearing/cycles?equivalent={code}"
     user = await register_and_login(client, "P035A1Slow")
     plan = await flow_planner.plan_for_equivalent(db_session, code)
     planned = {frozenset(str(edge.debt_id) for edge in cycle.edges) for cycle in plan.cycles}
-    plan_seconds = [0.0]
-    _slow_the_planner(monkeypatch, lambda _pool: plan_seconds[0])
 
-    control_response, control = await _get_while_measuring_the_loop(client, url, user["headers"])
-    assert control_response.status_code == 200, control_response.text
-    assert _debt_id_sets(control_response.json()["cycles"]) == planned, "the control is not the same request"
-
-    plan_seconds[0] = _PLAN_SECONDS
-    started = time.perf_counter()
-    response, hold = await _get_while_measuring_the_loop(client, url, user["headers"])
-    elapsed = time.perf_counter() - started
-    threshold = _hold_threshold(control.worst)
-    measured = (
-        f"actual={hold.worst:.3f} s (from {hold.at:.3f} s into a {hold.window:.3f} s window), "
-        f"control={control.worst:.3f} s, threshold=min(control x k + c, ceiling)={threshold:.3f} s "
-        f"with k={_HOLD_CONTROL_FACTOR}, c={_HOLD_CONTROL_OFFSET_SECONDS} s, ceiling={_HOLD_CEILING_SECONDS} s, "
-        f"plan={_PLAN_SECONDS} s"
-    )
-    _record_hold(actual=hold.worst, actual_at=hold.at, window=hold.window, control=control.worst,
-                 control_window=control.window, threshold=threshold, k=_HOLD_CONTROL_FACTOR,
-                 c=_HOLD_CONTROL_OFFSET_SECONDS, ceiling=_HOLD_CEILING_SECONDS, plan=_PLAN_SECONDS, elapsed=elapsed)
+    monkeypatch.setattr(runner, "_diagnostic_executor", None)  # restored at teardown; the fresh one is shut down below
+    before = time.perf_counter()
+    fresh = runner._default_diagnostic_executor()
+    try:
+        warming = fresh.submit(flow_planner.plan_clearing, [])  # the real planner: the patch below is not in place yet
+        cold_start = time.perf_counter() - before
+        await asyncio.wrap_future(warming)
+        stamps = tmp_path / "plan.stamps"
+        handed = _slow_the_planner(monkeypatch, _PLAN_SECONDS, str(stamps))
+        response, hold = await _get_while_measuring_the_loop(
+            client, f"/api/v1/clearing/cycles?equivalent={code}", user["headers"])
+        answered = time.perf_counter()
+    finally:
+        fresh.shutdown(wait=True, cancel_futures=True)
 
     assert response.status_code == 200, response.text
+    assert handed == [fresh], f"the plan was not handed to the fresh diagnostic pool: {handed}"
+    plan_start, plan_end = (float(stamp) for stamp in stamps.read_text(encoding="utf-8").split())
+    handed_over, zero = handed.at[0], hold.started
+    nothing = (0.0, (zero, 0.0))
+    inside = [(_overlap(gap, handed_over, plan_end), gap) for gap in hold.gaps]
+    held, worst = max(((part, gap) for part, gap in inside if part > 0), default=nothing)
+    outside, outside_gap = max(((gap[1] - part, gap) for part, gap in inside if gap[1] > part), default=nothing)
+    measured = (
+        f"held={held:.3f} s of the plan's time in flight (gap at {worst[0] - zero:.3f} s, {worst[1]:.3f} s long), "
+        f"threshold={_LOOP_DELAY_THRESHOLD_SECONDS} s; in flight {handed_over - zero:.3f}..{plan_end - zero:.3f} s "
+        f"(in the worker from {plan_start - zero:.3f} s) of a {hold.window:.3f} s window, plan={_PLAN_SECONDS} s; "
+        f"NOT JUDGED: largest hold outside it {outside:.3f} s (gap at {outside_gap[0] - zero:.3f} s), creation and "
+        f"first submit() of the fresh pool {cold_start:.3f} s"
+    )
+    _record_hold(held=held, held_gap_at=worst[0] - zero, held_gap=worst[1], threshold=_LOOP_DELAY_THRESHOLD_SECONDS,
+                 handed_over=handed_over - zero, plan_start=plan_start - zero, plan_end=plan_end - zero,
+                 window=hold.window, outside=outside, outside_gap_at=outside_gap[0] - zero, cold_start=cold_start,
+                 plan=_PLAN_SECONDS)
+
+    # The mechanism, on one clock: handed over under the probe, computed in the worker for the plan's time, and only
+    # then answered. A clock that is not shared between the processes fails here, not silently below.
+    assert zero <= handed_over <= plan_start < plan_end <= answered, measured
+    assert plan_end - plan_start >= _PLAN_SECONDS > _LOOP_DELAY_THRESHOLD_SECONDS, measured
     cycles = response.json()["cycles"]
     assert _debt_id_sets(cycles) == planned and len(cycles) > 1
-    # Anti-vacuum: the plan really was in flight under the probe for longer than ANY threshold the control can give.
-    assert elapsed >= _PLAN_SECONDS > _HOLD_CEILING_SECONDS >= threshold, (elapsed, measured)
     canonical = [cycle for cycle in cycles if cycle[0]["debt_id"] == min(edge["debt_id"] for edge in cycle)]
     assert canonical == [], (
         f"{len(canonical)} of {len(cycles)} cycles are in the planner's canonical rotation: the answer was "
         f"recomputed, it is not the plan that came back from the worker"
     )
-    assert hold.worst < threshold, f"GET /clearing/cycles held the event loop while the plan ran: {measured}"
+    assert held < _LOOP_DELAY_THRESHOLD_SECONDS, f"GET /clearing/cycles held the event loop while the plan ran: {measured}"
 
 
 # ------------------------------------------------------------------ diagnostics and a clearing pass, side by side
