@@ -169,11 +169,15 @@ describe('BottomBar — analytics surface toggle (spec 007, T705)', () => {
 
 describe('BottomBar — the offline effects workbench (042 T4205)', () => {
   function workbench(over: Record<string, unknown> = {}) {
-    return reactive({
+    const wb = reactive({
       offered: [
         { id: 'demo-tx', label: 'Платежи', count: 20 },
         { id: 'demo-clearing', label: 'Клиринг', count: 1 },
       ],
+      selectedId: 'demo-tx',
+      select: vi.fn((id: string) => {
+        wb.selectedId = id
+      }),
       playingId: null as string | null,
       cursorId: null as string | null,
       position: 0,
@@ -183,6 +187,7 @@ describe('BottomBar — the offline effects workbench (042 T4205)', () => {
       stop: vi.fn(),
       ...over,
     })
+    return wb
   }
   const buttons = (host: HTMLElement) =>
     Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).map((b) => b.textContent?.trim())
@@ -199,6 +204,8 @@ describe('BottomBar — the offline effects workbench (042 T4205)', () => {
     select.value = 'demo-clearing'
     select.dispatchEvent(new Event('change'))
     await nextTick()
+    // The choice is the workbench's: it is asked to select (and so to stop a playback), not kept in the bar.
+    expect(wb.select).toHaveBeenCalledWith('demo-clearing')
     ;(Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).find((b) => b.textContent?.trim() === 'Проиграть') as HTMLButtonElement).click()
     expect(wb.play).toHaveBeenCalledWith('demo-clearing')
     ;(Array.from(host.querySelectorAll('[data-testid="playlist-workbench"] button')).find((b) => b.textContent?.trim() === 'Шаг') as HTMLButtonElement).click()

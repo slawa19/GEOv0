@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { validateEvents, validateSnapshot } from './fixtures'
+import { validateSnapshot } from './fixtures'
 
 type RawSnapshot = {
   equivalent: string
@@ -56,23 +56,6 @@ describe('fixtures validation', () => {
     expect(snap.links[0]!.used).toBeUndefined()
     expect(snap.links[0]!.available).toBeUndefined()
   })
-
-  it('validateEvents accepts a minimal tx.updated playlist', () => {
-    const raw = [
-      {
-        event_id: 'evt-1',
-        ts: '2026-01-27T00:00:00Z',
-        type: 'tx.updated',
-        equivalent: 'UAH',
-        ttl_ms: 250,
-        edges: [{ from: 'A', to: 'B' }],
-      },
-    ]
-
-    const events = validateEvents(raw, 'mem:events.json')
-    expect(events).toHaveLength(1)
-    expect(events[0]!.type).toBe('tx.updated')
-  })
 })
 
 /**
@@ -83,13 +66,11 @@ describe('fixtures validation', () => {
 describe('fixtures validation - old colour keys still load (039 slice B)', () => {
   const OLD_KEYS = ['unknown', 'business', 'person', 'suspended', 'left', 'deleted', 'debt-0', 'debt-1', 'debt-2', 'debt-3', 'debt-4', 'debt-5', 'debt-6', 'debt-7', 'debt-8']
 
-  it('every key the backend and the fixtures use is accepted, on a node and in a node patch', () => {
+  it('every key the backend and the fixtures use is accepted on a node (in a recorded node patch: `usePlaylistWorkbench.test.ts`)', () => {
     for (const key of OLD_KEYS) {
       const raw = mkBaseSnapshot()
       raw.nodes[0]!.viz_color_key = key
       expect(validateSnapshot(raw, 'mem:snapshot.json').nodes[0]!.viz_color_key, key).toBe(key)
-      const events = validateEvents([{ event_id: 'e1', ts: '2026-01-27T00:00:00Z', type: 'tx.updated', equivalent: 'UAH', from: 'A', to: 'B', ttl_ms: 100, edges: [{ from: 'A', to: 'B' }], node_patch: [{ id: 'A', viz_color_key: key, net_sign: -1 }] }], 'mem:events.ndjson')
-      expect(events).toHaveLength(1)
     }
   })
 

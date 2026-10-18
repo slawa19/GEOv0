@@ -8,6 +8,9 @@ import HudBar from './common/HudBar.vue'
 
 type PlaylistWorkbenchProps = {
   offered: readonly PlaylistWorkbenchOption[]
+  /** The playlist the controls act on; choosing another stops the current playback (the workbench owns it). */
+  selectedId: string
+  select: (id: string) => void
   playingId: string | null
   cursorId: string | null
   position: number
@@ -72,18 +75,16 @@ const scene = defineModel<SceneId>('scene', { required: true })
 
 const artifactsOpen = ref(false)
 
-// 042 T4205: the playlist the workbench acts on - the chosen one while it is offered, else the first offered.
-const playlistChoice = ref('')
+// 042 T4205: the playlist the workbench acts on is the workbench's (a change of choice stops the current playback).
 const offeredPlaylists = computed(() => (props.apiMode !== 'real' ? props.playlists?.offered ?? [] : []))
 const playlistId = computed({
-  get: () => offeredPlaylists.value.find((p) => p.id === playlistChoice.value)?.id ?? offeredPlaylists.value[0]?.id ?? '',
-  set: (id: string) => {
-    playlistChoice.value = id
-  },
+  get: () => props.playlists?.selectedId ?? '',
+  set: (id: string) => props.playlists?.select(id),
 })
+/** The position in the selected playlist: "0 / N" until it is played. */
 const playlistPosition = computed(() => {
   const pl = props.playlists
-  return pl && pl.cursorId === playlistId.value && pl.position > 0 ? `${pl.position} / ${pl.total}` : ''
+  return pl && pl.total > 0 ? `${pl.position} / ${pl.total}` : ''
 })
 
 const {

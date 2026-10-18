@@ -16,7 +16,7 @@
  * the snapshot after a playlist (the recorded patches stay applied until the scene is loaded again), honour the
  * recorded `ts` (the recordings span days; events are spaced by their own effect length, see `gapAfterMs`).
  */
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
 import { normalizeSimulatorEvent, type AcceptedSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
@@ -24,6 +24,7 @@ import type { ClearingDoneEvent, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import {
   applyAcceptedRealEvent,
+  createRealEventReplayOwner,
   executeRealEventIntents,
   type RealEventDraft,
   type RealEventStateDeps,
@@ -149,6 +150,11 @@ export function createPlaylistPlayer(deps: {
   deliver: (event: PlaylistEvent, playbackId: string) => void
   /** A new playback begins (the effect caches of the previous one are reset, as for a new run). */
   onPlaybackStart?: () => void
+  /**
+   * A playback ends by Stop, a replaced scene or another playlist chosen: its pending effects (the later legs of a beam,
+   * the receiver's burst) must not fire. Not called when a playlist simply plays to its end.
+   */
+  onPlaybackEnd?: () => void
   timers?: Timers
 }) {
   const timers = deps.timers ?? defaultTimers
@@ -181,6 +187,7 @@ export function createPlaylistPlayer(deps: {
   function stop() {
     clearTimer()
     state.playingId = null
+    if (playbackId !== null) deps.onPlaybackEnd?.()
     playbackId = null
   }
 
@@ -204,9 +211,10 @@ export function createPlaylistPlayer(deps: {
   function step(playlist: LoadedPlaylist) {
     if (playlist.events.length === 0) return
     if (state.playingId !== null) stop()
-    if (playbackId === null || state.cursorId !== playlist.id) begin(playlist)
-    const next = state.position >= playlist.events.length ? 0 : state.position
-    deliverAt(playlist, next)
+    // A wrap after the last event is a fresh playback, as Play is: a new id and reset effect caches - otherwise the
+    // clearing dedup (by plan id, `useRealClearingFx.ts`) would swallow a replayed clearing.
+    if (playbackId === null || state.cursorId !== playlist.id || state.position >= playlist.events.length) begin(playlist)
+    deliverAt(playlist, state.position)
   }
 
   /** Forget the cursor and the playback (the scene was replaced: its playlists are of another snapshot). */
@@ -221,8 +229,9 @@ export function createPlaylistPlayer(deps: {
 }
 
 /**
- * The delivery of a recorded event: the live connection's own two steps (`useSimulatorRealMode.ts`, after the replay
- * owner admitted the event) with the same FX functions. The run counters the live path keeps are a private draft here:
+ * The delivery of a recorded event: the live connection's own steps (`useSimulatorRealMode.ts`): the replay owner
+ * admits the event (a duplicate id within one playback, an event of another equivalent than the snapshot's, or of a
+ * playback that is no longer the active one is not applied), then apply, commit, execute - with the same FX functions. The run counters the live path keeps are a private draft here:
  * a playlist is not a run, and the server's counters are not touched. The playback id stands for the run id, so a
  * delayed receiver label of a stopped or replaced playback is dropped by the live path's own guard.
  */
@@ -246,13 +255,23 @@ export function createLivePathDelivery(deps: {
     lastError: '',
     runStats: { attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} },
   }
+  const replayOwner = createRealEventReplayOwner()
   return (event, playbackId) => {
+    const admission = replayOwner.admit({
+      event,
+      connectionRunId: playbackId,
+      activeRunId: deps.getActivePlaybackId(),
+      connectionEquivalent: deps.state.snapshot?.equivalent ?? '',
+      currentCursor: null,
+    })
+    if (admission.status !== 'accepted') return
     draftReal.runId = playbackId
     const intents = applyAcceptedRealEvent(event, playbackId, { real: draftReal, state: deps.state }, {
       patchApplier: deps.patchApplier,
       isUserFacingRunError: deps.isUserFacingRunError,
       inc: deps.inc,
     })
+    replayOwner.commit(event.event_id, playbackId)
     executeRealEventIntents(intents, {
       getActiveRunId: deps.getActivePlaybackId,
       getSceneEquivalent: () => deps.state.snapshot?.equivalent ?? null,
@@ -284,11 +303,24 @@ export function usePlaylistWorkbench(deps: {
   fetchJson: (path: string) => Promise<unknown>
   base: string
   deliver: (event: PlaylistEvent, playbackId: string) => void
-  onPlaybackStart?: () => void
+  /**
+   * The effect caches of the live path: a new playback resets both (as a new run does); an ended one invalidates the
+   * pending tx effects (`resetTxFx` bumps the generation the beam legs and the receiver burst check).
+   */
+  fx: { resetTxFx: () => void; resetClearingDedup: () => void }
   warn?: (message: string, context: Record<string, unknown>) => void
   timers?: Timers
 }) {
-  const player = createPlaylistPlayer({ deliver: deps.deliver, onPlaybackStart: deps.onPlaybackStart, timers: deps.timers })
+  const player = createPlaylistPlayer({
+    deliver: deps.deliver,
+    onPlaybackStart: () => {
+      deps.fx.resetClearingDedup()
+      deps.fx.resetTxFx()
+    },
+    onPlaybackEnd: () => deps.fx.resetTxFx(),
+    timers: deps.timers,
+  })
+  const choice = ref('')
   const loaded = reactive<{ equivalent: string | null; playlists: LoadedPlaylist[] }>({ equivalent: null, playlists: [] })
   let loadSeq = 0
 
@@ -324,12 +356,23 @@ export function usePlaylistWorkbench(deps: {
     loaded.playlists.map((p) => ({ id: p.id, label: p.label, count: p.events.length })),
   )
 
+  /** The playlist the controls act on: the chosen one while it is offered, else the first offered. */
+  const selectedId = computed(() => offered.value.find((p) => p.id === choice.value)?.id ?? offered.value[0]?.id ?? '')
+
   return reactive({
     offered,
+    selectedId,
+    /** Another playlist chosen: the current playback stops (its pending effects with it). */
+    select: (id: string) => {
+      if (id === selectedId.value) return
+      player.stop()
+      choice.value = id
+    },
     playingId: computed(() => player.state.playingId),
     cursorId: computed(() => player.state.cursorId),
-    position: computed(() => player.state.position),
-    total: computed(() => player.state.total),
+    /** The position in the SELECTED playlist (0 until it is played), and its length. */
+    position: computed(() => (player.state.cursorId === selectedId.value ? player.state.position : 0)),
+    total: computed(() => offered.value.find((p) => p.id === selectedId.value)?.count ?? 0),
     play: (id: string) => {
       const pl = playable(id)
       if (pl) player.play(pl)

@@ -291,6 +291,7 @@ describe('usePlaylistWorkbench', () => {
       fetchJson,
       base: '/f',
       deliver: vi.fn(),
+      fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
     })
     await flush()
     expect(fetchJson).not.toHaveBeenCalled()
@@ -306,6 +307,7 @@ describe('usePlaylistWorkbench', () => {
       fetchJson: async (p) => (p.endsWith('demo-tx.json') ? [tx('t1')] : []),
       base: '/f',
       deliver,
+      fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
       timers: { setTimeout: () => 1, clearTimeout: () => undefined },
     })
     await flush()
@@ -314,5 +316,184 @@ describe('usePlaylistWorkbench', () => {
     expect(deliver).toHaveBeenCalledTimes(1)
     wb.play('demo-clearing') // not offered: nothing happens
     expect(deliver).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * 042 T4205 fix round (Codex §15, 2026-10-18): the workbench wired to the REAL tx and clearing effects
+ * (`useRealTxFx`, `useRealClearingFx`) - only the spawn functions at the bottom are spies, delivery is not mocked.
+ */
+describe('the workbench on the real effect functions', () => {
+  async function flush() {
+    for (let i = 0; i < 5; i += 1) await nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  async function mkBench(playlists: Record<string, unknown[]>) {
+    const { ref: vueRef } = await import('vue')
+    const { useRealTxFx } = await import('./realFx/useRealTxFx')
+    const { useRealClearingFx } = await import('./realFx/useRealClearingFx')
+    const { resolveTxDirection } = await import('../utils/txDirection')
+    const pending: Array<() => void> = []
+    const scheduleTimeout = (fn: () => void) => {
+      pending.push(fn)
+    }
+    const spawnSparks = vi.fn()
+    const spawnNodeBursts = vi.fn()
+    const spawnEdgePulses = vi.fn()
+    const fxState = { sparks: [], edgePulses: [], nodeBursts: [] }
+    const keyEdge = (a: string, b: string) => `${a}→${b}`
+    const txFx = useRealTxFx({
+      fxState,
+      isTestMode: vueRef(false),
+      isWebDriver: false,
+      intensityScale: () => 1,
+      resolveTxDirection,
+      keyEdge,
+      seedFn: () => 1,
+      txSparkColorCore: '#fff',
+      txSparkColorTrail: '#fff',
+      clearingDebtColor: '#f80',
+      fxColorForNode: (_id, fb) => fb,
+      scheduleTimeout,
+      pushFloatingLabelWhenReady: vi.fn(),
+      spawnSparks,
+      spawnNodeBursts,
+    })
+    const clearingFx = useRealClearingFx({
+      fxState,
+      isTestMode: vueRef(false),
+      isWebDriver: false,
+      keyEdge,
+      seedFn: () => 1,
+      clearingColor: '#f80',
+      addActiveNode: vi.fn(),
+      addActiveEdge: vi.fn(),
+      scheduleTimeout,
+      getLayoutNodeById: () => null,
+      setFlash: vi.fn(),
+      spawnEdgePulses,
+      spawnNodeBursts,
+    })
+    const state = mkState('UAH')
+    let active: () => string | null = () => null
+    const deliver = createLivePathDelivery({
+      state,
+      patchApplier: { applyNodePatches: vi.fn(), applyEdgePatches: vi.fn(), applyNodeStatus: vi.fn(), applyEdgeStatus: vi.fn() },
+      isUserFacingRunError: () => false,
+      inc: vi.fn(),
+      getActivePlaybackId: () => active(),
+      wakeUp: vi.fn(),
+      runRealTxFx: txFx.runRealTxFx,
+      runRealClearingDoneFx: (e) => clearingFx.runRealClearingDoneFx(e),
+      pushTxAmountLabel: txFx.pushTxAmountLabel,
+      clampRealTxTtlMs: txFx.clampRealTxTtlMs,
+      scheduleTimeout,
+    })
+    const sceneIdentity = vueRef<unknown>(1)
+    const wb = usePlaylistWorkbench({
+      isOfflineSource: () => true,
+      getSnapshotEquivalent: () => 'UAH',
+      getSceneIdentity: () => sceneIdentity.value,
+      fetchJson: async (p) => playlists[p.replace(/^.*\/events\//, '').replace(/\.json$/, '')] ?? [],
+      base: '/f',
+      deliver,
+      fx: { resetTxFx: txFx.resetRateLimiter, resetClearingDedup: clearingFx.resetDedup },
+      timers: { setTimeout: () => 1, clearTimeout: () => undefined },
+    })
+    active = () => wb.activePlaybackId()
+    await flush()
+    const runPending = () => pending.splice(0).forEach((fn) => fn())
+    return { wb, spawnSparks, spawnNodeBursts, spawnEdgePulses, runPending, sceneIdentity }
+  }
+  const route3 = {
+    ...tx('m1'),
+    from: 'A',
+    to: 'D',
+    edges: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'D' }],
+  }
+
+  it('Stop during a three-line payment: the remaining legs and the receiver burst are not drawn', async () => {
+    const b = await mkBench({ 'demo-tx': [route3, tx('t2')] })
+    b.wb.play('demo-tx')
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1) // the first leg, at once
+    const burstsBefore = b.spawnNodeBursts.mock.calls.length // the sender's
+    b.wb.stop()
+    b.runPending()
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1)
+    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore)
+  })
+
+  it('counter-check: without Stop the same payment draws all three legs and the receiver burst', async () => {
+    const b = await mkBench({ 'demo-tx': [route3, tx('t2')] })
+    b.wb.play('demo-tx')
+    const burstsBefore = b.spawnNodeBursts.mock.calls.length
+    b.runPending()
+    expect(b.spawnSparks).toHaveBeenCalledTimes(3)
+    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore + 1)
+  })
+
+  it('a replaced scene stops the playback and its pending legs', async () => {
+    const b = await mkBench({ 'demo-tx': [route3, tx('t2')] })
+    b.wb.play('demo-tx')
+    b.sceneIdentity.value = 2
+    await flush()
+    b.runPending()
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1)
+    expect(b.wb.playingId).toBeNull()
+  })
+
+  it('"Шаг" on a one-event clearing playlist, twice at once: the clearing is drawn twice (the wrap is a fresh playback)', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1')] })
+    b.wb.step('demo-clearing')
+    b.wb.step('demo-clearing')
+    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+  })
+
+  it('a duplicated event id within one playback is delivered once (the live replay owner\'s rule); a new playback replays it', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1'), done('c1')] })
+    b.wb.step('demo-clearing')
+    b.wb.step('demo-clearing') // the same id again, same playback: refused as a duplicate
+    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(1)
+    b.wb.step('demo-clearing') // the wrap: a fresh playback may replay the id
+    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+  })
+
+  it('choosing another playlist while one plays stops it (its pending legs too) and shows the new one\'s position', async () => {
+    const b = await mkBench({ 'demo-tx': [route3, tx('t2')], 'demo-clearing': [done('c1')] })
+    b.wb.select('demo-tx')
+    b.wb.play('demo-tx')
+    expect(b.wb.playingId).toBe('demo-tx')
+    b.wb.select('demo-clearing')
+    expect(b.wb.playingId).toBeNull()
+    expect(b.wb.selectedId).toBe('demo-clearing')
+    expect([b.wb.position, b.wb.total]).toEqual([0, 1])
+    b.runPending()
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('old colour keys in a recorded node patch (moved from the removed `validateEvents` tests, 039 slice B)', () => {
+  it('every key the backend and the fixtures use is accepted by the live parser in a tx.updated node patch', () => {
+    const OLD_KEYS = ['unknown', 'business', 'person', 'suspended', 'left', 'deleted', 'debt-0', 'debt-1', 'debt-2', 'debt-3', 'debt-4', 'debt-5', 'debt-6', 'debt-7', 'debt-8']
+    for (const key of OLD_KEYS) {
+      const pl = parsed([{ ...tx('e1'), from: 'A', to: 'B', node_patch: [{ id: 'A', viz_color_key: key, net_sign: -1 }] }])
+      expect(pl.events, key).toHaveLength(1)
+    }
+  })
+})
+
+describe('createLivePathDelivery: the live replay owner admits each event (duplicate ids within one playback)', () => {
+  it('the same event id twice in one playback is applied once; a new playback applies it again', () => {
+    const state = mkState('UAH')
+    let active: string | null = 'pb1'
+    const { deliver, fx } = mkDelivery(state, () => active)
+    const ev = parsed([{ ...tx('t1'), edge_patch: [{ source: 'A', target: 'B', used: '1' }] }]).events[0]!
+    deliver(ev, 'pb1')
+    deliver(ev, 'pb1')
+    expect(fx.applyEdgePatches).toHaveBeenCalledTimes(1)
+    active = 'pb2'
+    deliver(ev, 'pb2')
+    expect(fx.applyEdgePatches).toHaveBeenCalledTimes(2)
   })
 })

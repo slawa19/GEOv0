@@ -123,6 +123,25 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
     expect(apiCalls, 'the workbench makes no request to a server').toEqual([])
   })
 
+  test('Stop during the recorded three-line payment: its later legs are never drawn (fix round, Codex P2)', async ({ page }) => {
+    const { select } = await openWorkbench(page)
+    await select.selectOption({ label: 'Платежи (20)' })
+    const sparkKeys = () =>
+      page.evaluate(() => ((window as unknown as { __geoSim?: { fxState: { sparks: Array<{ source: string; target: string }> } } })
+        .__geoSim?.fxState.sparks ?? []).map((s) => `${s.source}>${s.target}`))
+    await page.getByRole('button', { name: 'Проиграть', exact: true }).click()
+    // The second recorded event is the route U0001 -> U0002 -> U0006 -> U0036: wait for its first leg, then stop.
+    await expect.poll(sparkKeys, { timeout: 5_000, intervals: [20] }).toContain('PID_U0001_9e3779b1>PID_U0002_3c6ef362')
+    await page.getByRole('button', { name: 'Стоп', exact: true }).click()
+    const seen = new Set<string>()
+    const until = Date.now() + 2_000
+    while (Date.now() < until) {
+      for (const k of await sparkKeys()) seen.add(k)
+      await page.waitForTimeout(30)
+    }
+    expect([...seen].filter((k) => k !== 'PID_U0001_9e3779b1>PID_U0002_3c6ef362'), 'legs drawn after Stop').toEqual([])
+  })
+
   test('"Шаг" plays one recorded event at a time and says which', async ({ page }) => {
     const { select } = await openWorkbench(page)
     await select.selectOption({ label: 'Платежи (20)' })

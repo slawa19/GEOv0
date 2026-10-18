@@ -1332,11 +1332,9 @@ export function useSimulatorApp(opts?: {
     fetchJson: (path) => loadJson<unknown>(path),
     base: fixturesBase(),
     deliver: deliverPlaylistEvent,
-    // A playback is a new "run" for the effect caches: a replayed clearing is not deduplicated against the last one.
-    onPlaybackStart: () => {
-      resetClearingFxDedupImpl()
-      realTxFx.resetRateLimiter()
-    },
+    // A playback is a new "run" for the effect caches (a replayed clearing is not deduplicated against the last one);
+    // an ended one invalidates its pending beam legs and receiver burst.
+    fx: { resetTxFx: () => realTxFx.resetRateLimiter(), resetClearingDedup: () => resetClearingFxDedupImpl() },
   })
   playlistWorkbenchActivePlayback = playlistWorkbench.activePlaybackId
 

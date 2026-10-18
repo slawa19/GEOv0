@@ -1,4 +1,4 @@
-import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
+import type { GraphLink, GraphNode, GraphSnapshot } from './types'
 import { isRecord } from './utils/isRecord'
 import { LEGACY_NODE_COLOR_KEYS, VIZ_LINK } from './vizMapping'
 
@@ -66,43 +66,11 @@ function asSnapshotLimits(value: unknown, label: string): GraphSnapshot['limits'
   }
 }
 
-function asFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
-  return value
-}
-
-function asEdgeArray(value: unknown, label: string): Array<{ from: string; to: string }> {
-  if (value === undefined) return []
-  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
-  return value.map((e, idx) => {
-    if (!isRecord(e)) throw new Error(`${label}[${idx}] must be object`)
-    return {
-      from: asString(e.from, `${label}[${idx}].from`),
-      to: asString(e.to, `${label}[${idx}].to`),
-    }
-  })
-}
-
 function asOptionalAnyNumberOrString(value: unknown): string | number | undefined {
   if (value === undefined) return undefined
   if (typeof value === 'string') return value
   if (typeof value === 'number' && Number.isFinite(value)) return value
   return undefined
-}
-
-function asOptionalNodeBadges(
-  value: unknown,
-  label: string,
-): DemoEvent extends { type: 'tx.updated' } ? never : Array<{ id: string; viz_badge_key: string | null }> | undefined {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
-  return value.map((badge, idx) => {
-    if (!isRecord(badge)) throw new Error(`${label}[${idx}] must be object`)
-    return {
-      id: asString(badge.id, `${label}[${idx}].id`),
-      viz_badge_key: asOptionalNullableString(badge.viz_badge_key) ?? null,
-    }
-  })
 }
 
 type NetSign = -1 | 0 | 1 | null | undefined
@@ -129,75 +97,6 @@ function normalizeBalanceAtomsMagnitude(
   }
 
   return raw
-}
-
-function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefined {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
-  return value.map((p, idx) => {
-    if (!isRecord(p)) throw new Error(`${label}[${idx}] must be object`)
-    const id = asString(p.id, `${label}[${idx}].id`)
-
-    const vizColorKey = asOptionalNullableString(p.viz_color_key)
-    if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `${label}[${idx}] node:${id}`)
-
-    const vizShapeKey = asOptionalNullableString(p.viz_shape_key)
-    if (vizShapeKey) assertVizKeyKnown('viz_shape_key', vizShapeKey, `${label}[${idx}] node:${id}`)
-
-    let viz_size: NodePatch['viz_size'] = undefined
-    if (p.viz_size !== undefined && p.viz_size !== null) {
-      if (!isRecord(p.viz_size)) throw new Error(`${label}[${idx}].viz_size must be object`)
-      const w = asOptionalNumber(p.viz_size.w)
-      const h = asOptionalNumber(p.viz_size.h)
-      if (w === undefined || h === undefined) throw new Error(`${label}[${idx}].viz_size.w/h must be numbers`)
-      viz_size = { w, h }
-    } else if (p.viz_size === null) {
-      viz_size = null
-    }
-
-    const netSign = (p.net_sign === -1 || p.net_sign === 0 || p.net_sign === 1 || p.net_sign === null) ? p.net_sign : undefined
-    const netBal = (typeof p.net_balance_atoms === 'string' || p.net_balance_atoms === null) ? p.net_balance_atoms : undefined
-    const normalizedNetBal = normalizeBalanceAtomsMagnitude(netBal, netSign, `${label}[${idx}] node:${id}`)
-
-    return {
-      id,
-      net_balance_atoms: normalizedNetBal,
-      net_sign: netSign,
-      viz_color_key: vizColorKey,
-      viz_shape_key: vizShapeKey,
-      viz_size,
-    }
-  })
-}
-
-function asEdgePatchArray(value: unknown, label: string): EdgePatch[] | undefined {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
-  return value.map((p, idx) => {
-    if (!isRecord(p)) throw new Error(`${label}[${idx}] must be object`)
-    const source = asString(p.source, `${label}[${idx}].source`)
-    const target = asString(p.target, `${label}[${idx}].target`)
-
-    const vw = asOptionalNullableString(p.viz_width_key)
-    const va = asOptionalNullableString(p.viz_alpha_key)
-    const vc = asOptionalNullableString(p.viz_color_key)
-    if (vw) assertVizKeyKnown('viz_width_key', vw, `${label}[${idx}] link:${source}->${target}`)
-    if (va) assertVizKeyKnown('viz_alpha_key', va, `${label}[${idx}] link:${source}->${target}`)
-    if (vc) assertVizKeyKnown('viz_color_key', vc, `${label}[${idx}] link:${source}->${target}`)
-
-    const used = asOptionalAnyNumberOrString(p.used)
-    const available = asOptionalAnyNumberOrString(p.available)
-
-    return {
-      source,
-      target,
-      used,
-      available,
-      viz_color_key: vc,
-      viz_width_key: vw,
-      viz_alpha_key: va,
-    }
-  })
 }
 
 function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_shape_key' | 'viz_width_key' | 'viz_alpha_key', key: string, context: string) {
@@ -332,57 +231,4 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
     palette: asSnapshotPalette(raw.palette, `palette (${sourcePath})`),
     limits: asSnapshotLimits(raw.limits, `limits (${sourcePath})`),
   }
-}
-
-export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
-  if (!Array.isArray(raw)) throw new Error(`Events playlist must be an array (${sourcePath})`)
-
-  return raw.map((evt, idx) => {
-    if (!isRecord(evt)) throw new Error(`events[${idx}] must be object (${sourcePath})`)
-    const type = asString(evt.type, `events[${idx}].type (${sourcePath})`)
-
-    if (type === 'tx.updated') {
-      if (!Array.isArray(evt.edges)) throw new Error(`tx.updated.edges must be array (${sourcePath})`)
-      const ttl = asFiniteNumber(evt.ttl_ms, `events[${idx}].ttl_ms (${sourcePath})`)
-      return {
-        event_id: asString(evt.event_id, `events[${idx}].event_id (${sourcePath})`),
-        ts: asString(evt.ts, `events[${idx}].ts (${sourcePath})`),
-        type: 'tx.updated',
-        equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
-        ttl_ms: ttl,
-        intensity_key: asOptionalString(evt.intensity_key),
-        edges: evt.edges.map((e, eidx) => {
-          if (!isRecord(e)) throw new Error(`tx.updated.edges[${eidx}] must be object (${sourcePath})`)
-          const from = asString(e.from, `tx.updated.edges[${eidx}].from (${sourcePath})`)
-          const to = asString(e.to, `tx.updated.edges[${eidx}].to (${sourcePath})`)
-          const style = isRecord(e.style) ? e.style : undefined
-          const vw = style ? asOptionalString(style.viz_width_key) : undefined
-          const va = style ? asOptionalString(style.viz_alpha_key) : undefined
-          if (vw) assertVizKeyKnown('viz_width_key', vw, `event tx edge:${from}->${to} (${sourcePath})`)
-          if (va) assertVizKeyKnown('viz_alpha_key', va, `event tx edge:${from}->${to} (${sourcePath})`)
-          return { from, to, style: style ? { viz_width_key: vw, viz_alpha_key: va } : undefined }
-        }),
-        node_badges: asOptionalNodeBadges(evt.node_badges, `tx.updated.node_badges (${sourcePath})`),
-        node_patch: asNodePatchArray(evt.node_patch, `tx.updated.node_patch (${sourcePath})`),
-        edge_patch: asEdgePatchArray(evt.edge_patch, `tx.updated.edge_patch (${sourcePath})`),
-      }
-    }
-
-    if (type === 'clearing.done') {
-      return {
-        event_id: asString(evt.event_id, `events[${idx}].event_id (${sourcePath})`),
-        ts: asString(evt.ts, `events[${idx}].ts (${sourcePath})`),
-        type: 'clearing.done',
-        equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
-        plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
-        cleared_cycles: asOptionalNumber(evt.cleared_cycles),
-        cleared_amount: asOptionalString(evt.cleared_amount),
-        cycle_edges: evt.cycle_edges === undefined ? undefined : asEdgeArray(evt.cycle_edges, `clearing.done.cycle_edges (${sourcePath})`),
-        node_patch: asNodePatchArray(evt.node_patch, `clearing.done.node_patch (${sourcePath})`),
-        edge_patch: asEdgePatchArray(evt.edge_patch, `clearing.done.edge_patch (${sourcePath})`),
-      }
-    }
-
-    throw new Error(`Unknown event type '${type}' (${sourcePath})`)
-  })
 }
