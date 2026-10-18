@@ -44,7 +44,7 @@ function stand() {
       lastError: '',
       runStats: { attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} },
     },
-    state: { loading: false, error: '', sourcePath: '', snapshot, selectedNodeId: null, flash: 0 } satisfies SimulatorAppState,
+    state: { loading: false, error: '', sourcePath: '', snapshot, selectedNodeId: null } satisfies SimulatorAppState,
   }
 
   function apply(payload: Partial<Extract<AcceptedSimulatorEvent, { type: 'topology.changed' }>['payload']>): RealEventIntent[] {

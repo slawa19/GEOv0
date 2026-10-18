@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { GraphSnapshot } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { CLEARING_EFFECT_MS } from './realFx/useRealClearingFx'
 import {
-  CLEARING_EFFECT_MS,
   PLAYLIST_GAP_PAD_MS,
   PLAYLISTS,
   createLivePathDelivery,
@@ -43,6 +43,11 @@ const done = (id: string, eq = 'UAH') => ({
   cycle_edges: [{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }],
 })
 const META = { id: 'p', label: 'P' }
+/**
+ * The effect lengths the player is given (039 slice C: asked of the effects, not read from the wire). Here a payment's
+ * is its `ttl_ms`, so the cases below can name it; in the app it is the route plan's (`useRealTxFx.ts`, `routeEffectMs`).
+ */
+const EFFECTS = { tx: (e: { ttl_ms?: number }) => e.ttl_ms ?? 1200, clearingMs: CLEARING_EFFECT_MS }
 
 function parsed(raw: unknown[], eq = 'UAH'): LoadedPlaylist {
   const r = parsePlaylist(raw, META, eq, 'mem:p.json')
@@ -140,7 +145,7 @@ describe('the player', () => {
     vi.useFakeTimers()
     const delivered: Array<[string, string]> = []
     const onPlaybackStart = vi.fn()
-    const p = createPlaylistPlayer({ deliver: (e, id) => delivered.push([e.event_id, id]), onPlaybackStart })
+    const p = createPlaylistPlayer({ deliver: (e, id) => delivered.push([e.event_id, id]), effects: EFFECTS, onPlaybackStart })
     const pl = parsed([tx('t1', 'UAH', 1000), done('c1'), tx('t2')])
     p.play(pl)
     expect(onPlaybackStart).toHaveBeenCalledTimes(1)
@@ -159,7 +164,7 @@ describe('the player', () => {
   it('stop halts the playback and drops its id (a pending receiver label of it is dropped by the live path)', () => {
     vi.useFakeTimers()
     const delivered: string[] = []
-    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id) })
+    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id), effects: EFFECTS })
     p.play(parsed([tx('t1'), tx('t2')]))
     expect(p.activePlaybackId()).toMatch(/^playlist:UAH:p:/)
     p.stop()
@@ -172,7 +177,7 @@ describe('the player', () => {
   it('a second play is a new playback (new id, caches reset again)', () => {
     const ids: string[] = []
     const onPlaybackStart = vi.fn()
-    const p = createPlaylistPlayer({ deliver: (_e, id) => ids.push(id), onPlaybackStart, timers: { setTimeout: () => 1, clearTimeout: () => undefined } })
+    const p = createPlaylistPlayer({ deliver: (_e, id) => ids.push(id), effects: EFFECTS, onPlaybackStart, timers: { setTimeout: () => 1, clearTimeout: () => undefined } })
     const pl = parsed([tx('t1'), tx('t2')])
     p.play(pl)
     p.play(pl)
@@ -182,7 +187,7 @@ describe('the player', () => {
 
   it('step delivers one event at a time and wraps to the first after the last', () => {
     const delivered: string[] = []
-    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id) })
+    const p = createPlaylistPlayer({ deliver: (e) => delivered.push(e.event_id), effects: EFFECTS })
     const pl = parsed([tx('t1'), tx('t2')])
     p.step(pl)
     expect(p.state).toMatchObject({ cursorId: 'p', position: 1, total: 2, playingId: null })
@@ -192,10 +197,13 @@ describe('the player', () => {
     expect(p.state.position).toBe(1)
   })
 
-  it('gapAfterMs: a payment its ttl plus the pad, a clearing its pulse length plus the pad', () => {
+  // RECORD OF A DELIBERATE CHANGE (039 slice C, 2026-10-18): until then a payment was spaced by its wire `ttl_ms` and
+  // a clearing by a literal 4200 kept in this module - two more copies of durations the effects own (P-3 of spec 039).
+  it('gapAfterMs: a payment its effect length plus the pad, a clearing its effect length plus the pad - both asked of the effects', () => {
     const [a, b] = parsed([tx('t1', 'UAH', 900), done('c1')]).events
-    expect(gapAfterMs(a!)).toBe(900 + PLAYLIST_GAP_PAD_MS)
-    expect(gapAfterMs(b!)).toBe(CLEARING_EFFECT_MS + PLAYLIST_GAP_PAD_MS)
+    const effects = { tx: () => 1777, clearingMs: 3333 }
+    expect(gapAfterMs(a!, effects)).toBe(1777 + PLAYLIST_GAP_PAD_MS)
+    expect(gapAfterMs(b!, effects)).toBe(3333 + PLAYLIST_GAP_PAD_MS)
   })
 })
 
@@ -206,7 +214,6 @@ function mkState(eq: string): SimulatorAppState {
     sourcePath: 'mem',
     snapshot: { equivalent: eq, generated_at: '2026-01-11T00:00:00Z', nodes: [{ id: 'A' }, { id: 'B' }], links: [] },
     selectedNodeId: null,
-    flash: 0,
   } as unknown as SimulatorAppState
 }
 
@@ -235,7 +242,7 @@ function mkDelivery(state: SimulatorAppState, active: () => string | null) {
     runRealTxFx: fx.runRealTxFx,
     runRealClearingDoneFx: fx.runRealClearingDoneFx,
     pushTxAmountLabel: fx.pushTxAmountLabel,
-    clampRealTxTtlMs: (t) => Number(t),
+    routeArrivalMs: (e) => e.ttl_ms,
     scheduleTimeout: (fn) => fx.scheduled.push(fn),
   })
   return { deliver, fx }
@@ -292,6 +299,7 @@ describe('usePlaylistWorkbench', () => {
       base: '/f',
       deliver: vi.fn(),
       fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
+      effects: EFFECTS,
     })
     await flush()
     expect(fetchJson).not.toHaveBeenCalled()
@@ -308,6 +316,7 @@ describe('usePlaylistWorkbench', () => {
       base: '/f',
       deliver,
       fx: { resetTxFx: vi.fn(), resetClearingDedup: vi.fn() },
+      effects: EFFECTS,
       timers: { setTimeout: () => 1, clearTimeout: () => undefined },
     })
     await flush()
@@ -351,10 +360,9 @@ describe('the workbench on the real effect functions', () => {
       resolveTxDirection,
       keyEdge,
       seedFn: () => 1,
-      txSparkColorCore: '#fff',
-      txSparkColorTrail: '#fff',
-      clearingDebtColor: '#f80',
+      fxColors: () => ({ txSparkCore: '#fff', txSparkTrail: '#fff', clearingDebt: '#f80' }),
       fxColorForNode: (_id, fb) => fb,
+      txLabelLifeMs: () => 2600,
       scheduleTimeout,
       pushFloatingLabelWhenReady: vi.fn(),
       spawnSparks,
@@ -366,14 +374,16 @@ describe('the workbench on the real effect functions', () => {
       isWebDriver: false,
       keyEdge,
       seedFn: () => 1,
-      clearingColor: '#f80',
+      clearingColor: () => '#f80',
+      sparkCoreColor: () => '#fff',
       addActiveNode: vi.fn(),
       addActiveEdge: vi.fn(),
+      clearingLabelLifeMs: () => 4200,
       scheduleTimeout,
       getLayoutNodeById: () => null,
-      setFlash: vi.fn(),
       spawnEdgePulses,
       spawnNodeBursts,
+      spawnSparks,
     })
     const state = mkState('UAH')
     let active: () => string | null = () => null
@@ -387,7 +397,7 @@ describe('the workbench on the real effect functions', () => {
       runRealTxFx: txFx.runRealTxFx,
       runRealClearingDoneFx: (e) => clearingFx.runRealClearingDoneFx(e),
       pushTxAmountLabel: txFx.pushTxAmountLabel,
-      clampRealTxTtlMs: txFx.clampRealTxTtlMs,
+      routeArrivalMs: txFx.routeArrivalMs,
       scheduleTimeout,
     })
     const sceneIdentity = vueRef<unknown>(1)
@@ -399,6 +409,7 @@ describe('the workbench on the real effect functions', () => {
       base: '/f',
       deliver,
       fx: { resetTxFx: txFx.resetRateLimiter, resetClearingDedup: clearingFx.resetDedup },
+      effects: { tx: txFx.routeEffectMs, clearingMs: CLEARING_EFFECT_MS },
       timers: { setTimeout: () => 1, clearTimeout: () => undefined },
     })
     active = () => wb.activePlaybackId()
@@ -430,7 +441,8 @@ describe('the workbench on the real effect functions', () => {
     const burstsBefore = b.spawnNodeBursts.mock.calls.length
     b.runPending()
     expect(b.spawnSparks).toHaveBeenCalledTimes(3)
-    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore + 1)
+    // 039 slice C: the two intermediate nodes light up as the beam leaves them, the receiver when it arrives.
+    expect(b.spawnNodeBursts.mock.calls.length).toBe(burstsBefore + 2 + 1)
   })
 
   it('a replaced scene stops the playback and its pending legs', async () => {
@@ -447,16 +459,37 @@ describe('the workbench on the real effect functions', () => {
     const b = await mkBench({ 'demo-clearing': [done('c1')] })
     b.wb.step('demo-clearing')
     b.wb.step('demo-clearing')
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+    // 039 slice C: a clearing starts with its spark going round the cycle (the first leg at once); the pulses come
+    // after the loop, on a timer - and the fresh playback of the wrap cancels the pending tail of the first, as it
+    // cancels the pending legs of a payment.
+    expect(b.spawnSparks).toHaveBeenCalledTimes(2)
+    b.runPending()
+    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(1)
+  })
+
+  it('Stop during a clearing (039 slice C): the rest of its loop, its pulses and its amount are not drawn', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1'), done('c2')] })
+    b.wb.play('demo-clearing')
+    expect(b.spawnSparks, 'the first leg of the loop, at once').toHaveBeenCalledTimes(1)
+    b.wb.stop()
+    b.runPending()
+    expect({ sparks: b.spawnSparks.mock.calls.length, pulses: b.spawnEdgePulses.mock.calls.length }).toEqual({ sparks: 1, pulses: 0 })
+  })
+
+  it('counter-check: without Stop the same clearing goes round and then pulses', async () => {
+    const b = await mkBench({ 'demo-clearing': [done('c1'), done('c2')] })
+    b.wb.play('demo-clearing')
+    b.runPending()
+    expect({ sparks: b.spawnSparks.mock.calls.length, pulses: b.spawnEdgePulses.mock.calls.length }).toEqual({ sparks: 2, pulses: 1 })
   })
 
   it('a duplicated event id within one playback is delivered once (the live replay owner\'s rule); a new playback replays it', async () => {
     const b = await mkBench({ 'demo-clearing': [done('c1'), done('c1')] })
     b.wb.step('demo-clearing')
     b.wb.step('demo-clearing') // the same id again, same playback: refused as a duplicate
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(1)
+    expect(b.spawnSparks).toHaveBeenCalledTimes(1)
     b.wb.step('demo-clearing') // the wrap: a fresh playback may replay the id
-    expect(b.spawnEdgePulses).toHaveBeenCalledTimes(2)
+    expect(b.spawnSparks).toHaveBeenCalledTimes(2)
   })
 
   it('choosing another playlist while one plays stops it (its pending legs too) and shows the new one\'s position', async () => {

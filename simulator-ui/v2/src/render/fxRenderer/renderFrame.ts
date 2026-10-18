@@ -5,14 +5,16 @@ import { withAlpha } from '../color'
 import { drawGlowSprite } from '../glowSprites'
 import { getLinkTermination } from '../linkGeometry'
 import { getNodeBaseGeometry } from '../nodeGeometry'
-import { easeOutCubic } from './easing'
+import { easeArrive } from './easing'
 import {
-  BEAM_ALPHA_DECAY_POW,
   BEAM_CORE_MIN_SPX,
   BEAM_CORE_TH_K,
   BEAM_HALO_GLOBAL_ALPHA,
   BEAM_HALO_MIN_SPX,
   BEAM_HALO_TH_K,
+  BEAM_LOW_TRAIL_ALPHA,
+  BEAM_LOW_TRAIL_MIN_SPX,
+  BEAM_LOW_TRAIL_TH_K,
   BEAM_MAX_TRAIL_FRAC,
   BEAM_SEG_CORE_MIN_SPX,
   BEAM_SEG_CORE_TH_K,
@@ -21,31 +23,15 @@ import {
   BEAM_SEG_LEN_FRAC,
   BEAM_SEG_MAX_SPX,
   BEAM_SEG_MIN_SPX,
-  BEAM_SHRINK_START_T,
   BEAM_TRAIL_ALPHA_K,
+  BEAM_TRAIL_MS,
+  EDGE_PULSE_AFTERGLOW_K,
   FX_ALPHA_EPS,
   FX_SHADOW_BLUR_K_BY_QUALITY,
   GLOW_BLUR_MIN_SPX,
   GLOW_BLUR_R_K,
   HEAD_DOT_MIN_SPX,
   HEAD_DOT_TH_K,
-  SEED_BUCKET_1K,
-  SEED_BUCKET_4K,
-  SPARK_CORE_LIFE_K,
-  SPARK_GLOW_BLUR_MIN_SPX,
-  SPARK_GLOW_BLUR_R_K,
-  SPARK_HEAD_MIN_SPX,
-  SPARK_HEAD_TH_K,
-  SPARK_PHASE_K,
-  SPARK_TRAIL_LEN_FRAC,
-  SPARK_TRAIL_LIFE_K,
-  SPARK_TRAIL_MAX_MS,
-  SPARK_TRAIL_MIN_MS,
-  SPARK_TRAIL_MIN_PX,
-  SPARK_TRAIL_TIME_FRAC,
-  SPARK_WOBBLE_FREQ_BASE,
-  SPARK_WOBBLE_FREQ_RANGE,
-  SPARK_WOBBLE_PHASE_OFF,
 } from '../fxConfig'
 import {
   invalidateNodeOutlineCacheForSnapshotKey,
@@ -98,7 +84,7 @@ export function renderFxFrame(opts: {
 
   // FX are always rendered (no early return on interaction).
 
-  // Tx sparks / comets
+  // Beams: payment legs and the clearing spark (039 slice C, motion contract P-3)
   if (fxState.sparks.length > 0) {
     // Compact in-place filter.
     let write = 0
@@ -113,8 +99,6 @@ export function renderFxFrame(opts: {
       const b = pos.get(s.target)
       if (!a || !b) continue
 
-      const t0 = clamp01(age / s.ttlMs)
-
       const start = getLinkTermination(a, b, invZ)
       const end = getLinkTermination(b, a, invZ)
 
@@ -124,370 +108,140 @@ export function renderFxFrame(opts: {
       const ux = dx / len
       const uy = dy / len
 
-      if (s.kind === 'beam') {
-        const t = easeOutCubic(t0)
+      // Where the head is: ONE speed along the route (`linear`), eased only into the receiver (`arrive`). Until 039
+      // slice C every leg was eased (`easeOutCubic`) and faded inside itself, so the route went dark at every node.
+      const moveMs = Math.max(1, Math.min(s.ttlMs, s.moveMs ?? s.ttlMs))
+      const at = (ms: number) => {
+        const u = clamp01(ms / moveMs)
+        return s.motion === 'arrive' ? easeArrive(u) : u
+      }
+      const t = at(age)
+      // Full brightness while the head moves; after it arrived (the last leg only: `ttlMs - moveMs` of fade) it
+      // fades out at the receiver with a cosine, so the beam is never cut off.
+      const fadeMs = s.ttlMs - moveMs
+      const fadeT = fadeMs > 0 && age > moveMs ? clamp01((age - moveMs) / fadeMs) : 0
+      const alpha = fadeT > 0 ? 0.5 * (1 + Math.cos(Math.PI * fadeT)) : 1
+      if (alpha < FX_ALPHA_EPS) continue
 
-        // Beam head uses easing (fast early, slow near the end).
-        // Trail has a maximum length and shrinks as head approaches target (meteor effect).
-        const lifePos = Math.max(0, 1 - t)
-        const alpha = clamp01(Math.pow(lifePos, BEAM_ALPHA_DECAY_POW))
+      const th = s.thickness * invZ
 
-        const th = s.thickness * invZ
+      const headX = start.x + dx * t
+      const headY = start.y + dy * t
 
-        const headX = start.x + dx * t
-        const headY = start.y + dy * t
+      // The trail is where the head was `BEAM_TRAIL_MS` ago, on this edge, at most `BEAM_MAX_TRAIL_FRAC` of it: it is
+      // as long as the speed makes it, it shortens by itself as the head slows into the receiver, and it drains into
+      // the receiver during the fade.
+      const trailStartT = Math.max(0, t - BEAM_MAX_TRAIL_FRAC, at(age - BEAM_TRAIL_MS))
+      const trailStartX = start.x + dx * trailStartT
+      const trailStartY = start.y + dy * trailStartT
 
-        // Trail length: limited so beam doesn't span the entire edge.
-        // As head approaches target, trail shrinks proportionally.
-        const maxTrailFraction = BEAM_MAX_TRAIL_FRAC // Max trail = 85% of edge length (longer for better visibility)
-        const maxTrailLen = len * maxTrailFraction
-        const distanceTraveled = len * t
-        // Trail shrinks as we approach the end (last 30% of journey)
-        const shrinkStart = BEAM_SHRINK_START_T
-        const shrinkFactor = t > shrinkStart ? 1 - (t - shrinkStart) / (1 - shrinkStart) : 1
-        const currentTrailLen = Math.min(maxTrailLen, distanceTraveled) * shrinkFactor
-
-        // Trail start point (follows behind head)
-        const trailStartT = Math.max(0, t - currentTrailLen / Math.max(1e-6, len))
-        const trailStartX = start.x + dx * trailStartT
-        const trailStartY = start.y + dy * trailStartT
-
-        // Low quality: only draw the head dot — skip all trail gradient work.
-        if (q === 'low') {
-          const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
-          ctx.save()
-          ctx.globalCompositeOperation = 'lighter'
-          ctx.globalAlpha = alpha
-          drawGlowSprite(ctx, {
-            kind: 'fx-dot',
-            x: headX,
-            y: headY,
-            color: s.colorCore,
-            r,
-            blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
-            composite: 'lighter',
-          })
-          ctx.restore()
-          continue
-        }
-
-        // Med quality: gradient trail + bright packet segment (like HIGH), but no embers.
-        // Per-frame gradient cost (2 objects per beam) is negligible for typical counts (≤28 beams).
-        if (q === 'med') {
-          ctx.save()
-          ctx.globalCompositeOperation = 'lighter'
-          ctx.lineCap = 'round'
-          ctx.lineJoin = 'round'
-
-          // Gradient trail (transparent tail → bright head)
-          {
-            const baseAlpha = Math.max(0, Math.min(1, alpha * BEAM_TRAIL_ALPHA_K))
-
-            const trailStroke = (() => {
-              const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
-              g.addColorStop(0, withAlpha(s.colorTrail, 0))
-              g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
-              g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
-              return g
-            })()
-
-            ctx.globalAlpha = BEAM_HALO_GLOBAL_ALPHA
-            ctx.strokeStyle = trailStroke
-            ctx.lineWidth = Math.max(spx(BEAM_HALO_MIN_SPX), th * BEAM_HALO_TH_K)
-            ctx.beginPath()
-            ctx.moveTo(trailStartX, trailStartY)
-            ctx.lineTo(headX, headY)
-            ctx.stroke()
-
-            ctx.globalAlpha = 1
-            ctx.strokeStyle = trailStroke
-            ctx.lineWidth = Math.max(spx(BEAM_CORE_MIN_SPX), th * BEAM_CORE_TH_K)
-            ctx.beginPath()
-            ctx.moveTo(trailStartX, trailStartY)
-            ctx.lineTo(headX, headY)
-            ctx.stroke()
-          }
-
-          // Bright "packet" segment near the head
-          {
-            const segLen = Math.max(spx(BEAM_SEG_MIN_SPX), Math.min(spx(BEAM_SEG_MAX_SPX), len * BEAM_SEG_LEN_FRAC))
-            const tailX = headX - ux * segLen
-            const tailY = headY - uy * segLen
-            ctx.globalAlpha = 1
-            const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
-            grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
-            grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * BEAM_TRAIL_ALPHA_K))
-            grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-            ctx.strokeStyle = grad
-            ctx.lineWidth = Math.max(spx(BEAM_SEG_HALO_MIN_SPX), th * BEAM_SEG_HALO_TH_K)
-            ctx.beginPath()
-            ctx.moveTo(tailX, tailY)
-            ctx.lineTo(headX, headY)
-            ctx.stroke()
-
-            ctx.lineWidth = Math.max(spx(BEAM_SEG_CORE_MIN_SPX), th * BEAM_SEG_CORE_TH_K)
-            ctx.beginPath()
-            ctx.moveTo(tailX, tailY)
-            ctx.lineTo(headX, headY)
-            ctx.stroke()
-          }
-
-          // Head dot with glow
-          {
-            const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
-            ctx.globalAlpha = alpha
-            drawGlowSprite(ctx, {
-              kind: 'fx-dot',
-              x: headX,
-              y: headY,
-              color: s.colorCore,
-              r,
-              blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
-              composite: 'lighter',
-            })
-          }
-
-          ctx.restore()
-          continue
-        }
-
-        // High quality: full gradient trail.
+      // Low quality (the machine without a GPU): ONE trail stroke and the head dot - a beam that is SEEN along its edge
+      // (until 039 slice C low drew the head dot only: 0-26 lit pixels a frame). The stroke is a two-stop gradient,
+      // transparent at the tail and full at the head, so the brightest point of the beam is always its head: with a
+      // flat stroke the brightest pixels were the whole trail, and where the head was hidden (inside a node) the
+      // brightest visible point jumped back along the trail - the motion oracle read that as the beam stepping back.
+      if (q === 'low') {
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-
-        // Trail beam (from trailStart to head) — thin core + soft halo
-        // Now the trail is limited in length and shrinks at the end.
-        {
-          const baseAlpha = Math.max(0, Math.min(1, alpha * BEAM_TRAIL_ALPHA_K))
-
-          const trailStroke = (() => {
-            const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
-            // Gradient from tail (transparent) to head (bright)
-            g.addColorStop(0, withAlpha(s.colorTrail, 0))
-            g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
-            g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
-            return g
-          })()
-
-          // Halo approximation: thicker stroke + `lighter` (no on-screen shadowBlur).
-          ctx.globalAlpha = BEAM_HALO_GLOBAL_ALPHA
-          ctx.strokeStyle = trailStroke
-          ctx.lineWidth = Math.max(spx(BEAM_HALO_MIN_SPX), th * BEAM_HALO_TH_K)
-          ctx.beginPath()
-          ctx.moveTo(trailStartX, trailStartY)
-          ctx.lineTo(headX, headY)
-          ctx.stroke()
-
-          // Core pass (from trailStart to head)
-          ctx.globalAlpha = 1
-          ctx.strokeStyle = trailStroke
-          ctx.lineWidth = Math.max(spx(BEAM_CORE_MIN_SPX), th * BEAM_CORE_TH_K)
+        if (trailStartT < t) {
+          const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
+          g.addColorStop(0, withAlpha(s.colorTrail, 0))
+          g.addColorStop(1, withAlpha(s.colorTrail, 1))
+          ctx.globalAlpha = alpha * BEAM_LOW_TRAIL_ALPHA
+          ctx.strokeStyle = g
+          ctx.lineWidth = Math.max(spx(BEAM_LOW_TRAIL_MIN_SPX), th * BEAM_LOW_TRAIL_TH_K)
           ctx.beginPath()
           ctx.moveTo(trailStartX, trailStartY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
         }
+        const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
+        ctx.globalAlpha = alpha
+        drawGlowSprite(ctx, {
+          kind: 'fx-dot',
+          x: headX,
+          y: headY,
+          color: s.colorCore,
+          r,
+          blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
+          composite: 'lighter',
+        })
+        ctx.restore()
+        continue
+      }
 
-        // Moving bright "packet" segment near the head
-        {
-          const segLen = Math.max(spx(BEAM_SEG_MIN_SPX), Math.min(spx(BEAM_SEG_MAX_SPX), len * BEAM_SEG_LEN_FRAC))
+      // Med and high: gradient trail + bright packet segment + head dot (high and med drew the same before too).
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      // Trail beam (from trailStart to head) - soft halo + thin core.
+      if (trailStartT < t) {
+        const baseAlpha = Math.max(0, Math.min(1, alpha * BEAM_TRAIL_ALPHA_K))
+        const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
+        g.addColorStop(0, withAlpha(s.colorTrail, 0))
+        g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
+        g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
+
+        // Halo approximation: thicker stroke + `lighter` (no on-screen shadowBlur).
+        ctx.globalAlpha = BEAM_HALO_GLOBAL_ALPHA
+        ctx.strokeStyle = g
+        ctx.lineWidth = Math.max(spx(BEAM_HALO_MIN_SPX), th * BEAM_HALO_TH_K)
+        ctx.beginPath()
+        ctx.moveTo(trailStartX, trailStartY)
+        ctx.lineTo(headX, headY)
+        ctx.stroke()
+
+        ctx.globalAlpha = 1
+        ctx.lineWidth = Math.max(spx(BEAM_CORE_MIN_SPX), th * BEAM_CORE_TH_K)
+        ctx.beginPath()
+        ctx.moveTo(trailStartX, trailStartY)
+        ctx.lineTo(headX, headY)
+        ctx.stroke()
+      }
+
+      // Moving bright "packet" segment near the head, never longer than the trail.
+      {
+        const trailLen = len * (t - trailStartT)
+        const segLen = Math.min(trailLen, Math.max(spx(BEAM_SEG_MIN_SPX), Math.min(spx(BEAM_SEG_MAX_SPX), len * BEAM_SEG_LEN_FRAC)))
+        if (segLen > 0) {
           const tailX = headX - ux * segLen
           const tailY = headY - uy * segLen
           ctx.globalAlpha = 1
           const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
-          grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
+          grad.addColorStop(0, withAlpha(s.colorCore, alpha))
           grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * BEAM_TRAIL_ALPHA_K))
           grad.addColorStop(1, withAlpha(s.colorTrail, 0))
           ctx.strokeStyle = grad
-          // Halo approximation: thicker segment stroke (no on-screen shadowBlur).
           ctx.lineWidth = Math.max(spx(BEAM_SEG_HALO_MIN_SPX), th * BEAM_SEG_HALO_TH_K)
           ctx.beginPath()
           ctx.moveTo(tailX, tailY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
 
-          // Core segment pass
           ctx.lineWidth = Math.max(spx(BEAM_SEG_CORE_MIN_SPX), th * BEAM_SEG_CORE_TH_K)
           ctx.beginPath()
           ctx.moveTo(tailX, tailY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
         }
-
-        // Head: soft glowing dot (no star/cross spikes)
-        {
-          const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
-
-          // Replace arc+shadowBlur with pre-rendered FX dot sprite.
-          ctx.globalAlpha = alpha
-          drawGlowSprite(ctx, {
-            kind: 'fx-dot',
-            x: headX,
-            y: headY,
-            color: s.colorCore,
-            r,
-            blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
-            composite: 'lighter',
-          })
-        }
-
-        ctx.restore()
-        continue
       }
 
-      const phase = ((s.seed % SEED_BUCKET_1K) / SEED_BUCKET_1K) * SPARK_PHASE_K
-      const t = clamp01(t0 + phase)
-
-      // Comet-like spark: trail length depends on edge length and ttl.
-      // Small ttl => faster head => longer trail.
-      const speedPxPerMs = len / Math.max(1, s.ttlMs)
-      const trailTimeMs = Math.max(SPARK_TRAIL_MIN_MS, Math.min(SPARK_TRAIL_MAX_MS, s.ttlMs * SPARK_TRAIL_TIME_FRAC))
-      const trailLen = Math.max(SPARK_TRAIL_MIN_PX, Math.min(len * SPARK_TRAIL_LEN_FRAC, speedPxPerMs * trailTimeMs))
-
-      const seed01 = (s.seed % SEED_BUCKET_4K) / SEED_BUCKET_4K
-      const wobbleFreq = SPARK_WOBBLE_FREQ_BASE + seed01 * SPARK_WOBBLE_FREQ_RANGE
-      const wobbleAmp = (spx(2.0) + (s.thickness * invZ) * 2.5) * (1 - t0)
-      const perpX = -uy
-      const perpY = ux
-      const wobble = Math.sin((t * Math.PI * 2 * wobbleFreq) + seed01 * SPARK_WOBBLE_PHASE_OFF) * wobbleAmp
-
-      const x = start.x + dx * t + perpX * wobble
-      const y = start.y + dy * t + perpY * wobble
-
-      const tailX = x - ux * trailLen
-      const tailY = y - uy * trailLen
-
-      const life = 1 - t0
-      const alphaTrail = Math.max(0, Math.min(1, life * SPARK_TRAIL_LIFE_K))
-      const alphaCore = Math.max(0, Math.min(1, life * SPARK_CORE_LIFE_K))
-
-      // Low quality: only draw the head dot — skip all trail gradient work.
-      if (q === 'low') {
-        const th = s.thickness * invZ
-        const r = Math.max(spx(SPARK_HEAD_MIN_SPX), th * SPARK_HEAD_TH_K)
-        ctx.save()
-        ctx.globalCompositeOperation = 'lighter'
-        ctx.globalAlpha = alphaCore
+      // Head: soft glowing dot (pre-rendered sprite, no on-screen shadowBlur).
+      {
+        const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
+        ctx.globalAlpha = alpha
         drawGlowSprite(ctx, {
           kind: 'fx-dot',
-          x,
-          y,
+          x: headX,
+          y: headY,
           color: s.colorCore,
           r,
-          blurPx: Math.max(spx(SPARK_GLOW_BLUR_MIN_SPX), r * SPARK_GLOW_BLUR_R_K) * shadowBlurK,
+          blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
           composite: 'lighter',
         })
-        ctx.restore()
-        continue
-      }
-
-      // Med quality: simplified solid-color trail (no gradient objects).
-      if (q === 'med') {
-        const th = s.thickness * invZ
-        ctx.save()
-        ctx.globalCompositeOperation = 'lighter'
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.strokeStyle = s.colorTrail
-        ctx.lineWidth = Math.max(spx(1.8), th * 4.2)
-        ctx.globalAlpha = alphaTrail * 0.9
-        ctx.beginPath()
-        ctx.moveTo(tailX, tailY)
-        ctx.lineTo(x, y)
-        ctx.stroke()
-        ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
-        ctx.globalAlpha = alphaTrail
-        ctx.beginPath()
-        ctx.moveTo(tailX, tailY)
-        ctx.lineTo(x, y)
-        ctx.stroke()
-        const r = Math.max(spx(SPARK_HEAD_MIN_SPX), th * SPARK_HEAD_TH_K)
-        ctx.globalAlpha = alphaCore
-        drawGlowSprite(ctx, {
-          kind: 'fx-dot',
-          x,
-          y,
-          color: s.colorCore,
-          r,
-          blurPx: Math.max(spx(SPARK_GLOW_BLUR_MIN_SPX), r * SPARK_GLOW_BLUR_R_K) * shadowBlurK,
-          composite: 'lighter',
-        })
-        ctx.restore()
-        continue
-      }
-
-      // High quality: full gradient trail.
-      ctx.save()
-      ctx.globalCompositeOperation = 'lighter'
-
-      // Trail (glow pass)
-      {
-        const th = s.thickness * invZ
-        ctx.globalAlpha = 1
-        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * BEAM_HALO_GLOBAL_ALPHA))
-        grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * BEAM_TRAIL_ALPHA_K))
-        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-        ctx.strokeStyle = grad
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        // Halo approximation: thicker stroke (no on-screen shadowBlur).
-        ctx.lineWidth = Math.max(spx(1.8), th * 4.2)
-        ctx.beginPath()
-        ctx.moveTo(tailX, tailY)
-        ctx.lineTo(x, y)
-        ctx.stroke()
-      }
-
-      // Trail (core pass)
-      {
-        const th = s.thickness * invZ
-        ctx.globalAlpha = 1
-        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
-        grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
-        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-        ctx.strokeStyle = grad
-        ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
-        ctx.beginPath()
-        ctx.moveTo(tailX, tailY)
-        ctx.lineTo(x, y)
-        ctx.stroke()
-      }
-
-      // Head core with soft bloom
-      {
-        const th = s.thickness * invZ
-        const r = Math.max(spx(SPARK_HEAD_MIN_SPX), th * SPARK_HEAD_TH_K)
-
-        ctx.globalAlpha = alphaCore
-        drawGlowSprite(ctx, {
-          kind: 'fx-dot',
-          x,
-          y,
-          color: s.colorCore,
-          r,
-          blurPx: Math.max(spx(SPARK_GLOW_BLUR_MIN_SPX), r * SPARK_GLOW_BLUR_R_K) * shadowBlurK,
-          composite: 'lighter',
-        })
-      }
-
-      // Small embers behind the head
-      {
-        const th = s.thickness * invZ
-        ctx.fillStyle = withAlpha(s.colorTrail, alphaTrail * 0.55)
-        for (let j = 1; j <= 3; j++) {
-          const tt = j / 4
-          const ex = x - ux * trailLen * tt
-          const ey = y - uy * trailLen * tt
-          const rr = Math.max(spx(0.8), th * (1.25 - tt * 0.7))
-          ctx.globalAlpha = Math.max(0, alphaTrail * (1 - tt) * 0.9)
-          ctx.beginPath()
-          ctx.arc(ex, ey, rr, 0, Math.PI * 2)
-          ctx.fill()
-        }
       }
 
       ctx.restore()
@@ -503,7 +257,7 @@ export function renderFxFrame(opts: {
     for (let read = 0; read < fxState.edgePulses.length; read++) {
       const p = fxState.edgePulses[read]!
       const age = nowMs - p.startedAtMs
-      const afterglowMs = p.durationMs * 0.30
+      const afterglowMs = p.durationMs * EDGE_PULSE_AFTERGLOW_K
       const totalMs = p.durationMs + afterglowMs
       if (age >= totalMs) continue
       fxState.edgePulses[write++] = p
@@ -601,6 +355,9 @@ export function renderFxFrame(opts: {
       const t0 = clamp01(age / b.durationMs)
       const alpha = Math.pow(1 - t0, 1.2) // Smooth decay
 
+      // 039 slice C: the one kind of burst - a node the beam leaves, passes or reaches, and a node of a clearing
+      // cycle the spark passes. The 'glow' and 'clearing' kinds (bloom and shockwave with 'screen' composite over the
+      // whole node area) had no spawner left and were removed.
       if (b.kind === 'tx-impact') {
         // Shape-aware contour glow: matches the node's actual outline (rounded-rect or circle).
         const { shape, w: nw, h: nh, r: nodeR, rr } = getNodeBaseGeometry(n, invZ)
@@ -645,57 +402,6 @@ export function renderFxFrame(opts: {
         ctx.strokeStyle = withAlpha(mapping.fx.glint, 0.7 * alpha)
         ctx.lineWidth = Math.max(spx(1), baseWidth * 0.4)
         ctx.stroke(outline)
-
-        ctx.restore()
-      } else if (b.kind === 'glow') {
-        // Soft blurred circle glow (no rim, no hard ring).
-        const { r: nodeR } = getNodeBaseGeometry(n, invZ)
-
-        const life = Math.max(0, 1 - t0)
-        const a = Math.max(0, Math.min(1, life * life))
-        const r = nodeR * (0.75 + Math.pow(t0, 0.6) * 2.0)
-
-        ctx.save()
-        ctx.globalCompositeOperation = 'screen'
-        ctx.globalAlpha = a
-
-        drawGlowSprite(ctx, {
-          kind: 'fx-bloom',
-          x: n.__x,
-          y: n.__y,
-          color: b.color,
-          r,
-          blurPx: Math.max(spx(18), nodeR * 1.4) * shadowBlurK,
-          composite: 'screen',
-        })
-
-        ctx.restore()
-      } else {
-        // Default (clearing) burst: bloom + ring
-        const r = spx(10) + Math.pow(t0, 0.4) * spx(35)
-
-        ctx.save()
-        ctx.globalCompositeOperation = 'screen'
-
-        // 1. Core bloom
-        ctx.globalAlpha = alpha
-        drawGlowSprite(ctx, {
-          kind: 'fx-bloom',
-          x: n.__x,
-          y: n.__y,
-          color: b.color,
-          r: r * 0.5,
-          blurPx: spx(30) * shadowBlurK,
-          composite: 'screen',
-        })
-
-        // 2. Shockwave
-        ctx.globalAlpha = alpha * 0.7
-        ctx.strokeStyle = b.color
-        ctx.lineWidth = spx(3) * (1 - t0)
-        ctx.beginPath()
-        ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
-        ctx.stroke()
 
         ctx.restore()
       }

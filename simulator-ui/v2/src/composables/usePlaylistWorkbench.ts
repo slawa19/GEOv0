@@ -113,12 +113,18 @@ export async function loadPlaylists(
 
 /** The pause after an event before the next one: the event's own effect length plus a gap, so effects do not overlap. */
 export const PLAYLIST_GAP_PAD_MS = 400
-/** A clearing's edge pulses last 4200 ms (`useRealClearingFx.ts`). */
-export const CLEARING_EFFECT_MS = 4200
 
-export function gapAfterMs(event: PlaylistEvent): number {
-  if (event.type === 'tx.updated') return (event.ttl_ms ?? 1200) + PLAYLIST_GAP_PAD_MS
-  if (event.type === 'clearing.done') return CLEARING_EFFECT_MS + PLAYLIST_GAP_PAD_MS
+/**
+ * How long an event's effect lasts - asked of the effects themselves (039 slice C, P-3: one duration source, not a
+ * copy here): a payment's from its route plan (`useRealTxFx.ts`, `routeEffectMs`), a clearing's from
+ * `CLEARING_EFFECT_MS` (`useRealClearingFx.ts`). Until then a payment was spaced by its wire `ttl_ms` and a clearing
+ * by a literal 4200 here.
+ */
+export type EffectLengths = { tx: (event: TxUpdatedEvent) => number; clearingMs: number }
+
+export function gapAfterMs(event: PlaylistEvent, effects: EffectLengths): number {
+  if (event.type === 'tx.updated') return effects.tx(event) + PLAYLIST_GAP_PAD_MS
+  if (event.type === 'clearing.done') return effects.clearingMs + PLAYLIST_GAP_PAD_MS
   return PLAYLIST_GAP_PAD_MS
 }
 
@@ -148,6 +154,8 @@ const defaultTimers: Timers = {
  */
 export function createPlaylistPlayer(deps: {
   deliver: (event: PlaylistEvent, playbackId: string) => void
+  /** The length of each event's effect, for the pause before the next one (`gapAfterMs`). */
+  effects: EffectLengths
   /** A new playback begins (the effect caches of the previous one are reset, as for a new run). */
   onPlaybackStart?: () => void
   /**
@@ -203,7 +211,7 @@ export function createPlaylistPlayer(deps: {
         state.playingId = null
         return
       }
-      timer = timers.setTimeout(() => run(index + 1), gapAfterMs(event))
+      timer = timers.setTimeout(() => run(index + 1), gapAfterMs(event, deps.effects))
     }
     run(0)
   }
@@ -246,7 +254,7 @@ export function createLivePathDelivery(deps: {
   runRealTxFx: (event: TxUpdatedEvent) => void
   runRealClearingDoneFx: (event: ClearingDoneEvent) => void
   pushTxAmountLabel: (nodeId: string, amount: string, unit: string, opts: { throttleMs: number }) => void
-  clampRealTxTtlMs: (ttl: unknown) => number
+  routeArrivalMs: (event: TxUpdatedEvent) => number
   scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
 }): (event: PlaylistEvent, playbackId: string) => void {
   const draftReal: RealEventDraft['real'] = {
@@ -282,7 +290,7 @@ export function createLivePathDelivery(deps: {
       runRealTxFx: deps.runRealTxFx,
       runRealClearingDoneFx: deps.runRealClearingDoneFx,
       pushTxAmountLabel: deps.pushTxAmountLabel,
-      clampRealTxTtlMs: deps.clampRealTxTtlMs,
+      routeArrivalMs: deps.routeArrivalMs,
       scheduleTimeout: deps.scheduleTimeout,
     })
   }
@@ -305,19 +313,28 @@ export function usePlaylistWorkbench(deps: {
   deliver: (event: PlaylistEvent, playbackId: string) => void
   /**
    * The effect caches of the live path: a new playback resets both (as a new run does); an ended one invalidates the
-   * pending tx effects (`resetTxFx` bumps the generation the beam legs and the receiver burst check).
+   * pending effects of both (`resetTxFx` bumps the generation the beam legs and the receiver burst check,
+   * `resetClearingDedup` the one the clearing loop and its after-step check).
    */
   fx: { resetTxFx: () => void; resetClearingDedup: () => void }
+  /** The length of each event's effect, from the effects themselves (`gapAfterMs`). */
+  effects: EffectLengths
   warn?: (message: string, context: Record<string, unknown>) => void
   timers?: Timers
 }) {
   const player = createPlaylistPlayer({
     deliver: deps.deliver,
+    effects: deps.effects,
     onPlaybackStart: () => {
       deps.fx.resetClearingDedup()
       deps.fx.resetTxFx()
     },
-    onPlaybackEnd: () => deps.fx.resetTxFx(),
+    // 039 slice C: a clearing has pending effects now too (its spark goes round the cycle on timers, then the pulses and
+    // the amount): an ended playback cancels them as it cancels the legs of a beam.
+    onPlaybackEnd: () => {
+      deps.fx.resetTxFx()
+      deps.fx.resetClearingDedup()
+    },
     timers: deps.timers,
   })
   const choice = ref('')

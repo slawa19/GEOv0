@@ -159,7 +159,11 @@ export type RealEventIntent =
       signedAmount: string
       unit: string
       throttleMs: number
-      delayMs: number
+      /**
+       * The payment this label belongs to: the label comes when ITS beam arrives (`routeArrivalMs`), the one route
+       * time of P-3 (spec 039). Until 039 slice C the label carried `delayMs: ttl_ms` - a second duration.
+       */
+      txEvent: TxUpdatedEvent
       runId: string
       equivalent: string
     }
@@ -397,7 +401,7 @@ export function applyAcceptedRealEvent(
         signedAmount: `+${amount}`,
         unit: event.equivalent,
         throttleMs,
-        delayMs: event.ttl_ms ?? 1200,
+        txEvent: event,
         runId: connectionRunId,
         equivalent: event.equivalent,
       })
@@ -447,7 +451,8 @@ export function executeRealEventIntents(
     runRealTxFx: (event: TxUpdatedEvent) => void
     runRealClearingDoneFx: (event: ClearingDoneEvent) => void
     pushTxAmountLabel: (nodeId: string, amount: string, unit: string, opts: { throttleMs: number }) => void
-    clampRealTxTtlMs: (ttl: unknown) => number
+    /** When the beam of this payment reaches the receiver (`useRealTxFx.ts`, `routeArrivalMs`): the one route time. */
+    routeArrivalMs: (event: TxUpdatedEvent) => number
     scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
     onIntentExecuted?: (intent: RealEventIntent) => void
     onReceiverLabelPushed?: () => void
@@ -480,7 +485,7 @@ export function executeRealEventIntents(
           deps.pushTxAmountLabel(intent.nodeId, intent.signedAmount, intent.unit, { throttleMs: intent.throttleMs })
           deps.onReceiverLabelPushed?.()
         },
-        deps.clampRealTxTtlMs(intent.delayMs),
+        deps.routeArrivalMs(intent.txEvent),
         { critical: true },
       )
     }

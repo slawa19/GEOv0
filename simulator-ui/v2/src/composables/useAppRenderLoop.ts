@@ -15,8 +15,6 @@ export function useAppRenderLoop(opts: {
   isTestMode: () => boolean
   getQuality: () => 'low' | 'med' | 'high'
   isGpuLikely?: () => boolean
-  getFlash: () => number
-  setFlash: (v: number) => void
   pruneActiveEdges: (nowMs: number) => void
   pruneActiveNodes: (nowMs: number) => void
   pruneFloatingLabels: (nowMs: number) => void
@@ -53,8 +51,6 @@ export function useAppRenderLoop(opts: {
     isTestMode: opts.isTestMode,
     getQuality: opts.getQuality,
     isGpuLikely: opts.isGpuLikely,
-    getFlash: opts.getFlash,
-    setFlash: opts.setFlash,
     pruneActiveEdges: opts.pruneActiveEdges,
     pruneActiveNodes: opts.pruneActiveNodes,
     pruneFloatingLabels: opts.pruneFloatingLabels,

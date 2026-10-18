@@ -36,7 +36,6 @@ function createDraft(snapshot: GraphSnapshot | null = null): RealEventDraft {
       sourcePath: '',
       snapshot,
       selectedNodeId: null,
-      flash: 0,
     } satisfies SimulatorAppState,
   }
 }
@@ -75,7 +74,7 @@ function execute(intents: ReturnType<typeof applyAcceptedRealEvent>, draft: Real
     runRealTxFx: () => trace.push(`effect:tx-fx:${draft.real.runStats.committed}`),
     runRealClearingDoneFx: () => trace.push(`effect:clearing-fx:${draft.state.snapshot?.nodes[0]?.net_balance}`),
     pushTxAmountLabel: (_nodeId, amount) => trace.push(`effect:label:${amount}`),
-    clampRealTxTtlMs: (ttl) => Number(ttl),
+    routeArrivalMs: (event) => event.ttl_ms,
     scheduleTimeout: (fn) => {
       trace.push('effect:schedule')
       fn()
@@ -349,7 +348,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
       runRealTxFx: txFx,
       runRealClearingDoneFx: vi.fn(),
       pushTxAmountLabel: vi.fn(),
-      clampRealTxTtlMs: () => 10,
+      routeArrivalMs: () => 10,
       scheduleTimeout: vi.fn(),
     })
     expect(draft.real.runStats).toMatchObject({ attempts: 1, rejected: 1, errors: 0, timeouts: 0 })
@@ -403,7 +402,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
           signedAmount: '+1',
           unit: 'EUR',
           throttleMs: 0,
-          delayMs: 10,
+          txEvent: { event_id: 'evt_run_1_7', ts: TS, type: 'tx.updated', equivalent: 'EUR', ttl_ms: 1200, edges: [{ from: 'A', to: 'B' }] },
           runId: 'run_1',
           equivalent: 'EUR',
         },
@@ -419,7 +418,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
         runRealTxFx: () => trace.push('fx'),
         runRealClearingDoneFx: () => trace.push('clearing'),
         pushTxAmountLabel: (_nodeId, amount) => trace.push(`label:${amount}`),
-        clampRealTxTtlMs: () => 10,
+        routeArrivalMs: () => 10,
         scheduleTimeout: (fn) => fn(),
       },
     )
@@ -447,7 +446,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
       runRealTxFx: vi.fn(),
       runRealClearingDoneFx: vi.fn(),
       pushTxAmountLabel: vi.fn(),
-      clampRealTxTtlMs: () => 10,
+      routeArrivalMs: () => 10,
       scheduleTimeout: vi.fn(),
       warnContract,
     })

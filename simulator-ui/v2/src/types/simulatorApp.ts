@@ -7,5 +7,4 @@ export type SimulatorAppState = {
   snapshot: GraphSnapshot | null
 
   selectedNodeId: string | null
-  flash: number
 }

@@ -177,7 +177,6 @@ function createSseCharacterizationHarness(opts?: {
     sourcePath: '',
     snapshot: null,
     selectedNodeId: null,
-    flash: 0,
   }
   const loadRecoveryScene = vi.fn(opts?.loadRecoveryScene ?? (async () => {
     await loadScene()
@@ -207,7 +206,7 @@ function createSseCharacterizationHarness(opts?: {
     loadRecoveryScene,
     realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
     pushTxAmountLabel,
-    clampRealTxTtlMs: () => 1200,
+    routeArrivalMs: () => 1200,
 
     scheduleTimeout,
     runRealTxFx,
@@ -259,7 +258,6 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -274,7 +272,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 0,
+      routeArrivalMs: () => 0,
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
@@ -331,7 +329,6 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -346,7 +343,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 0,
+      routeArrivalMs: () => 0,
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
@@ -407,7 +404,6 @@ describe('useSimulatorRealMode - admin helpers', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -421,7 +417,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       loadScene,
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 0,
+      routeArrivalMs: () => 0,
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
@@ -455,7 +451,6 @@ describe('useSimulatorRealMode - admin helpers', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -469,7 +464,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       loadScene: async () => undefined,
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 0,
+      routeArrivalMs: () => 0,
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
@@ -515,7 +510,7 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
       isRealMode: computed(() => true),
       isLocalhost: false,
       effectiveEq: computed(() => 'EUR'),
-      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
       real,
 
       ensureScenarioSelectionValid: () => undefined,
@@ -528,7 +523,7 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
       loadScene,
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
@@ -576,7 +571,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isRealMode: computed(() => true),
       isLocalhost: false,
       effectiveEq: computed(() => 'EUR'),
-      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
       real,
       ensureScenarioSelectionValid: () => undefined,
       resetRunStats: () => undefined,
@@ -586,7 +581,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       loadScene: vi.fn(async () => undefined),
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
       runRealClearingDoneFx: () => undefined,
@@ -634,7 +629,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isRealMode: computed(() => true),
       isLocalhost: false,
       effectiveEq: computed(() => 'EUR'),
-      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
       real,
       ensureScenarioSelectionValid: () => undefined,
       resetRunStats: () => undefined,
@@ -644,7 +639,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       loadScene: vi.fn(async () => undefined),
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
       runRealClearingDoneFx: () => undefined,
@@ -696,7 +691,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isRealMode: computed(() => true),
       isLocalhost: false,
       effectiveEq: computed(() => 'EUR'),
-      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
       real,
       ensureScenarioSelectionValid: () => undefined,
       resetRunStats: () => undefined,
@@ -706,7 +701,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       loadScene: vi.fn(async () => undefined),
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
       runRealClearingDoneFx: () => undefined,
@@ -751,7 +746,6 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -766,7 +760,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
 
       scheduleTimeout,
       runRealTxFx,
@@ -872,7 +866,6 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -887,7 +880,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       realPatchApplier: { applyNodePatches, applyEdgePatches, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
 
       scheduleTimeout,
       runRealTxFx,
@@ -980,7 +973,6 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         sourcePath: '',
         snapshot: null,
         selectedNodeId: null,
-        flash: 0,
       },
       real,
 
@@ -995,7 +987,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
 
       scheduleTimeout,
       runRealTxFx,
@@ -2177,7 +2169,7 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         isRealMode: computed(() => false),
         isLocalhost: false,
         effectiveEq: computed(() => 'EUR'),
-        state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+        state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
         real,
         ensureScenarioSelectionValid: () => undefined,
         resetRunStats: () => undefined,
@@ -2188,7 +2180,7 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         loadScene: async () => undefined,
         realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
         pushTxAmountLabel: () => undefined,
-        clampRealTxTtlMs: () => 0,
+        routeArrivalMs: () => 0,
         scheduleTimeout: () => undefined,
         runRealTxFx: () => undefined,
         runRealClearingDoneFx: () => undefined,

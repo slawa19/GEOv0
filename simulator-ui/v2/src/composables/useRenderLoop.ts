@@ -4,7 +4,6 @@ import type { FxState } from '../render/fxRenderer'
 import type { GraphNode, GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { clearGradientCache } from '../render/gradientCache'
-import { clamp01 } from '../utils/math'
 import type { VizMapping } from '../vizMapping'
 
 type Quality = 'low' | 'med' | 'high'
@@ -134,9 +133,6 @@ type UseRenderLoopDeps = {
   /** 039 slice C: the product's own verdict on a GPU (`useQualityAutoguards`); absent = a GPU is assumed. */
   isGpuLikely?: () => boolean
 
-  getFlash: () => number
-  setFlash: (v: number) => void
-
   pruneFloatingLabels: (nowMs: number) => void
   hasFloatingLabels?: () => boolean
 
@@ -197,7 +193,7 @@ type UseRenderLoopDeps = {
   beforeDraw?: (nowMs: number) => void
 
   // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
-  // When omitted, a conservative heuristic based on FX + flash is used.
+  // When omitted, a conservative heuristic based on FX and overlays is used.
   isAnimating?: () => boolean
 }
 
@@ -265,14 +261,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let fpsEma = 60
   let fxBudgetScale = 1
   let lastFps = 60
-
-  // Flash radial gradient cache: recreate only when canvas dimensions change.
-  // The gradient colors are constant (from mapping), and opacity is driven by ctx.globalAlpha —
-  // so the gradient object itself is reusable across frames as long as layout is stable.
-  let flashGradCache: CanvasGradient | null = null
-  let flashGradCacheW = 0
-  let flashGradCacheH = 0
-  let flashGradCacheFx: CanvasRenderingContext2D | null = null
 
   function baseDprClampForQuality(q: Quality): number {
     if (q === 'low') return 1
@@ -479,36 +467,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     fx.setTransform(dpr, 0, 0, dpr, 0, 0)
     fx.clearRect(0, 0, layout.w, layout.h)
 
-    // Screen-space flash overlay (clearing) — must not move with camera.
-    const flash = deps.getFlash()
-    if (flash > 0) {
-      const t = clamp01(flash)
-      fx.save()
-      fx.globalAlpha = t
-      // Reuse cached gradient when layout dimensions are unchanged.
-      // Gradient colors are constant; opacity is driven by globalAlpha set above.
-      if (flashGradCache === null || flashGradCacheW !== layout.w || flashGradCacheH !== layout.h || flashGradCacheFx !== fx) {
-        const g = fx.createRadialGradient(
-          layout.w / 2,
-          layout.h / 2,
-          0,
-          layout.w / 2,
-          layout.h / 2,
-          Math.max(layout.w, layout.h) * 0.7,
-        )
-        g.addColorStop(0, deps.mapping.fx.flash.clearing.from)
-        g.addColorStop(1, deps.mapping.fx.flash.clearing.to)
-        flashGradCache = g
-        flashGradCacheW = layout.w
-        flashGradCacheH = layout.h
-        flashGradCacheFx = fx
-      }
-      fx.fillStyle = flashGradCache
-      fx.fillRect(0, 0, layout.w, layout.h)
-      fx.restore()
-      deps.setFlash(Math.max(0, flash - 0.03))
-    }
-
     // Apply camera transform for drawing.
     ctx.translate(camera.panX, camera.panY)
     ctx.scale(camera.zoom, camera.zoom)
@@ -589,7 +547,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     // that has a snapshot, so with none of it there is nothing to animate - and the loop may sleep (038 S1, A5).
     if (deps.hasFloatingLabels?.()) return true
     if (!deps.getSnapshot()) return false
-    if (deps.getFlash() > 0) return true
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
     if (deps.activeNodes && deps.activeNodes.size > 0) return true
 
