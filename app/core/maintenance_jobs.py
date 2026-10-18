@@ -39,8 +39,9 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tupl
     """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
     around the application, and of a recorded change that disagrees with its recorded intent.
 
-    THE ONLY HOST. Not `POST /integrity/verify`, which participants can call, and not the payment or
-    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints - and since
+    THE ONLY HOST in the application. Not `POST /integrity/verify`, which participants can call, and not the payment
+    or clearing checkpoints, which run inside the money transaction. Outside it the operator runs the same entry point
+    on demand (`scripts/reconcile_debts.py`, 047 `T4702`). It runs after the checkpoints - and since
     030 F-030-7 also after they failed - in fresh transactions of its own, and its result is its own row: it never enters a
     checkpoint's `checks`, `passed`, `status` or `alerts`, and never an audit row.
 
