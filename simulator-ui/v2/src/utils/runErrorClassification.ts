@@ -19,9 +19,11 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  * codes decides as before. Not judged here: whether the server's message is fit for a person - it is printed as sent.
  */
 export function runStatusErrorText(
-  status: { state?: string | null; last_error?: RunError | null },
+  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
   isUserFacing: (code: string) => boolean,
 ): string {
+  // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
+  if (String(status.state ?? '').trim().toLowerCase() === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return idleStopText()
   const error = status.last_error
   if (!error) return ''
   const stopped = String(status.state ?? '').trim().toLowerCase() === 'error'
@@ -32,6 +34,18 @@ export function runStatusErrorText(
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)
   return `${error.code}: ${error.message}`
+}
+
+/** 044 stage 2: `stop_reason` of a run the server stopped because it had no SSE subscriber (`run_lifecycle.py`). */
+export const IDLE_STOP_REASON = 'idle_no_subscribers'
+
+/**
+ * 044 stage 2: the line of a run stopped by the idle stop. 046 wave 1 (merge of #299): from the dictionary
+ * (`runLine.idleStopped`); the way back is the reload - the earlier text named Start under "Подробнее", which put a
+ * Russian word in the English text and an English one in the Russian (the service row is not translated yet).
+ */
+export function idleStopText(locale: UiLocale = uiLocale()): string {
+  return t('runLine.idleStopped', undefined, locale)
 }
 
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
@@ -91,4 +105,13 @@ export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, 
 /** 043 S2 (review B5): the error line when the server offers no scenario at all - the opening has nothing to show. */
 export function noScenarioText(locale: UiLocale = uiLocale()): string {
   return t('runStart.noScenario', undefined, locale)
+}
+
+/**
+ * 044 stage 2 (BACKLOG 043-19): the error line when Start or Apply is asked with a tempo below 1 (the field allows 0).
+ * A run at 0 makes no payment - a silent run that looks broken; it is refused with this hint instead, and the typed
+ * value is not replaced by another one behind the person's back. Stopping the payments is the pause.
+ */
+export function zeroIntensityText(locale: UiLocale = uiLocale()): string {
+  return t('runLine.zeroIntensity', undefined, locale)
 }

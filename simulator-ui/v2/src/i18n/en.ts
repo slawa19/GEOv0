@@ -428,6 +428,15 @@ export const en = {
   },
 
   /**
+   * Lines of the run that 044 stage 2 (PR #299) wrote as literals, moved here on its merge (046 wave 1): the error line of
+   * a run the idle stop ended, and the refusal of a start or an apply at tempo 0 (BACKLOG 043-19).
+   */
+  runLine: {
+    idleStopped: 'The server stopped the run: nobody watched it for a long time. To start again, reload the page.',
+    zeroIntensity: 'A tempo of 0 makes no payments: enter a tempo from 1 to 100. To stop the payments, pause.',
+  },
+
+  /**
    * The accessible names of the window shell (`overlaySurfaceCatalog.ts` -> `WindowShell.vue`). An action window's
    * shell is named by its panel's `*.panelAria`; these are the rest.
    */

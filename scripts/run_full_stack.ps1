@@ -1375,6 +1375,11 @@ if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_AMOUNT_CAP)) {
 if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_ENABLE_INJECT)) {
     $env:SIMULATOR_REAL_ENABLE_INJECT = '0'
 }
+# 044 stage 2: the demo holds N = 10 visitor runs on one process (measured at the visitor tempo 15); the code default
+# stays 1. A run nobody watches stops after SIMULATOR_RUN_IDLE_STOP_SEC (code default 600).
+if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_MAX_ACTIVE_RUNS)) {
+    $env:SIMULATOR_MAX_ACTIVE_RUNS = '10'
+}
 
 $backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort")
 $backendProcess = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLogPath -RedirectStandardError $BackendErrLogPath -PassThru

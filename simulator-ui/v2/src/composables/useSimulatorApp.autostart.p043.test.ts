@@ -223,7 +223,8 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       const app = boot()
       await settle()
       expect(app.real.runId).toBeNull()
-      // 046 wave 1: the server's number of places (`max_active_runs: 1` here), and no pointer to Start - the line offers a retry.
+      // 044 stage 2: the number of places from `details.max_active_runs` (1 here); 046 wave 1: from the dictionary, no pointer
+      // to Start under «Подробнее» - the line offers a retry (merge of #299, 2026-10-18).
       expect(app.real.lastError).toBe('Сейчас занято единственное место: демо смотрит 1 человек. Попробуйте через минуту.')
       expect(app.real.retryableStartError, '046 wave 1: this refusal may be tried again').toBe(app.real.lastError)
     } finally {

@@ -173,10 +173,11 @@ describe('042 S2: the client no longer chooses a run mode (reproducers: red whil
     await vi.waitFor(() => expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['PREVIEW_sc2']))
     expect(vi.mocked(getScenarioPreview).mock.calls.at(-1)?.[1]).toBe('sc2')
 
-    await app.realActions.startRun({ intensityPercent: 0, pauseImmediately: true })
+    // 044 stage 2 (BACKLOG 043-19): a tempo below 1 starts no run; this case is about the mode, not the tempo.
+    await app.realActions.startRun({ intensityPercent: 1, pauseImmediately: true })
     await settle()
     expect(app.real.runId).toBe('R2')
     expect(createRun, 'the failed opening did not try again behind the explicit Start').toHaveBeenCalledTimes(2)
-    expect(vi.mocked(createRun).mock.calls[1]?.[1]).toMatchObject({ scenario_id: 'sc2', mode: 'real', intensity_percent: 0 })
+    expect(vi.mocked(createRun).mock.calls[1]?.[1]).toMatchObject({ scenario_id: 'sc2', mode: 'real', intensity_percent: 1 })
   })
 })

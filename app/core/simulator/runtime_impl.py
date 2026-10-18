@@ -4,7 +4,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from pathlib import Path
 
 from app.schemas.simulator import (
@@ -18,9 +18,9 @@ from app.schemas.simulator import (
 )
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
-from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription
+from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription, note_subscribers_locked
 from app.core.simulator.real_runner_impl import RealRunnerImpl
-from app.core.simulator.run_lifecycle import RunLifecycle
+from app.core.simulator.run_lifecycle import IDLE_STOP_REASON, RunLifecycle
 from app.config import settings
 from app.core.simulator.runtime_utils import (
     FIXTURES_DIR,
@@ -94,6 +94,9 @@ class _SimulatorRuntimeBase:
         self._max_active_runs = settings.SIMULATOR_MAX_ACTIVE_RUNS
         self._max_run_records = settings.SIMULATOR_MAX_RUN_RECORDS
         self._max_active_runs_per_owner = settings.SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER
+        # 044 stage 2 (decision 2): the idle stop - its threshold and its clock (monotonic; tests replace `_idle_now`).
+        self._run_idle_stop_sec = settings.SIMULATOR_RUN_IDLE_STOP_SEC
+        self._idle_now: Callable[[], float] = time.monotonic
 
         # DB persistence throttling for run status row.
         # Defaults reduce write amplification in heartbeat loop.
@@ -157,6 +160,7 @@ class _SimulatorRuntimeBase:
             get_sub_queue_max=lambda: int(self._sse_sub_queue_max),
             enqueue_event_artifact=self._artifacts.enqueue_event_artifact,
             logger=logger,
+            idle_now=lambda: self._idle_now(),
         )
 
         self._run_lifecycle = RunLifecycle(
@@ -184,6 +188,7 @@ class _SimulatorRuntimeBase:
                 self._active_run_id_by_owner.get(owner_id) if owner_id else None
             ),
             get_max_active_runs_per_owner=lambda: int(self._max_active_runs_per_owner),
+            idle_now=lambda: self._idle_now(),
         )
 
         self._real_runner = RealRunnerImpl(
@@ -231,6 +236,7 @@ class _SimulatorRuntimeBase:
                 for run in self._runs.values():
                     try:
                         run._subs.clear()
+                        note_subscribers_locked(run, self._idle_now())
                     except Exception:
                         pass
 
@@ -491,20 +497,35 @@ class _SimulatorRuntimeBase:
         reason: Optional[str] = None,
         client: Optional[str] = None,
     ) -> RunStatus:
-        status = await self._run_lifecycle.stop(
-            run_id, source=source, reason=reason, client=client
-        )
-
-        # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
-        # Must not break stop() even if DB is unavailable.
+        # 044 stage 2 (Codex §15 fix-delta): the record is pinned for the WHOLE cleanup - the lifecycle's stop (writer
+        # drain, upsert, artifacts finalize, which reads the record) and the final flush below - so a pruning pass
+        # running meanwhile cannot drop it; pinned before the first await, unpinned in `finally`, pruned after.
+        with self._lock:
+            self._run_lifecycle.pin_cleanup_locked(run_id)
         try:
-            await self._real_runner.flush_pending_storage(run_id)
-        except Exception:
-            logger.warning(
-                "simulator.runtime.flush_pending_storage_failed run_id=%s",
-                run_id,
-                exc_info=True,
+            status = await self._run_lifecycle.stop(
+                run_id, source=source, reason=reason, client=client
             )
+
+            # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
+            # Must not break stop() even if DB is unavailable.
+            try:
+                await self._real_runner.flush_pending_storage(run_id)
+            except Exception:
+                logger.warning(
+                    "simulator.runtime.flush_pending_storage_failed run_id=%s",
+                    run_id,
+                    exc_info=True,
+                )
+        finally:
+            with self._lock:
+                self._run_lifecycle.unpin_cleanup_locked(run_id)
+
+        # 044 stage 2: a run that ends is a pruning point too (after the flush, which reads the record).
+        try:
+            await self._run_lifecycle.prune_ended_runs()
+        except Exception:
+            logger.exception("simulator.runtime.prune_ended_runs_failed run_id=%s", run_id)
 
         return status
 
@@ -683,6 +704,32 @@ class _SimulatorRuntimeBase:
             return 1.0
         return float(value)
 
+    def _idle_expired_locked(self, run: RunRecord) -> bool:
+        """044 stage 2 (decision 2): the run has had no SSE subscriber for `SIMULATOR_RUN_IDLE_STOP_SEC` (0: never)."""
+
+        limit = int(self._run_idle_stop_sec or 0)
+        if limit <= 0 or run._subs:
+            return False
+        since = run._no_subscribers_since
+        return since is not None and self._idle_now() - since >= limit
+
+    async def _stop_idle_run(self, run_id: str, run: RunRecord) -> None:
+        """Stop the run from its own heartbeat: the task detaches itself first, so `stop` does not cancel and await the
+        task it runs in (a task cannot await itself); the loop returns right after."""
+
+        with self._lock:
+            if run._heartbeat_task is asyncio.current_task():
+                run._heartbeat_task = None
+            idle_for = self._idle_now() - float(run._no_subscribers_since or 0.0)
+        logger.info(
+            "simulator.run.idle_stop run_id=%s state=%s idle_sec=%d threshold_sec=%d",
+            run_id,
+            run.state,
+            int(idle_for),
+            int(self._run_idle_stop_sec or 0),
+        )
+        await self.stop(run_id, source="server", reason=IDLE_STOP_REASON)
+
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
             while True:
@@ -692,12 +739,17 @@ class _SimulatorRuntimeBase:
                 with self._lock:
                     if run.state in ("stopped", "stopping", "error"):
                         return
-                    if run.state != "running":
+                    # 044 stage 2: checked before the pause - a paused run nobody watches is stopped too.
+                    idle = self._idle_expired_locked(run)
+                    if not idle and run.state != "running":
                         continue
-
-                    # Runner-algorithm: fixed sim-time tick; intensity controls action budget.
-                    run.tick_index += 1
-                    run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
+                    if not idle:
+                        # Runner-algorithm: fixed sim-time tick; intensity controls action budget.
+                        run.tick_index += 1
+                        run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
+                if idle:
+                    await self._stop_idle_run(run_id, run)
+                    return
 
                 # The runner's work is intentionally outside the lock (it can touch the DB and may take time).
                 # Every run is real-mode (042 S1).

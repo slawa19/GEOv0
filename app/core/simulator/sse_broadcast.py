@@ -7,7 +7,7 @@ import threading
 from typing import Any, Callable, Optional
 
 from app.config import settings
-from app.core.simulator.models import RunRecord, _Subscription
+from app.core.simulator.models import RunRecord, _Subscription, note_subscribers_locked
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
     SimulatorClearingDoneEvent,
@@ -38,8 +38,11 @@ class SseBroadcast:
         get_sub_queue_max: Callable[[], int],
         enqueue_event_artifact: Callable[[str, dict[str, Any]], None],
         logger: logging.Logger,
+        idle_now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._lock = lock
+        # 044 stage 2: the clock of the idle stop (`RunRecord._no_subscribers_since`); the runtime's, tests control it.
+        self._idle_now = idle_now
         self._runs = runs
         self._get_event_buffer_max = get_event_buffer_max
         self._get_event_buffer_ttl_sec = get_event_buffer_ttl_sec
@@ -186,6 +189,7 @@ class SseBroadcast:
             run._subs.remove(sub)
         except ValueError:
             pass
+        note_subscribers_locked(run, self._idle_now())
 
         # Discard every not-yet-delivered event after the gap and wake the stream.
         # Reconnect uses the last event actually acknowledged by the client and
@@ -385,6 +389,7 @@ class SseBroadcast:
             if bootstrap_event is not None:
                 sub.queue.put_nowait(bootstrap_event)
             run._subs.append(sub)
+            note_subscribers_locked(run, self._idle_now())
 
         return sub
 
@@ -411,6 +416,7 @@ class SseBroadcast:
                 run._subs.remove(sub)
             except ValueError:
                 return
+            note_subscribers_locked(run, self._idle_now())
 
 class SseEventEmitter:
     """Domain-level SSE event construction.

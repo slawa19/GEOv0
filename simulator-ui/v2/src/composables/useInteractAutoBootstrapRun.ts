@@ -1,11 +1,25 @@
 import type { RunStatus, ScenarioSummary } from '../api/simulatorTypes'
+import { isJwtLike } from '../utils/isJwtLike'
 import { isLiveRunState } from '../utils/status'
 
 /** The scenario started when none is selected yet and the catalogue offers it (unchanged since the Interact bootstrap). */
 export const INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'
 
-/** 043 S2 (decision 2): the intensity of a run the screen starts by itself when the person has no stored preference. */
+/** 043 S2 (decision 2): the operator's default intensity (an admin token is held) - Start and the opening's run. */
 export const AUTOSTART_DEFAULT_INTENSITY_PERCENT = 30
+
+/**
+ * 044 stage 2 (spec amendments (vii), (viii)): the default intensity of a VISITOR's run - a screen without an admin
+ * token, the public demo. 10 concurrent visitor runs were measured on one process at this tempo (64 % of a core, tick
+ * stretch 1.24); at the operator's 30 the same 10 saturate the core. A stored preference still wins.
+ */
+export const VISITOR_DEFAULT_INTENSITY_PERCENT = 15
+
+/** The default intensity of this screen: the operator's when it holds an admin token (not a participant JWT), else the visitor's. */
+export function defaultIntensityPercentFor(accessToken: string | null | undefined): number {
+  const t = String(accessToken ?? '').trim()
+  return t && !isJwtLike(t) ? AUTOSTART_DEFAULT_INTENSITY_PERCENT : VISITOR_DEFAULT_INTENSITY_PERCENT
+}
 
 function readScenarioId(scenario: ScenarioSummary | null | undefined): string {
   return String(scenario?.scenario_id ?? '').trim()
@@ -30,10 +44,12 @@ export function autostartDecision(runId: string | null | undefined, status: RunS
 /**
  * 043 S2: opening the demo is a live run. ONE attempt per page load, made when the opening is over (the caller calls
  * `onOpened` once): a run the person stops afterwards is not restarted behind their back, and a failed start leaves its
- * error on screen (`startRun` records it) with Start under "Подробнее" as the way to try again.
+ * error on screen (`startRun` records it); a refusal by the global limit of runs offers "Try again" in that line (046
+ * wave 1), and Start under "Подробнее" remains the way to try again after any other failure.
  *
- * The run is started with the existing `startRun` - not paused, at the person's stored intensity (the default 30 when
- * none is stored; a stored 0 is dropped when it is read, `useSimulatorApp.ts`, 043 S3). When the person is already in a manual action at that moment (a panel
+ * The run is started with the existing `startRun` - not paused, at the person's stored intensity (when none is stored,
+ * the screen's default: 15 for a visitor, 30 for the operator - `defaultIntensityPercentFor`, 044 stage 2; a stored 0 is
+ * dropped when it is read, `useSimulatorApp.ts`, 043 S3). When the person is already in a manual action at that moment (a panel
  * is open, a participant chosen - decision 3), the run is started paused instead, so no automatic payment runs over it.
  *
  * Until S2 this file was the Interact bootstrap: `?ui=interact` only, `intensityPercent: 0, pauseImmediately: true`.
@@ -47,6 +63,7 @@ export function useInteractAutoBootstrapRun(deps: {
     runStatus?: RunStatus | null
     selectedScenarioId: string | null
     intensityPercent: number
+    accessToken?: string | null
     loadingScenarios?: boolean
     scenarios?: ScenarioSummary[] | null
   }
@@ -55,6 +72,8 @@ export function useInteractAutoBootstrapRun(deps: {
   }
 }): {
   onOpened: () => Promise<AutostartDecision | 'no-scenario' | 'off'>
+  /** 044 stage 2 (BACKLOG 043-23): an explicit Stop spends the attempt not made yet - the opening starts nothing after it. */
+  cancel: () => void
 } {
   let attempted = false
 
@@ -77,11 +96,16 @@ export function useInteractAutoBootstrapRun(deps: {
     if (!String(deps.real.selectedScenarioId ?? '').trim()) return 'no-scenario'
 
     await deps.realMode.startRun({
-      intensityPercent: deps.real.intensityPercent > 0 ? deps.real.intensityPercent : AUTOSTART_DEFAULT_INTENSITY_PERCENT,
+      intensityPercent: deps.real.intensityPercent > 0 ? deps.real.intensityPercent : defaultIntensityPercentFor(deps.real.accessToken),
       pauseImmediately: deps.isManualActionActive(),
     })
     return 'start'
   }
 
-  return { onOpened }
+  return {
+    onOpened,
+    cancel: () => {
+      attempted = true
+    },
+  }
 }

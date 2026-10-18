@@ -97,7 +97,8 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   console.log(`043 S2 LIVE ${JSON.stringify({ tookMs, beam: seen, creates, pauses: pauses.length })}`)
 
   expect(creates, 'exactly one run was created, by the product itself').toHaveLength(1)
-  expect(creates[0], 'at the default intensity').toMatchObject({ intensity_percent: 30 })
+  // 044 stage 2: the live config empties the dev token, so this is a visitor - the visitor tempo 15.
+  expect(creates[0], 'at the visitor default intensity').toMatchObject({ intensity_percent: 15 })
   expect(pauses, 'nothing paused it').toEqual([])
   await expect(page.locator('[data-testid="network-state"]')).toContainText('живёт')
 
