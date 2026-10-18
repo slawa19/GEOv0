@@ -64,13 +64,13 @@
 | `node-card` | `wm-inspector-window` | двойной клик по узлу | внутри viewport с отступом; Escape закрывает; клик по пустой канве закрывает; фокус — на открывший элемент (с канвы — на `body`, из навигатора — на «Inspect node») |
 | `edge-popup` | `wm-inspector-window` | клик по линии доверия | то же |
 | `payment-from-list`, `trustline-from-list` | `interact-select-dropdown` | клик по списку «From» | внутри viewport; Escape закрывает **список, а не панель**, фокус — на триггер; Tab не покидает список |
-| `menu-artifacts`, `menu-admin` (оба — после «Подробнее») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
+| `menu-admin` (после «Подробнее»; `menu-artifacts` снята 048 S1 — файлы прогона теперь внутри «Admin ▾») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
 | `top-bar-interact`, `top-bar-auto-run`, `graph-navigator` | `top-hud-stack` | на экране всегда; навигатор — клик «Inspect graph» | внутри viewport |
 | `bottom-bar` | `bottom-hud-stack` | на экране всегда | внутри viewport |
 | `toast-success`, `toast-error` | `success-toast`, `error-toast` | клиринг с циклом; клиринг с отказом бэкенда | внутри viewport; Escape, фокус и клик вне не применяются |
 | `interact-history` | `interact-history-overlay` | после первого выполненного действия | внутри viewport |
 | `edge-tooltip` | `edge-tooltip` | клик по узлу, затем наведение на его линию | внутри viewport |
-| `analytics-panel` | `real-metrics-panel` | кнопка «Analytics» | внутри viewport |
+| `analytics-panel` | `real-metrics-panel` | кнопка «Analytics» в «Admin ▾» (048 S1), затем Escape закрывает меню | внутри viewport |
 | `node-labels`, `event-labels` | `canvas-labels-overlay`, `canvas-floating-labels-overlay` | клик по узлу; событие платежа из потока (не жест пользователя) | кадр; слой растянут на сцену, политик нет |
 | `loading-message`, `error-message` | `loading-message-overlay`, `error-message-overlay` | загрузка страницы, пока сцена не ответила; сцена не загрузилась | внутри viewport |
 | `dev-perf-overlay` | `dev-perf-overlay` | адрес с `?perf=1` | внутри viewport |

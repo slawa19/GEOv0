@@ -33,20 +33,22 @@ Since 043 (S1-S3, 2026-10-16/17) the UI is **one screen**: there is no Sandbox /
 
 **Opening.** The source is the **server** by default (`apiMode` falls back to `real` when neither `?mode=` nor `VITE_API_MODE` says otherwise, `useSimulatorApp.ts` `apiMode`). When the opening is over the screen makes **one** attempt per page load to start a live run with the existing `startRun` (the stored intensity, 30 % when none; not paused). A live run found on the server - paused included - is left as it is; a run the person stops afterwards is not restarted (`useInteractAutoBootstrapRun.ts`, `autostartDecision`). If the server refuses because its limit of active runs is reached (409 `conflict_kind: global_active_limit`), the error line is a readable text, not an HTTP string: "Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова - Start в «Подробнее»." (`utils/runErrorClassification.ts`, `startRunErrorText`). The page language is Russian (`index.html` `<html lang="ru">`); the texts that follow the interface language (`uiLocale()`) are Russian accordingly, the English strings of `i18n/interactStrings.ts` are unchanged.
 
-**First view** (the "Подробнее" toggle off, the default): the first row of the TopBar - network name and state, the "Поток" button, the three actions (Send Payment, Manage Trustline, Run Clearing) and "Подробнее"; the BottomBar - the legend, the total debt and "Reset view"; one onboarding hint (once dismissed it does not come back, `geo.sim.v2.onboarding.dismissed`). Everything else is **not rendered** until "Подробнее" is on.
+**First view** (the "Подробнее" toggle off, the default): the first row of the TopBar - network name and state, the "Поток" button, the three actions (Send Payment, Manage Trustline, Run Clearing) and "Подробнее"; the BottomBar - the legend, the total debt and "Reset view"; one onboarding hint (once dismissed it does not come back, `geo.sim.v2.onboarding.dismissed`); the capacity-stall alert while payments stall (`consec_all_rejected_ticks` at the threshold; on the first view since 048 S1). Everything else is **not rendered** until "Подробнее" is on.
 
 **"Подробнее"** (one flag, remembered in the browser, `geo.sim.v2.details.open`) opens the service rows:
 
-- TopBar: Theme, scenario and run controls (Start / Pause / Resume / Stop, Intensity + Apply; server source only), the SSE / Run / TX badges, Admin, the full system metrics;
-- BottomBar: EQ, Layout, **"Источник"**, Scene (offline snapshot only), Quality, Labels, Refresh, Analytics and Artifacts (server source only) and "Inspect graph".
+- TopBar: Theme and language, scenario and run controls (Start / Stop, Intensity + Apply; server source only), the TX badge, Admin (an admin token), the full system metrics;
+- BottomBar: EQ (the code as text when there is one equivalent, a select when there are more), Layout, Labels and "Inspect graph".
 
-**Pause on a manual act.** Any explicit manual act pauses the run (`POST .../pause`): starting an action (Send Payment, Manage Trustline, Run Clearing, a node card, a line's popup), choosing a participant or a line, choosing a sender, recipient, creditor or debtor (`useSimulatorApp.ts`, the entries wrapped around `interactMode`, `noteManualAction`). Confirm, cancel, Escape and a closed panel do **not** resume. The flow comes back only by an explicit act: the "Поток" button (⏸ pauses a living run, ▶ resumes a paused one) or Resume under "Подробнее". A selection made by loading (a `?focus=` deep link) is not an act.
+Since 048 S1 (2026-10-18) the screen has three addressees on the existing entries: the **visitor** (the first view and "Подробнее", above); the **administrator** (an admin token) - "Admin ▾" holds the runs, the run files ("Artifacts"), the refresh of the scenario catalogue (↻) and the toggle of the analytics dock (the dock is neither shown nor polled without the token); the **developer** - `?debug=1` adds "Источник", Quality, the SSE badge and, on the offline source, the playlist workbench to "Подробнее" (`useSimulatorApp.ts`, `isDebugUi`). Removed in 048 S1: the Scene selector with `?scene=` (it had no reader - the offline snapshot is loaded by the equivalent alone), the "Run <state>" badge, Pause / Resume of the service row ("Поток" is the one path), the TEST MODE badge, the "Clean" badge, Refresh of the snapshot (the recovery pipeline keeps `refreshSnapshot`) and the raw `Status` row of the line tooltip.
 
-**"Источник"** (under "Подробнее") switches between "Сервер" (a live run) and "Снимок без сервера" (the offline snapshot on static fixtures; no run, no server requests). It replaces the whole data pipeline, so it reloads the page with `?mode=` - the one switch of this screen that still navigates (`SimulatorAppRoot.vue`, `setSource`). Entering a manual action never navigates. The offline snapshot is also reached with `?mode=fixtures` or `VITE_API_MODE=fixtures`.
+**Pause on a manual act.** Any explicit manual act pauses the run (`POST .../pause`): starting an action (Send Payment, Manage Trustline, Run Clearing, a node card, a line's popup), choosing a participant or a line, choosing a sender, recipient, creditor or debtor (`useSimulatorApp.ts`, the entries wrapped around `interactMode`, `noteManualAction`). Confirm, cancel, Escape and a closed panel do **not** resume. The flow comes back only by an explicit act: the "Поток" button (⏸ pauses a living run, ▶ resumes a paused one; Resume under "Подробнее" was removed in 048 S1). A selection made by loading (a `?focus=` deep link) is not an act.
+
+**"Источник"** (under "Подробнее", with `?debug=1` since 048 S1) switches between "Сервер" (a live run) and "Снимок без сервера" (the offline snapshot on static fixtures; no run, no server requests). It replaces the whole data pipeline, so it reloads the page with `?mode=` - the one switch of this screen that still navigates (`SimulatorAppRoot.vue`, `setSource`). Entering a manual action never navigates. The offline snapshot is also reached with `?mode=fixtures` or `VITE_API_MODE=fixtures`; `scripts/run_simulator_ui.ps1 -Mode fixtures` prints `?mode=fixtures&debug=1`. The switch carries `?debug=1` into the new address.
 
 Notes:
 - The backend run mode `fixtures` was removed on 2026-10-16 (programme 042): a run is always `real`; "offline" is a client-only choice.
-- The Dev Tools shell, Demo UI (`?ui=demo`), FX Debug buttons, the `VITE_ALLOW_DEMO_UI` gate, the `geo.sim.v2.devtools.open.*` and `fxDebugRun` keys and the `?mode=demo` alias were removed in 043 S3 (2026-10-17). `?debug=1` is accepted in a URL but nothing reads it any more; the source switch drops `?ui=` and `?debug=`. The "Single Tx" / "Run Clearing" debug buttons, `window.__geoSim.runTxOnce` / `runClearingOnce` and the backend actions `tx-once` / `clearing-once` were removed on 2026-10-16 (programme 042): a payment or clearing event is born in the core only.
+- The Dev Tools shell, Demo UI (`?ui=demo`), FX Debug buttons, the `VITE_ALLOW_DEMO_UI` gate, the `geo.sim.v2.devtools.open.*` and `fxDebugRun` keys and the `?mode=demo` alias were removed in 043 S3 (2026-10-17). `?debug=1` had no reader from 043 S3 until 048 S1, which gave it one (above); the source switch drops `?ui=` and keeps `?debug=`. The offline effects workbench below is reached with `?debug=1` since 048 S1. The "Single Tx" / "Run Clearing" debug buttons, `window.__geoSim.runTxOnce` / `runClearingOnce` and the backend actions `tx-once` / `clearing-once` were removed on 2026-10-16 (programme 042): a payment or clearing event is born in the core only.
 
 ### Test and automation switches (glossary)
 
@@ -54,28 +56,16 @@ These are not end-user settings - they keep automation stable.
 
 - **DEV** (`import.meta.env.DEV`): running via Vite dev server (`npm run dev`); dev-only warnings and the `window.__geoSim` hook.
 - **WebDriver** (`navigator.webdriver=true`): the browser is controlled by automation (Playwright/Selenium).
-- **Test mode** (`VITE_TEST_MODE=1`): enables deterministic behavior for visual/screenshot tests (e.g., FX spawning is suppressed) and shows the `TEST MODE` badge under "Подробнее".
+- **Test mode** (`VITE_TEST_MODE=1`): enables deterministic behavior for visual/screenshot tests (e.g., FX spawning is suppressed). Its `TEST MODE` badge was removed in 048 S1.
 - **E2E screenshots**: effectively "test mode + WebDriver". In this case the app forces the fixtures/offline pipeline for deterministic snapshots.
 
 Dev hook:
 
 - In DEV builds only, the UI installs `window.__geoSim` (see `src/dev/geoSimDevHook.ts`) to help debugging and E2E harnesses. It is not available in production builds.
 
-## Scenes (A–E)
+## Deep links
 
-The **Scene** selector (A–E) switches the demo into predefined, repeatable states.
-This is used both for manual QA and Playwright screenshot tests.
-
-- **A — Overview**: baseline overall graph view
-- **B — Focus**: selection/focus behavior
-- **C — Statuses**: status/color mapping coverage
-- **D — Tx burst**: single deterministic transaction animation
-- **E — Clearing**: deterministic clearing step animation
-
-Tip: you can deep-link for deterministic repro:
-
-- `/?scene=A`
-- `/?scene=D&layout=admin-force`
+The A–E "scenes" are gone (048 S1, 2026-10-18): the Scene selector and `?scene=` had no reader - the offline snapshot is loaded by the equivalent alone - and an old link with `?scene=` opens the same screen. The screenshot stand `e2e/scenes.spec.ts` keeps its file names (`scene-A.png` ...). Deep links that are read: `?focus=<node id>`, `?layout=<value>`, `?eq=<code>` (not in test mode), `?theme=`, `?lang=`, `?debug=1`, `?perf=1`.
 
 Supported `layout` values: `admin-force`, `community-clusters`, `balance-split`, `type-split`, `status-split`.
 
@@ -101,7 +91,7 @@ $env:VITE_DEMO_FIXTURES='1'
 npm run dev
 ```
 
-When `VITE_TEST_MODE=1` and you are not running under Playwright, the HUD shows a small `TEST MODE` pill.
+`VITE_TEST_MODE=1` no longer shows a `TEST MODE` pill (removed in 048 S1); the flag still shapes the behaviour above.
 
 ---
 
