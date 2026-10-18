@@ -260,6 +260,8 @@ export const ru = {
   actionReason: {
     equivalent_inactive: 'Эквивалент остановлен — операции с ним недоступны.',
     equivalent_integrity_hold: 'Эквивалент на проверке целостности — операции приостановлены.',
+    // No pronoun for a participant (a participant may be an organisation): «с этим участником», not «с ним».
+    participant_suspended: 'Участник приостановлен — операции с этим участником недоступны.',
   },
 
   history: {

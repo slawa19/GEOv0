@@ -293,6 +293,8 @@ export const en = {
   actionReason: {
     equivalent_inactive: 'The equivalent is stopped — operations are unavailable.',
     equivalent_integrity_hold: 'The equivalent is under an integrity check — operations are on hold.',
+    /** 046 wave 1 (044 stage 2, PR #299): a trust line create refused because a party is suspended (`details.participants`). */
+    participant_suspended: 'The participant is suspended — operations with this participant are unavailable.',
   },
 
   /** Toasts and history lines of the actions (`useInteractMode.ts`). Amounts arrive as decimal strings. */

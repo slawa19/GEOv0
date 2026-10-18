@@ -226,9 +226,16 @@ const stopSummaryRaw = computed(() => {
 /**
  * BACKLOG 043-3 (046 wave 1): the scenario select changed the choice under a live run while the run went on - nothing
  * happened. While a run is live (`isRunActive`: running, paused, created, stopping, or a run whose status is not read
- * yet) the select is disabled and a line beside it says that the run has to be stopped first; Stop is in this row.
+ * yet) the select is disabled and says why - in its `title` (a pointer) and in its accessible description (a screen
+ * reader); Stop is beside it. Not as a visible line: a line of its own made the service row one line taller for as
+ * long as a run lives, which is most of the time (the stand's `empty-scene` counter-check lost a node to it).
  */
 const scenarioLocked = computed(() => isRunActive.value)
+const scenarioSelectTitle = computed(() => {
+  if (!scenarioLocked.value) return selectedScenarioText.value || undefined
+  const why = t('topBar.scenarioLocked')
+  return selectedScenarioText.value ? `${selectedScenarioText.value} — ${why}` : why
+})
 
 /** 046 wave 1: the error line is a start the global limit of runs refused - "Try again" starts again (as Start does). */
 const startRetryable = computed(() => !!ctx.startRetryable?.value)
@@ -433,7 +440,7 @@ function onApplyIntensity() {
             <select
               class="ds-select tb-scenario-select"
               :value="ctx.selectedScenarioId.value"
-              :title="selectedScenarioText || undefined"
+              :title="scenarioSelectTitle"
               :disabled="scenarioLocked"
               :aria-describedby="scenarioLocked ? 'tb-scenario-locked' : undefined"
               data-testid="scenario-select"
@@ -454,7 +461,7 @@ function onApplyIntensity() {
             >
               ↻
             </button>
-            <span v-if="scenarioLocked" id="tb-scenario-locked" class="ds-label tb-scenario-locked" data-testid="scenario-locked">{{ t('topBar.scenarioLocked') }}</span>
+            <span v-if="scenarioLocked" id="tb-scenario-locked" class="tb-visually-hidden" data-testid="scenario-locked">{{ t('topBar.scenarioLocked') }}</span>
 
             <button
               v-if="!isRunActive"
@@ -823,9 +830,17 @@ function onApplyIntensity() {
   height: var(--ds-tb-control-h);
 }
 
-/* BACKLOG 043-3: the reason the scenario select is disabled; it may wrap, never pushes the row past the screen. */
-.tb-scenario-locked {
-  white-space: normal;
+/* BACKLOG 043-3: the reason the scenario select is disabled - read by a screen reader (`aria-describedby`), not drawn. */
+.tb-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tb-retry {

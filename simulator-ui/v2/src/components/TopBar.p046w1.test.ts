@@ -3,8 +3,8 @@
  *
  *   1. the language switch sits in the service row right after the theme row (behind "Подробнее", not on the first
  *      view); choosing a language changes `<html lang>` and the texts of this wave without a remount, and is stored;
- *   2. BACKLOG 043-3: under a live run the scenario select is disabled and a line says the run has to be stopped first;
- *      without a live run it is enabled and the line is absent;
+ *   2. BACKLOG 043-3: under a live run the scenario select is disabled and says the run has to be stopped first (its
+ *      title and its accessible description); without a live run it is enabled and says nothing of the kind;
  *   3. a start refused by the global limit of runs shows "Try again" in the error line, which starts again (start-run);
  *      any other error line offers nothing;
  *   4. the stop reason of a stopped run is a text of the closed set in the language of the interface, an unknown one
@@ -109,6 +109,9 @@ describe('046 wave 1 (2) - BACKLOG 043-3: the scenario cannot be changed under a
       const line = host.querySelector('[data-testid="scenario-locked"]')
       expect(text(line)).toBe('Stop the run to choose another scenario.')
       expect(select.getAttribute('aria-describedby')).toBe(line!.id)
+      // Said to a pointer too: the select's title is its full option text and the reason.
+      expect(select.getAttribute('title')).toBe('Riverside town (sc-1) — Stop the run to choose another scenario.')
+      expect(line!.classList.contains('tb-visually-hidden'), 'not a visible line: the row does not grow under a live run').toBe(true)
       setUiLocale('ru')
       await nextTick()
       expect(text(host.querySelector('[data-testid="scenario-locked"]'))).toBe('Остановите прогон, чтобы выбрать другой сценарий.')
@@ -129,6 +132,7 @@ describe('046 wave 1 (2) - BACKLOG 043-3: the scenario cannot be changed under a
       expect(select.disabled).toBe(false)
       expect(select.hasAttribute('aria-describedby')).toBe(false)
       expect(host.querySelector('[data-testid="scenario-locked"]')).toBeNull()
+      expect(select.getAttribute('title'), 'the full option text only').toBe('Riverside town (sc-1)')
       done()
     }
   })

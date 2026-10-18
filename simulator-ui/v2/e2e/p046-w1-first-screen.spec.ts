@@ -5,8 +5,8 @@
  *
  *   1. the language switch behind "Подробнее", right after the theme: choosing a language rewrites `<html lang>` and
  *      the page's texts without a reload, stores the choice, and the stored choice is what the next load shows;
- *   2. BACKLOG 043-3: under a live run the scenario select is disabled and the line beside it says why; the service row
- *      with that line and the switch has no control over another or off the screen;
+ *   2. BACKLOG 043-3: under a live run the scenario select is disabled and says why (title, accessible description - no
+ *      drawn line); the service row with the switch has no control over another or off the screen;
  *   3. the 409 of the global limit of runs: the error line in the interface language, with the server's number of
  *      places, and "Try again", which starts the run;
  *   4. a stopped run says why, in the interface language (a known reason, and an unknown one with its value);
@@ -130,6 +130,9 @@ for (const theme of THEMES) {
       const line = page.locator('[data-testid="scenario-locked"]')
       await expect(line).toHaveText(t('topBar.scenarioLocked', undefined, lang))
       await expect(select).toHaveAttribute('aria-describedby', 'tb-scenario-locked')
+      await expect(select).toHaveAttribute('title', new RegExp(`${t('topBar.scenarioLocked', undefined, lang).replace(/[.]/g, '\\.')}$`))
+      const box = await line.boundingBox()
+      expect(box && box.width <= 1 && box.height <= 1, 'the reason is not drawn as a line of its own (the row does not grow)').toBe(true)
       await expect(page.locator('[data-testid="language-switch"]')).toBeVisible()
       for (const vp of [{ width: 1366, height: 768 }, { width: 1280, height: 720 }]) {
         await page.setViewportSize(vp)

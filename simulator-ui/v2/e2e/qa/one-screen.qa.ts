@@ -13,6 +13,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
+import { t } from '../../src/i18n/t'
 import { RING, boot, fxCounts, mockLiveRun, pushEvent, ringSnapshot, screenNodes, txUpdated, type LiveRunLog } from './stand.js'
 
 const STATE = '[data-testid="network-state"]'
@@ -121,8 +122,12 @@ test('(b) a start refused by the global limit of runs: a Russian line from the r
   })
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   expect(await page.evaluate(() => document.documentElement.lang), 'the language the page declares (?lang=ru, written by i18n/locale.ts)').toBe('ru')
-  await expect(page.locator('[role="alert"][aria-label="Error"]'), 'the refusal in the interface language')
-    .toContainText('Демо уже кто-то смотрит на этом сервере', { timeout: 15_000 })
+  // 046 wave 1: the line's text and label come from the dictionary (the server's number of places: 1 here), and the
+  // line offers "Повторить"; it is found by its test id (its accessible name is in the interface language).
+  const line = page.locator('[role="alert"][data-testid="top-error"]')
+  await expect(line, 'the refusal in the interface language').toContainText(t('runStart.limitOne', undefined, 'ru'), { timeout: 15_000 })
+  await expect(line).toHaveAttribute('aria-label', t('topBar.errorAria', undefined, 'ru'))
+  await expect(line.getByTestId('start-retry')).toHaveText(t('topBar.retry', undefined, 'ru'))
   expect(creates, 'one attempt').toBe(1)
   // No run: the three actions are there and disabled (B4), so no raw "No active run_id" can be reached.
   for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) await expect(page.getByTestId(id), `${id} without a run`).toBeDisabled()
