@@ -389,7 +389,9 @@ defineExpose({
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="participantsSorted.length && isPickFrom" class="ds-controls__row ds-controls__row--compact">
+      <!-- 045 S3 (BACKLOG 045-1): From stays on the create step (decision 3: From -> To -> Limit); a change goes through
+           `setTrustlineFromPid` of the interact state machine. -->
+      <div v-if="participantsSorted.length && (isPickFrom || isCreate)" class="ds-controls__row ds-controls__row--compact">
         <label id="tl-from-label" class="ds-label" for="tl-from__trigger">From</label>
           <OverlaySelect
           id="tl-from"

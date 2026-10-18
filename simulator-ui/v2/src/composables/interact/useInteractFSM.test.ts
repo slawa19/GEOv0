@@ -133,3 +133,41 @@ describe('useInteractFSM', () => {
     expect(h.state.toPid).toBeNull()
   })
 })
+
+// 045 S3 (BACKLOG 045-1): the create step of a trust line shows From, and changing it goes through `setTrustlineFromPid`.
+describe('useInteractFSM - From on the create step of a trust line (045-1)', () => {
+  function toCreate(lines: Array<[string, string]> = []) {
+    const fsm = useInteractFSM({
+      snapshot: ref<GraphSnapshot | null>(null),
+      findActiveTrustline: (from: string | null, to: string | null) => (lines.some(([f, t]) => f === from && t === to) ? ({ from_pid: from, to_pid: to } as never) : null),
+    })
+    fsm.startTrustlineFlowWithFrom('alice')
+    fsm.setTrustlineToPid('carol')
+    expect(fsm.state.phase, 'precondition: no line alice -> carol, the create step').toBe('confirm-trustline-create')
+    return fsm
+  }
+
+  it('another sender with no line to the recipient stays on the create step, for the new pair', () => {
+    const fsm = toCreate()
+    fsm.setTrustlineFromPid('bob')
+    expect([fsm.state.phase, fsm.state.fromPid, fsm.state.toPid]).toEqual(['confirm-trustline-create', 'bob', 'carol'])
+  })
+
+  it('a sender who already has a line to the recipient moves to editing that line', () => {
+    const fsm = toCreate([['bob', 'carol']])
+    fsm.setTrustlineFromPid('bob')
+    expect([fsm.state.phase, fsm.state.fromPid, fsm.state.toPid]).toEqual(['editing-trustline', 'bob', 'carol'])
+  })
+
+  it('the recipient chosen as the sender never leaves a line from a participant to itself on the create step', () => {
+    const fsm = toCreate()
+    fsm.setTrustlineFromPid('carol')
+    expect([fsm.state.phase, fsm.state.fromPid, fsm.state.toPid]).toEqual(['picking-trustline-to', 'carol', null])
+  })
+
+  it('clearing the sender goes back to choosing the sender', () => {
+    const fsm = toCreate()
+    fsm.setTrustlineFromPid(null)
+    expect([fsm.state.phase, fsm.state.fromPid, fsm.state.toPid]).toEqual(['picking-trustline-from', null, null])
+  })
+})
