@@ -107,7 +107,8 @@ test('(d) entering the manual flow is zero navigations of the document', async (
 test('(b) a start refused by the global limit of runs: a Russian line from the real page language, and no action without a run', async ({ page }) => {
   let creates = 0
   await boot(page, {
-    snapshot: ringSnapshot(), clock: false, firstVisit: true, awaitScene: false,
+    // 046 wave 0: the language is chosen explicitly (`?lang=ru`), not left to the browser's.
+    snapshot: ringSnapshot(), clock: false, firstVisit: true, awaitScene: false, query: 'lang=ru',
     beforeLoad: async (p) => {
       await p.route(/\/simulator\/runs$/i, (r) => {
         if (r.request().method() !== 'POST') return r.fallback()
@@ -119,7 +120,7 @@ test('(b) a start refused by the global limit of runs: a Russian line from the r
     },
   })
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
-  expect(await page.evaluate(() => document.documentElement.lang), 'the language the page declares (index.html)').toBe('ru')
+  expect(await page.evaluate(() => document.documentElement.lang), 'the language the page declares (?lang=ru, written by i18n/locale.ts)').toBe('ru')
   await expect(page.locator('[role="alert"][aria-label="Error"]'), 'the refusal in the interface language')
     .toContainText('Демо уже кто-то смотрит на этом сервере', { timeout: 15_000 })
   expect(creates, 'one attempt').toBe(1)
