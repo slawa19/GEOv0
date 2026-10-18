@@ -280,6 +280,8 @@ export const en = {
     ENGINE_TIMEOUT: 'The payment timed out.',
     TIMEOUT: 'No answer from the server in time.',
     INVALID_JSON: 'The server answer could not be read.',
+    /** 046 fix-delta F2: `fetch` rejected (a `TypeError`) - no answer reached the client. */
+    NETWORK: 'No connection to the server — try again.',
     noRun: 'No active run_id',
     unknown: 'The action failed ({code}).',
   },
