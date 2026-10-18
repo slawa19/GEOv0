@@ -207,8 +207,10 @@ export const en = {
     total: 'Total over cycles',
     totalNote: 'Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.',
     cycle: 'Cycle {n} of {total}: {amount} {unit}',
-    // Advisor, round 1 (2026-10-18): the arrow form, names undeclined (was "{debtor}’s debt to {creditor} reduced by ...").
-    edgeLine: '{debtor} → {creditor}: debt reduced by {amount} {unit}',
+    // Advisor, 2026-10-18: the arrow form, names undeclined, and ONE arrow meaning across the interface - creditor -> debtor,
+    // the protocol's from -> to, as the line window's title and the graph's edge (was "{debtor}’s debt to {creditor} ...";
+    // round 1 had it debtor-first, corrected the same day).
+    edgeLine: '{creditor} → {debtor}: debt reduced by {amount} {unit}',
     // Codex §15 round 1: a clearing refused because of the equivalent's state (`CONFLICT` + `details.reason`).
     equivalentInactive: 'The equivalent is stopped — clearing is unavailable.',
     equivalentIntegrityHold: 'The equivalent is under an integrity check — operations are on hold.',

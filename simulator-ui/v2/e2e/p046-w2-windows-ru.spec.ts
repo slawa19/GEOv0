@@ -351,3 +351,27 @@ test('046 W2 frames: the result of a clearing, both themes and languages (P046_F
     }
   }
 })
+
+// 046 (advisor, 2026-10-18): the sum of a clearing result keeps its figure and unit on one line - in hud the label
+// «Погашено циклов: 2 · Сумма по циклам: 10.00 UAH» wraps, and before the no-break space the unit went alone to the next line.
+for (const theme of THEMES) {
+  test(`046 W2 [${theme}] ru: the sum of a clearing result keeps "10.00 UAH" on one line`, async ({ page }, info) => {
+    await open(page, theme, 'ru')
+    await page.locator('[data-testid="actionbar-clearing"]').click()
+    await page.locator('[data-testid="clearing-confirm"]').click()
+    const amount = page.locator('[data-testid="clearing-total-amount"]')
+    await expect(amount).toBeVisible()
+    await settleShell(page, 'clearing-panel')
+    const m = await amount.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const label = el.closest('.ds-label')!.getBoundingClientRect()
+      const lh = Number.parseFloat(getComputedStyle(el.closest('.ds-label')!).lineHeight) || 1
+      return { boxes: el.getClientRects().length, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
+        labelLines: Math.round(label.height / lh), text: (el.textContent ?? '').replace(/\s+/g, ' ') }
+    })
+    console.log(`P046W2 clearing-sum ${theme} ${JSON.stringify(m)}`)
+    info.annotations.push({ type: 'P046W2-clearing-sum', description: JSON.stringify(m) })
+    expect(m.text).toBe('10.00 UAH')
+    expect(m.boxes, `the figure and its unit are one line box ${JSON.stringify(m)}`).toBe(1)
+  })
+}

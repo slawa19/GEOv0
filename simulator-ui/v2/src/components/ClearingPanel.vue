@@ -77,6 +77,8 @@ function nameOf(pid: string): string {
 /**
  * An edge of the answer runs CREDITOR -> DEBTOR ("from" is whom the debt is owed to, "to" is who owes). So {from: Alice, to: Bob}
  * is "Bob's debt to Alice reduced": the wire arrow is NOT a payment from Alice to Bob.
+ * 046 (advisor, 2026-10-18): the line reads "Alice → Bob: debt reduced by X" - the arrow means creditor -> debtor here as in
+ * the line window's title and on the graph; `creditor` is the edge's `from`, `debtor` its `to`.
  */
 function edgeLine(edge: { from: string; to: string }, cycle: SimulatorActionClearingCycle): string {
   return t('clearing.edgeLine', {
@@ -170,7 +172,7 @@ const closeDisabled = computed(() => waiting.value)
           <!-- 045 S2: the result as one line; what the total adds up is the `title` of the total. -->
           <div class="ds-label">
             <span>{{ t('clearing.cycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span></span>{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="clearing-total" :title="t('clearing.totalNote')">
-              {{ t('clearing.total') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
+              {{ t('clearing.total') }}: <span class="ds-mono" data-testid="clearing-total-amount">{{ last.total_cleared_amount }}&nbsp;{{ resultUnit }}</span>
             </span>
           </div>
 

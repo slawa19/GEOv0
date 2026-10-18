@@ -302,9 +302,9 @@ const CASES: Case[] = [
       mountWith(ClearingPanel, { phase: 'clearing-preview', state: state('clearing-preview', null, null, null, CLEARING), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
       await settle()
     },
-    en: ['Clearing result', 'Cycles cleared: 2', 'Total over cycles', 'Cycle 1 of 2: 7.00 UAH', 'Борис → Алиса: debt reduced by 7.00 UAH', 'Close'],
+    en: ['Clearing result', 'Cycles cleared: 2', 'Total over cycles', 'Cycle 1 of 2: 7.00 UAH', 'Алиса → Борис: debt reduced by 7.00 UAH', 'Close'],
     ru: [r('clearing.resultTitle'), `${r('clearing.cycles')}: 2`, r('clearing.total'), r('clearing.cycle', { n: 1, total: 2, amount: '7.00', unit: 'UAH' }),
-      'Борис → Алиса: долг уменьшен на 7.00 UAH', r('common.close')],
+      'Алиса → Борис: долг уменьшен на 7.00 UAH', r('common.close')],
   },
   {
     name: 'clearing: nothing to clear',

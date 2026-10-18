@@ -189,7 +189,7 @@ export const ru = {
     total: 'Сумма по циклам',
     totalNote: 'Каждый долг цикла уменьшен на сумму этого цикла; здесь сложены суммы циклов, а не долги.',
     cycle: 'Цикл {n} из {total}: {amount} {unit}',
-    edgeLine: '{debtor} → {creditor}: долг уменьшен на {amount} {unit}',
+    edgeLine: '{creditor} → {debtor}: долг уменьшен на {amount} {unit}',
     equivalentInactive: 'Эквивалент остановлен — клиринг недоступен.',
     equivalentIntegrityHold: 'Эквивалент на проверке целостности — операции приостановлены.',
     nothing: 'Ничего не погашено: замкнутых цепочек долгов не найдено.',

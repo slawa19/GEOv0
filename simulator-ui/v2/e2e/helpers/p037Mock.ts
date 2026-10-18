@@ -108,7 +108,7 @@ export async function mockApp(
     }
     // The edges of the answer run creditor -> debtor: { from: alice, to: bob } = "Bob owes Alice".
     // `many` - a result longer than a phone screen. Five cycles since 2026-10-18 (046 round 1): the arrow form of a line
-    // ("x02 → x01: debt reduced by 1.00 UAH") is shorter than the old sentence, and three (and four: body 545 of 599 px) stopped overflowing 375x667.
+    // ("x01 → x02: debt reduced by 1.00 UAH") is shorter than the old sentence, and three (and four: body 545 of 599 px) stopped overflowing 375x667.
     const cycles = kind === 'none' ? [] : kind === 'many'
       ? [1, 2, 3, 4, 5].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
       : [

@@ -639,7 +639,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await activateButton(page, 'Confirm')
     // 037 C: the result stays until the user closes it (it used to be a "preview" that left on a timer).
     await expect(page.getByTestId('clearing-panel')).toContainText('Clearing result')
-    // 046 round 1 (advisor, 2026-10-18): "{debtor} → {creditor}: debt reduced by ..." (was "{debtor}’s debt to {creditor} ...").
+    // 046 (advisor, 2026-10-18): "{creditor} → {debtor}: debt reduced by ..." (was "{debtor}’s debt to {creditor} ...").
     await expect(page.getByTestId('clearing-panel')).toContainText('debt reduced by')
     await expect(page.getByLabel('Success notification')).toContainText('Clearing done: 1/1 cycles')
     expect(mock.clearingRequests).toHaveLength(1)
