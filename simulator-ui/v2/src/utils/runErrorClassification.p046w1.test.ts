@@ -7,7 +7,21 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '../api/http'
-import { isGlobalLimitRefusal, noScenarioText, startRetryOffered, startRunErrorText } from './runErrorClassification'
+import {
+  isGlobalLimitRefusal,
+  NO_SCENARIO_LINE,
+  noScenarioText,
+  rawRunErrorLine,
+  renderRunErrorLine,
+  runErrorLine,
+  runStatusErrorLine,
+  startRetryOffered,
+  startRunErrorLine,
+  startRunErrorText,
+  writeRunErrorLine,
+  ZERO_INTENSITY_LINE,
+  type RunErrorLine,
+} from './runErrorClassification'
 
 const answer = (status: number, body: unknown) =>
   new ApiError(`HTTP ${status} for /simulator/runs`, { status, bodyText: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -62,33 +76,50 @@ describe('046 wave 1 - the text of the refusal names the server\'s number of pla
 })
 
 describe('046 wave 1 - "Try again" stands only beside the refusal it would fix', () => {
-  it('offered while the line is the refused text; withdrawn when another error replaces it, or nothing was refused', () => {
-    const refused = 'All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.'
+  it('offered while the line IS the refused line (the same value); never by an equal text', () => {
+    const refused = startRunErrorLine(limit({ max_active_runs: 10 }))!
     expect(startRetryOffered(refused, refused)).toBe(true)
-    expect(startRetryOffered('SSE: connection lost', refused), 'a later error replaced the line').toBe(false)
-    expect(startRetryOffered('', refused), 'the line was cleared').toBe(false)
-    expect(startRetryOffered(refused, ''), 'nothing refusable recorded').toBe(false)
-    expect(startRetryOffered('', ''), 'no line, nothing recorded: no offer').toBe(false)
+    // The same text made again is another value: §15 Codex fix-delta P3 - identity is never recovered from the text.
+    const sameText = startRunErrorLine(limit({ max_active_runs: 10 }))!
+    expect(renderRunErrorLine(sameText, 'en')).toBe(renderRunErrorLine(refused, 'en'))
+    expect(startRetryOffered(sameText, refused), 'an equal text is not the refusal').toBe(false)
+    expect(startRetryOffered(rawRunErrorLine('SSE: connection lost'), refused), 'a later error replaced the line').toBe(false)
+    expect(startRetryOffered(null, refused), 'the line was cleared').toBe(false)
+    expect(startRetryOffered(refused, null), 'nothing refusable recorded').toBe(false)
     expect(startRetryOffered(null, undefined)).toBe(false)
   })
 })
 
-describe('046 wave 1 (§15 Codex P2) - every line of the error line made from the dictionary can be remade in the other language', () => {
-  it('no scenario, the clearing step refusal of a run, the idle stop, tempo 0, the limit refusal', async () => {
-    const { relocalizeLine } = await import('../i18n/localizedLine')
-    const { idleStopText, runErrorText, zeroIntensityText } = await import('./runErrorClassification')
-    const makers: Array<(l: 'en' | 'ru') => string> = [
-      (l) => noScenarioText(l),
-      (l) => runErrorText({ code: 'CLEARING_REFUSED', message: 'refused', at: '2026-10-18T00:00:00Z' }, l),
-      (l) => idleStopText(l),
-      (l) => zeroIntensityText(l),
-      (l) => startRunErrorText(limit({ max_active_runs: 4 }), raw, l),
+describe('046 wave 1 (§15 Codex) - every line of the run error line is a value rendered in either language', () => {
+  it('no scenario, the clearing step refusal of a run, the idle stop, tempo 0, the limit refusal (count, one, none)', () => {
+    const lines: RunErrorLine[] = [
+      NO_SCENARIO_LINE,
+      runErrorLine({ code: 'CLEARING_REFUSED', message: 'refused', at: '2026-10-18T00:00:00Z' }),
+      runStatusErrorLine({ state: 'stopped', stop_reason: 'idle_no_subscribers' }, () => false)!,
+      ZERO_INTENSITY_LINE,
+      startRunErrorLine(limit({ max_active_runs: 4 }))!,
+      startRunErrorLine(limit({ max_active_runs: 1 }))!,
+      startRunErrorLine(limit({}))!,
     ]
-    for (const make of makers) {
-      expect(relocalizeLine(make('ru'), 'en')).toBe(make('en'))
-      expect(relocalizeLine(make('en'), 'ru')).toBe(make('ru'))
+    for (const line of lines) {
+      expect(line.kind, JSON.stringify(line)).not.toBe('raw')
+      const en = renderRunErrorLine(line, 'en')
+      const ru = renderRunErrorLine(line, 'ru')
+      expect(en, JSON.stringify(line)).not.toMatch(/[Ѐ-ӿ]/)
+      expect(ru, JSON.stringify(line)).toMatch(/[Ѐ-ӿ]/)
     }
-    // Counter-check: a run error that is the server's own `CODE: message` is not a dictionary line.
-    expect(relocalizeLine(runErrorText({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' }, 'ru'), 'en')).toBeNull()
+    expect(renderRunErrorLine(startRunErrorLine(limit({ max_active_runs: 4 }))!, 'ru')).toBe('Сейчас заняты все 4 места: демо смотрят 4 человека. Попробуйте через минуту.')
+    // Counter-check: the server's own `CODE: message` is a raw line - the same text in both languages.
+    const raw = runErrorLine({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' })
+    expect(raw).toEqual({ kind: 'raw', text: 'PAYMENT_TIMEOUT: timed out' })
+    expect(renderRunErrorLine(raw, 'ru')).toBe(renderRunErrorLine(raw, 'en'))
+  })
+
+  it('writeRunErrorLine writes the text of the language, then the value', () => {
+    const holder: { lastError: string; lastErrorLine?: RunErrorLine | null } = { lastError: 'old' }
+    writeRunErrorLine(holder, ZERO_INTENSITY_LINE, 'ru')
+    expect(holder).toEqual({ lastError: 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.', lastErrorLine: ZERO_INTENSITY_LINE })
+    writeRunErrorLine(holder, null, 'ru')
+    expect(holder).toEqual({ lastError: '', lastErrorLine: null })
   })
 })

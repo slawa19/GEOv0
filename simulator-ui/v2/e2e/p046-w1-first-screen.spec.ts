@@ -144,6 +144,22 @@ for (const theme of THEMES) {
         expect(boxes.length, 'anti-vacuum: the row has its controls').toBeGreaterThan(8)
         expect(boxes.some((b) => b.name.startsWith('select "English') || b.name.startsWith('select "Русский') || b.name.includes('English')), 'the switch is measured').toBe(true)
         expect(problems(boxes, vp.width, vp.height), `${vp.width}x${vp.height}`).toEqual([])
+        // CI run 39143700381 (stand empty-scene, judged 2 < 3): the switch beside the theme widened the left column, the
+        // run controls wrapped one more line with the CI fonts and the row covered a node. The theme and the language
+        // stand one under the other: the left column is no wider than its widest row and no taller than the middle.
+        const cols = await page.evaluate(() => {
+          const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
+          const theme = r('[data-testid="top-details-row"] .tb-theme-row')
+          const lang = r('[data-testid="top-details-row"] [data-testid="language-switch"]')
+          const mode = r('[data-testid="top-details-row"] .tb-mode-row')
+          const center = r('[data-testid="top-details-row"] > .hud-bar__center')
+          const row = r('[data-testid="top-details-row"]')
+          return { themeW: theme.width, langW: lang.width, modeW: mode.width, modeH: mode.height, centerH: center.height, rowH: row.height, langBelow: lang.top >= theme.bottom - 0.5 }
+        })
+        console.log(`P046W1 service-row-columns ${theme} ${lang} ${vp.width}x${vp.height} ${JSON.stringify(cols)}`)
+        expect(cols.langBelow, 'the language stands under the theme').toBe(true)
+        expect(cols.modeW, 'the left column is as wide as its widest row').toBeLessThanOrEqual(Math.max(cols.themeW, cols.langW) + 1)
+        expect(cols.modeH, 'the left column is not the tallest part of the row').toBeLessThanOrEqual(cols.centerH + 1)
       }
       await page.setViewportSize({ width: 1366, height: 768 })
       await frame(page, `${theme}-${lang}-2-scenario-locked`)

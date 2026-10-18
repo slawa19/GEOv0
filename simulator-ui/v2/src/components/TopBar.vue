@@ -826,6 +826,29 @@ function onApplyIntensity() {
   align-items: center;
 }
 
+/*
+  046 wave 1 (CI run 39143700381, stand: empty-scene "SAME source" judged 2 < 3): the language switch beside the theme
+  made the left column of the service row about 180 px wider; the run controls in the middle got that much less, and
+  with the CI fonts the Scenario label wrapped to a line of its own - the row grew by two lines and covered a node.
+  The theme and the language stand one under the other instead: the column is as wide as before the switch (its
+  widest row), and as tall as two controls - not taller than the middle's own two lines. Desktop only; narrow screens
+  wrap as before.
+*/
+@media (min-width: 501px) {
+  .tb-mode-row {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: var(--ds-space-1, 4px);
+  }
+
+  .tb-mode-row > .tb-theme-row,
+  .tb-mode-row > .lang-switch {
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+}
+
 .tb-select-28 {
   height: var(--ds-tb-control-h);
 }

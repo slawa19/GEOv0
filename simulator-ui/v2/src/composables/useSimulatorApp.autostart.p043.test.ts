@@ -22,6 +22,11 @@ import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { keyEdge } from '../utils/edgeKey'
 import { autostartDecision } from './useInteractAutoBootstrapRun'
 import { useSimulatorApp } from './useSimulatorApp'
+import { startRetryOffered } from '../utils/runErrorClassification'
+
+/** 046 wave 1: does the top bar offer "Try again" (the root's `startRetryable`, the same call)? */
+const offered = (app: { real: { lastErrorLine?: unknown; retryableStartLine?: unknown } }) =>
+  startRetryOffered(app.real.lastErrorLine as never, app.real.retryableStartLine as never)
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -228,7 +233,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       // 044 stage 2: the number of places from `details.max_active_runs` (1 here); 046 wave 1: from the dictionary, no pointer
       // to Start under «Подробнее» - the line offers a retry (merge of #299, 2026-10-18).
       expect(app.real.lastError).toBe('Сейчас занято единственное место: демо смотрит 1 человек. Попробуйте через минуту.')
-      expect(app.real.retryableStartError, '046 wave 1: this refusal may be tried again').toBe(app.real.lastError)
+      expect(offered(app), '046 wave 1: this refusal may be tried again').toBe(true)
     } finally {
       document.documentElement.lang = ''
     }
@@ -243,7 +248,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     const app = boot()
     await settle()
     expect(createRun).toHaveBeenCalledTimes(1)
-    expect(app.real.retryableStartError).toBe(app.real.lastError)
+    expect(offered(app)).toBe(true)
     expect(app.real.lastError).not.toBe('')
 
     // A place freed: the retry (the top bar's start-run, the same action as Start) starts the run.
@@ -251,7 +256,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     await settle()
     expect(createRun).toHaveBeenCalledTimes(2)
     expect(app.real.runId).toBe('R_NEW')
-    expect([app.real.lastError, app.real.retryableStartError]).toEqual(['', ''])
+    expect([app.real.lastError, app.real.retryableStartLine, offered(app)]).toEqual(['', null, false])
 
     // A retry that meets another error: that error is on the line and nothing offers a retry of it.
     scope?.stop()
@@ -260,11 +265,11 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     vi.mocked(createRun).mockRejectedValueOnce(conflict('global_active_limit')).mockRejectedValueOnce(new ApiError('HTTP 503 for /simulator/runs', { status: 503 }))
     const again = boot()
     await settle()
-    expect(again.real.retryableStartError).not.toBe('')
+    expect(offered(again)).toBe(true)
     await again.realActions.startRun()
     await settle()
     expect(again.real.lastError).toBe('HTTP 503 for /simulator/runs')
-    expect(again.real.retryableStartError).toBe('')
+    expect([again.real.retryableStartLine, offered(again)]).toEqual([null, false])
   })
 
   // §15 Codex P2 (2026-10-18): the refusal was stored translated - a switch left it in the old language beside a label
@@ -283,17 +288,48 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       setUiLocale('en')
       await settle()
       expect(app.real.lastError).toBe('All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.')
-      expect(app.real.retryableStartError, 'the offer follows the line').toBe(app.real.lastError)
+      expect(offered(app), 'the offer follows the line').toBe(true)
       setUiLocale('ru')
       await settle()
       expect(app.real.lastError).toBe('Сейчас заняты все 10 мест: демо смотрят 10 человек. Попробуйте через минуту.')
-      expect(app.real.retryableStartError).toBe(app.real.lastError)
+      expect(offered(app)).toBe(true)
       // Counter-check: a line no dictionary made (a raw transport text) is left as it is by a switch.
       app.real.lastError = 'HTTP 503 for /simulator/runs'
+      expect([app.real.lastErrorLine, offered(app)], 'a text written alone has no value: no stale line, no offer').toEqual([null, false])
       setUiLocale('en')
       await settle()
       expect(app.real.lastError).toBe('HTTP 503 for /simulator/runs')
       expect(t('topBar.retry', undefined, 'en')).toBe('Try again')
+    } finally {
+      setUiLocale('en')
+    }
+  })
+
+  // §15 Codex fix-delta P2 (2026-10-18): a refusal hidden behind a scene-load error came back in the language it was
+  // shown in - the switch remade only the line on screen, and the displaced one was kept as its text.
+  it('046 wave 1: a refusal displaced by a scene-load error comes back in the language of the moment it comes back', async () => {
+    const ten = new ApiError('HTTP 409 Conflict for /simulator/runs', {
+      status: 409,
+      bodyText: JSON.stringify({ error: { code: 'E008', message: 'x', details: { conflict_kind: 'global_active_limit', max_active_runs: 10, active_runs: 10 } } }),
+    })
+    vi.mocked(createRun).mockRejectedValue(ten)
+    setUiLocale('ru')
+    try {
+      const app = boot()
+      await settle()
+      expect(app.real.lastError).toBe(tn('runStart.limitAll', 10, undefined, 'ru'))
+      // A scene that fails to load hides the refusal (its HUD copy takes the line)...
+      app.state.error = 'HTTP 500 for /simulator/scenarios/other/graph/preview'
+      await settle()
+      expect(app.real.lastError).toBe('HTTP 500 for /simulator/scenarios/other/graph/preview')
+      // ...the language changes while it is hidden...
+      setUiLocale('en')
+      await settle()
+      // ...and the next load clears the scene error: the refusal comes back, in English.
+      app.state.error = ''
+      await settle()
+      expect(app.real.lastError).toBe('All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.')
+      expect(offered(app), 'the refusal comes back with its "Try again"').toBe(true)
     } finally {
       setUiLocale('en')
     }
@@ -304,7 +340,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     const app = boot()
     await settle()
     expect(app.real.lastError, 'another 409: the raw message as before').toBe('HTTP 409 Conflict for /simulator/runs')
-    expect(app.real.retryableStartError, '046 wave 1: another 409 offers no retry').toBe('')
+    expect([app.real.retryableStartLine, offered(app)], '046 wave 1: another 409 offers no retry').toEqual([null, false])
     scope?.stop()
     window.localStorage.clear()
     vi.mocked(createRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs', { status: 500, bodyText: JSON.stringify({ error: { details: { conflict_kind: 'global_active_limit' } } }) }))
