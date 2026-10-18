@@ -8,6 +8,7 @@ import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
 import { renderAvailable } from '../utils/valueFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
+import { interactText } from '../i18n/interactStrings'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -35,6 +36,12 @@ type Props = {
   trustlinesLoading?: boolean
   /** True while Interact Mode is busy (disable quick actions). */
   interactBusy?: boolean
+  /**
+   * The interact phase (BACKLOG 043-4). Pay and New line start a flow only from `idle` (`useInteractMode`
+   * `startPaymentFlowWithFrom` / `startTrustlineFlowWithFrom` return early otherwise), so while another action is open
+   * they are `disabled` and the card says why - instead of a button that silently does nothing.
+   */
+  interactPhase?: string
   onInteractSendPayment?: (fromPid: string) => void
   onInteractNewTrustline?: (fromPid: string) => void
   onInteractEditTrustline?: (fromPid: string, toPid: string) => void
@@ -137,13 +144,30 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
 // Ids are PRINTED in this card (a name falls back to the id), so they go through the display rule; keys and events keep the full id.
 const showPid = useParticipantDisplayId()
 const nodeName = computed(() => showPid(String(props.node.name ?? props.node.id)))
+/** 045 S3: the head is one line; the type and status of the participant are said in the name's `title`. */
+const nodeMeta = computed(() => `${props.node.type ?? '—'} · ${props.node.status ?? '—'}`)
 
-/** Trustlines that involve this node (outgoing or incoming). */
+/** 043-4: why Pay and New line cannot start now, or null when they can. */
+const startBlockedReason = computed<string | null>(() => {
+  if (props.interactBusy) return interactText('cardBusyReason')
+  const phase = String(props.interactPhase ?? 'idle').trim().toLowerCase()
+  if (phase && phase !== 'idle') return interactText('cardFlowOpenReason')
+  return null
+})
+
+const sameEquivalent = (a: unknown, b: unknown) => String(a ?? '').trim().toUpperCase() === String(b ?? '').trim().toUpperCase()
+
+/**
+ * Trustlines that involve this node (outgoing or incoming), in the equivalent the card is labelled with: a line of another
+ * equivalent is never listed under this one (owner's principle: equivalents are not mixed). A row without its own
+ * equivalent is the card's.
+ */
 const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   if (!props.interactMode || !props.interactTrustlines?.length) return []
   const id = props.node.id
   return props.interactTrustlines.filter(
-    (tl) => tl.from_pid === id || tl.to_pid === id,
+    (tl) => (tl.from_pid === id || tl.to_pid === id)
+      && (!tl.equivalent || !props.equivalentText || sameEquivalent(tl.equivalent, props.equivalentText)),
   )
 })
 
@@ -167,15 +191,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
     <div class="ds-panel ds-panel--elevated">
       <div class="ds-panel__body ds-ov-node-card__body">
 
-        <!-- Identity + Balance (merged) ------------------------------------>
+        <!-- Head, one line (045 S3): name and role, balance and its equivalent, pin and close. -->
         <div class="ds-ov-node-card__identity">
-          <div class="ds-node-card__avatar ds-ov-node-card__avatar">
-            {{ nodeName.slice(0, 2).toUpperCase() }}
-          </div>
-          <div class="ds-ov-node-card__text">
-            <div class="ds-node-card__name">{{ nodeName }}</div>
-            <div class="ds-node-card__meta">{{ node.type ?? '—' }} · {{ node.status ?? '—' }}</div>
-            <div class="nco-role" data-testid="node-card-role" :data-role="look.role">
+          <div class="ds-ov-node-card__who">
+            <span class="ds-ov-node-card__name" data-testid="node-card-name" :title="`${nodeName} · ${nodeMeta}`">{{ nodeName }}</span>
+            <span class="nco-role" data-testid="node-card-role" :data-role="look.role">
               <span
                 class="ds-data-swatch"
                 :class="look.frozen ? 'ds-data-swatch--frozen' : 'ds-data-swatch--role'"
@@ -183,136 +203,129 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 data-testid="node-card-role-swatch"
                 aria-hidden="true"
               >{{ look.sign }}</span>
-              <span>{{ roleWords }}</span>
-            </div>
+              <span class="nco-role__words">{{ roleWords }}</span>
+            </span>
           </div>
-          <div class="ds-ov-node-card__right">
-            <div class="ds-ov-node-card__service">
-              <button
-                v-if="showPinActions"
-                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-                type="button"
-                :aria-label="isPinned ? 'Unpin' : 'Pin'"
-                :title="isPinned ? 'Unpin' : 'Pin'"
-                @click="isPinned ? unpin() : pin()"
-              >
-                {{ isPinned ? '◆' : '◇' }}
-              </button>
-              <button
-                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-                type="button"
-                aria-label="Close"
-                title="Close"
-                @click="emit('close')"
-              >
-                ×
-              </button>
-            </div>
-            <div class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</div>
+          <span class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</span>
+          <span v-if="equivalentText" class="ds-ov-node-card__unit">{{ equivalentText }}</span>
+          <div class="ds-ov-node-card__service">
+            <button
+              v-if="showPinActions"
+              class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+              type="button"
+              :aria-label="isPinned ? 'Unpin' : 'Pin'"
+              :title="isPinned ? 'Unpin' : 'Pin'"
+              @click="isPinned ? unpin() : pin()"
+            >
+              {{ isPinned ? '◆' : '◇' }}
+            </button>
+            <button
+              class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+              type="button"
+              aria-label="Close"
+              title="Close"
+              aria-keyshortcuts="Escape"
+              @click="emit('close')"
+            >
+              ×
+            </button>
           </div>
         </div>
 
-        <!-- Separator -------------------------------------------------------->
-        <hr class="ds-ov-node-card__divider" />
-
-        <!-- Stats (only unique fields: Out, In, Degree) ---------------------->
-        <div class="ds-ov-node-card__stats">
-          <div class="ds-ov-node-card__stat">
-            <span class="ds-label">Out</span>
-            <span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>
-          </div>
-          <div class="ds-ov-node-card__stat">
-            <span class="ds-label">In</span>
-            <span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>
-          </div>
-          <div class="ds-ov-node-card__stat">
-            <span class="ds-label">Degree</span>
-            <span class="ds-value ds-mono">{{ edgeStats?.degree ?? '—' }}</span>
-          </div>
+        <!-- Statistics, one line (only unique fields: Out, In, Degree). -->
+        <div class="ds-ov-node-card__stats" data-testid="node-card-stats">
+          <span class="ds-label">Out</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>{{ ' · ' }}<span
+            class="ds-label">In</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>{{ ' · ' }}<span
+            class="ds-label">Degree</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.degree ?? '—' }}</span>
         </div>
 
         <!-- BUG-1: Interact Mode Trustlines section --------------------------->
         <template v-if="interactMode">
-          <hr class="ds-ov-node-card__divider" />
-
-          <!-- Quick-action buttons -->
+          <!-- Quick-action buttons; 043-4: disabled with the reason on a line while they cannot start. -->
           <div class="nco-interact-actions">
             <button
               class="ds-btn ds-btn--primary ds-btn--sm"
               type="button"
-              :disabled="!!interactBusy"
+              :disabled="!!startBlockedReason"
+              :title="startBlockedReason ?? undefined"
+              :aria-describedby="startBlockedReason ? 'node-card-actions-reason' : undefined"
               data-testid="node-card-send-payment"
               @click="onInteractSendPayment?.(node.id)"
             >
-              💸 Send Payment
+              Pay
             </button>
             <button
               class="ds-btn ds-btn--secondary ds-btn--sm"
               type="button"
-              :disabled="!!interactBusy"
+              :disabled="!!startBlockedReason"
+              :title="startBlockedReason ?? undefined"
+              :aria-describedby="startBlockedReason ? 'node-card-actions-reason' : undefined"
               data-testid="node-card-new-trustline"
               @click="onInteractNewTrustline?.(node.id)"
             >
-              ＋ New Trustline
+              New line
             </button>
           </div>
+          <div v-if="startBlockedReason" id="node-card-actions-reason" class="ds-help" data-testid="node-card-actions-reason">
+            {{ startBlockedReason }}
+          </div>
 
-          <!-- Trustlines list: grouped OUT / IN -->
+          <!-- Trustlines list: grouped OUT / IN; at most five rows on screen, then it scrolls. -->
           <div v-if="nodeTrustlines.length > 0" class="nco-trustlines">
 
-            <!-- OUT group -->
-            <div class="nco-tl-group-header">OUT → {{ outTrustlines.length }}</div>
-            <div
-              v-for="tl in outTrustlines"
-              :key="`${tl.from_pid}→${tl.to_pid}`"
-              :class="[
-                'nco-trustline-row',
-                { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
-              ]"
-              :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
-            >
-              <span class="nco-trustline-row__peer ds-mono">{{ showPid(tl.to_name) }}</span>
-              <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
-              <button
-                class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
-                type="button"
-                :disabled="!!interactBusy"
-                title="Edit trustline"
-                aria-label="Edit trustline"
-                @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
-              >✏️</button>
-            </div>
+            <template v-if="outTrustlines.length">
+              <div class="nco-tl-group-header">OUT → {{ outTrustlines.length }}</div>
+              <div
+                v-for="tl in outTrustlines"
+                :key="`${tl.from_pid}→${tl.to_pid}`"
+                :class="[
+                  'nco-trustline-row',
+                  { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
+                ]"
+                :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
+              >
+                <span class="nco-trustline-row__peer">{{ showPid(tl.to_name) }}</span>
+                <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+                <button
+                  class="ds-btn ds-btn--ghost nco-trustline-row__edit"
+                  type="button"
+                  :disabled="!!interactBusy"
+                  title="Edit trustline"
+                  aria-label="Edit trustline"
+                  @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
+                >Edit</button>
+              </div>
+            </template>
 
-            <!-- IN group -->
-            <div class="nco-tl-group-header nco-tl-group-header--gap">IN ← {{ inTrustlines.length }}</div>
-            <div
-              v-for="tl in inTrustlines"
-              :key="`${tl.from_pid}→${tl.to_pid}`"
-              :class="[
-                'nco-trustline-row',
-                { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
-              ]"
-              :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
-            >
-              <span class="nco-trustline-row__peer ds-mono">{{ showPid(tl.from_name) }}</span>
-              <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
-              <button
-                class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
-                type="button"
-                :disabled="!!interactBusy"
-                :title="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
-                :aria-label="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
-                @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
-              >✏️</button>
-            </div>
+            <template v-if="inTrustlines.length">
+              <div class="nco-tl-group-header">IN ← {{ inTrustlines.length }}</div>
+              <div
+                v-for="tl in inTrustlines"
+                :key="`${tl.from_pid}→${tl.to_pid}`"
+                :class="[
+                  'nco-trustline-row',
+                  { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
+                ]"
+                :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
+              >
+                <span class="nco-trustline-row__peer">{{ showPid(tl.from_name) }}</span>
+                <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+                <button
+                  class="ds-btn ds-btn--ghost nco-trustline-row__edit"
+                  type="button"
+                  :disabled="!!interactBusy"
+                  :title="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
+                  :aria-label="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
+                  @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
+                >Edit</button>
+              </div>
+            </template>
 
           </div>
-          <div v-else-if="trustlinesLoading" class="nco-trustlines__empty ds-label">
-            <span class="ds-text-secondary">Loading trustlines…</span>
+          <div v-else-if="trustlinesLoading" class="nco-trustlines__empty ds-help">
+            Loading trustlines…
           </div>
-          <div v-else class="nco-trustlines__empty ds-label">
+          <div v-else class="nco-trustlines__empty ds-help">
             No trustlines
           </div>
         </template>
@@ -323,65 +336,67 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 </template>
 
 <style scoped>
-/* Interact Mode: quick-action buttons */
+/*
+  045 S3 (decision 3): the card on the one scale of the windows - the head and the statistics are one line each, a row of a
+  line is 24 px (the smallest pointer target the stand allows, `surfaces.qa.ts`; the spec's 20 px would put the Edit button
+  under it), at most five rows are on screen and the list scrolls. Sizes are the tokens of the compact density.
+*/
 .nco-interact-actions {
   display: flex;
-  gap: var(--ds-nco-actions-gap);
-  flex-wrap: wrap;
-  margin-bottom: var(--ds-nco-actions-margin-bottom);
+  gap: var(--ds-space-2);
 }
 
 .nco-interact-actions > .ds-btn {
   flex: 1 1 0;
-  min-width: var(--ds-nco-actions-min-btn-width);
 }
 
-/* 039 slice B: the role line - the swatch the legend shows, and the same words. */
+/* 039 slice B: the role - the swatch the legend shows, and the same words. In the head, after the name. */
 .nco-role {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 4px;
+  min-width: 0;
   /* Not the muted colour of the meta line: the role is information, and `--ds-text-3` fails contrast in a theme. */
   color: var(--ds-text-2);
-  font-size: 0.75rem;
+  font-size: var(--ds-typo-label-font-size);
   white-space: nowrap;
 }
 
-/* Trustlines list */
+.nco-role__words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Trustlines list: five rows of 24 px and one group heading of 16 px on screen, then it scrolls. */
 .nco-trustlines {
-  margin-top: var(--ds-nco-trustlines-margin-top);
-  max-height: max(var(--ds-nco-trustlines-min-h), calc(50vh - var(--ds-nco-trustlines-vh-offset)));
+  max-height: calc(5 * 24px + 16px);
   overflow-y: auto;
 }
 
-/* Group heading: OUT → N / IN ← N */
+/* Group heading: OUT → N / IN ← N (meta size). */
 .nco-tl-group-header {
-  font-size: var(--ds-nco-tl-group-font-size);
+  font-size: var(--ds-typo-section-label-font-size);
+  line-height: 16px;
   text-transform: uppercase;
-  letter-spacing: var(--ds-nco-tl-group-letter-spacing);
-  opacity: var(--ds-nco-tl-group-opacity);
-  margin-bottom: var(--ds-nco-tl-group-margin-bottom);
+  letter-spacing: 0.08em;
+  color: var(--ds-text-3);
 }
 
-.nco-tl-group-header--gap {
-  margin-top: var(--ds-nco-tl-group-gap-margin-top);
-}
-
-/* Grid row: [peer-name] [used/limit] [edit-btn or placeholder] */
+/* Row: [peer] [used / limit] [Edit]; what is available is in the row's `title`. */
 .nco-trustline-row {
   display: grid;
-  grid-template-columns: minmax(60px, 80px) 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: var(--ds-nco-row-gap);
-  padding: var(--ds-nco-row-padding-y) 0;
-  font-size: var(--ds-nco-row-font-size);
+  column-gap: var(--ds-space-2);
+  min-height: 24px;
+  font-size: var(--ds-typo-label-font-size);
 }
 
 /* NC-3: "available <= 0" should be visually emphasized (border only). */
 .nco-trustline-row--saturated {
-  border-left: var(--ds-nco-row-saturated-border-w) solid var(--ds-err);
-  padding-left: var(--ds-nco-row-saturated-pad-left);
+  border-left: 2px solid var(--ds-err);
+  padding-left: 4px;
 }
 
 .nco-trustline-row__peer {
@@ -391,35 +406,19 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 }
 
 .nco-trustline-row__amounts {
-  font-size: var(--ds-nco-row-amounts-font-size);
   text-align: right;
-  opacity: var(--ds-nco-row-amounts-opacity);
   font-variant-numeric: tabular-nums;
-}
-
-/* NC-2: available column */
-.nco-trustline-row__avail {
-  font-size: var(--ds-nco-row-avail-font-size);
-  opacity: var(--ds-nco-row-avail-opacity);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
+  white-space: nowrap;
 }
 
 .nco-trustline-row__edit {
-  font-size: var(--ds-nco-row-edit-font-size);
-  padding: var(--ds-nco-row-edit-padding-y) var(--ds-nco-row-edit-padding-x);
-  line-height: 1;
-  opacity: var(--ds-nco-row-edit-opacity);
-  transition: opacity var(--ds-nco-row-edit-dur);
-}
-
-.nco-trustline-row__edit:hover {
-  opacity: 1;
+  --ds-button-height: 24px;
+  --ds-button-padding-x: 6px;
+  min-width: 24px;
+  font-size: var(--ds-typo-section-label-font-size);
 }
 
 .nco-trustlines__empty {
-  font-size: var(--ds-nco-empty-font-size);
-  opacity: var(--ds-nco-empty-opacity);
   font-style: italic;
 }
 </style>

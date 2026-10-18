@@ -59,12 +59,14 @@
   --ds-wm-interact-prefh-picking: 420px;
 
   --ds-wm-edge-detail-minw: 320px;
-  --ds-wm-edge-detail-minh: 200px;
+  /* 045 S3: 200 -> 60 and 180 -> 60 (node card), under the shortest inspector (a card without Interact: head and statistics,
+     about 70 px); a floor above the window is an invisible shell over the canvas (F-045-12). > 0 - the WM refuses 0. */
+  --ds-wm-edge-detail-minh: 60px;
   --ds-wm-edge-detail-prefw: 320px;
   --ds-wm-edge-detail-prefh: 320px;
 
   --ds-wm-node-card-minw: 320px;
-  --ds-wm-node-card-minh: 180px;
+  --ds-wm-node-card-minh: 60px;
   --ds-wm-node-card-prefw: 320px;
   --ds-wm-node-card-prefh: 260px;
 
@@ -508,63 +510,52 @@ details[open].ds-ov-details > summary::after {
   gap: var(--ds-ov-node-card-body-gap);
 }
 
-/* Service actions: top-right overlay, does not consume layout height. */
+/* Service actions (pin, close): the end of the head line. */
 .ds-ov-node-card__service {
   display: flex;
   gap: 2px;
   align-items: center;
-  justify-content: flex-end;
-  align-self: flex-end;
 }
 
-/* ---- Identity (avatar + name/meta/balance + actions) -------------------- */
+/* ---- Head: one line (045 S3) - name and role, balance and its equivalent, service actions ---- */
 
 .ds-ov-node-card__identity {
-  display: grid;
-  grid-template-columns: var(--ds-ov-node-card-avatar-size) minmax(0, 1fr) auto;
-  column-gap: 8px;
+  display: flex;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.ds-ov-node-card__text {
+.ds-ov-node-card__who {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
 }
 
-[data-theme='hud'] .ds-ov-node-card__text {
-  gap: 0px;
-}
-
-.ds-ov-node-card__text .ds-node-card__name,
-.ds-ov-node-card__text .ds-node-card__meta {
+.ds-ov-node-card__name {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--ds-typo-panel-heading-font-size);
+  font-weight: 600;
+  color: var(--ds-text-1);
 }
 
-.ds-ov-node-card__right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+/* The equivalent of the balance: meta text, once per card. */
+.ds-ov-node-card__unit {
+  font-size: var(--ds-typo-section-label-font-size);
+  color: var(--ds-text-3);
+  white-space: nowrap;
 }
 
-[data-theme='hud'] .ds-ov-node-card__right {
-  gap: 0px;
-}
-
-.ds-ov-node-card__avatar {
-  width: var(--ds-ov-node-card-avatar-size);
-  height: var(--ds-ov-node-card-avatar-size);
-}
-
-/* Balance inline with meta - its colour is the data colour of the node's role or freeze (inline, from the resolved palette) */
+/* Balance in the head line - its colour is the data colour of the node's role or freeze (inline, from the resolved palette) */
 .ds-ov-node-card__balance {
   font-family: var(--ds-typo-numeric-font-family);
-  font-size: 1.1rem;
+  font-size: var(--ds-typo-panel-heading-font-size);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -605,40 +596,21 @@ details[open].ds-ov-details > summary::after {
   box-shadow: var(--ds-focus-ring-btn);
 }
 
-/* ---- Divider ------------------------------------------------------------ */
-
-.ds-ov-node-card__divider {
-  border: none;
-  border-top: 1px solid var(--ds-border-subtle);
-  margin: 0;
-}
-
-/* ---- Stats (3-column, label above value) -------------------------------- */
+/* ---- Statistics: one line "Out X · In Y · Degree N" (045 S3) ---------------- */
 
 .ds-ov-node-card__stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 3px 10px;
-}
-
-.ds-ov-node-card__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 0px;
-  min-width: 0;
-}
-
-.ds-ov-node-card__stat .ds-value {
+  font-size: var(--ds-typo-label-font-size);
+  color: var(--ds-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* ---- Theme: HUD --------------------------------------------------------- */
-
-[data-theme='hud'] .ds-ov-node-card__divider {
-  border-color: rgba(0, 229, 255, 0.15);
+.ds-ov-node-card__stats .ds-value {
+  color: var(--ds-text-1);
 }
+
+/* ---- Theme: HUD --------------------------------------------------------- */
 
 [data-theme='hud'] .ds-ov-node-card__action-btn {
   font-family: var(--ds-font-mono);

@@ -2553,8 +2553,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
 
-      // UI-close inside edge-detail window.
-      const closeBtn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as
+      // UI-close inside edge-detail window (045 S3: the × of its title, named "Close").
+      const closeBtn = Array.from(host.querySelectorAll('[data-testid="edge-detail-popup"] button')).find((b) => b.getAttribute('aria-label') === 'Close') as
         | HTMLButtonElement
         | undefined
       expect(closeBtn).toBeTruthy()
@@ -2890,8 +2890,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
 
+      // 045 S3: the × of the window's title, named "Close".
       const closeBtn = Array.from(host.querySelectorAll('[data-testid="edge-detail-popup"] button')).find((b) =>
-        (b.textContent ?? '').trim() === 'Close',
+        b.getAttribute('aria-label') === 'Close',
       ) as HTMLButtonElement | undefined
       expect(closeBtn).toBeTruthy()
 
@@ -6366,7 +6367,9 @@ describe('SimulatorAppRoot - 043 S1 review: the kept-alive edge popup and a scen
       expect(setup0.wmEdgeDetail.frozenEquivalent.value, 'the equivalent is captured at freeze time').toBe('UAH')
       setup0.wmEdgeDetail.frozenEquivalent.value = 'XQ1'
       await nextTick()
-      expect(popupText(), 'the kept-alive popup prints the captured equivalent, not the live one').toContain('500.00 XQ1')
+      // 045 S3: the equivalent is said once, in the title of the window (`edge-unit`), the limit in its own span.
+      const shown = (id: string) => host.querySelector(`[data-testid="edge-detail-popup"] [data-testid="${id}"]`)?.textContent?.trim()
+      expect([shown('edge-limit'), shown('edge-unit')], 'the kept-alive popup prints the captured equivalent, not the live one').toEqual(['500.00', 'XQ1'])
       setup0.wmEdgeDetail.frozenEquivalent.value = 'UAH'
       await nextTick()
 
