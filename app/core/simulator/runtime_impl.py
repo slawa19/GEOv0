@@ -512,6 +512,12 @@ class _SimulatorRuntimeBase:
                 exc_info=True,
             )
 
+        # 044 stage 2: a run that ends is a pruning point too (after the flush, which reads the record).
+        try:
+            await self._run_lifecycle.prune_ended_runs()
+        except Exception:
+            logger.exception("simulator.runtime.prune_ended_runs_failed run_id=%s", run_id)
+
         return status
 
     async def restart(self, run_id: str) -> RunStatus:

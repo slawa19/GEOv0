@@ -136,37 +136,66 @@ class RunLifecycle:
                 )
         self._enforce_active_run_limit_locked()
 
-    def _prune_run_records_locked(self) -> None:
+    @staticmethod
+    def _has_live_task(task: Optional[asyncio.Task[None]]) -> bool:
+        return task is not None and not task.done()
+
+    def _ended_overflow_locked(self) -> list[RunRecord]:
+        """The ended records (`stopped` and, 044 stage 2, `error`) to drop for `SIMULATOR_MAX_RUN_RECORDS`, oldest first,
+        as many as the registry is over the limit. A record whose heartbeat still runs is never one of them."""
+
         max_records = int(self._get_max_run_records() or 0)
-        if max_records <= 0:
-            return
-        if len(self._runs) <= max_records:
-            return
-
-        # Prefer pruning stopped runs first (oldest first).
-        def _has_live_task(task: Optional[asyncio.Task[None]]) -> bool:
-            return task is not None and not task.done()
-
-        stopped: list[RunRecord] = [
+        if max_records <= 0 or len(self._runs) <= max_records:
+            return []
+        ended = [
             r
             for r in self._runs.values()
-            if str(getattr(r, "state", "")) == "stopped"
-            and not _has_live_task(getattr(r, "_heartbeat_task", None))
-            and not _has_live_task(getattr(r, "_artifact_events_task", None))
+            if str(getattr(r, "state", "")) in ("stopped", "error")
+            and not self._has_live_task(getattr(r, "_heartbeat_task", None))
         ]
 
         def _sort_key(r: RunRecord):
             ts = getattr(r, "stopped_at", None) or getattr(r, "started_at", None)
             return (ts is None, ts)
 
-        stopped.sort(key=_sort_key)
+        ended.sort(key=_sort_key)
+        return ended[: len(self._runs) - max_records]
 
-        while len(self._runs) > max_records and stopped:
-            r = stopped.pop(0)
+    def _prune_run_records_locked(self) -> None:
+        """Drop the oldest ended records over the limit whose events writer has ended (044 stage 2: `error` records
+        too - until then they were never dropped). A dropped record's owner mapping is cleared with it: `fail_run` leaves
+        the mapping of an `error` run in place (admin stop-all and the 409 of `restart` read it), and a mapping to a
+        record that no longer exists would answer for a run nobody can reach."""
+
+        for r in self._ended_overflow_locked():
+            if self._has_live_task(getattr(r, "_artifact_events_task", None)):
+                continue  # `prune_ended_runs` ends it first; never dropped with a writer still running
+            if self._runs.get(r.run_id) is not r:
+                continue
+            del self._runs[r.run_id]
+            if r.owner_id:
+                self._clear_active_run_id(owner_id=r.owner_id, run_id=r.run_id)
+
+    async def prune_ended_runs(self) -> None:
+        """044 stage 2 (stage 0 finding (n)): the pruning pass also when a run ends, not only on create. An `error` run
+        keeps its events writer (`fail_run` does not stop it), so the writers of the records about to be dropped are
+        ended first, outside the lock; then the records are dropped under it."""
+
+        with self._lock:
+            writers = [
+                r.run_id
+                for r in self._ended_overflow_locked()
+                if self._has_live_task(getattr(r, "_artifact_events_task", None))
+            ]
+        for run_id in writers:
             try:
-                del self._runs[r.run_id]
+                await self._artifacts.stop_events_writer(run_id)
+            except NotFoundException:
+                continue
             except Exception:
-                break
+                self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", run_id)
+        with self._lock:
+            self._prune_run_records_locked()
 
     def _start_heartbeat_locked(self, run: RunRecord) -> None:
         run._heartbeat_task = asyncio.create_task(
@@ -347,6 +376,7 @@ class RunLifecycle:
 
         await simulator_storage.upsert_run(run)
         await simulator_storage.sync_artifacts(run)
+        await self.prune_ended_runs()  # the `error` records the locked pass above had to leave (their writer ran)
         return run_id
 
     async def pause(self, run_id: str) -> RunStatus:
