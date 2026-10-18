@@ -8,6 +8,8 @@
  */
 import { expect, type Page } from '@playwright/test'
 
+import { installCssClockSync } from '../stand.js'
+
 export const ALPHA_MIN = 12
 export const CORRIDOR_PX = 5
 export const NODE_CLEAR_PX = 46
@@ -25,7 +27,12 @@ async function waitStill(page: Page) {
 }
 
 export async function openWorkbench(page: Page, o: { theme: string; quality: string; playlist?: 'payments' | 'clearing'; clock?: boolean }) {
-  if (o.clock !== false) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
+  if (o.clock !== false) {
+    await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
+    // The amount labels fade by CSS, which does not follow `page.clock`: pause each label's animation at mount, and
+    // the frame script sets it to the label's JS age before a shot (2026-10-18: the recordings carry amounts now).
+    await installCssClockSync(page)
+  }
   await page.addInitScript(() => { try { localStorage.clear() } catch { /* ignore */ } })
   await page.goto(`/?mode=fixtures&theme=${o.theme}`)
   await page.waitForSelector('[data-ready="1"]', { timeout: 60_000 })
