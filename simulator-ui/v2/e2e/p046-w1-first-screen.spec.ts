@@ -154,12 +154,18 @@ for (const theme of THEMES) {
           const mode = r('[data-testid="top-details-row"] .tb-mode-row')
           const center = r('[data-testid="top-details-row"] > .hud-bar__center')
           const row = r('[data-testid="top-details-row"]')
-          return { themeW: theme.width, langW: lang.width, modeW: mode.width, modeH: mode.height, centerH: center.height, rowH: row.height, langBelow: lang.top >= theme.bottom - 0.5 }
+          return { themeW: theme.width, themeH: theme.height, langW: lang.width, modeW: mode.width, modeH: mode.height, centerH: center.height, rowH: row.height, langBelow: lang.top >= theme.bottom - 0.5 }
         })
         console.log(`P046W1 service-row-columns ${theme} ${lang} ${vp.width}x${vp.height} ${JSON.stringify(cols)}`)
         expect(cols.langBelow, 'the language stands under the theme').toBe(true)
         expect(cols.modeW, 'the left column is as wide as its widest row').toBeLessThanOrEqual(Math.max(cols.themeW, cols.langW) + 1)
-        expect(cols.modeH, 'the left column is not the tallest part of the row').toBeLessThanOrEqual(cols.centerH + 1)
+        // 048 S1 (2026-10-18): this line read "the left column is not the tallest part of the row" (modeH <= centerH + 1) -
+        // true while the middle needed two lines. S1 removed the catalogue refresh and Pause/Resume from the middle, which
+        // now fits one line (centerH 74 -> 34 at 1366x768), and the row got SHORTER (rowH 78 -> 66, both themes and
+        // languages, measured on b8a9c7f6 and on S1): the stacked column is now the tallest part by itself. The intent
+        // held instead: the column is two controls tall, no more, and the row has no line beyond its tallest part.
+        expect(cols.modeH, 'the left column is two controls tall, not more').toBeLessThanOrEqual(2 * cols.themeH + 8)
+        expect(cols.rowH, 'the row is as tall as its tallest part - no extra line').toBeLessThanOrEqual(Math.max(cols.modeH, cols.centerH) + 6)
       }
       await page.setViewportSize({ width: 1366, height: 768 })
       await frame(page, `${theme}-${lang}-2-scenario-locked`)
