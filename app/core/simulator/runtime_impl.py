@@ -497,20 +497,29 @@ class _SimulatorRuntimeBase:
         reason: Optional[str] = None,
         client: Optional[str] = None,
     ) -> RunStatus:
-        status = await self._run_lifecycle.stop(
-            run_id, source=source, reason=reason, client=client
-        )
-
-        # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
-        # Must not break stop() even if DB is unavailable.
+        # 044 stage 2 (Codex §15 fix-delta): the record is pinned for the WHOLE cleanup - the lifecycle's stop (writer
+        # drain, upsert, artifacts finalize, which reads the record) and the final flush below - so a pruning pass
+        # running meanwhile cannot drop it; pinned before the first await, unpinned in `finally`, pruned after.
+        with self._lock:
+            self._run_lifecycle.pin_cleanup_locked(run_id)
         try:
-            await self._real_runner.flush_pending_storage(run_id)
-        except Exception:
-            logger.warning(
-                "simulator.runtime.flush_pending_storage_failed run_id=%s",
-                run_id,
-                exc_info=True,
+            status = await self._run_lifecycle.stop(
+                run_id, source=source, reason=reason, client=client
             )
+
+            # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
+            # Must not break stop() even if DB is unavailable.
+            try:
+                await self._real_runner.flush_pending_storage(run_id)
+            except Exception:
+                logger.warning(
+                    "simulator.runtime.flush_pending_storage_failed run_id=%s",
+                    run_id,
+                    exc_info=True,
+                )
+        finally:
+            with self._lock:
+                self._run_lifecycle.unpin_cleanup_locked(run_id)
 
         # 044 stage 2: a run that ends is a pruning point too (after the flush, which reads the record).
         try:

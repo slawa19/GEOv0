@@ -71,9 +71,11 @@ class RunLifecycle:
         self._get_active_run_id_for_owner = get_active_run_id_for_owner
         self._get_max_active_runs_per_owner = get_max_active_runs_per_owner
         self._idle_now = idle_now
-        # 044 stage 2 (Codex §15): records whose events writer a pruning pass is ending right now. Such a record looks
-        # writer-less (`stop_events_writer` detaches before it awaits the drain) and must not be dropped meanwhile.
-        self._draining_writers: set[str] = set()
+        # 044 stage 2 (Codex §15, two rounds): records whose cleanup is in progress - a pruning pass ending their events
+        # writer, or a `stop` from its first await to its last (writer drain, final upsert, artifacts finalize, final
+        # metrics flush). Such a record looks writer-less (`stop_events_writer` detaches before it awaits the drain) and
+        # must not be dropped meanwhile. A count per run: two cleanups of one run may overlap.
+        self._cleanup_in_progress: dict[str, int] = {}
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
@@ -171,13 +173,24 @@ class RunLifecycle:
         record that no longer exists would answer for a run nobody can reach."""
 
         for r in self._ended_overflow_locked():
-            if self._has_live_task(getattr(r, "_artifact_events_task", None)) or r.run_id in self._draining_writers:
+            if self._has_live_task(getattr(r, "_artifact_events_task", None)) or r.run_id in self._cleanup_in_progress:
                 continue  # `prune_ended_runs` ends it first; never dropped with a writer still running or draining
             if self._runs.get(r.run_id) is not r:
                 continue
             del self._runs[r.run_id]
             if r.owner_id:
                 self._clear_active_run_id(owner_id=r.owner_id, run_id=r.run_id)
+
+    def pin_cleanup_locked(self, run_id: str) -> None:
+        """044 stage 2: the record is not dropped by a pruning pass until the matching `unpin_cleanup_locked`."""
+        self._cleanup_in_progress[run_id] = self._cleanup_in_progress.get(run_id, 0) + 1
+
+    def unpin_cleanup_locked(self, run_id: str) -> None:
+        left = self._cleanup_in_progress.get(run_id, 0) - 1
+        if left > 0:
+            self._cleanup_in_progress[run_id] = left
+        else:
+            self._cleanup_in_progress.pop(run_id, None)
 
     async def prune_ended_runs(self) -> None:
         """044 stage 2 (stage 0 finding (n)): the pruning pass also when a run ends, not only on create. An `error` run
@@ -188,7 +201,7 @@ class RunLifecycle:
             candidates = [
                 (r, int(r._launch_epoch))
                 for r in self._ended_overflow_locked()
-                if self._has_live_task(getattr(r, "_artifact_events_task", None)) and r.run_id not in self._draining_writers
+                if self._has_live_task(getattr(r, "_artifact_events_task", None)) and r.run_id not in self._cleanup_in_progress
             ]
         for r, epoch in candidates:
             # 044 stage 2 (Codex §15): the list was taken before earlier awaits; a candidate the owner resumed or
@@ -199,10 +212,10 @@ class RunLifecycle:
                     self._runs.get(r.run_id) is r
                     and str(r.state) in ("stopped", "error")
                     and int(r._launch_epoch) == epoch
-                    and r.run_id not in self._draining_writers
+                    and r.run_id not in self._cleanup_in_progress
                 )
                 if still_ended:
-                    self._draining_writers.add(r.run_id)
+                    self.pin_cleanup_locked(r.run_id)
             if not still_ended:
                 continue
             try:
@@ -213,7 +226,7 @@ class RunLifecycle:
                 self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", r.run_id)
             finally:
                 with self._lock:
-                    self._draining_writers.discard(r.run_id)
+                    self.unpin_cleanup_locked(r.run_id)
         with self._lock:
             self._prune_run_records_locked()
 

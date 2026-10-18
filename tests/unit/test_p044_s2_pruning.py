@@ -224,3 +224,51 @@ async def test_a_second_pass_does_not_drop_a_record_whose_writer_is_draining(reg
     gate.set()
     await first
     assert "e1" not in runtime._runs
+
+
+@pytest.mark.asyncio
+async def test_a_record_whose_stop_is_still_cleaning_up_is_not_pruned_before_its_stop_ends(
+    registry, tmp_path, monkeypatch
+) -> None:
+    """Codex §15 fix-delta (044 stage 2): limit 2; A ended (oldest), B-D running. A pruning pass holds on A's writer
+    drain; B is stopped and its stop holds on B's writer drain; A's drain is released - the pass's final sweep sees A
+    and B as the two oldest ended records. B must survive until its own stop has finished (writer, upsert, artifacts
+    finalize - which reads the record - and the final flush), and only then be pruned."""
+
+    monkeypatch.setattr(runtime, "_max_run_records", 2)
+    a = _add("a", "error", minute=1)
+    gate_a, draining_a = asyncio.Event(), asyncio.Event()
+    _with_held_writer(a, gate_a, draining_a)
+    b = _add("b", "running", minute=2)
+    b.artifacts_dir = tmp_path / "b"
+    b.artifacts_dir.mkdir(parents=True)
+    gate_b, draining_b = asyncio.Event(), asyncio.Event()
+    _with_held_writer(b, gate_b, draining_b)
+    _add("c", "running", minute=3)
+    _add("d", "running", minute=4)
+    finalize_failed: list[str] = []
+
+    def status_payload(run_id):
+        try:
+            return runtime.get_run_status(run_id).model_dump(mode="json", by_alias=True)
+        except Exception:
+            finalize_failed.append(run_id)
+            raise
+
+    monkeypatch.setattr(runtime._run_lifecycle, "_get_run_status_payload_json", status_payload)
+
+    pruning = asyncio.create_task(runtime._run_lifecycle.prune_ended_runs())
+    await draining_a.wait()           # the pass holds on A's drain
+    stopping_b = asyncio.create_task(runtime.stop("b"))
+    await draining_b.wait()           # B's stop holds on B's drain
+    gate_a.set()
+    await pruning                     # the pass's final sweep runs now
+    assert "a" not in runtime._runs, "the held candidate itself is dropped (non-vacuity of the sweep)"
+    assert "b" in runtime._runs, "B is not dropped while its stop is still cleaning up"
+    gate_b.set()
+    await stopping_b
+
+    assert finalize_failed == [], "the finalize found the record"
+    assert (tmp_path / "b" / "status.json").exists() and (tmp_path / "b" / "summary.json").exists()
+    assert "b" not in runtime._runs, "pruned after its stop ended (the run-end pass)"
+    assert runtime._run_lifecycle._cleanup_in_progress == {}, "no pin left behind"
