@@ -63,7 +63,9 @@ describe('TrustlineManagementPanel', () => {
     app.mount(host)
     await nextTick()
 
-    expect(host.textContent ?? '').toContain('ESC to close')
+    // 045 S2: the title no longer says "(ESC to close)" (decision 2); Escape is announced to assistive technology by the
+    // panel's `aria-keyshortcuts` and still closes the window (e2e `p045-s2-panels.spec.ts`, the (г1) tests).
+    expect(host.querySelector('[data-testid="trustline-panel"]')?.getAttribute('aria-keyshortcuts')).toBe('Escape')
 
     const input = host.querySelector('#tl-limit') as HTMLInputElement | null
     expect(input).toBeTruthy()
@@ -588,5 +590,29 @@ describe('TrustlineManagementPanel', () => {
     app.unmount()
     host.remove()
   })
-})
 
+  // 045 S2 (Codex §15 coverage note): the old markup snapshot was the one check that paired 12 / 100 / 88 with their labels and
+  // unit. The merged stats line keeps that pairing: each figure in its own span, the unit after the pair and after "avail".
+  it('the stats line pairs used, limit and available with their labels and unit (positive triplet)', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+    const app = createApp({
+      render: () =>
+        h(trustlineManagementPanelComponent, {
+          phase: 'editing-trustline', state, unit: 'UAH', used: '12', currentLimit: '100', available: '88',
+          participants: [], figuresSource: { kind: 'row' } as const, trustlines: [], busy: false,
+          confirmTrustlineCreate: vi.fn(), confirmTrustlineUpdate: vi.fn(), confirmTrustlineClose: vi.fn(), cancel: vi.fn(),
+        }),
+    })
+    app.mount(host)
+    await nextTick()
+    const q = (id: string) => (host.querySelector(`[data-testid="${id}"]`)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+    expect(q('tl-stats-used')).toBe('12')
+    expect(q('tl-stats-limit')).toBe('100')
+    expect(q('tl-stats-available')).toBe('avail 88 UAH')
+    expect(q('tl-stats')).toBe('Used 12 / Limit 100 UAH · avail 88 UAH')
+    app.unmount()
+    host.remove()
+  })
+})

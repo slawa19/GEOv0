@@ -290,7 +290,9 @@ describe('ManualPaymentPanel', () => {
     app.mount(host)
     await nextTick()
 
-    expect(host.textContent ?? '').toContain('ESC to close')
+    // 045 S2: the title no longer says "(ESC to close)" (decision 2); Escape is announced to assistive technology by the
+    // panel's `aria-keyshortcuts` and still closes the window (e2e `p045-s2-panels.spec.ts`, the (г1) tests).
+    expect(host.querySelector('[data-testid="manual-payment-panel"]')?.getAttribute('aria-keyshortcuts')).toBe('Escape')
 
     const toSelect = host.querySelector('#mp-to') as HTMLSelectElement
     expect(toSelect.getAttribute('aria-describedby')).toBe('mp-to-help')

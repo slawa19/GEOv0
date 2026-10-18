@@ -138,7 +138,7 @@ Simulator UI показывает, что **что-то движется и св
 ```powershell
 npm --prefix simulator-ui/v2 ci
 npm --prefix simulator-ui/v2 exec -- playwright install chromium
-$env:PW_E2E_PORT = "5241"           # свой порт, не 41731/41732 CI
+$env:PW_E2E_PORT = "5241"           # свой порт, не 24731–24738 CI (041 T4111)
 npm --prefix simulator-ui/v2 run test:e2e:qa:gate
 npm --prefix simulator-ui/v2 run test:e2e:qa:gate -- --grep "label-fade"
 npm --prefix simulator-ui/v2 run test:e2e:qa:report   # галерея кадров для владельца

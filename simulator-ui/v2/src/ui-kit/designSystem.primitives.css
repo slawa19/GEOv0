@@ -612,6 +612,19 @@
 }
 .ds-btn--primary:hover { box-shadow: 0 0 22px rgba(0,0,0,0.22), 0 0 18px rgba(56,189,248,0.18); }
 
+/*
+  045 S2 (advisor 2026-10-17): a disabled button reads as disabled - until then no rule existed for `.ds-btn:disabled`, and a
+  disabled primary in saas looked live (the owner's frames). The same values as `.ds-segment:disabled`; no new names. A disabled
+  button keeps its hover events (its `title` says why it is disabled) but loses the hover glow and the press offset.
+*/
+.ds-btn:disabled,
+.ds-btn:disabled:hover {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.ds-btn:disabled:active { transform: none; }
+
 /* shadcn buttons */
 [data-theme='shadcn'] .ds-btn {
   font-family: var(--ds-typo-button-font-family);

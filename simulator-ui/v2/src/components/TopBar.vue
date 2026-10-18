@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
@@ -91,6 +91,29 @@ const networkName = computed(() => {
   const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
   return scenarioTitle(s) || id
 })
+
+/**
+ * 045 S2 (Codex §15 P2): is the name in the first row cut by its ellipsis? Measured on the element (a resize of the row or a
+ * new name re-measures). Only a cut name gets its full form behind "Подробнее" - a name that fits adds no row there.
+ */
+const networkNameEl = ref<HTMLElement | null>(null)
+const networkNameCut = ref(false)
+function measureNetworkName() {
+  const el = networkNameEl.value
+  networkNameCut.value = !!el && el.scrollWidth > el.clientWidth + 0.5
+}
+let networkNameRo: ResizeObserver | null = null
+onMounted(() => {
+  measureNetworkName()
+  if (typeof ResizeObserver === 'undefined' || !networkNameEl.value) return
+  networkNameRo = new ResizeObserver(() => measureNetworkName())
+  networkNameRo.observe(networkNameEl.value)
+})
+onBeforeUnmount(() => {
+  networkNameRo?.disconnect()
+  networkNameRo = null
+})
+watch(networkName, () => void nextTick(measureNetworkName))
 
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
 const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
@@ -312,7 +335,7 @@ function onApplyIntensity() {
         <div class="hud-bar__left tb-identity">
           <span class="ds-panel ds-ov-metric tb-network-name" data-testid="network-name">
             <span class="ds-label">GEO</span>
-            <span class="ds-value">{{ networkName }}</span>
+            <span ref="networkNameEl" class="ds-value tb-network-name__value" :title="networkName || undefined">{{ networkName }}</span>
           </span>
           <span class="ds-panel ds-ov-metric tb-network-state" data-testid="network-state">
             <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
@@ -346,6 +369,19 @@ function onApplyIntensity() {
             Подробнее <span aria-hidden="true">{{ props.detailsOpen ? '▴' : '▾' }}</span>
           </button>
         </div>
+      </HudBar>
+
+      <!--
+        045 S2 (Codex §15 P2): the first row cuts a long network name (its `title` is for a pointer only). Behind "Подробнее" the
+        name of the network on screen - the scenario of the RUN, the selected one only while there is no run (`networkName`;
+        not `selectedScenarioText`, which is the selection and may differ) - is shown in full, as text: a keyboard user reaches it
+        with the toggle, and the first view gains no focus stop. Only when the first row cuts it: a name that fits adds no row.
+      -->
+      <HudBar v-if="props.detailsOpen && networkNameCut" variant="ghost" layout="start" class="tb-network-full-row">
+        <span class="ds-panel ds-ov-metric tb-network-full" data-testid="details-network-name">
+          <span class="ds-label">Network</span>
+          <span class="ds-value">{{ networkName }}</span>
+        </span>
       </HudBar>
 
       <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" aria-label="Top bar" data-testid="top-details-row">
@@ -681,6 +717,43 @@ function onApplyIntensity() {
   align-items: center;
   gap: var(--ds-space-2, 8px);
   white-space: nowrap;
+}
+
+/* 045 S2: the full network name behind "Подробнее" wraps rather than being cut. */
+.tb-network-full {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ds-space-2, 8px);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/*
+  045 S2 (advisor 2026-10-17): the first row keeps the name, the state and the flow button on one line - a long scenario
+  name wrapped the cluster into two (1280x720, both themes: the state went under the name). Like the Scenario select: the
+  name gives way, cut by an ellipsis, and the whole name is its `title`. Desktop only; narrow screens wrap as before.
+*/
+@media (min-width: 501px) {
+  .tb-identity {
+    flex-wrap: nowrap;
+  }
+
+  .tb-network-name {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .tb-network-name__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tb-network-state,
+  .tb-flow-toggle {
+    flex-shrink: 0;
+  }
 }
 
 .tb-state-dot {

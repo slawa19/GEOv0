@@ -369,4 +369,53 @@ describe('WindowShell', () => {
       }
     })
   })
+
+  // 045 S2 (advisor 2026-10-17): an OPT-IN first focus. A window may name its first focus with `data-initial-focus`; without a
+  // usable marker the rule stays "the first focusable". Focus is placed only where it is contained (interact panels): the node
+  // card and the line window are not moved by the marker either.
+  describe('initial focus', () => {
+    async function mountWith(type: string, buttons: Array<{ id: string; initial?: boolean; disabled?: boolean }>) {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const outside = document.createElement('button')
+      document.body.appendChild(outside)
+      outside.focus()
+      const app = createApp({
+        render: () => h(windowShellComponent, { instance: makeInstance({ type } as Partial<WindowInstance>), frameless: true }, {
+          default: () => buttons.map((b) => h('button', {
+            id: b.id, type: 'button', disabled: b.disabled || undefined, 'data-initial-focus': b.initial ? '' : undefined,
+          }, b.id)),
+        }),
+      })
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+      return { host, app, outside, done: () => { cleanup(host, app); outside.remove() } }
+    }
+    const activeId = () => (document.activeElement as HTMLElement | null)?.id ?? ''
+
+    it('without a marker: the first focusable control', async () => {
+      const m = await mountWith('interact-panel', [{ id: 'cancel' }, { id: 'confirm' }])
+      expect(activeId()).toBe('cancel')
+      m.done()
+    })
+
+    it('with a marker: the marked control, wherever it stands', async () => {
+      const m = await mountWith('interact-panel', [{ id: 'cancel' }, { id: 'confirm', initial: true }])
+      expect(activeId()).toBe('confirm')
+      m.done()
+    })
+
+    it('a disabled marked control is skipped: the first focusable again', async () => {
+      const m = await mountWith('interact-panel', [{ id: 'cancel' }, { id: 'confirm', initial: true, disabled: true }])
+      expect(activeId()).toBe('cancel')
+      m.done()
+    })
+
+    it.each(['node-card', 'edge-detail'])('a %s window is not focused at all, marker or not', async (type) => {
+      const m = await mountWith(type, [{ id: 'a' }, { id: 'b', initial: true }])
+      expect(document.activeElement).toBe(m.outside)
+      m.done()
+    })
+  })
 })
