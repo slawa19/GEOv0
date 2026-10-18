@@ -14,7 +14,8 @@ past that fast phase the job reads `failed` (`/health` degraded). Every wait hon
 THE STAND. The real loop, the real `_run_integrity_checkpoints_once` and the real `redis_distributed_lock` over a
 TIME-AWARE fake Redis: `SET NX EX` creates a key that expires `ex` seconds later on a controllable clock, and the
 release (`eval` of the unlock script) deletes the key only when it is unexpired AND holds the caller's token - so a
-lock that never expired, or a release that ignored the token, would show in these results. The clock advances only
+lock that never expired, or a release that ignored the token, would show in these results (the second one is
+exercised by `test_a_release_after_the_lock_expired_under_a_long_run_leaves_the_new_holders_key`). The clock advances only
 in the replaced `_stopped_within` (no real sleep), which also fires scheduled events (another process taking the
 lock) and stops the loop at a horizon. The work under the lock is a recorder, or the real
 `_run_debt_reconciliation_once` over a scripted `run_scheduled_reconciliation`; its subject is covered by 015/030.
@@ -95,7 +96,7 @@ class _Session:
 
 
 def _stand(monkeypatch, *, redis_expires: bool = True, use_redis: bool = True, horizon: int = 3 * DAY,
-           stop_at_wait: int | None = None, checkpoint_errors: int = 0, reconcile=None):
+           stop_at_wait: int | None = None, checkpoint_errors: int = 0, reconcile=None, during_run=None):
     clock = _Clock()
     redis = _ExpiringRedis(clock, expires=redis_expires) if use_redis else None
     app = SimpleNamespace(state=SimpleNamespace(redis=redis, _bg_stop_event=asyncio.Event(), background_jobs={}))
@@ -104,6 +105,8 @@ def _stand(monkeypatch, *, redis_expires: bool = True, use_redis: bool = True, h
 
     async def checkpoints(_session):
         seen.work.append((clock.now, "checkpoints"))
+        if during_run is not None and len(seen.work) == 1:
+            during_run(seen)
         if failures["checkpoints"] > 0:
             failures["checkpoints"] -= 1
             raise RuntimeError("p047: the checkpoints fail on this attempt")
@@ -287,3 +290,46 @@ async def test_an_explicit_lock_ttl_stays_the_deployments_choice(monkeypatch) ->
     await maintenance_jobs._integrity_loop(seen.app)
 
     assert seen.redis.granted == [(0, 7200)]
+
+
+@pytest.mark.asyncio
+async def test_a_release_after_the_lock_expired_under_a_long_run_leaves_the_new_holders_key(monkeypatch) -> None:
+    """Our run takes 400 s; at 350 another process D takes the lock, expired at 300. Our release must not delete D's
+    key: the unlock compares the token. MUTATION: drop the token comparison from the fake's release - D's key is
+    deleted, red (the stand would then hide a release that ignores ownership)."""
+
+    def long_run(seen) -> None:
+        seen.clock.now = 350
+        assert seen.redis.take(KEY, "D", TTL), "stand: our lock must have expired at 300"
+        seen.clock.now = 400
+
+    seen = _stand(monkeypatch, horizon=DAY, during_run=long_run)
+
+    await maintenance_jobs._integrity_loop(seen.app)
+
+    assert seen.redis.granted[0] == (0, TTL) and seen.redis.released == [], (seen.redis.granted, seen.redis.released)
+    assert seen.redis.keys.get(KEY) == ("D", 350 + TTL), seen.redis.keys
+
+
+@pytest.mark.parametrize("configured", [-5, 0])
+def test_a_non_positive_interval_reads_as_300_s(configured) -> None:
+    """Codex §15 P3: a negative interval was the loop's wait as is. Not positive -> 300 s, as an explicit 0 already
+    meant. RED BEFORE (`fb05cd6d`): -5 stayed -5. Counter-check: a positive value is kept."""
+
+    from app.config import Settings
+
+    assert Settings(INTEGRITY_CHECKPOINT_INTERVAL_SECONDS=configured).INTEGRITY_CHECKPOINT_INTERVAL_SECONDS == 300
+    assert Settings(INTEGRITY_CHECKPOINT_INTERVAL_SECONDS=86400).INTEGRITY_CHECKPOINT_INTERVAL_SECONDS == 86400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [0, -5])
+async def test_the_stop_is_heard_by_a_wait_of_zero_or_less(seconds) -> None:
+    """The real `_stopped_within`: with the stop set, a wait of zero or less reports the stop. RED BEFORE
+    (`fb05cd6d`): `wait_for(timeout<=0)` cancelled the wait first and reported a timeout (False). Counter-check: an
+    unset stop with a zero wait is a timeout."""
+
+    stop = asyncio.Event()
+    assert await maintenance_jobs._stopped_within(stop, seconds) is False
+    stop.set()
+    assert await maintenance_jobs._stopped_within(stop, seconds) is True

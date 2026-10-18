@@ -172,8 +172,13 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool 
 
 
 async def _stopped_within(stop_event: asyncio.Event, seconds: float) -> bool:
-    """Wait up to `seconds` for the stop event: True if it was set, False if the time ran out."""
+    """Wait up to `seconds` for the stop event: True if it was set, False if the time ran out.
 
+    The stop is checked first, on its own (047, Codex §15 P3): `wait_for` with a timeout of zero or less cancels the
+    wait before it can see an event that is already set, and reports a timeout."""
+
+    if stop_event.is_set():
+        return True
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
         return True

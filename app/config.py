@@ -406,6 +406,13 @@ class Settings(BaseSettings):
         except ValueError:
             return cls.model_fields[info.field_name].default
 
+    @field_validator("INTEGRITY_CHECKPOINT_INTERVAL_SECONDS")
+    @classmethod
+    def _integrity_interval(cls, value: int) -> int:
+        """047 (2026-10-18, Codex §15 P3): not positive -> 300 s, the meaning an explicit 0 already had (`or 300` in its
+        readers). A negative interval was the loop's wait as is - runs back to back, the stop unheard in that wait."""
+        return value if value > 0 else 300
+
     @field_validator("SIMULATOR_ACTIONS_ENABLE", mode="before")
     @classmethod
     def _actions_enable(cls, value: object) -> bool:
