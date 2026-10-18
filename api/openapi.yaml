@@ -7305,9 +7305,6 @@ components:
         stop_reason:
           type: string
           nullable: true
-          description: >-
-            Why the run was stopped, as the stopper said it. The server itself writes `idle_no_subscribers` (with
-            `stop_source` = `server`) when the run had no SSE subscriber for `SIMULATOR_RUN_IDLE_STOP_SEC` (044).
         stop_client:
           type: string
           nullable: true
