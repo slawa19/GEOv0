@@ -1,10 +1,10 @@
-import { computed, effectScope, nextTick, reactive, ref, type Ref } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref, toRaw, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { ApiError } from '../api/http'
 import { connectSse, type SseConnectOpts } from '../api/sse'
-import { createRun, getActiveRun, getRun, stopRun } from '../api/simulatorApi'
+import { createRun, getActiveRun, getRun, listArtifacts, stopRun } from '../api/simulatorApi'
 import type { ActiveRunResponse } from '../api/simulatorTypes'
 import { isUserFacingRunErrorCode, runErrorText } from '../utils/runErrorClassification'
 
@@ -2110,7 +2110,9 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       expect(signals).toHaveLength(2)
       expect(signals[0]?.aborted).toBe(true)
       expect(signals[1]?.aborted).toBe(false)
-      expect(harness.real.sseState).toBe('open')
+      // 048 S1 (§15 Codex fix-delta P2): the restored stream is `open` only once it delivers a message; this mocked one
+      // has delivered none yet, so the observation is restored and still `connecting` (it read `open` until then).
+      expect(harness.real.sseState).toBe('connecting')
     } finally {
       harness.h.stopSse()
       restoreConnectSseImplementation(prevConnectImpl)
@@ -2619,5 +2621,120 @@ describe('useSimulatorRealMode - 034 S8: a failed replay-recovery snapshot is cl
     } finally {
       s.cleanup()
     }
+  })
+})
+
+/**
+ * 048 S1 (§15 Codex fix-delta P2, 2026-10-18): the stream is `open` only on evidence of a connection - its first
+ * message. It was set `open` before the request: a reconnect stalled in `fetch()` / `reader.read()` read as healthy, and
+ * the state of the network (`TopBar.vue`: `reconnecting`/`closed` under a living run is "нет связи с сервером") flickered
+ * green between two failed attempts. Red before the fix: the state at the start of every attempt was `open`.
+ */
+describe('useSimulatorRealMode - 048 S1: `open` only once the stream delivers', () => {
+  it('a reconnect that fails, then one that stalls: "reconnecting" all along; the first message makes it "open"', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    const stateAtAttemptStart: string[] = []
+    const stalled = deferred()
+    const thirdStarted = deferred()
+    let harness!: ReturnType<typeof createSseCharacterizationHarness>
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      stateAtAttemptStart.push(harness.real.sseState)
+      const n = stateAtAttemptStart.length
+      if (n === 1) { emitRunStatusBootstrap(opts, 'evt_r1_1'); return } // a stream that worked, then ended cleanly
+      if (n === 2) throw new TypeError('network error') // a failed attempt
+      thirdStarted.resolve()
+      await stalled.promise // a stalled attempt: no answer yet
+      emitRunStatusBootstrap(opts, 'evt_r1_3')
+      await waitForAbort(opts.signal)
+    })
+    harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1000 + 2000 + 100)
+      await thirdStarted.promise
+      await vi.advanceTimersByTimeAsync(10_000) // the stalled attempt stays pending
+
+      expect(stateAtAttemptStart, 'no attempt reads as open before it delivered anything').toEqual(['connecting', 'reconnecting', 'reconnecting'])
+      expect(harness.real.sseState, 'a stalled reconnect is still a lost stream').toBe('reconnecting')
+
+      stalled.resolve()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(harness.real.sseState, 'the first message of the stream is the evidence').toBe('open')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * 048 S1 (§15 Codex fix-delta P2, 2026-10-18): the run file index is read for ONE attachment. `refreshArtifacts`
+ * resolves with the array it installed on a success of the current attachment, `null` otherwise; an answer that comes
+ * after a start/attach/reset of the index is dropped. Red before the fix: it resolved `undefined` either way (the panel
+ * had to infer success across the await), and a late answer was written into the new attachment's index.
+ */
+describe('useSimulatorRealMode - 048 S1: the run file index belongs to its attachment', () => {
+  function owner() {
+    const real = createRealState()
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => false),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null },
+      real,
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+      loadScene: async () => undefined,
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
+      pushTxAmountLabel: () => undefined,
+      routeArrivalMs: () => 0,
+      scheduleTimeout: () => undefined,
+      runRealTxFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      wakeUp: () => undefined,
+    })
+    return { real, h }
+  }
+
+  it('a read in flight across an Attach of the same run: a failure or a late success is not this attachment\'s read', async () => {
+    const { real, h } = owner()
+    await h.attachToRun('r1')
+    const listMock = vi.mocked(listArtifacts)
+
+    // 1. In flight, then Attach r1 again, then the read FAILS: null, and the reset (empty, unread) index stays.
+    let rejectRead!: (e: unknown) => void
+    listMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject }))
+    const failed = h.refreshArtifacts()
+    await h.attachToRun('r1')
+    const resetIndex = real.artifacts
+    rejectRead(new Error('HTTP 500'))
+    expect(await failed, 'a failed read reports no success').toBeNull()
+    expect(real.artifacts, 'the reset index is left as the attach put it').toBe(resetIndex)
+
+    // 2. In flight, then Attach r1 again, then the read SUCCEEDS late: dropped, null.
+    let resolveRead!: (v: { items: Array<{ name: string }> }) => void
+    listMock.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve as typeof resolveRead }))
+    const late = h.refreshArtifacts()
+    await h.attachToRun('r1')
+    const resetAgain = real.artifacts
+    resolveRead({ items: [{ name: 'events.ndjson' }] })
+    expect(await late, 'an answer for the index before the attach is not this attachment\'s').toBeNull()
+    expect(real.artifacts, 'and it is not written into the new attachment').toBe(resetAgain)
+
+    // 3. Counter-check: a read of the current attachment installs its array and resolves with it.
+    listMock.mockImplementationOnce(async () => ({ items: [{ name: 'summary.json' }] }) as never)
+    const ok = await h.refreshArtifacts()
+    expect(ok, 'a successful read of the current attachment').not.toBeNull()
+    expect(toRaw(real.artifacts), 'the array it resolved with is the one on screen').toBe(ok)
+    expect(real.artifacts.map((a) => a.name)).toEqual(['summary.json'])
   })
 })

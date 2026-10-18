@@ -33,7 +33,13 @@ function context(over: Partial<TopBarContext> = {}): TopBarContext {
   } as TopBarContext
 }
 
-type Files = { runId: string | null; items: readonly ArtifactIndexItem[]; loading: boolean; refresh: () => Promise<void>; download: (n: string) => void }
+type Files = { runId: string | null; items: readonly ArtifactIndexItem[]; loading: boolean; refresh: () => Promise<readonly ArtifactIndexItem[] | null>; download: (n: string) => void }
+
+/** The owner's successful read (`useSimulatorRealMode.ts` `refreshArtifacts`): it installs a new array and resolves with it. */
+const installs = (items: { value: readonly ArtifactIndexItem[] }, next: ArtifactIndexItem[] = []) => async () => {
+  items.value = next
+  return next
+}
 
 function mountTopBar(ctx: TopBarContext, props: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -54,7 +60,7 @@ const admin = (host: HTMLElement) => host.querySelector('details[aria-label="Adm
 const ADMIN_TOOLS = ['[data-testid="analytics-toggle"]', '[data-testid="scenarios-refresh"]', '[data-testid="admin-run-files"]'] as const
 
 describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there', () => {
-  const files = (): Files => ({ runId: 'run-1', items: [], loading: false, refresh: vi.fn(async () => undefined), download: vi.fn() })
+  const files = (): Files => ({ runId: 'run-1', items: [], loading: false, refresh: vi.fn(async () => null), download: vi.fn() })
 
   it('reproducer (в), unit half: with an admin token the analytics toggle, the catalogue refresh and the run files are inside Admin', async () => {
     const { host, done } = mountTopBar(context(), { runFiles: files() })
@@ -115,7 +121,7 @@ describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there
     const items = ref<readonly ArtifactIndexItem[]>([])
     const f = files()
     // The owner's read replaces the array (`useSimulatorRealMode.ts`, refreshArtifacts).
-    f.refresh = vi.fn(async () => { items.value = [] })
+    f.refresh = vi.fn(installs(items))
     const { host, done } = mountTopBar(context(), { get runFiles() { return { ...f, items: items.value } } })
     await nextTick()
     const count = () => host.querySelector('[data-testid="admin-run-files-count"]')
@@ -135,7 +141,7 @@ describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there
     const runId = ref<string | null>('run-A')
     const items = ref<readonly ArtifactIndexItem[]>([])
     const f = files()
-    f.refresh = vi.fn(async () => { items.value = [] }) // a successful read of an empty index replaces the array
+    f.refresh = vi.fn(installs(items)) // a successful read of an empty index installs a new array
     const { host, done } = mountTopBar(context(), { get runFiles() { return { ...f, runId: runId.value, items: items.value } } })
     await nextTick()
     const count = () => host.querySelector('[data-testid="admin-run-files-count"]')
@@ -164,10 +170,40 @@ describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there
     done()
   })
 
+  // §15 Codex fix-delta P2 (2026-10-18): a read in flight, then Attach of the same run (the owner resets the index to a
+  // new empty array), then the read FAILS. The panel inferred "read" from "same run, another array after the await" and
+  // remembered the reset array: "0 / No artifacts" for an index nobody read. Now only the owner's success counts.
+  it('the run files: a read in flight, then Attach of the same run, then the read fails - "not read"; a later successful read - "read"', async () => {
+    const items = ref<readonly ArtifactIndexItem[]>([])
+    const f = files()
+    let fail!: () => void
+    // The panel calls what the owner gives it at render; the owner's behaviour is switched under it.
+    let impl: () => Promise<readonly ArtifactIndexItem[] | null> = () =>
+      new Promise((resolve) => { fail = () => resolve(null) })
+    f.refresh = vi.fn(() => impl())
+    const { host, done } = mountTopBar(context(), { get runFiles() { return { ...f, items: items.value } } })
+    await nextTick()
+    const count = () => host.querySelector('[data-testid="admin-run-files-count"]')
+    host.querySelector<HTMLButtonElement>('[data-testid="admin-run-files"] button[aria-label="Refresh artifacts"]')!.click()
+    await nextTick()
+    items.value = [] // Attach of the same run: the owner resets the index
+    await nextTick()
+    fail()
+    // Let the panel finish whatever it does after the read (its handler awaits the read and a render).
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0))
+    expect(count(), 'a failed read across an Attach is not a read').toBeNull()
+    expect(host.querySelector('[data-testid="admin-run-files"]')!.textContent, 'and no "No artifacts"').not.toContain('No artifacts')
+
+    impl = installs(items)
+    host.querySelector<HTMLButtonElement>('[data-testid="admin-run-files"] button[aria-label="Refresh artifacts"]')!.click()
+    await vi.waitFor(() => expect(count()?.textContent, 'a successful read after the Attach').toBe('0'))
+    done()
+  })
+
   it('the run files: a failed read (the index not replaced) shows no number; a listed file downloads by its name', async () => {
     const items = ref<readonly ArtifactIndexItem[]>([])
     const f = files()
-    f.refresh = vi.fn(async () => undefined) // failed: the array is left as it was
+    f.refresh = vi.fn(async () => null) // failed: the array is left as it was, the owner says null
     const download = vi.fn()
     const { host, done } = mountTopBar(context(), { get runFiles() { return { ...f, download, items: items.value } } })
     await nextTick()

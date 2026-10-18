@@ -202,7 +202,12 @@ export function useSimulatorRealMode(opts: {
   resume: () => Promise<void>
   stop: () => Promise<void>
   applyIntensity: () => Promise<void>
-  refreshArtifacts: () => Promise<void>
+  /**
+   * Reads the run's file index. Resolves with the index array it put into `real.artifacts` when the read succeeded AND
+   * still belongs to the attachment it was started for; `null` otherwise (no run, a failed read - its error is the
+   * error line -, or a start/attach/reset of the index while it was in flight, whose answer is then dropped).
+   */
+  refreshArtifacts: () => Promise<ArtifactIndexItem[] | null>
   downloadArtifact: (name: string) => Promise<void>
 
   // Admin helpers
@@ -267,6 +272,15 @@ export function useSimulatorRealMode(opts: {
   let sseSeq = 0
   let refreshRunStatusSeq = 0
   let replayGapRecoveryRunId: string | null = null
+
+  // 048 S1 (§15 Codex fix-delta P2, 2026-10-18): the generation of the run's file index. Every reset (a start, an attach
+  // - also of the same run again -, a stale run) begins a new one; a read started in an older one is not this
+  // attachment's index: its answer is dropped, and it reports no success (the panel's "read" marker, `TopBar.vue`).
+  let artifactIndexGeneration = 0
+  function resetArtifactIndex(): void {
+    artifactIndexGeneration += 1
+    real.artifacts = []
+  }
   let sceneContextRefreshSeq = 0
   let sceneContextRefresh: {
     seq: number
@@ -407,7 +421,7 @@ export function useSimulatorRealMode(opts: {
     real.runId = null
     real.runStatus = null
     real.lastEventId = null
-    real.artifacts = []
+    resetArtifactIndex()
     cleanupRealRunFxAndTimers()
     resetRunStats()
     stopSse()
@@ -1001,7 +1015,14 @@ export function useSimulatorRealMode(opts: {
             continue
           }
         } else {
-          real.sseState = 'open'
+          // 048 S1 (§15 Codex fix-delta P2, 2026-10-18): the stream is `open` only on EVIDENCE of a connection - the
+          // first SSE message it delivers (every answered connection delivers one at once: the bootstrap `run_status`, or
+          // replayed data events before it; see below). Until then the state stays what the loop set: `connecting` on the
+          // first attempt, `reconnecting` on a later one. It was set `open` before the request, so a reconnect stalled in
+          // `fetch()` or in `reader.read()` (`api/sse.ts`) read as a healthy stream, and failing attempts flickered
+          // green between two "no connection" states of the network (`TopBar.vue` `streamLost`). The first message, not
+          // the response headers: it covers a stall after the headers too. Keep-alive comments are not messages; a run's
+          // stream always starts with its bootstrap, so they are not needed as evidence.
           // The back-off counts attempts that failed in a row, and only a connection that PROVED itself resets it
           // (034 S8): it delivered a frame and stayed open for the top step of the ladder, however it then ended.
           // A frame alone proves nothing: every answered connection delivers one at once (the bootstrap `run_status`,
@@ -1016,6 +1037,7 @@ export function useSimulatorRealMode(opts: {
               lastEventId: real.lastEventId,
               signal: ctrl.signal,
               onMessage: (msg) => {
+                if (!deliveredFrame && !ctrl.signal.aborted && mySeq === sseSeq && real.runId === runId) real.sseState = 'open'
                 deliveredFrame = true
                 handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow })
               },
@@ -1231,7 +1253,7 @@ export function useSimulatorRealMode(opts: {
       real.runStatus = null
       real.lastEventId = null
       replayGapRecoveryRunId = null
-      real.artifacts = []
+      resetArtifactIndex()
 
       if (startOpts?.pauseImmediately) {
         const delaysMs = [80, 160]
@@ -1378,7 +1400,7 @@ export function useSimulatorRealMode(opts: {
       real.runStatus = null
       real.lastEventId = null
       replayGapRecoveryRunId = null
-      real.artifacts = []
+      resetArtifactIndex()
 
       await refreshRunStatus()
       await refreshSnapshot()
@@ -1422,15 +1444,22 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function refreshArtifacts() {
+  async function refreshArtifacts(): Promise<ArtifactIndexItem[] | null> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
-    if (!real.runId) return
+    if (!real.runId) return null
+    const runId = real.runId
+    const generation = artifactIndexGeneration
     real.artifactsLoading = true
     try {
-      const idx = await listArtifacts({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      real.artifacts = idx.items ?? []
+      const idx = await listArtifacts({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
+      // 048 S1: an answer for an index that was reset (or another run attached) while it was in flight is not shown.
+      if (generation !== artifactIndexGeneration || real.runId !== runId) return null
+      const items = idx.items ?? []
+      real.artifacts = items
+      return items
     } catch (e: unknown) {
       real.lastError = getErrorMessage(e)
+      return null
     } finally {
       real.artifactsLoading = false
     }

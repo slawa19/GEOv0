@@ -31,7 +31,8 @@ type RunFiles = {
   /** The run's file index as last read (`real.artifacts`); a read replaces the array, a failed read leaves it. */
   items: readonly ArtifactIndexItem[]
   loading: boolean
-  refresh: () => Promise<void> | void
+  /** Resolves with the index array a successful read of the current attachment installed, or `null`. */
+  refresh: () => Promise<readonly ArtifactIndexItem[] | null>
   download: (name: string) => void
 }
 
@@ -281,12 +282,13 @@ const showAdminControls = computed(() => isAdminViewer(ctx.accessToken.value, ct
 
 /**
  * 048 S1 (decision 5): the run files under "Admin ▾". Their number is shown only once the index ON SCREEN has been
- * read: "not read yet" is not "no files". The marker is the index itself, not the run: a read that succeeded replaced
- * the array (`useSimulatorRealMode.ts`, `refreshArtifacts`), and that very array is remembered; a failed read leaves the
- * array and writes the error line instead. Every reset of the index - a start, an attach (also of the same run again),
- * a stale run - assigns a new empty array, which is not the remembered one, so the panel is "not read" again
- * (§15 Codex P2, 2026-10-18: the marker was the run id, and attaching run A again, or A -> B -> A, showed "0 / No
- * artifacts" for an index nobody had read).
+ * read: "not read yet" is not "no files". The marker is the index array a SUCCESSFUL read of the current attachment
+ * installed - the owner says which (`useSimulatorRealMode.ts` `refreshArtifacts` resolves with it, or with `null` for a
+ * failed read, no run, or a read whose attachment was reset while it was in flight). Every reset of the index (a start,
+ * an attach - also of the same run again -, a stale run) puts a new empty array, which is not the remembered one.
+ * §15 Codex (2026-10-18): the marker was the run id (attaching A again showed "0 / No artifacts"), then "the same run,
+ * a different array after the await" - which a failed read across an Attach of the same run also satisfied. Nothing is
+ * inferred across the await now.
  */
 const runFilesReadIndex = shallowRef<readonly ArtifactIndexItem[] | null>(null)
 const runFilesRead = computed(() => {
@@ -296,12 +298,8 @@ const runFilesRead = computed(() => {
 async function onRefreshRunFiles() {
   const f = props.runFiles
   if (!f?.runId || f.loading) return
-  const runId = f.runId
-  const before = toRaw(f.items)
-  await f.refresh()
-  await nextTick() // the owner's new index reaches this bar's props on the next render
-  const after = props.runFiles
-  if (after?.runId === runId && toRaw(after.items) !== before) runFilesReadIndex.value = toRaw(after.items)
+  const installed = await f.refresh()
+  if (installed) runFilesReadIndex.value = toRaw(installed)
 }
 
 const adminRunsCountLabel = computed(() => {
