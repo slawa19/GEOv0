@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { MetricPoint, MetricSeries, MetricSeriesKey, MetricUnit } from '../api/simulatorTypes'
+import { t, tn, type MessageKey } from '../i18n/t'
 
 const props = defineProps<{
   series: MetricSeries
@@ -12,15 +13,16 @@ const props = defineProps<{
 /**
  * Human titles for the seven declared series keys. Typed as a total `Record`, so adding a key to
  * `MetricSeriesKey` breaks the build here instead of silently rendering a raw wire token.
+ * 046 wave 2: the titles are the dictionary's (`metrics.series.*`), in the language of the interface.
  */
-const SERIES_TITLE: Record<MetricSeriesKey, string> = {
-  success_rate: 'Success rate',
-  avg_route_length: 'Avg route length',
-  total_debt: 'Total debt',
-  clearing_volume: 'Clearing volume',
-  bottlenecks_score: 'Bottlenecks score',
-  active_participants: 'Active participants',
-  active_trustlines: 'Active trustlines',
+const SERIES_TITLE: Record<MetricSeriesKey, MessageKey> = {
+  success_rate: 'metrics.series.success_rate',
+  avg_route_length: 'metrics.series.avg_route_length',
+  total_debt: 'metrics.series.total_debt',
+  clearing_volume: 'metrics.series.clearing_volume',
+  bottlenecks_score: 'metrics.series.bottlenecks_score',
+  active_participants: 'metrics.series.active_participants',
+  active_trustlines: 'metrics.series.active_trustlines',
 }
 
 /** Sparkline geometry, in viewBox units. Not pixels: the SVG stretches to its container. */
@@ -169,7 +171,10 @@ function polylinePoints(segment: PlottedPoint[]): string {
   return segment.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')
 }
 
-const title = computed(() => SERIES_TITLE[props.series.key] ?? props.series.key)
+const title = computed(() => {
+  const key = SERIES_TITLE[props.series.key]
+  return key ? t(key) : props.series.key
+})
 
 const latest = computed<MetricPoint | null>(() => {
   const list = points.value
@@ -218,7 +223,7 @@ const unitText = computed(() => {
       :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
       preserveAspectRatio="none"
       role="img"
-      :aria-label="`${title} trend`"
+      :aria-label="t('metrics.trendAria', { title })"
       :data-segment-count="chart.segments.length"
       :data-gap-count="chart.gapCount"
       :data-point-count="chart.dots.length"
@@ -242,9 +247,9 @@ const unitText = computed(() => {
         :data-v="dot.raw"
       />
     </svg>
-    <p v-if="chart.malformed" class="mkc__note ds-help">Series value outside the wire contract</p>
+    <p v-if="chart.malformed" class="mkc__note ds-help">{{ t('metrics.malformed') }}</p>
     <p v-else-if="chart.gapCount > 0" class="mkc__note ds-help">
-      {{ chart.gapCount }} of {{ points.length }} points have no measurement
+      {{ tn('metrics.gaps', points.length, { gaps: chart.gapCount }) }}
     </p>
   </div>
 </template>

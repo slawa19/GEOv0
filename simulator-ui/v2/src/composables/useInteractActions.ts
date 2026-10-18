@@ -1,6 +1,7 @@
 import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
+import { t } from '../i18n/t'
 import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
 import { paymentOutcomeUnknown } from './interact/paymentIntent'
 import {
@@ -45,6 +46,24 @@ export type InteractActionError = {
    * an unusable 2xx, 408/5xx) and the server did not say the key is spent. The payment may have been made.
    */
   outcomeUnknown?: boolean
+  /**
+   * 046 wave 2: `message` is the client's own text in the language of the interface (the "no answer" of a mutation), not
+   * the server's - `actionErrorText` shows it instead of the text of `code`.
+   */
+  clientMessage?: boolean
+}
+
+/**
+ * 046 fix-delta (F2): a failure whose message the client composed from its dictionary, in the language of the interface (a
+ * missing run id). The ONLY non-HTTP value the mapper passes on as the client's own text (`clientMessage`); anything else
+ * thrown - a network `TypeError` of `fetch`, an `AbortError`, a defect - carries the runtime's English message and is told
+ * by its code instead.
+ */
+export class ClientTextError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ClientTextError'
+  }
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
@@ -117,9 +136,17 @@ function mapToInteractActionError(e: unknown): InteractActionError {
     }
   }
 
+  // Not an HTTP answer. Only a text the client composed itself (`ClientTextError`) is marked as its own message (Codex §15
+  // round 1: a SERVER answer with the code `UNKNOWN` is not one). Anything else carries the runtime's English (fix-delta F2:
+  // "Failed to fetch" reached the trust line and clearing windows under ?lang=ru) and is told by its code: `fetch` rejects
+  // with a `TypeError` on a network failure - NETWORK, "no connection to the server"; any other value - UNKNOWN, the
+  // general text with the code. The message stays for diagnosis; it is not shown.
+  if (e instanceof ClientTextError) {
+    return { status: 0, code: 'UNKNOWN', message: e.message, details: null, clientMessage: true }
+  }
   return {
     status: 0,
-    code: 'UNKNOWN',
+    code: e instanceof TypeError ? 'NETWORK' : 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
     details: null,
   }
@@ -196,7 +223,7 @@ export function useInteractActions(opts: {
 
   function requireRunId(): string {
     const id = opts.runId.value.trim()
-    if (!id) throw mapToInteractActionError(new Error('No active run_id'))
+    if (!id) throw mapToInteractActionError(new ClientTextError(t('actionError.noRun')))
     return id
   }
 
@@ -214,6 +241,7 @@ export function useInteractActions(opts: {
       // technical timeout line that reads like a failed request.
       if (e instanceof ApiError && e.outcomeUnknown) {
         mapped.message = actionOutcomeUnknownText(e.timeoutMs)
+        mapped.clientMessage = true
       }
 
       // If the run no longer exists, stop issuing run-scoped calls.

@@ -1,7 +1,8 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../../types'
-import { extractErrorMessage } from '../../utils/errorMessage'
+import { t } from '../../i18n/t'
+import { actionErrorText } from '../../utils/paymentRefusalText'
 import { subMoney } from '../../utils/money'
 import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
@@ -10,8 +11,10 @@ import { findAnsweredRow, type TrustlinesFetchState } from './trustlinesSourceSt
 import { canonicalEquivalent, sameEquivalent } from '../../config/equivalents'
 
 // Register 271: an `InteractActionError` is a plain object, not an `Error` - read its `message` too.
+// 046 wave 2: a coded answer is told by its code in the language of the interface (`actionErrorText`), not by the server's
+// English message; a failure without a code keeps its own text.
 function getErrorMessage(error: unknown, fallback: string): string {
-  return (error == null ? '' : extractErrorMessage(error).trim()) || fallback
+  return (error == null ? '' : actionErrorText(error).trim()) || fallback
 }
 
 export type PaymentTargetDetail = { hops: number; max_available: string | null }
@@ -261,7 +264,7 @@ export function useInteractDataCache(opts: {
         return
       // Best-effort: fall back on snapshot-derived trustlines.
       // Keep a lightweight error signal for UI hints/debugging.
-      trustlinesLastErrorRef.value = getErrorMessage(error, 'Trustlines refresh failed')
+      trustlinesLastErrorRef.value = getErrorMessage(error, t('trustlineSource.trustlinesFailed'))
     } finally {
       if (
         trustlinesFetchEpoch === myEpoch &&
@@ -392,7 +395,7 @@ export function useInteractDataCache(opts: {
       const nextDetails = new Map(paymentTargetDetailsByKey.value)
       nextDetails.set(key, new Map())
       paymentTargetDetailsByKey.value = nextDetails
-      setPaymentTargetsError(key, getErrorMessage(error, 'Payment targets refresh failed'))
+      setPaymentTargetsError(key, getErrorMessage(error, t('trustlineSource.paymentTargetsFailed')))
       // Treat error response as “known” for UI determinism, but still revalidate after TTL.
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } finally {

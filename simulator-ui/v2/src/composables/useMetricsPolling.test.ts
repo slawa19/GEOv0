@@ -298,6 +298,17 @@ describe('useMetricsPolling', () => {
     h.scope.stop()
   })
 
+  // Codex §15 round 1 (P2): the analytics panel showed the transport's English sentence ("HTTP 500 Internal Server Error for
+  // /simulator/...") as is. The stream now keeps only what identifies the failure: the status and the request id.
+  it('an HTTP failure is kept as its status and request id, without the English sentence of the transport', async () => {
+    getMetricsMock.mockRejectedValue(new ApiError('HTTP 500 Internal Server Error for /simulator/runs/run-1/metrics', { status: 500, requestId: 'req-77' }))
+    const h = setup()
+    await flush()
+    expect(h.api.metricsPhase.value).toBe('error')
+    expect(h.api.metricsError.value).toBe('HTTP 500 · req-77')
+    h.scope.stop()
+  })
+
   it('keeps a non-ApiError rejection (network / decoder) in the error state', async () => {
     getMetricsMock.mockRejectedValue(new Error('metrics: $.series[0].points[1].v: expected string'))
 
@@ -305,7 +316,9 @@ describe('useMetricsPolling', () => {
     await flush()
 
     expect(h.api.metricsPhase.value).toBe('error')
-    expect(h.api.metricsError.value).toContain('expected string')
+    // 046 wave 2 (Codex §15 round 1): the error is a reference with no prose of any language - the class of a value that is
+    // not an HTTP failure (was the decoder's English message, shown as is in the panel).
+    expect(h.api.metricsError.value).toBe('Error')
     // The decoder blew up on `/metrics`; `/bottlenecks` answered and is untouched by it.
     expect(h.api.bottlenecksPhase.value).toBe('ready')
     expect(h.api.bottlenecksError.value).toBe('')

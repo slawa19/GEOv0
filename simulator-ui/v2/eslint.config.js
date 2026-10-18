@@ -53,6 +53,23 @@ const typescriptRecommended = tseslint.configs.recommended.map((config) => ({
   ignores: ['src/**/*.test.ts'],
 }))
 
+// 046 (decision 4; advisor 2026-10-18, wave 2): money is a decimal string with a dot in BOTH languages. `toLocaleString`
+// (on any receiver: a `Number`, a `Date`, a `BigInt`) and `Intl.NumberFormat` would group the digits and print the
+// Russian decimal comma, so they are refused on every product file - a counter-check of a violating text is in
+// `src/i18n/moneyLocaleLint.policy.test.ts`. `Intl.PluralRules` (the form of a count, `i18n/messages.ts`) stays allowed.
+// NOT seen: a locale-aware formatting reached by another name (a destructured `toLocaleString`, `Intl['NumberFormat']`
+// with a computed key, a library) - this is a guard on the obvious spellings, not a proof.
+const MONEY_LOCALE_RESTRICTIONS = [
+  {
+    selector: "CallExpression[callee.property.name='toLocaleString']",
+    message: '046: no toLocaleString - money is a decimal string with a dot in both languages (print it as it came, `formatMoney`).',
+  },
+  {
+    selector: "MemberExpression[object.name='Intl'][property.name='NumberFormat']",
+    message: '046: no Intl.NumberFormat - money is a decimal string with a dot in both languages (print it as it came, `formatMoney`).',
+  },
+]
+
 export default [
   {
     ignores: [
@@ -85,14 +102,31 @@ export default [
     rules: correctnessRules,
   },
   {
+    files: productFiles,
+    ignores: ['src/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...MONEY_LOCALE_RESTRICTIONS],
+    },
+  },
+  // Codex §15 round 1: `no-restricted-syntax` sees the <script> of a .vue only; the <template> expressions (an
+  // interpolation, a bound attribute) are seen by eslint-plugin-vue's own rule with the same selectors.
+  {
+    files: ['src/**/*.vue'],
+    rules: {
+      'vue/no-restricted-syntax': ['error', ...MONEY_LOCALE_RESTRICTIONS],
+    },
+  },
+  {
     files: [
       'src/components/SimulatorAppRoot.vue',
       'src/composables/useWindowController.ts',
       'src/composables/windowManager/**/*.ts',
     ],
     rules: {
+      // A later block REPLACES the rule's options for these files: the money restrictions are repeated here.
       'no-restricted-syntax': [
         'error',
+        ...MONEY_LOCALE_RESTRICTIONS,
         {
           selector: "CallExpression[callee.name='watchEffect']",
           message:

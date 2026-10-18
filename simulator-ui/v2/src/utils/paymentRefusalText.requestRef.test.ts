@@ -2,11 +2,13 @@
  * 034 S5a fix-delta, item 3: EVERY return branch of the refusal texts shows the request id.
  * The branches are enumerated from the source of `paymentRefusalText` / `clearingRefusalText`:
  *   payment:  (1) a known `details.reason`; (2) a known `code` without a reason (CODES map);
- *             (3) a generic code (INVALID_AMOUNT, PAYMENT_REJECTED); (4) anything else -> the server's message.
- *   clearing: (5) CLEARING_REFUSED + occurrence_amount_not_in_step; (6) anything else -> the server's message.
+ *             (3) a generic code (INVALID_AMOUNT, PAYMENT_REJECTED); (4) anything else -> the text of its code, or the
+ *             general text with the code (046 wave 2; was: the server's message).
+ *   clearing: (5) CLEARING_REFUSED + occurrence_amount_not_in_step; (6) anything else -> the text of its code (same).
  */
 import { describe, expect, it } from 'vitest'
 
+import { t } from '../i18n/t'
 import { clearingRefusalText, paymentRefusalText, type UiLocale } from './paymentRefusalText'
 
 type Case = { branch: string; error: Record<string, unknown>; text: (e: unknown, l: UiLocale) => string }
@@ -27,13 +29,16 @@ const CASES: Case[] = [
   { branch: '6 clearing other', error: withId({ code: 'CLEARING_FAILED' }), text: (e, l) => clearingRefusalText(e, 'UAH', l) },
 ]
 
-describe('every branch of the refusal texts carries (ref: <id>)', () => {
+describe('every branch of the refusal texts carries (ref: <id>), in the language of the text', () => {
   it.each(CASES.flatMap((c) => (['en', 'ru'] as UiLocale[]).map((l) => [c.branch, l, c] as const)))(
     '%s [%s]',
     (_branch, locale, c) => {
       const text = c.text(c.error, locale)
-      expect(text).toContain('(ref: req-x)')
-      expect(text.match(/\(ref:/g)).toHaveLength(1)
+      // 046 wave 2: the reference is in the language of the text ("(ref: req-x)" / "(запрос: req-x)").
+      const ref = t('common.requestRefOnly', { id: 'req-x' }, locale)
+      expect(text).toContain(ref)
+      expect(text.split(ref)).toHaveLength(2)
+      expect(text.match(/req-x/g)).toHaveLength(1)
     },
   )
 

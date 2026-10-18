@@ -2,6 +2,9 @@
  * 037 C on the existing `ClearingPanel`: the finished result of a clearing - who repaid whom - until "Close". Observed through
  * the DOM. The direction is the contract: an edge of the answer runs creditor -> debtor, so `{from: Alice, to: Bob}` reads
  * "Bob's debt to Alice reduced by X" and is never worded as a payment from Alice to Bob.
+ * 046 (advisor, 2026-10-18): worded in the arrow form with the arrow of the protocol - creditor -> debtor, the edge's own
+ * from -> to - "Alice → Bob: debt reduced by X" (was "Bob’s debt to Alice reduced by X"; round 1 had "Bob → Alice", the
+ * advisor's premise "as the line window's title" corrected the same day: that title is from -> to).
  */
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -56,12 +59,15 @@ describe('the finished result', () => {
     await settle()
 
     expect(lines(host)).toEqual([
-      'Bob’s debt to Alice reduced by 7.00 UAH',
-      'Carol’s debt to Bob reduced by 7.00 UAH',
-      'Alice’s debt to Carol reduced by 7.00 UAH',
+      'Alice → Bob: debt reduced by 7.00 UAH',
+      'Bob → Carol: debt reduced by 7.00 UAH',
+      'Carol → Alice: debt reduced by 7.00 UAH',
     ])
     const all = host.textContent ?? ''
-    expect(all).not.toMatch(/Alice (paid|pays|→|->) Bob/)
+    // 046 (2026-10-18): the arrow now IS on screen - creditor -> debtor, the edge's own direction - and every arrow is
+    // followed by "debt reduced"; what stays forbidden is wording it as a payment (was: no "Alice → Bob" at all).
+    expect(all).not.toMatch(/Alice (paid|pays) Bob/)
+    expect(lines(host).every((l) => /^\S+ → \S+: debt reduced by /.test(l))).toBe(true)
     expect(all).not.toMatch(/(payment|paid)\b.*\b(Alice|Bob|Carol)/i)
   })
 
@@ -72,7 +78,7 @@ describe('the finished result', () => {
     })
     await settle()
 
-    expect(lines(host)[0]).toBe('Bob’s debt to Alice reduced by 5.50 USD')
+    expect(lines(host)[0]).toBe('Alice → Bob: debt reduced by 5.50 USD')
     expect(text(host, 'clearing-total')).toContain('5.50 USD')
     expect(host.textContent).not.toContain('UAH 5.50')
   })
@@ -94,24 +100,39 @@ describe('the finished result', () => {
     expect(Array.from(host.querySelectorAll('[data-testid="clearing-cycle-title"]')).map((e) => e.textContent!.replace(/\s+/g, ' ').trim()))
       .toEqual(['Cycle 1 of 2: 7.00 UAH', 'Cycle 2 of 2: 3.00 UAH'])
     expect(lines(host)).toEqual([
-      'Bob’s debt to Alice reduced by 7.00 UAH', 'Alice’s debt to Bob reduced by 7.00 UAH',
-      'Alice’s debt to Carol reduced by 3.00 UAH', 'Carol’s debt to Alice reduced by 3.00 UAH',
+      'Alice → Bob: debt reduced by 7.00 UAH', 'Bob → Alice: debt reduced by 7.00 UAH',
+      'Carol → Alice: debt reduced by 3.00 UAH', 'Alice → Carol: debt reduced by 3.00 UAH',
     ])
+  })
+
+  // 046 (advisor, 2026-10-18): one arrow meaning across the interface - creditor -> debtor, the protocol's from -> to. The order
+  // of the two names is read from each edge of the ANSWER, not restated by hand, so a swap of creditor and debtor anywhere
+  // between the answer and the screen turns this red.
+  it('the names of every line are in the order of its edge: from (creditor) first, to (debtor) second', async () => {
+    const answer = result({ cycles: [
+      { cleared_amount: '2.00', edges: [{ from: 'carol', to: 'alice' }, { from: 'alice', to: 'bob' }, { from: 'bob', to: 'carol' }] },
+    ] })
+    const { host } = mount({ last: answer })
+    await settle()
+    const name = (pid: string) => PEOPLE.find((p) => p.pid === pid)!.name
+    const expected = answer.cycles[0]!.edges.map((e) => `${name(e.from)} → ${name(e.to)}: debt reduced by 2.00 UAH`)
+    expect(lines(host)).toEqual(expected)
+    expect(lines(host)[0]!.startsWith('Carol → Alice')).toBe(true)
   })
 
   it('names come from the participants given; a participant the list does not know is shown by id, never guessed', async () => {
     const known = mount()
     await settle()
-    expect(lines(known.host)[0]).toContain('Bob’s debt to Alice')
+    expect(lines(known.host)[0]).toContain('Alice → Bob: debt')
     document.body.innerHTML = ''
 
     const unknown = mount({ participants: [{ pid: 'alice', name: 'Alice', type: 'person', status: 'active' }] })
     await settle()
-    expect(lines(unknown.host)[0]).toBe('bob’s debt to Alice reduced by 7.00 UAH')
+    expect(lines(unknown.host)[0]).toBe('Alice → bob: debt reduced by 7.00 UAH')
 
     const none = mount({ participants: undefined })
     await settle()
-    expect(lines(none.host)[0]).toBe('bob’s debt to alice reduced by 7.00 UAH')
+    expect(lines(none.host)[0]).toBe('alice → bob: debt reduced by 7.00 UAH')
   })
 
   it('shows no before -> after: the answer carries none', async () => {

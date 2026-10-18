@@ -1,4 +1,13 @@
 import type { TrustlineInfo } from '../../api/simulatorTypes'
+import type { UiLocale } from '../../i18n/locale'
+import { t } from '../../i18n/t'
+
+/*
+ * 046 wave 2: the three notices below are the dictionary's (`trustlineSource.*`). Each takes the language to speak in; the
+ * trust line window passes the interface's. Without one they are English: the other reader, the line window
+ * (`EdgeDetailPopup.vue`, wave 3), is English as a whole until wave 3 moves it, and a Russian notice inside it would be
+ * the mixed string spec 046 forbids.
+ */
 
 /**
  * `F-013-7` — состояние источника trustlines КАК СОСТОЯНИЕ, а не как два булева флага.
@@ -187,7 +196,7 @@ export function trustlineSourceFrozen(source: TrustlineFiguresSource | null | un
  * называть его ответ отсутствием ответа — значит повторить ту же подмену этажом выше. Этот случай
  * говорит `trustlineNoRowNotice`.
  */
-export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | undefined): string | null {
+export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
   const resolved: TrustlineFiguresSource = source ?? { kind: 'never-asked' }
   // ВОПРОС А ЗАДАЁТСЯ ОДИН РАЗ И ЗДЕСЬ. Раньше на этом месте стоял собственный список видов
   // (`row | no-row | frozen`) — вторая копия того же правила, из-за которой `trustlineSourceAnswered`
@@ -195,16 +204,14 @@ export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | u
   if (trustlineSourceAnswered(resolved)) return null
   switch (resolved.kind) {
     case 'never-asked':
-      return 'Trustline data for this pair has not been requested from the backend; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.'
+      return t('trustlineSource.neverAsked', {}, locale)
     case 'loading':
       // ЗАМОРОЖЕННАЯ ЗАГРУЗКА — НЕ ЗАГРУЗКА (кросс-ревью, P3). Запрос, который был в полёте в
       // момент заморозки, обновит ЖИВОЕ состояние, а не этот снимок; обещать «ещё грузится»
       // значит утверждать про окно то, чего с ним никогда не случится.
-      return resolved.frozen === true
-        ? 'Trustline data for this pair was still being requested when this window was frozen; that request will not update these figures, and nothing has confirmed them for this pair.'
-        : 'Trustline data is still loading from the backend; the figures for this pair are not available yet.'
+      return resolved.frozen === true ? t('trustlineSource.loadingFrozen', {}, locale) : t('trustlineSource.loading', {}, locale)
     case 'failed':
-      return `Trustline data could not be loaded: ${resolved.message}. The figures for this pair are not available, and what the graph shows may be out of date.`
+      return t('trustlineSource.failed', { message: resolved.message }, locale)
   }
 }
 
@@ -220,25 +227,18 @@ export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | u
  *
  * `null` — во всех остальных состояниях.
  */
-export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | undefined): string | null {
+export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
   // ЧТО ИЗМЕНИЛОСЬ (кросс-ревью, P3). Здесь стояло `source?.kind !== 'frozen'`, то есть
   // уведомление о заморозке доставалось ОДНОМУ из способов быть замороженным — заморозке ответа
   // со строкой. Замороженные `no-row`, `never-asked`, `loading` и `failed` оставались наблюдаемо
   // НЕОТЛИЧИМЫ от живых — ровно та неразличимость, против которой это уведомление и заведено.
   if (!trustlineSourceFrozen(source)) return null
   if (source?.kind === 'frozen') {
-    return (
-      'These figures are a frozen copy of an earlier backend answer, kept as context for the ' +
-      'action in progress; they are not being refreshed and may describe a different pair than the ' +
-      'one now selected.'
-    )
+    return t('trustlineSource.frozenAnswer', {}, locale)
   }
   // Про ОТВЕТ здесь не говорится ни слова: его в этих основаниях нет (либо он есть, но
   // означает «линии нет»), и что именно было основанием — говорят соседние уведомления.
-  return (
-    'The figures in this window are a frozen copy kept as context for the action in progress; ' +
-    'they are not being refreshed and may describe a different pair than the one now selected.'
-  )
+  return t('trustlineSource.frozenOther', {}, locale)
 }
 
 /**
@@ -251,16 +251,12 @@ export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | un
  *
  * `null` — во всех остальных состояниях.
  */
-export function trustlineNoRowNotice(source: TrustlineFiguresSource | null | undefined): string | null {
+export function trustlineNoRowNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
   // Сначала вопрос А тем же предикатом: рассказывать СОДЕРЖАНИЕ ответа можно только там, где
   // ответ был. Это не перестраховка, а отказ от третьей копии набора видов.
   if (!trustlineSourceAnswered(source)) return null
   if (source.kind !== 'no-row') return null
-  return (
-    'The backend answered for this pair: there is no trustline. ' +
-    'The figures on the graph come from the snapshot and do not describe an existing line — ' +
-    'there is nothing to update or close here; create the line instead.'
-  )
+  return t('trustlineSource.noRow', {}, locale)
 }
 
 /** Ищет строку пары в списке, который источник ДЕЙСТВИТЕЛЬНО прислал (`null` — не присылал). */

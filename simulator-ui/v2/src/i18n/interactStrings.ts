@@ -1,104 +1,25 @@
+import { t, type MessageKey } from './t'
+
 /**
- * Every NEW user-facing string of the manual-payment flow (037 slice A2), in one place, English only.
- *
- * Why one module: the visitor-side dictionary (RU/EN with a switcher) belongs to the demo programme (034 S9); until it
- * lands these strings are the single list it will absorb - keys here, no literal of this kind in a template. Why English
- * only: no new Russian text is introduced by this slice; `utils/paymentRefusalText.ts` keeps its own RU branch.
- *
- * Placeholders are `{name}`; `interactText` fills them and leaves an unknown placeholder visible rather than guessing.
+ * 046 wave 2 (T4603): the strings of the action windows moved into the one dictionary (`en.ts` / `ru.ts`, areas
+ * `payment`, `clearing`, `card`). This module is what is LEFT of the 037 A2 list: a re-export of the dictionary keys
+ * still read under their old names by the files of wave 3 - the participant card (`NodeCardOverlay.vue`) and the line
+ * window (`EdgeDetailPopup.vue`), which this wave does not edit. They get the ENGLISH text: those two windows are
+ * English as a whole until wave 3 moves them, and one Russian sentence inside an English card would be the mixed string
+ * spec 046 forbids. Wave 3 calls `t()` directly (the language of the interface) and removes this file; no new key is
+ * added here.
  */
-export const interactStrings = {
-  // The result screen of a committed payment.
-  resultTitle: 'Payment sent',
-  resultPaymentId: 'Payment ID',
-  resultStatus: 'Status',
-  resultAmount: 'Amount',
-  resultParties: 'From → To',
-  resultRoute: 'Route',
-  resultRoutes: 'Route {n} of {total}',
-  resultRouteStep: '{from} → {to}: {amount} {unit}',
-  resultNoRoutes: 'The server did not report the route of this payment.',
-  resultAnother: 'Another payment',
-  resultClose: 'Close',
+const KEYS = {
+  cardFlowOpenReason: 'card.flowOpenReason',
+  cardBusyReason: 'card.busyReason',
+  cardLineAvailable: 'card.lineAvailable',
+  lineDirectionTitle: 'payment.lineDirectionTitle',
+  lineDirectionNote: 'payment.lineDirectionNote',
+} as const satisfies Record<string, MessageKey>
 
-  // An outcome that is not known, and what the user can do about it.
-  unknownTitle: 'Result unknown',
-  unknownNoAnswer: 'No usable answer arrived; the payment of {amount} {unit} ({from} → {to}) may have been made.',
-  unknownFrozen: 'Unresolved payment: {amount} {unit}, {from} → {to}.',
-  unknownOtherRun: 'This payment belongs to another run, so it cannot be checked from here. Go back to that run, or discard it.',
-  unknownBlocksNew: 'A payment with an unknown result has to be checked or discarded before another payment is sent.',
-  noValidKey: 'The payment has no valid key, so nothing was sent.',
-  storageRefused: 'The browser would not save a record of this payment, so it was not sent: after a reload it could not be checked safely. Free the storage or allow it, then repeat.',
-  storageUnreadable: 'The browser storage could not be read, so it is not known whether an earlier payment is unresolved; no payment was sent. Allow the storage, then repeat.',
-  unknownDiscard: 'Discard and start over',
-  unknownDiscardWarning: 'The first payment may have been made; a new one could be a second. Discard only after checking.',
-  unknownDiscardConfirm: 'Discard it',
-  unknownDiscardKeep: 'Keep checking',
-  unknownRetry: 'Check / repeat',
-  unknownRetryHint: 'A repeat uses the same key: the payment is made once.',
+export type InteractStringKey = keyof typeof KEYS
 
-  // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}", never a payment).
-  clearingResultTitle: 'Clearing result',
-  clearingRunning: 'Running clearing…',
-  clearingCycles: 'Cycles cleared',
-  clearingTotal: 'Total over cycles',
-  clearingTotalNote: 'Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.',
-  clearingCycle: 'Cycle {n} of {total}: {amount} {unit}',
-  clearingEdgeLine: '{debtor}’s debt to {creditor} reduced by {amount} {unit}',
-  clearingNothing: 'Nothing was cleared: no cycle of debts was found.',
-
-  // A payment started from a line goes against the line's arrow (F-037-4).
-  lineDirectionTitle: 'Why is the direction reversed?',
-  lineDirectionNote: 'This line runs from creditor to debtor; Pay starts a payment from debtor to creditor. For the part sent directly, any reverse debt is offset first, and only the remainder increases the debtor’s debt under this line’s limit; it does not repay that debt. The server may route some or all of the payment through other participants.',
-
-  // The progression of the form: what the form announces when it opens the next list for the user.
-  nextChoiceRecipient: 'Choose the recipient.',
-
-  // The hint under the direct capacity of the confirm step (045 S2: the `title` of the "Direct" figure of the information line).
-  directCapacityHelp: '1-hop hint; recipients are server-routed (max hops: {hops}).',
-  directTitle: 'Direct',
-
-  // 045 S2: the windows of the actions. A hint lives in the placeholder of its field; Escape is said in the title's `title`;
-  // a disabled primary button says why in its own `title`.
-  pickPlaceholder: 'Pick on the canvas or choose',
-  escHint: 'Esc: one step back, then close',
-  confirmNeedsParties: 'Choose the sender and the recipient first.',
-  confirmNeedsRecipient: 'Choose the recipient first.',
-  trustlineNeedsParties: 'Choose From and To first.',
-  trustlineNeedsLimit: 'Enter a limit.',
-  trustlineNeedsNewLimit: 'Enter a new limit.',
-  trustlineCloseRequested: 'Close already requested.',
-
-  // 045 S3 (BACKLOG 043-4): why the participant card cannot start a payment or a new line now - the same words as the action bar.
-  cardFlowOpenReason: 'Cancel current action first (press ESC).',
-  cardBusyReason: 'Operation in progress… please wait.',
-  // 045 S3 round (Codex P2): what is available on a line of the card - the description of its Edit button.
-  cardLineAvailable: 'available {amount} {unit}',
-
-  // A success-shaped answer that is not a committed payment.
-  notCommitted: 'The server did not confirm the payment (status {status}).',
-
-  // Where the numbers on the panel come from.
-  sourceServer: 'server',
-  sourceSnapshot: 'snapshot, unconfirmed',
-  sourceLoading: 'waiting…',
-  sourceFailed: 'snapshot, no answer',
-
-  // The server's estimate for the chosen recipient (`payment-targets`, `include_max_available`).
-  estimateShort: 'Max',
-  estimateSource: 'server estimate',
-  shortestTitle: 'Shortest path',
-  shortestSteps: '{n} steps',
-  shortestOneStep: '1 step',
-  routeNote: 'The route is chosen when the payment is executed.',
-  estimateNotEstimated: 'not estimated',
-  estimateLoading: 'waiting for the server',
-  estimateFailed: 'not received',
-  estimateExceeded: 'The amount is above the server\'s estimate of the maximum ({max} {unit}); the server decides.',
-} as const
-
-export type InteractStringKey = keyof typeof interactStrings
-
+/** The English text of an old key, as before wave 2; placeholders not given stay visible (as before). */
 export function interactText(key: InteractStringKey, vars: Record<string, string | number> = {}): string {
-  return interactStrings[key].replace(/\{(\w+)\}/g, (whole, name: string) => (name in vars ? String(vars[name]) : whole))
+  return t(KEYS[key], vars, 'en')
 }

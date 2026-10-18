@@ -33,12 +33,14 @@ test.describe('037 C - the clearing result in a real browser', () => {
     await runClearing(page)
 
     await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(2)
+    // 046 (advisor, 2026-10-18): the arrow form, creditor -> debtor as the edge's from -> to and the line window's title
+    // (was "Bob’s debt to Alice reduced by 7.00 UAH"; round 1 had it debtor-first, corrected the same day).
     expect(await lines(page)).toEqual([
-      'Bob’s debt to Alice reduced by 7.00 UAH',
-      'Carol’s debt to Bob reduced by 7.00 UAH',
-      'Alice’s debt to Carol reduced by 7.00 UAH',
-      'Carol’s debt to Alice reduced by 3.00 UAH',
-      'Alice’s debt to Carol reduced by 3.00 UAH',
+      'Alice → Bob: debt reduced by 7.00 UAH',
+      'Bob → Carol: debt reduced by 7.00 UAH',
+      'Carol → Alice: debt reduced by 7.00 UAH',
+      'Alice → Carol: debt reduced by 3.00 UAH',
+      'Carol → Alice: debt reduced by 3.00 UAH',
     ])
     await expect(page.locator('[data-testid="clearing-total"]')).toContainText('10.00 UAH')
 
@@ -139,7 +141,7 @@ for (const vp of VIEWPORTS) {
       const confirm = await measure(page, 'confirm', ['[data-testid="clearing-confirm"]', '[data-testid="clearing-cancel"]'], 'clearing-panel')
 
       await page.locator('[data-testid="clearing-confirm"]').tap()
-      await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(3)
+      await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(5)
       await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
       const long = await measure(page, 'long-result', ['[data-testid="clearing-close"]'], 'clearing-panel')
 
@@ -165,7 +167,8 @@ for (const vp of VIEWPORTS) {
 
       expect.soft(problems(confirm), `clearing confirm in ${vp.w}x${vp.h}`).toEqual([])
       expect.soft(problems(long), `long clearing result in ${vp.w}x${vp.h}`).toEqual([])
-      expect.soft(tail.lines, 'fixture: three cycles of five edges').toBe(15)
+      // 046 round 1 (2026-10-18): five cycles (was three) - see `clearing: 'many'` in helpers/p037Mock.ts.
+      expect.soft(tail.lines, 'fixture: five cycles of five edges').toBe(25)
       expect.soft(tail.above, `the last line (${tail.text}) lies above Close`).toBe(true)
       expect.soft(tail.covered, 'nothing covers the last line').toBe(false)
       if (vp.h <= 667) expect.soft(tail.scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)
