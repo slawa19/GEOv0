@@ -46,6 +46,8 @@ async function openCard(page: Page, nodeId = 'alice'): Promise<Locator> {
   await expect(card.locator('.ds-ov-node-card')).toBeVisible()
   // The lines arrive from the mocked backend after the card opens.
   await expect(card.locator('.nco-trustline-row').first()).toBeVisible()
+  // The window manager re-clamps a shell that grew a few frames later: measure the card where it stays, not in transit.
+  await settleShell(page, 'node-card-stats')
   return card
 }
 
