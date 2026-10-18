@@ -232,6 +232,26 @@ details[open].ds-ov-details > summary::after {
   max-width: 100%;
 }
 
+/*
+  045 S3, BACKLOG 045-2 (measured 2026-10-18): the "0" seen on a window is a node the CANVAS draws under it, not a label
+  above it - `document.elementsFromPoint` at the mark gives the window (.ws-shell z 1000002 in .wm-layer z 42), then the
+  canvas; no label layer. The saas surfaces are translucent (`--ds-surface-2` alpha 0.78, `--ds-surface-1` 0.62), so
+  the graph shows through a window; hud's are opaque. Inside a window the same surface is laid over the page colour (what an
+  empty canvas shows), so a window looks as before over an empty canvas and hides what is drawn under it. Saas only:
+  hud is opaque already, shadcn and library are frozen. The gradients repeat `.ds-panel--elevated` (primitives.css).
+*/
+[data-theme='saas'] .ws-shell .ds-panel--elevated {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.05), transparent 26%),
+    radial-gradient(900px 300px at 30% 0%, var(--ds-gridline), transparent 60%),
+    linear-gradient(var(--ds-surface-2), var(--ds-surface-2)),
+    var(--ds-page-bg);
+}
+
+[data-theme='saas'] .ws-shell .ds-ov-surface {
+  background: linear-gradient(var(--ds-surface-1), var(--ds-surface-1)), var(--ds-page-bg);
+}
+
 .ds-ov-panel--compact .ds-panel__header,
 .ds-ov-panel--compact .ds-panel__body {
   padding: var(--ds-ov-panel-compact-pad);
