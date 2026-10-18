@@ -272,9 +272,9 @@ export async function installSseShim(page: Page): Promise<void> {
 export async function installRafCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number>; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number>; fxByMethod: Record<string, number>; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
     }
-    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, baseByMethod: {}, drawAt: [], callbackMs: [], frameT: [], record: false }
+    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, baseByMethod: {}, fxByMethod: {}, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
     // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
     // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
@@ -300,6 +300,7 @@ export async function installRafCounter(page: Page): Promise<void> {
           w.__qaRaf.cmds += 1
           // 039 slice C: the same calls of the BASE canvas by method (criterion 8: stroke and drawImage a pass).
           if (!cl.contains('canvas-fx')) w.__qaRaf.baseByMethod[m] = (w.__qaRaf.baseByMethod[m] ?? 0) + 1
+          else w.__qaRaf.fxByMethod[m] = (w.__qaRaf.fxByMethod[m] ?? 0) + 1
         }
         return real.apply(this, a)
       }
@@ -324,12 +325,12 @@ export async function installRafCounter(page: Page): Promise<void> {
 /**
  * `calls`: registrations of a callback (weak: any caller). `draws`: completed PASSES of the render loop (one clear of
  * the base canvas each) - not how much a pass draws. `cmds`: calls of drawing methods on the on-screen canvases.
- * `baseByMethod`: the same calls of the base canvas only, by method name (039 slice C).
+ * `baseByMethod` / `fxByMethod`: the same calls of the base / the FX canvas, by method name (039 slice C).
  */
-export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number> }> {
+export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number>; fxByMethod: Record<string, number> }> {
   return page.evaluate(() => {
-    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number> } }).__qaRaf
-    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds, baseByMethod: { ...q.baseByMethod } }
+    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number; baseByMethod: Record<string, number>; fxByMethod: Record<string, number> } }).__qaRaf
+    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds, baseByMethod: { ...q.baseByMethod }, fxByMethod: { ...q.fxByMethod } }
   })
 }
 
@@ -461,15 +462,26 @@ export function pausedClockTime(t: number): number {
 }
 
 /**
- * Step the paused clock to the next frame boundary (`Date.now() % FRAME_MS === 0`; a whole frame when it already stands
- * on one). The fake clock fires animation frames on that grid, and `performance.now()` shares it (the clock is installed
- * at a time divisible by 16), so after this call the next frame is exactly one step away whatever the phase was. For
- * counts that must not depend on the phase at all - the discrete budgets of S3. The ONE place where the stand does
- * phase arithmetic besides `pausedClockTime`.
+ * Step the paused clock to the next frame boundary (a whole frame when it already stands on one), so that after this
+ * call the next animation frame is exactly one step away whatever the phase was. For counts that must not depend on
+ * the phase at all - the discrete budgets of S3. The ONE place where the stand does phase arithmetic besides
+ * `pausedClockTime`.
+ *
+ * The grid is that of `performance.now()`, NOT of `Date.now()` (corrected 2026-10-18, 039 slice C): Playwright's clock
+ * fires animation frames when its ticks - what the page reads as `performance.now()` - are a multiple of 16
+ * (`getTimeToNextFrame() = 16 - ticks % 16`, playwright-core `clockSource`), and the ticks are offset from `Date.now()`
+ * by the real time from navigation start to the moment the clock script ran. That offset is a matter of how fast the
+ * boot was: measured 2026-10-18 with the CPU throttled x12 during the boot, `performance.now() % 16` at this point was
+ * 14, 7, 2, 15, 1, 1 in six runs while `Date.now() % 16` was 0 in all six. Until that day this function stepped to the
+ * `Date.now()` grid, on the belief written here that the two shared it: a budget counted over a period was then a
+ * function of the boot's speed - DRAW_COMMANDS_IN_ONE_PERIOD_OF_LOAD 187882 on Windows and in CI run 39130480920,
+ * 187873 in CI run 39133364307 with no product change for that load between them, and 187758..187924 locally under
+ * the throttle. `pausedClockTime` still pins the `Date.now()` phase, which is therefore NOT the phase of the frames
+ * (BACKLOG 039-11).
  */
 export async function stepToFrameBoundary(page: Page): Promise<void> {
-  const now = await page.evaluate(() => Date.now())
-  await page.clock.runFor(FRAME_MS - (now % FRAME_MS))
+  const ticks = await page.evaluate(() => performance.now())
+  await page.clock.runFor(FRAME_MS - (ticks % FRAME_MS))
 }
 
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */

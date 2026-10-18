@@ -43,6 +43,9 @@ async function bootClocked(page: Page, snap: QaSnapshot, beforeLoad?: (page: Pag
   if (!devHook) await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 1000))
   await page.clock.runFor(3600) // IDLE_DELAY_MS 3000 + hold + one idle period: the loop is in deep sleep
   await stepToFrameBoundary(page) // the one phase mechanism of the stand (`stand.ts`); these counts hold at any `CLOCK_PHASE_MS`
+  // ... and at any speed of the boot: the frames are on the grid of `performance.now()`, whose offset from `Date.now()`
+  // the boot decides (2026-10-18, `stepToFrameBoundary`). Counter-check that the step landed on that grid.
+  expect(await page.evaluate(() => performance.now() % 16), 'precondition: the clock stands on the frame grid of performance.now()').toBe(0)
 }
 
 // Awaited (2026-10-12, 039 slice A): a count taken after frames that the product has not read yet is a count of
@@ -207,8 +210,13 @@ test('budget: one period of the named load is one pass per frame of a recorded d
   const warm = await onePeriod(page, 'budget-warm')
   const offScreenWarm = await page.evaluate(() => (window as unknown as { __qaShadow: { offScreen: number } }).__qaShadow.offScreen)
 
+  const byMethod = (a: Record<string, number>, b: Record<string, number>) =>
+    Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].sort().map((m) => [m, (b[m] ?? 0) - (a[m] ?? 0)]))
   const row = {
-    drawsInOnePeriod: after.draws - before.draws, commandsInOnePeriod: after.cmds - before.cmds, peak, backdropUnderLoad, shadow, drained,
+    drawsInOnePeriod: after.draws - before.draws, commandsInOnePeriod: after.cmds - before.cmds,
+    // Diagnostic, not judged: where the commands are (base / FX canvas, by method), to compare two runs that disagree.
+    base: byMethod(before.baseByMethod, after.baseByMethod), fx: byMethod(before.fxByMethod, after.fxByMethod),
+    peak, backdropUnderLoad, shadow, drained,
     drawsAsleepAfter: d1.draws - d0.draws, warm: { draws: warm.after.draws - warm.before.draws, commands: warm.after.cmds - warm.before.cmds, offScreenShadowBlurSets: offScreenWarm },
   }
   console.log('[038 budget] one period of the load', JSON.stringify(row))
