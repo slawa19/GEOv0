@@ -40,9 +40,9 @@ const MAPPING: VizMapping = {
     tx_spark: { core: '#fff', trail: '#fff' },
     clearing_credit: '#fff',
     clearing_debt: '#fff',
-    flash: { clearing: { from: '#fff', to: '#fff' } },
     glint: '#fff',
   },
+  motion: { txLabelMs: 2600, clearingLabelMs: 4200 },
 }
 
 type MockCtx = Omit<CanvasRenderingContext2D, 'canvas'> & {

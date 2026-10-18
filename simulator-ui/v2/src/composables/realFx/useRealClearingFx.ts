@@ -4,12 +4,19 @@ import type { ClearingDoneEvent } from '../../types'
 import { canonicalEquivalent } from '../../config/equivalents'
 import { CLEARING_LABEL_COLOR } from '../../config/fxConfig'
 import type { FxState } from '../../render/fxRenderer'
-import { spawnEdgePulses as spawnEdgePulsesDefault, spawnNodeBursts as spawnNodeBurstsDefault } from '../../render/fxRenderer'
+import {
+  spawnEdgePulses as spawnEdgePulsesDefault,
+  spawnNodeBursts as spawnNodeBurstsDefault,
+  spawnSparks as spawnSparksDefault,
+} from '../../render/fxRenderer'
+import { EDGE_PULSE_AFTERGLOW_K } from '../../render/fxConfig'
 import type { LayoutNode } from '../../types/layout'
 import { computeClearingAmountAnchorFromEdgeMidpoints } from '../../utils/clearingAmountAnchor'
 import { isZeroDecimalString } from '../../utils/isZeroDecimalString'
 import { __retryUntilTruthyOrDeadline } from '../../utils/retryUntilTruthy'
 import type { ClearingAmountOverlay } from '../useOverlayState'
+import { BEAM_NODE_BURST_MS } from './useRealTxFx'
+import { BEAM_FADE_MS } from './txRoutePlan'
 
 export type ClearingFxParams = {
   edges: Array<{ from: string; to: string }>
@@ -20,12 +27,30 @@ export type ClearingFxParams = {
 
 type ClearingFxOptions = { animate?: boolean }
 
+/**
+ * 039 slice C - the clearing effect, in this order (spec 039, slice C: "one spark goes round the cycle in 1.2 s, then
+ * the labels"):
+ *  1. `CLEARING_LOOP_MS`: one spark per cycle goes round it once, along the cycle's lines (creditor -> debtor, the
+ *     direction the snapshot draws them), at one speed; every node of the cycle lights up as the spark leaves it;
+ *  2. then the lines of the cycles pulse for `CLEARING_PULSE_MS` (and fade over the renderer's afterglow), the cycle is
+ *     highlighted on the base canvas for as long, and the amount label comes - it lives as long as its CSS fade.
+ * What is gone with this (it was there until 039 slice C): the full-screen flash, the bloom-and-shockwave bursts of
+ * every node with `screen` composite at the first instant, and the 4.2 s pulse of all lines at once - the cycle was
+ * lit before anything had moved round it.
+ */
+export const CLEARING_LOOP_MS = 1200
+export const CLEARING_PULSE_MS = 1600
+/** The whole effect: the loop, then the pulse with its afterglow. The offline workbench spaces its events by it. */
+export const CLEARING_EFFECT_MS = CLEARING_LOOP_MS + CLEARING_PULSE_MS * (1 + EDGE_PULSE_AFTERGLOW_K)
+
 type SpawnEdgePulsesFn = typeof spawnEdgePulsesDefault
 type SpawnNodeBurstsFn = typeof spawnNodeBurstsDefault
+type SpawnSparksFn = typeof spawnSparksDefault
 type FxStateLike = Partial<Pick<FxState, 'sparks' | 'edgePulses' | 'nodeBursts'>>
 type LayoutNodePosition = Pick<LayoutNode, '__x' | '__y'>
+type Edge = { from: string; to: string }
 
-function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
+function nodesFromEdges(edges: Edge[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const e of edges) {
@@ -41,6 +66,74 @@ function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
   return out
 }
 
+/**
+ * The edge union in CANONICAL order: each line `from>to` once, sorted by `from`, then `to`, by code point - the order the
+ * server sorts `clearing.done.cycle_edges` in (`app/api/v1/simulator.py` ≈`:212`, `tick.py` `sorted(touched_edges)`).
+ * The reconstruction (`cyclesOf`: its first line and its tie-breaks) and the 30-line cut follow this order, so the same
+ * union gives the same cycles whichever path brought it - Interact lists its cycles in execution order (fix-delta
+ * review, 2026-10-18: in first-seen order HTTP A>B>D>A, A>B>C>A rebuilt ABD, the sorted SSE set ABC).
+ */
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+export function uniqueEdges(edges: Edge[]): Edge[] {
+  const seen = new Set<string>()
+  const out: Edge[] = []
+  for (const e of edges) {
+    const k = `${e.from}>${e.to}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ from: e.from, to: e.to })
+  }
+  return out.sort((x, y) => byCodePoint(x.from, y.from) || byCodePoint(x.to, y.to))
+}
+
+/**
+ * The cycles of a set of lines, each in walking order (`clearing.done.cycle_edges` is the SET of lines a pass touched,
+ * sorted, of possibly several cycles - `app/core/simulator/tick.py`, `_done_cycle_edges`). Each line is used once:
+ * from the first unused line, the shortest way back to its start over unused lines closes a cycle. A line that closes
+ * no cycle (the set was cut at the backend's limit, a line flipped to the topology, or the second of two cycles that
+ * SHARE a line - the set holds the shared line once) is returned in `rest`: it pulses with the others after the loop,
+ * no spark goes over it. The visual contract is therefore "one spark per cycle that can be rebuilt from the edge
+ * union", not "one spark per cleared cycle" (spec 039, dated narrowing of 2026-10-18; BACKLOG 039-10).
+ */
+export function cyclesOf(edges: Edge[]): { cycles: Edge[][]; rest: Edge[] } {
+  const unused = edges.map((e, i) => ({ ...e, i }))
+  const used = new Set<number>()
+  const cycles: Edge[][] = []
+  const rest: Edge[] = []
+  for (const first of unused) {
+    if (used.has(first.i)) continue
+    // Breadth-first from first.to back to first.from over unused lines other than `first`.
+    const prev = new Map<string, { node: string; edge: number } | null>([[first.to, null]])
+    const queue = [first.to]
+    let found = first.to === first.from
+    while (queue.length > 0 && !found) {
+      const at = queue.shift()!
+      for (const e of unused) {
+        if (e.i === first.i || used.has(e.i) || e.from !== at || prev.has(e.to)) continue
+        prev.set(e.to, { node: at, edge: e.i })
+        if (e.to === first.from) { found = true; break }
+        queue.push(e.to)
+      }
+    }
+    if (!found) {
+      used.add(first.i)
+      rest.push({ from: first.from, to: first.to })
+      continue
+    }
+    const back: Edge[] = []
+    for (let node = first.from; node !== first.to;) {
+      const p = prev.get(node)!
+      const e = unused[p.edge]!
+      back.push({ from: e.from, to: e.to })
+      used.add(e.i)
+      node = p.node
+    }
+    used.add(first.i)
+    cycles.push([{ from: first.from, to: first.to }, ...back.reverse()])
+  }
+  return { cycles, rest }
+}
+
 export function useRealClearingFx(deps: {
   fxState: FxStateLike
   isTestMode: Readonly<Ref<boolean>>
@@ -49,7 +142,10 @@ export function useRealClearingFx(deps: {
   keyEdge: (from: string, to: string) => string
   seedFn: (s: string) => number
 
-  clearingColor: string
+  /** The clearing colour, read when the effect is spawned (the mapping's `fx` is replaced on a theme change). */
+  clearingColor: () => string
+  /** The beam's core colour (the head of the clearing spark). */
+  sparkCoreColor: () => string
 
   addActiveNode: (nodeId: string, ttlMs: number) => void
   addActiveEdge: (edgeKey: string, ttlMs: number) => void
@@ -61,16 +157,25 @@ export function useRealClearingFx(deps: {
       throttleMs?: number
     },
   ) => void
+  /** How long the amount label lives: the duration of its CSS animation (Р2; `vizMapping.ts` `motion`). */
+  clearingLabelLifeMs: () => number
 
-  scheduleTimeout: (fn: () => void, ms: number) => void
+  /**
+   * Managed timer. The steps of the loop and the step after it are scheduled `critical` (a refresh of the scene on
+   * screen does not cut them, a change of scene does) and guard themselves by a generation `resetDedup` bumps, as the
+   * beam of a payment does (`useRealTxFx.ts`).
+   */
+  scheduleTimeout: (fn: () => void, ms: number, opts?: { critical?: boolean }) => void
   getLayoutNodeById: (nodeId: string) => LayoutNodePosition | null
-  setFlash: (v: number) => void
+  /** Screen px of a line's visible segment (as for the beam); absent or null: the lines of a cycle count as equal. */
+  edgeLengthPx?: (from: string, to: string) => number | null
 
   nowMs?: () => number
   nowEpochMs?: () => number
 
   spawnEdgePulses?: SpawnEdgePulsesFn
   spawnNodeBursts?: SpawnNodeBurstsFn
+  spawnSparks?: SpawnSparksFn
 }): {
   runClearingFx: (params: ClearingFxParams, opts?: ClearingFxOptions) => void
   runRealClearingDoneFx: (done: ClearingDoneEvent, opts?: ClearingFxOptions) => void
@@ -86,6 +191,9 @@ export function useRealClearingFx(deps: {
 
   const spawnEdgePulses = deps.spawnEdgePulses ?? spawnEdgePulsesDefault
   const spawnNodeBursts = deps.spawnNodeBursts ?? spawnNodeBurstsDefault
+  const spawnSparks = deps.spawnSparks ?? spawnSparksDefault
+
+  let generation = 0
 
   /** Edge-signature dedup: prevents double FX spawn when both HTTP and SSE paths fire. */
   // IMPORTANT: dedup policy must NOT suppress distinct clearing.done events that happen to
@@ -106,7 +214,7 @@ export function useRealClearingFx(deps: {
   }
 
   function pushClearingLabelDeferred(
-    opts: { edges: Array<{ from: string; to: string }>; text: string; planId?: string },
+    opts: { edges: Edge[]; text: string; planId?: string },
     startedAtMs = nowMs(),
     retryDelayMs = 80,
   ) {
@@ -132,7 +240,9 @@ export function useRealClearingFx(deps: {
           text: opts.text,
           worldX: anchor.x,
           worldY: anchor.y,
-          ttlMs: 3800,
+          // Р2 of spec 039: the label lives as long as its CSS animation (it ends at opacity 0) - until 039 slice C a
+          // literal 3800 against 4200 of the CSS, the label disappeared at opacity 0.05.
+          ttlMs: deps.clearingLabelLifeMs(),
           styleKey: 'clearing-premium',
           planId: opts.planId,
         } satisfies ClearingAmountOverlay
@@ -153,8 +263,59 @@ export function useRealClearingFx(deps: {
     return fxState
   }
 
+  /** One spark round one cycle in `CLEARING_LOOP_MS`, at one speed; each node lights up as the spark leaves it. */
+  function loopSpark(fxState: FxState, cycle: Edge[], tNowMs: number, seedKey: string, gen: number, fxOff: boolean) {
+    const lengths = cycle.map((e) => deps.edgeLengthPx?.(e.from, e.to) ?? null)
+    const known = lengths.every((l) => typeof l === 'number' && Number.isFinite(l) && l > 0)
+    const len = known ? (lengths as number[]) : cycle.map(() => 1)
+    const total = len.reduce((s, l) => s + l, 0)
+    let at = 0
+    cycle.forEach((e, i) => {
+      const moveMs = (CLEARING_LOOP_MS * len[i]!) / total
+      const startMs = at
+      at += moveMs
+      const last = i === cycle.length - 1
+      const spawn = () => {
+        if (gen !== generation) return
+        spawnSparks(fxState, {
+          edges: [e],
+          nowMs: tNowMs + startMs,
+          ttlMs: moveMs + (last ? BEAM_FADE_MS : 0),
+          moveMs,
+          motion: 'linear',
+          colorCore: deps.sparkCoreColor(),
+          colorTrail: deps.clearingColor(),
+          thickness: 1.1,
+          kind: 'beam',
+          seedPrefix: `clearing-spark:${seedKey}`,
+          countPerEdge: 1,
+          keyEdge: deps.keyEdge,
+          seedFn: deps.seedFn,
+          isTestMode: fxOff,
+        })
+        spawnNodeBursts(fxState, {
+          nodeIds: [e.from],
+          nowMs: tNowMs + startMs,
+          durationMs: BEAM_NODE_BURST_MS,
+          color: deps.clearingColor(),
+          kind: 'tx-impact',
+          seedPrefix: `clearing-node:${seedKey}`,
+          seedFn: deps.seedFn,
+          isTestMode: fxOff,
+        })
+      }
+      if (i === 0) spawn()
+      else deps.scheduleTimeout(spawn, startMs, { critical: true })
+    })
+  }
+
   function runClearingFx(params: ClearingFxParams, opts: ClearingFxOptions = {}) {
-    const { edges: edgesAll, totalAmount, equivalent, planId } = params
+    const { totalAmount, equivalent, planId } = params
+    // ONE reconstruction for both paths (Codex §15, 2026-10-18): the SSE event carries the SET of lines a pass touched
+    // (`app/core/simulator/tick.py`, `_done_cycle_edges`: no multiplicity, no cycle identity), the Interact result its
+    // cycles flattened (a line shared by two cycles twice). Both are reduced to the same edge union first, so one
+    // clearing is drawn the same on both paths, and the HTTP/SSE double-fire signature below matches.
+    const edgesAll = uniqueEdges(params.edges)
 
     // 028 F-028-47 (B5): the same edges cleared in another equivalent are another clearing.
     const edgeSig = `${canonicalEquivalent(equivalent)}#${edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')}`
@@ -176,60 +337,63 @@ export function useRealClearingFx(deps: {
       gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
     }
 
-    if (opts.animate !== false) {
-      const tNowMs = nowMs()
-      const fxState = getFxState()
-      const nodeIds = nodesFromEdges(edgesAll)
+    const clearedAmount = totalAmount.trim()
+    const label = () => {
+      if (edgesAll.length > 0 && clearedAmount && !isZeroDecimalString(clearedAmount)) {
+        pushClearingLabelDeferred({
+          edges: edgesAll,
+          text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
+          planId,
+        })
+      }
+    }
 
-      deps.setFlash(0.55)
+    // Reduced motion / animations off: the amount label at once, nothing moves or lights up.
+    if (opts.animate === false) {
+      label()
+      return
+    }
 
-      for (const id of nodeIds) deps.addActiveNode(id, 5200)
+    const tNowMs = nowMs()
+    const fxState = getFxState()
+    const fxOff = deps.isTestMode.value && deps.isWebDriver
+    const gen = generation
+    const seedKey = planId ?? tNowMs.toFixed(0)
+    const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
 
-      const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
+    // 1. The loop.
+    const found = cyclesOf(edgesFx)
+    found.cycles.forEach((cycle, k) => loopSpark(fxState, cycle, tNowMs, `${seedKey}:${k}`, gen, fxOff))
+
+    // 2. After it: the lines pulse, the cycle is highlighted, the amount comes.
+    const afterLoop = () => {
+      if (gen !== generation) return
+      const t = nowMs()
       if (edgesFx.length > 0) {
         spawnEdgePulses(fxState, {
           edges: edgesFx,
-          nowMs: tNowMs,
-          durationMs: 4200,
-          color: deps.clearingColor,
+          nowMs: t,
+          durationMs: CLEARING_PULSE_MS,
+          color: deps.clearingColor(),
           thickness: 3.2,
-          seedPrefix: `clearing:${planId ?? tNowMs.toFixed(0)}`,
+          seedPrefix: `clearing:${seedKey}`,
           countPerEdge: 1,
           keyEdge: deps.keyEdge,
           seedFn: deps.seedFn,
-          isTestMode: deps.isTestMode.value && deps.isWebDriver,
+          isTestMode: fxOff,
         })
       }
-
-      for (const e of edgesAll) deps.addActiveEdge(deps.keyEdge(e.from, e.to), 5200)
-
-      const burstNodeIds = nodeIds.slice(0, 40)
-      if (burstNodeIds.length > 0) {
-        spawnNodeBursts(fxState, {
-          nodeIds: burstNodeIds,
-          nowMs: tNowMs,
-          durationMs: 2800,
-          color: deps.clearingColor,
-          kind: 'clearing',
-          seedPrefix: `clearing-burst:${planId ?? tNowMs.toFixed(0)}`,
-          seedFn: deps.seedFn,
-          isTestMode: deps.isTestMode.value && deps.isWebDriver,
-        })
-      }
+      const highlightMs = CLEARING_PULSE_MS * (1 + EDGE_PULSE_AFTERGLOW_K)
+      for (const id of nodesFromEdges(edgesAll)) deps.addActiveNode(id, highlightMs)
+      for (const e of edgesAll) deps.addActiveEdge(deps.keyEdge(e.from, e.to), highlightMs)
+      label()
     }
-
-    const clearedAmount = totalAmount.trim()
-    if (edgesAll.length > 0 && clearedAmount && !isZeroDecimalString(clearedAmount)) {
-      pushClearingLabelDeferred({
-        edges: edgesAll,
-        text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
-        planId,
-      })
-    }
+    if (found.cycles.length === 0) afterLoop()
+    else deps.scheduleTimeout(afterLoop, CLEARING_LOOP_MS, { critical: true })
   }
 
   function runRealClearingDoneFx(done: ClearingDoneEvent, opts: ClearingFxOptions = {}) {
-    const edges: Array<{ from: string; to: string }> = []
+    const edges: Edge[] = []
     if (Array.isArray(done.cycle_edges) && done.cycle_edges.length > 0) {
       for (const e of done.cycle_edges) edges.push({ from: e.from, to: e.to })
     }
@@ -249,6 +413,8 @@ export function useRealClearingFx(deps: {
   function resetDedup(): void {
     _clearingFxDedupByEdgeSig.clear()
     _clearingFxDedupByPlanId.clear()
+    // A pending step of a loop of the run (or playback) that is reset does nothing.
+    generation += 1
   }
 
   return { runClearingFx, runRealClearingDoneFx, resetDedup }

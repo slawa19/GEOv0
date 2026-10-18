@@ -154,9 +154,29 @@ export type VizMapping = {
     tx_spark: { core: string; trail: string }
     clearing_credit: string
     clearing_debt: string
-    flash: { clearing: { from: string; to: string } }
     /** `--ds-glint`: the badge pip and the FX highlight stroke. */
     glint: string
+  }
+  /**
+   * 039 slice C (Р2): how long an amount label lives = the duration of its CSS animation, read from the same tokens
+   * the stylesheet animates by (`App.css`: `floatUpFade` and `clearingPremiumPop`). One source: a label is removed
+   * when its fade has played to the end, never while it is still visible.
+   */
+  motion: { txLabelMs: number; clearingLabelMs: number }
+}
+
+/** `2.6s` / `2600ms` -> 2600; anything else -> `fallbackMs`. */
+export function cssDurationMs(raw: string, fallbackMs: number): number {
+  const m = /^\s*([0-9]*\.?[0-9]+)\s*(ms|s)\s*$/i.exec(raw)
+  if (!m) return fallbackMs
+  const v = Number(m[1]) * (m[2]!.toLowerCase() === 's' ? 1000 : 1)
+  return Number.isFinite(v) && v > 0 ? v : fallbackMs
+}
+
+function resolveMotion(scope: Element | null | undefined): VizMapping['motion'] {
+  return {
+    txLabelMs: cssDurationMs(readCssVar(scope, '--ds-app-floating-label-float-dur', '2.6s'), 2600),
+    clearingLabelMs: cssDurationMs(readCssVar(scope, '--ds-app-clearing-premium-pop-dur', '4.2s'), 4200),
   }
 }
 
@@ -181,12 +201,6 @@ function resolveFx(scope: Element | null | undefined): VizMapping['fx'] {
     },
     clearing_credit: readCssVar(scope, '--ds-fx-clearing-credit', '#22d3ee'),
     clearing_debt: readCssVar(scope, '--ds-fx-clearing-debt', '#f97316'),
-    flash: {
-      clearing: {
-        from: readCssVar(scope, '--ds-fx-flash-clearing-from', 'rgba(251,191,36,0.45)'),
-        to: readCssVar(scope, '--ds-fx-flash-clearing-to', 'rgba(251,191,36,0.00)'),
-      },
-    },
     glint: readCssVar(scope, '--ds-glint', '#ffffff'),
   }
 }
@@ -200,6 +214,7 @@ export function createVizMapping(scope?: Element | null): VizMapping {
     node: { palette: resolveDataPalette(scope) },
     link: { width_px: VIZ_LINK.width_px, alpha: VIZ_LINK.alpha, color: { default: '#64748b' } },
     fx: resolveFx(scope),
+    motion: resolveMotion(scope),
   }
 }
 
@@ -210,6 +225,7 @@ export function createVizMapping(scope?: Element | null): VizMapping {
 export function resolveVizColors(mapping: VizMapping, scope: Element | null | undefined): DataPalette {
   mapping.node.palette = resolveDataPalette(scope)
   mapping.fx = resolveFx(scope)
+  mapping.motion = resolveMotion(scope)
   return mapping.node.palette
 }
 

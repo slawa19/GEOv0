@@ -98,7 +98,6 @@ function createHarness() {
     sourcePath: '',
     snapshot: null,
     selectedNodeId: null,
-    flash: 0,
   }
 
   const scope = effectScope()
@@ -122,7 +121,7 @@ function createHarness() {
       loadRecoveryScene: async () => true,
       realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
-      clampRealTxTtlMs: () => 1200,
+      routeArrivalMs: () => 1200,
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,

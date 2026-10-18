@@ -9,7 +9,6 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   getLayoutNodeById: (id: string) => N | undefined
   sizeForNode: (n: N) => { w: number; h: number }
   getCameraZoom: () => number
-  setFlash: (v: number) => void
 
   // Reactive invalidation gate for computed overlay views.
   // Bumped on relayout/physics/drag so floating labels can resolve nodes without polling.
@@ -64,7 +63,6 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     sizeForNode: deps.sizeForNode,
     getCameraZoom: deps.getCameraZoom,
     layoutVersion: deps.layoutVersion,
-    setFlash: deps.setFlash,
     resetFxState: () => resetFxState(fxState),
   })
 

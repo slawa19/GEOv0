@@ -172,8 +172,8 @@ export function useSimulatorRealMode(opts: {
   // Backend-first tx labels (avoid frontend-derived balance deltas)
   pushTxAmountLabel: (nodeId: string, signedAmount: string, unit: string, opts?: { throttleMs?: number }) => void
 
-  // Shared TTL clamp (single source of truth with runRealTxFx)
-  clampRealTxTtlMs: (ttlRaw: unknown, fallbackMs?: number) => number
+  // When a payment's beam reaches the receiver: the one route time, shared with runRealTxFx (039 slice C, P-3)
+  routeArrivalMs: (tx: TxUpdatedEvent) => number
 
   // Managed timers (must be cleaned up via cleanupRealRunFxAndTimers -> clearScheduledTimeouts)
   scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
@@ -224,7 +224,7 @@ export function useSimulatorRealMode(opts: {
     loadRecoveryScene,
     realPatchApplier,
     pushTxAmountLabel,
-    clampRealTxTtlMs,
+    routeArrivalMs,
     scheduleTimeout,
     runRealTxFx,
     runRealClearingDoneFx,
@@ -706,7 +706,7 @@ export function useSimulatorRealMode(opts: {
       runRealTxFx,
       runRealClearingDoneFx,
       pushTxAmountLabel,
-      clampRealTxTtlMs,
+      routeArrivalMs,
       scheduleTimeout,
       onIntentExecuted: (intent: RealEventIntent) => {
         if (intent.type === 'amount-flyout-suppressed') diag.amount_flyout_suppressed += 1

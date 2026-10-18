@@ -126,13 +126,38 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   and a 64-character stop summary no control of the service row overlaps another or leaves the viewport, and the
  *   Scenario select carries the full option text as its title. Red before the fix in all four (the select overlapped
  *   the theme and the status cluster; in `hud` at 1280x720 it left the screen at x -25). About 0.5 s each.
- * - 2026-10-18 (046 wave 1, the language switch in the service row): gate 133 -> 137, full 224 -> 228. `top-bar-long.qa.ts`
+ * - 2026-10-18 (039 slice C, motion): gate 133 -> 138, full 224 -> 229. One new file, `motion-c.qa.ts`, five tests in the
+ *   gate (none tagged `@extended`): the pace, the handoff and the readability without a GPU of a 3- and a 6-edge payment
+ *   (two tests), the clearing's spark round the cycle (one), glow only on active nodes and its counter-check with a GPU
+ *   believed present (two). Each of the first four was red on the base `a1b6640c` (Changelog of spec 039). About 33 s
+ *   in all locally; the flights of `motion.qa.ts` and `chord.qa.ts` are watched until the beam is gone instead of a
+ *   fixed 76 frames, since a route now lasts as long as its legs (P-4 of spec 039) - the step time is in the Changelog.
+ * - 2026-10-18 (039 slice C, Codex §15 round): gate 138 -> 139, full 229 -> 230. One test of `motion-c.qa.ts`: a
+ *   clearing of two cycles, each traversed by its own spark, seen on the FX canvas in order and forward (the clearing
+ *   test of one cycle now observes pixels along the cycle too). About 6 s.
+ * - 2026-10-18 (039 slice C, fix-delta round): gate 139 -> 140, full 230 -> 231. The glow test of `motion-c.qa.ts`
+ *   runs in `saas` and `hud` (one test more); the clearing judge also counts head places and bounds the head's step.
+ * - 2026-10-18 (039 slice C, the stand over its CI time): gate 140 -> 137, full unchanged at 231. The required step took
+ *   657 s on `da415b30` and 596 s on `c8d9efbc` in CI (threshold 600 s; the base on #297 about 452 s): routes now last
+ *   as long as their legs. The three R3 tests of `motion.qa.ts` that took longest in CI are tagged `@extended`, by
+ *   their durations in the stand report of run 39133364307 (head `c8d9efbc`, 139 tests, 594 s summed): "R3 -
+ *   measurement at the cap: a 6-edge route ..." 26.1 s, "R3 - the beam of a 3-edge payment follows ..." 21.0 s, "R3 - a
+ *   payment over two edges ..." 17.2 s - 64.3 s in all. None of the new clearing pixel oracles of `motion-c.qa.ts` is
+ *   in that top three. In the next run, 39135012070 (head `e43cf317`, 140 tests, step 659 s, 652 s summed), the same
+ *   three were the longest R3 tests: 30.0, 23.7 and 19.3 s - 73.0 s. Forecast of the step from those CI numbers: about
+ *   596 - 64 = 532 s from the faster run, 659 - 73 = 586 s from the slower - under 600, with a thin margin on the
+ *   slower runner; the next R3 tests by CI time are "R3 - the five properties hold at quality "med" / "high" too"
+ *   (18.4 and 18.2 s in run 39135012070). In "ran N (as expected M, failed F, ...)" of the verdict line,
+ *   `as expected` counts the tests whose outcome was the expected one, so "ran 139 (as expected 138, failed 1)" on
+ *   `c8d9efbc` was 139 recorded, one red (the budget) - not a mismatch of this number.
+ * - 2026-10-18 (046 wave 1, the language switch in the service row; merged after 039 C): gate 137 -> 141, full 231 -> 235
+ *   (on its own branch: 133 -> 137, 224 -> 228). `top-bar-long.qa.ts`
  *   runs in both languages: +4 tests `[ru]` (the same two viewports and two themes, `?lang=ru`); the English four keep
  *   their titles and now pass `?lang=en`. Forecast before the run: +4 x about 0.55 s (the four English ones measured
- *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s, far under the 600 s budget; no
- *   `@extended` move (R3 rule) needed.
+ *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s locally; on CI, over 039 C's forecast of 532-586 s, about +3-4 s
+ *   (589-590 s at the slower runner) - under 600 s with a thin margin; no further `@extended` move (R3 rule) made.
  */
-export const EXPECTED = { gate: 137, full: 228 }
+export const EXPECTED = { gate: 141, full: 235 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

@@ -1,7 +1,12 @@
 /**
- * 038 S0 - R2, a MEASUREMENT (F-038-2): computed opacity of an amount label in its last frame before the JS TTL
- * removes it from the DOM. The CSS animation is put on the JS clock (`installCssClockSync`), because `page.clock`
- * does not drive it. No threshold is asserted here: the numbers go to the spec, the owner of the decision.
+ * 038 S0 - R2 (F-038-2): computed opacity of an amount label in its last frame before the JS TTL removes it from the
+ * DOM. The CSS animation is put on the JS clock (`installCssClockSync`), because `page.clock` does not drive it.
+ *
+ * Until 039 slice C a MEASUREMENT with no threshold: the label was removed at 1904 ms while its CSS fade ran 2600 ms,
+ * at opacity 0.110 (clearing: 3808 of 4200 ms, 0.054). Since 2026-10-18 the owner's decision R2 of spec 039 is the
+ * verdict (criterion 5, reproducer R5): the label lives as long as its CSS animation - it is not removed before the
+ * animation's end, and not while it can still be seen (opacity in its last frame at most 0.05). The old characterisations
+ * (`>= 1900`, `>= 3800`, "the CSS fade is longer than the JS TTL") were replaced explicitly here (P-4 of spec 039).
  */
 import { expect, test, type Page } from '@playwright/test'
 
@@ -42,27 +47,30 @@ test.beforeEach(async ({ page }) => {
   await boot(page, { snapshot: ringSnapshot(), clock: true })
 })
 
-test('R2 - measurement: opacity of the payment amount label in its last frame before the JS TTL removes it', async ({ page }) => {
+/** Opacity of a label in its last frame in the DOM may be at most this (criterion 5 of spec 039). */
+const GONE_OPACITY = 0.05
+
+test('R2/R5 - the payment amount label fades to nothing before it is removed: not before its CSS animation ends, at opacity <= 0.05', async ({ page }) => {
   await pushEvent(page, txUpdated(['a', 'b'], '10.00'))
-  const t = await traceLabel(page, (l) => l.text.startsWith('-'), 200)
+  const t = await traceLabel(page, (l) => l.text.startsWith('-'), 260)
   const row = report('payment', t)
-  // Facts of the mechanism, not a verdict: one CSS animation, and a JS TTL that ends before it does.
-  expect(t.last.animations).toBe(1)
-  expect(row.removedByJsAfterMs, 'JS TTL of the label (useRealTxFx.ts:225)').toBeGreaterThanOrEqual(1900)
-  expect(row.removedByJsAfterMs).toBeLessThan(1900 + 32)
-  expect(row.cssDurationMs, 'the CSS fade is longer than the JS TTL').toBeGreaterThan(row.removedByJsAfterMs)
+  expect(t.last.animations, 'one CSS animation').toBe(1)
+  expect(row.removedByJsAfterMs, `removed not before the end of its CSS animation (${row.cssDurationMs} ms)`).toBeGreaterThanOrEqual(row.cssDurationMs)
+  expect(row.removedByJsAfterMs, 'and not a frame later than needed').toBeLessThan(row.cssDurationMs + 32)
+  expect(row.opacityInLastFrame, `faded to nothing in its last frame (at most ${GONE_OPACITY})`).toBeLessThanOrEqual(GONE_OPACITY)
   expect(row.maxOpacity, 'counter-check: the label is read while fully opaque, the reader is not stuck at 0').toBe(1)
 })
 
-test('R2 - measurement: opacity of the clearing amount label in its last frame before the JS TTL removes it', async ({ page }) => {
+test('R2/R5 - the clearing amount label fades to nothing before it is removed: not before its CSS animation ends, at opacity <= 0.05', async ({ page }) => {
   await pushEvent(page, {
     type: 'clearing.done', plan_id: 'plan-p038-1', cleared_cycles: 1, cleared_amount: '7.00',
     cycle_edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }],
   })
-  const t = await traceLabel(page, (l) => l.cls.includes('clearing-premium'), 400)
+  // 039 slice C: the amount comes after the spark has gone round the cycle (1.2 s), then lives its 4.2 s animation.
+  const t = await traceLabel(page, (l) => l.cls.includes('clearing-premium'), 480)
   const row = report('clearing', t)
-  expect(row.removedByJsAfterMs, 'JS TTL of the overlay (useRealClearingFx.ts:134)').toBeGreaterThanOrEqual(3800)
-  expect(row.removedByJsAfterMs).toBeLessThan(3800 + 32)
-  expect(row.cssDurationMs, 'the CSS fade is longer than the JS TTL').toBeGreaterThan(row.removedByJsAfterMs)
+  expect(row.removedByJsAfterMs, `removed not before the end of its CSS animation (${row.cssDurationMs} ms)`).toBeGreaterThanOrEqual(row.cssDurationMs)
+  expect(row.removedByJsAfterMs, 'and not a frame later than needed').toBeLessThan(row.cssDurationMs + 32)
+  expect(row.opacityInLastFrame, `faded to nothing in its last frame (at most ${GONE_OPACITY})`).toBeLessThanOrEqual(GONE_OPACITY)
   expect(row.maxOpacity, 'counter-check: the label is read while fully opaque').toBeGreaterThan(0.99)
 })

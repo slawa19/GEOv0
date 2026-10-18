@@ -75,7 +75,6 @@ type UseOverlayStateDeps<N extends LayoutNodeLike> = {
   // If provided, floatingLabelsView becomes stable without polling timers.
   layoutVersion?: Ref<number>
 
-  setFlash: (v: number) => void
   resetFxState: () => void
 
   nowMs?: () => number
@@ -452,7 +451,6 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     activeNodes.clear()
     activeNodeExpiresAtMsById.clear()
     floatingLabels.splice(0, floatingLabels.length)
-    deps.setFlash(0)
     deps.resetFxState()
   }
 

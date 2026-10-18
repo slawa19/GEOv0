@@ -216,13 +216,17 @@ test('empty snapshot: a payment event that arrives after the scene was cleared p
   await pushEvent(page, txUpdated(['a', 'b'], '10.00'))
   await frames(page, 4)
   expect((await fxCounts(page)).labels, 'counter-check: on a loaded scene a payment gives an amount label').toBeGreaterThan(0)
-  await frames(page, 200) // every label of that payment has expired (1900 ms after the receiver's at 1200 ms)
+  // Every label of that payment has expired: the receiver's comes when the beam arrives and lives its 2.6 s CSS fade
+  // (039 slice C; until then 1900 ms after a receiver's label at 1200 ms, and 200 frames were enough).
+  await frames(page, 300)
   expect((await fxCounts(page)).labels).toBe(0)
 
   await switchToUnloadableScenario(page)
   await pushEvent(page, txUpdated(['a', 'b'], '10.00'))
   let maxLabels = 0
-  for (let f = 0; f < 90; f += 1) { // past the receiver's label at 1200 ms
+  // Past the moment the receiver's label would come: when the beam arrives (039 slice C: a 1-edge route of the old
+  // scene's layout moves at most about a second) plus the label's retries for a node that is not laid out (6 x 90 ms).
+  for (let f = 0; f < 260; f += 1) {
     await frames(page, 1)
     maxLabels = Math.max(maxLabels, (await fxCounts(page)).labels)
   }
@@ -246,7 +250,10 @@ test('empty snapshot: after a payment and a clearing event the render loop falls
   const pushed = await loopCounters(page)
   await frames(page, 3)
   const woken = await loopCounters(page)
-  await page.clock.runFor(8000) // every label TTL (3800 ms), the hold and the 3 s idle delay
+  // Every label TTL, the hold and the 3 s idle delay. 039 slice C (2026-10-18, P-4): until then 8000 ms - the route
+  // took 1200 ms and a label lived 1900. The receiver's label now comes when the beam arrives (the 3-edge route of the
+  // old scene's layout: about 3.1 s) and lives its 2.6 s CSS fade; the loop is awake until it is pruned, then 3 s idle.
+  await page.clock.runFor(11000)
   const rested = await loopCounters(page)
   await page.clock.runFor(2000)
   const asleep = await loopCounters(page)

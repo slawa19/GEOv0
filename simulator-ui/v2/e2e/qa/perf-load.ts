@@ -3,11 +3,15 @@
  *
  * `S3-MIXED-V1`, a pure function of the snapshot and the slot number (no randomness, no clock):
  *   - one SSE event every 150 ms; slots repeat with a period of 24 (3.6 s);
- *   - slot 12 of every period: `clearing.done` over 20 trust lines of the fixture (not a closed cycle: the FX does not
- *     read the topology), cleared amount 5.00 - 20 edge pulses, up to 40 node bursts, a screen flash, one amount label;
+ *   - slot 12 of every period: `clearing.done` over 20 trust lines of the fixture (an arbitrary sample, not a closed
+ *     cycle), cleared amount 5.00. Since 039 slice C (2026-10-18) the product draws a spark round each cycle
+ *     it can rebuild from these lines (an arbitrary sample is mostly none), then 20 edge pulses and one amount label;
+ *     until then 20 pulses, up to 40 node bursts and a full-screen flash at once. So this load does NOT measure the
+ *     cost of a multi-cycle clearing traversal (Codex review of 039 C);
  *   - the other 23 slots: `tx.updated` with `amount_flyout: true`, `ttl_ms: 1200`, over a CONNECTED simple route along
  *     real trust lines, of 1, 3 and 6 edges in turn (6 is the cap of the beam, `REAL_TX_MAX_ROUTE_EDGES`) - a sender
- *     label at once, a receiver label 1200 ms later, and the beam when the product's limiter admits it.
+ *     label at once, a receiver label when the beam arrives (039 slice C: its route plan, `ttl_ms` times nothing), and
+ *     the beam when the product's limiter admits it.
  *
  * What the product makes of it is NOT part of the definition and is recorded by the measurement: the limiter of
  * `useRealTxFx.ts` (3 beams per second, burst 2, 120 ms gap) admits fewer than half of 6.7 payments per second, and a

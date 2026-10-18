@@ -26,6 +26,8 @@ const NODE_SIGN_INK_ALPHA = 0.95
 /** Frozen outline: dash and gap, and the line width, in CSS px. */
 const NODE_FROZEN_DASH_PX = [3, 2.5] as const
 const NODE_FROZEN_OUTLINE_PX = 1.6
+/** The crisp rim of an idle node (039 slice C: no glow sprite there): its alpha over the dark page. */
+const NODE_IDLE_RIM_ALPHA = 0.85
 /** Hub ring: its distance from the node's outline and its line width, in CSS px. */
 const NODE_HUB_RING_GAP_PX = 3.5
 const NODE_HUB_RING_LINE_PX = 1.4
@@ -111,9 +113,20 @@ export function drawNodeShape(
     mapping: VizMapping
     cameraZoom?: number
     quality?: 'low' | 'med' | 'high'
+    /**
+     * 039 slice C: the node GLOWS (bloom and soft rim sprites) only when it is active - selected, highlighted by an
+     * effect or offered for picking (`baseGraph.ts`). An idle node gets a crisp rim stroke of its colour instead. Until
+     * then every node of the scene drew two glow sprites every frame - on a machine without a GPU the largest part of
+     * the frame (spec 039, "Замер стоимости кадра": the node pass ~36 of 57.6 ms of rasterisation at CPU x4).
+     */
+    glow?: boolean
+    /** The composite of the glow sprites: `lighter` where the product believes there is no GPU (`data-gpu=0`). */
+    glowComposite?: GlobalCompositeOperation
   },
 ) {
   const { mapping } = opts
+  const glow = opts.glow === true
+  const glowComposite = opts.glowComposite ?? 'screen'
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const px = (v: number) => v * invZ
@@ -143,8 +156,8 @@ export function drawNodeShape(
 
   ctx.save()
 
-  // 1) Glow sprite: bloom (underlay)
-  drawGlowSprite(ctx, {
+  // 1) Glow sprite: bloom (underlay) - an active node only.
+  if (glow) drawGlowSprite(ctx, {
     kind: 'bloom',
     shape: isRoundedRect ? 'rounded-rect' : 'circle',
     x: node.__x,
@@ -156,7 +169,7 @@ export function drawNodeShape(
     color: fill,
     blurPx: r * 1.5 * glowK,
     lineWidthPx: 0,
-    composite: 'screen',
+    composite: glowComposite,
   })
 
   // 2) Body fill - Semi-transparent glass (Darker/More Solid now)
@@ -188,25 +201,39 @@ export function drawNodeShape(
   }
   ctx.restore()
 
-  // 3) Glow sprite: rim (outer). A frozen node has NO continuous rim: its outline is the dashed stroke below, and a
-  //    solid ring under the dashes would make them unreadable.
+  // 3) Rim (outer): a soft glow sprite on an active node, a crisp stroke of the same colour and width on an idle one.
+  //    A frozen node has NO continuous rim: its outline is the dashed stroke below, and a solid ring under the dashes
+  //    would make them unreadable.
   ctx.save()
-  ctx.globalCompositeOperation = 'screen'
   const rimLineW = Math.max(px(2), r * 0.15)
-  if (!look.frozen) drawGlowSprite(ctx, {
-    kind: 'rim',
-    shape: isRoundedRect ? 'rounded-rect' : 'circle',
-    x: node.__x,
-    y: node.__y,
-    w,
-    h,
-    r,
-    rr,
-    color: fill,
-    blurPx: Math.max(px(2), r * 0.3) * glowK,
-    lineWidthPx: rimLineW,
-    composite: 'screen',
-  })
+  if (!look.frozen && glow) {
+    ctx.globalCompositeOperation = glowComposite
+    drawGlowSprite(ctx, {
+      kind: 'rim',
+      shape: isRoundedRect ? 'rounded-rect' : 'circle',
+      x: node.__x,
+      y: node.__y,
+      w,
+      h,
+      r,
+      rr,
+      color: fill,
+      blurPx: Math.max(px(2), r * 0.3) * glowK,
+      lineWidthPx: rimLineW,
+      composite: glowComposite,
+    })
+  } else if (!look.frozen) {
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.strokeStyle = withAlpha(fill, NODE_IDLE_RIM_ALPHA)
+    ctx.lineWidth = rimLineW
+    if (isRoundedRect) {
+      roundedRectPath(ctx, x, y, w, h, rr)
+    } else {
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
+    }
+    ctx.stroke()
+  }
 
   // Inner bright core stroke (white-ish). Frozen / suspended: the same stroke DASHED and a little heavier - the
   // non-colour cue of a freeze. The dash is set inside this save/restore pair, so no later stroke inherits it.
