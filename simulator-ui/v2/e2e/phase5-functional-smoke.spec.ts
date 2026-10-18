@@ -565,8 +565,11 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 043 S2: the run is the opening's own (decision 2), not a Start press.
     await expect(page.getByLabel('Run state')).toContainText('running')
     await expect.poll(() => page.evaluate(() => window.localStorage.getItem('geo.sim.v2.runId'))).toBe('phase5-run-1')
-    // 046 wave 0: the Russian refusal below is asserted in an explicitly chosen language, not the browser's.
-    await page.goto('/?mode=real&ui=interact&e2eReal=1&lang=ru')
+    // 046 wave 0: the texts below are asserted in an explicitly chosen language, not the browser's. 046 wave 2: that
+    // language is English - the action windows now speak the page's language, and this matrix holds their English texts
+    // (the Russian of the refusal is held by `utils/paymentRefusalText.test.ts` and the windows' Russian by
+    // `components/interactWindows.ru.p046.test.ts` / `e2e/p046-w2-windows-ru.spec.ts`).
+    await page.goto('/?mode=real&ui=interact&e2eReal=1&lang=en')
     await waitReady(page)
     await expect.poll(async () => ({
       runId: await page.evaluate(() => window.localStorage.getItem('geo.sim.v2.runId')),
@@ -600,8 +603,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 028 F-028-51 (T2884): a payment refusal reads as the client's text, not the server's `message`. The "(available now:
     // 0.00 UAH)" part comes only from the answer's `details.max_available`, so this fails if the mock's `details` are lost
     // and the text would otherwise be reached through the code alone (029 T2990, finding 4).
-    // 043 S2 (review B3, 2026-10-17): the page is Russian (`?lang=ru` since 046 wave 0), so the refusal is in its Russian form.
-    await expect(page.getByLabel('Error notification')).toContainText('Нет маршрута платежа между этими участниками (сейчас доступно: 0.00 UAH).')
+    // 043 S2 (review B3, 2026-10-17): the refusal is in the language of the page - English here (`?lang=en`, 046 wave 2).
+    await expect(page.getByLabel('Error notification')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 
