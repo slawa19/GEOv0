@@ -303,7 +303,16 @@ for (const theme of THEMES) {
   })
 
   test(`(г5b) [${theme}] counter-check: a name the first row shows whole adds no row behind "Подробнее"`, async ({ page }) => {
-    await open(page, theme, { width: 1366, height: 768 })
+    // 048 S1 (§15 Codex P2-1, 2026-10-18): the mock's event stream ends at once, and a living run whose stream is lost
+    // now says "нет связи с сервером" in the state of the network - a longer text, beside which the short name is cut.
+    // The stream is held open here, as the server holds it, so the first row reads as it does with a connection.
+    // Registered after `mockApp` (the newest route is asked first), before the page loads.
+    await mockApp(page, { paymentRealBodies: [] })
+    await page.route(/\/simulator\/runs\/[^/]+\/events/i, () => new Promise<void>(() => { /* held open */ }))
+    await page.setViewportSize({ width: 1366, height: 768 })
+    await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}`)
+    await ready(page, true)
+    await expect(page.locator('.root')).toHaveAttribute('data-theme', theme)
     const value = page.locator('[data-testid="network-name"] .ds-value')
     expect(await value.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5), 'precondition: the short name fits').toBe(true)
     await page.locator('[data-testid="details-toggle"]').click()
