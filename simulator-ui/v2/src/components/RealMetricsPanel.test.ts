@@ -104,7 +104,9 @@ const bottlenecks: BottlenecksResponse = {
     {
       target: { kind: 'edge', from: 'alice', to: 'bob' },
       score: 0.85,
-      reason_code: 'FREQUENT_ABORTS',
+      // 046 wave 2: the list names the reason by its code from the dictionary; FREQUENT_ABORTS reads "Frequent failures",
+      // which is the DATA of a ready section, not the section denying it - the honesty check below reads wording.
+      reason_code: 'HIGH_USED',
       label: null,
       suggested_action: null,
     },

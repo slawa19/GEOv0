@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 
+import { t } from '../i18n/t'
 import { DEFAULT_MONEY_PRECISION, normalizePrecision } from '../utils/money'
 import { canonicalEquivalent } from './equivalents'
 
@@ -83,10 +84,11 @@ export function catalogueEquivalentCodes(): string[] {
  * 028 F-028-48 (owner В-4: precision IS the accounting step): a client HINT for an amount finer than the
  * equivalent's step. A rule on the value - `"1.500"` passes at 2 - like `require_money_step` on the server,
  * which stays the authority (the precision here may be the shipped fallback). `null` when nothing to say.
+ * 046 wave 2: the text is the dictionary's (`common.stepHint`), in the language of the interface.
  */
 export function amountStepHint(amount: string | null, equivalent: string): string | null {
   const precision = equivalentPrecision(equivalent)
   const fraction = /^\d+(?:\.(\d+))?$/.exec(String(amount ?? '').trim())?.[1] ?? ''
   if (!/[1-9]/.test(fraction.slice(precision))) return null
-  return `${String(equivalent).toUpperCase()} allows at most ${precision} decimal places; the server will refuse this amount.`
+  return t('common.stepHint', { eq: String(equivalent).toUpperCase(), precision })
 }

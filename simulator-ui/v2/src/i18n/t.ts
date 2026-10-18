@@ -39,6 +39,24 @@ export function t(key: MessageKey, vars?: MessageVars, locale: UiLocale = uiLoca
   return typeof m === 'string' ? fillTemplate(m, vars) : key
 }
 
+/**
+ * The template of `key` as its parts, in order: literal text and placeholder names - for a sentence whose figures each
+ * keep an element of their own (a test id, a monospace face) while the sentence stays ONE dictionary entry.
+ */
+export function templateParts(key: MessageKey, locale: UiLocale = uiLocaleRef.value): Array<{ text: string } | { name: string }> {
+  const m = lookup(locale, key)
+  const template = typeof m === 'string' ? m : key
+  const out: Array<{ text: string } | { name: string }> = []
+  let at = 0
+  for (const match of template.matchAll(/\{(\w+)\}/g)) {
+    if (match.index > at) out.push({ text: template.slice(at, match.index) })
+    out.push({ name: match[1] })
+    at = match.index + match[0].length
+  }
+  if (at < template.length) out.push({ text: template.slice(at) })
+  return out
+}
+
 /** The form of the plural message `key` for `count`, `{count}` and `vars` filled. */
 export function tn(key: PluralKey, count: number, vars?: MessageVars, locale: UiLocale = uiLocaleRef.value): string {
   const m = lookup(locale, key)

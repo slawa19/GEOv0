@@ -12,7 +12,7 @@ import {
 import { ApiError, type HttpConfig } from '../api/http'
 import { getBottlenecks, getMetrics } from '../api/simulatorApi'
 import type { BottlenecksResponse, MetricsResponse, RunStatus } from '../api/simulatorTypes'
-import { extractErrorMessage } from '../utils/errorMessage'
+import { errorReference } from '../utils/errorMessage'
 import { toLower } from '../utils/stringHelpers'
 import { sameEquivalent } from '../config/equivalents'
 
@@ -283,7 +283,9 @@ export function useMetricsPolling(deps: {
     }
 
     stream.phase.value = 'error'
-    stream.error.value = extractErrorMessage(reason)
+    // 046 wave 2 (Codex §15 round 1): the status/code and the request id only - no prose of any language; the panel says
+    // what happened in the interface's words (`RealMetricsPanel`, `metrics.errorDetail`).
+    stream.error.value = errorReference(reason)
   }
 
   async function poll(): Promise<void> {

@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import type { ParticipantInfo, SimulatorActionClearingCycle } from '../api/simulatorTypes'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
-import { interactText } from '../i18n/interactStrings'
+import { t } from '../i18n/t'
 
 type Props = {
   phase: InteractPhase
@@ -77,9 +77,11 @@ function nameOf(pid: string): string {
 /**
  * An edge of the answer runs CREDITOR -> DEBTOR ("from" is whom the debt is owed to, "to" is who owes). So {from: Alice, to: Bob}
  * is "Bob's debt to Alice reduced": the wire arrow is NOT a payment from Alice to Bob.
+ * 046 (advisor, 2026-10-18): the line reads "Alice → Bob: debt reduced by X" - the arrow means creditor -> debtor here as in
+ * the line window's title and on the graph; `creditor` is the edge's `from`, `debtor` its `to`.
  */
 function edgeLine(edge: { from: string; to: string }, cycle: SimulatorActionClearingCycle): string {
-  return interactText('clearingEdgeLine', {
+  return t('clearing.edgeLine', {
     debtor: nameOf(edge.to), creditor: nameOf(edge.from), amount: cycle.cleared_amount, unit: resultUnit.value,
   })
 }
@@ -99,15 +101,15 @@ const closeDisabled = computed(() => waiting.value)
     :class="rootClass"
     :style="rootStyle"
     data-testid="clearing-panel"
-    aria-label="Clearing panel"
+    :aria-label="t('clearing.panelAria')"
     aria-keyshortcuts="Escape"
     :aria-busy="waiting || busyUi ? 'true' : 'false'"
   >
     <!-- 045 S2: the title is the action and its equivalent - "Run clearing · UAH"; the equivalent is no longer a row of its own. -->
     <div class="ds-panel__header">
-      <div class="ds-h2" :title="interactText('escHint')">
-        <span v-if="isConfirm">Run clearing</span>
-        <span v-else>{{ interactText('clearingResultTitle') }}</span>
+      <div class="ds-h2" :title="t('common.escHint')">
+        <span v-if="isConfirm">{{ t('clearing.runTitle') }}</span>
+        <span v-else>{{ t('clearing.resultTitle') }}</span>
         <span class="ds-muted" aria-hidden="true"> · </span>
         <span class="ds-mono" data-testid="clearing-equivalent">{{ shownEquivalent }}</span>
       </div>
@@ -126,9 +128,9 @@ const closeDisabled = computed(() => waiting.value)
           aria-atomic="true"
         >
           <template v-if="busyUi">
-            Running clearing… <span class="cp-spinner" aria-hidden="true" />
+            {{ t('clearing.running') }} <span class="cp-spinner" aria-hidden="true" />
           </template>
-          <template v-else>This will run a clearing cycle in backend.</template>
+          <template v-else>{{ t('clearing.confirmHelp') }}</template>
         </div>
 
         <!--
@@ -136,7 +138,7 @@ const closeDisabled = computed(() => waiting.value)
           `data-initial-focus` (WindowShell, opt-in): Enter on a freshly opened clearing window confirms, Escape cancels.
         -->
         <div class="ds-row ds-row--actions cp-actions">
-          <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-cancel" :disabled="busyUi" @click="cancel">Cancel</button>
+          <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-cancel" :disabled="busyUi" @click="cancel">{{ t('common.cancel') }}</button>
           <button
             class="ds-btn ds-btn--primary"
             type="button"
@@ -145,7 +147,7 @@ const closeDisabled = computed(() => waiting.value)
             :disabled="busyUi"
             @click="onConfirm"
           >
-            {{ busyUi ? 'Running…' : 'Confirm' }}
+            {{ busyUi ? t('clearing.runningShort') : t('clearing.confirm') }}
           </button>
         </div>
       </template>
@@ -159,24 +161,24 @@ const closeDisabled = computed(() => waiting.value)
           aria-live="polite"
           aria-atomic="true"
         >
-          {{ interactText('clearingRunning') }} <span class="cp-spinner" aria-hidden="true" />
+          {{ t('clearing.running') }} <span class="cp-spinner" aria-hidden="true" />
         </div>
 
         <div v-else-if="nothingCleared" class="ds-help" data-testid="clearing-nothing" role="status" aria-live="polite" aria-atomic="true">
-          {{ interactText('clearingNothing') }}
+          {{ t('clearing.nothing') }}
         </div>
 
         <div v-else-if="last" class="ds-stack cp-preview-stack" data-testid="clearing-result" role="status" aria-live="polite" aria-atomic="true">
           <!-- 045 S2: the result as one line; what the total adds up is the `title` of the total. -->
           <div class="ds-label">
-            <span>{{ interactText('clearingCycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span></span>{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="clearing-total" :title="interactText('clearingTotalNote')">
-              {{ interactText('clearingTotal') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
+            <span>{{ t('clearing.cycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span></span>{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="clearing-total" :title="t('clearing.totalNote')">
+              {{ t('clearing.total') }}: <span class="ds-mono" data-testid="clearing-total-amount">{{ last.total_cleared_amount }}&nbsp;{{ resultUnit }}</span>
             </span>
           </div>
 
           <div v-for="(c, i) in cycles" :key="i" class="ds-stack cp-cycle" data-testid="clearing-cycle">
             <div class="ds-label" data-testid="clearing-cycle-title">
-              {{ interactText('clearingCycle', { n: i + 1, total: cycles.length, amount: c.cleared_amount, unit: resultUnit }) }}
+              {{ t('clearing.cycle', { n: i + 1, total: cycles.length, amount: c.cleared_amount, unit: resultUnit }) }}
             </div>
             <ul class="cp-edges">
               <li v-for="(e, k) in c.edges" :key="k" class="ds-help ds-mono" data-testid="clearing-edge-line">{{ edgeLine(e, c) }}</li>
@@ -186,7 +188,7 @@ const closeDisabled = computed(() => waiting.value)
       </template>
 
       <div v-if="!isConfirm" class="ds-row ds-row--actions cp-actions">
-        <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-close" :disabled="closeDisabled" @click="cancel">Close</button>
+        <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-close" :disabled="closeDisabled" @click="cancel">{{ t('common.close') }}</button>
       </div>
     </div>
   </div>
