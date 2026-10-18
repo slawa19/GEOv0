@@ -98,7 +98,8 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   await push(page, [payment(l.source, l.target)])
   await page.clock.runFor(48)
   const c = await loopCounters(page)
-  // The whole life of the effect and the way back to sleep: flight 1200, receiver burst 420, hold 250, idle 3000, slack.
+  // The whole life of the effect and the way back to sleep: the flight (039 slice C: one leg, at most a few hundred ms,
+  // and a 360 ms fade - until then 1200), receiver burst 420, hold 250, idle 3000, slack.
   await page.clock.runFor(1200 + 420 + 250 + 500)
   // Idle cadence now (4 fps, nothing but the base graph on screen): the next 250 ms hold exactly one pass.
   const i0 = await loopCounters(page)
@@ -238,18 +239,23 @@ test('budget: at a sustained 10 fps the FX budget falls, the particle cap follow
   test.skip(!devHook, NEEDS_HOOK)
   await bootClocked(page, snapshot)
 
-  // 60 fps, FX on screen: three clearings 480 ms apart put more live objects on the scene than the low-FPS cap allows.
+  // 60 fps, FX on screen: five clearings 300 ms apart put more live objects on the scene than the low-FPS cap allows.
+  // 039 slice C (2026-10-18, P-4): it was three clearings 480 ms apart. A clearing's lines now pulse for 1.6 s (+30 %
+  // afterglow) after its spark went round, not 4.2 s from the start, and its nodes no longer burst all at once - so the
+  // same three left 90 objects alive, under the cap of 135, and the cap had nothing to cut. The load is made denser to
+  // keep the DEMAND above the cap: what this test judges is the cap, not the size of one clearing's effect.
   let n = 0
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     await push(page, [clearing((n += 1))])
-    await page.clock.runFor(480)
+    await page.clock.runFor(300)
   }
   const fast = await readFx(page)
 
-  // 10 fps for 8 s: one frame per 100 ms; a clearing every second keeps the demand above the cap.
+  // 10 fps for 8 s: one frame per 100 ms; a clearing every 400 ms keeps the demand above the cap (039 slice C: every
+  // second until then - see the warm-up above for why).
   const slow: FxRead[] = []
   for (let f = 0; f < 80; f += 1) {
-    if (f % 10 === 0) await push(page, [clearing((n += 1))])
+    if (f % 4 === 0) await push(page, [clearing((n += 1))])
     await page.clock.fastForward(100)
     slow.push(await readFx(page))
   }

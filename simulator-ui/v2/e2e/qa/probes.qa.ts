@@ -62,8 +62,11 @@ test('page.clock drives the render loop and the JS TTL, and does NOT drive the C
   const again = await syncCssToClock(page)
   expect(again[0]!.opacity, 'the same JS time gives the same opacity').toBe(s[0]!.opacity)
 
-  // JS TTL of the label: 1900 ms of the fake clock, however much wall time went by above.
-  await page.clock.runFor(1900 - 80 - 16)
+  // JS TTL of the label on the fake clock, however much wall time went by above. Since 039 slice C (R2) the TTL is the
+  // label's CSS animation (until then 1900 ms, shorter than its 2600 ms fade): read here from the animation itself.
+  const ttl = s[0]!.durationMs
+  expect(ttl, 'counter-check: the label has a CSS animation').toBeGreaterThan(1000)
+  await page.clock.runFor(ttl - 80 - 16)
   expect((await fxCounts(page)).labels, 'sender label still mounted one frame before its TTL').toBeGreaterThanOrEqual(1)
   const before = (await syncCssToClock(page)).filter((l) => l.text.startsWith('-')).length
   await frames(page, 2)

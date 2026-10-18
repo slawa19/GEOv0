@@ -126,8 +126,14 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   and a 64-character stop summary no control of the service row overlaps another or leaves the viewport, and the
  *   Scenario select carries the full option text as its title. Red before the fix in all four (the select overlapped
  *   the theme and the status cluster; in `hud` at 1280x720 it left the screen at x -25). About 0.5 s each.
+ * - 2026-10-18 (039 slice C, motion): gate 133 -> 138, full 224 -> 229. One new file, `motion-c.qa.ts`, five tests in the
+ *   gate (none tagged `@extended`): the pace, the handoff and the readability without a GPU of a 3- and a 6-edge payment
+ *   (two tests), the clearing's spark round the cycle (one), glow only on active nodes and its counter-check with a GPU
+ *   believed present (two). Each of the first four was red on the base `a1b6640c` (Changelog of spec 039). About 33 s
+ *   in all locally; the flights of `motion.qa.ts` and `chord.qa.ts` are watched until the beam is gone instead of a
+ *   fixed 76 frames, since a route now lasts as long as its legs (P-4 of spec 039) - the step time is in the Changelog.
  */
-export const EXPECTED = { gate: 133, full: 224 }
+export const EXPECTED = { gate: 138, full: 229 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

@@ -5,19 +5,24 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { expectBeamOnRoute, pickRingRoute, probeFrame, rememberBaseline, watchFlight } from './oracle.js'
+import { expectBeamOnRoute, pickRingRoute, probeFrame, rememberBaseline, watchUntilGone } from './oracle.js'
 import { RING, boot, frames, fxCounts, loopCounters, openDetails, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
 
 async function sparks(page: Page) {
   return page.evaluate(() =>
-    (window as unknown as { __geoSim: { fxState: { sparks: Array<{ source: string; target: string; startedAtMs: number; ttlMs: number }> } } })
-      .__geoSim.fxState.sparks.map((s) => ({ source: s.source, target: s.target, startedAtMs: s.startedAtMs, ttlMs: s.ttlMs })))
+    (window as unknown as { __geoSim: { fxState: { sparks: Array<{ source: string; target: string; startedAtMs: number; ttlMs: number; moveMs?: number }> } } })
+      .__geoSim.fxState.sparks.map((s) => ({ source: s.source, target: s.target, startedAtMs: s.startedAtMs, ttlMs: s.ttlMs, moveMs: s.moveMs })))
 }
 
 /**
- * One payment over `hops` consecutive edges of the ring, watched frame by frame for its whole 1200 ms and judged by the
+ * One payment over `hops` consecutive edges of the ring, watched frame by frame for its whole life and judged by the
  * five properties. The amount labels are switched off in the event (`amount_flyout: false`): a label is DOM over the
  * scene, it would change the screenshot by itself and make "the page changed here" true without a beam.
+ *
+ * 039 slice C (2026-10-18, P-4 of spec 039): until then the flight was watched for a fixed 76 frames (1216 ms: the whole
+ * route always took 1200 ms). A route now takes as long as its legs - at least 450 ms each, one speed, the last leg
+ * eased, then a fade - so the watch runs until no spark of the payment is alive (and three frames more), up to 400
+ * (`watchUntilGone`, `oracle.ts`).
  */
 async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: boolean } = {}) {
   const g = await pickRingRoute(page, RING, hops)
@@ -29,7 +34,7 @@ async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: 
   ).toEqual({ offRoute: 0, nearNode: 0, route: 0 })
 
   await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
-  const probes = await watchFlight(page, g, 76, 1) // 1216 ms: the whole beam and one frame more
+  const probes = await watchUntilGone(page, g)
   const sum = expectBeamOnRoute(g, probes, { order: hops > 1, compositionMinimums: o.compositionMinimums })
   const row = sum.map((e) => ({
     edge: e.name, lit: [e.firstLit, e.lastLit], paintedFrames: e.litFrames.length, head: [e.headFirst?.toFixed(3), e.headLast?.toFixed(3)],
@@ -40,7 +45,7 @@ async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: 
   test.info().annotations.push({ type: `038-oracle-${hops}`, description: JSON.stringify(row) })
 
   const last = probes[probes.length - 1]!
-  expect.soft(Object.values(last.edges).reduce((s, e) => s + e.px, 0), 'the beam is gone from the route by the end of its life (1200 ms)').toBe(0)
+  expect.soft(Object.values(last.edges).reduce((s, e) => s + e.px, 0), 'the beam is gone from the route by the end of its life').toBe(0)
   await frames(page, 30) // the receiver's burst (420 ms) fades too
   expect.soft((await fxCounts(page)).sparks, 'and no spark is left in the FX state').toBe(0)
 }
@@ -98,13 +103,18 @@ test('R3 - the beam of a 3-edge payment follows the edges of its route, one afte
   await flyAndJudge(page, 3)
 })
 
-test('R3 - FX state of a 3-edge payment: one spark alive at a time, in route order, 400 ms each; the receiver label comes at 1200 ms', async ({ page }) => {
+// 039 slice C (2026-10-18, P-4): until then this test pinned "400 ms each; the label at 1200 ms" (the wire's 1200 ms
+// divided by three legs). What it keeps: one spark at a time, in route order, the label when the beam arrives. The
+// tempo itself - 450 ms at least, one speed - is judged by `motion-c.qa.ts`.
+test('R3 - FX state of a 3-edge payment: one spark alive at a time, in route order, legs back to back; the receiver label comes when the beam arrives', async ({ page }) => {
   const g = await pickRingRoute(page, RING, 3)
+  const t0 = await page.evaluate(() => performance.now())
   await pushEvent(page, txUpdated(g.ids, '10.00'))
   const seen: string[] = []
+  const legs: Array<{ startedAtMs: number; moveMs: number }> = []
   let maxAlive = 0
   let receiverLabelAtFrame: number | null = null
-  for (let f = 1; f <= 80; f += 1) {
+  for (let f = 1; f <= 200; f += 1) {
     await frames(page, 1)
     // Alive = not yet past its TTL. A spark whose time is over stays in the array until the next frame drops it
     // (`renderFrame.ts`), and the timer of the next edge may fire before that frame; it is never drawn again.
@@ -113,26 +123,33 @@ test('R3 - FX state of a 3-edge payment: one spark alive at a time, in route ord
     const alive = all.filter((s) => now - s.startedAtMs < s.ttlMs)
     maxAlive = Math.max(maxAlive, alive.length)
     for (const s of alive) {
-      const k = `${s.source}>${s.target}+${s.ttlMs}`
-      if (seen[seen.length - 1] !== k) seen.push(k)
+      const k = `${s.source}>${s.target}`
+      if (seen[seen.length - 1] !== k) { seen.push(k); legs.push({ startedAtMs: s.startedAtMs - t0, moveMs: s.moveMs ?? s.ttlMs }) }
     }
     const plus = await page.evaluate(() => [...document.querySelectorAll('.floating-label-inner')].some((el) => (el.textContent ?? '').trim().startsWith('+')))
     if (plus && receiverLabelAtFrame === null) receiverLabelAtFrame = f
   }
-  console.log('[038 R3] fx state', JSON.stringify({ seen, maxAlive, receiverLabelAtFrame }))
-  expect(seen).toEqual(g.edges.map((e) => `${e.name}+400`))
+  const last = legs[legs.length - 1]
+  const arrivalFrame = last ? Math.ceil((last.startedAtMs + last.moveMs) / 16) : null
+  console.log('[038 R3] fx state', JSON.stringify({ seen, legs, maxAlive, receiverLabelAtFrame, arrivalFrame }))
+  expect(seen).toEqual(g.edges.map((e) => e.name))
   expect(maxAlive, 'never two sparks of one payment at once').toBe(1)
-  // 1200 ms is frame 75; the label is pushed by a timer at 1200 ms and mounted by the frame after it.
-  expect(receiverLabelAtFrame, 'the receiver label appears when the beam arrives: at the total route time, as before the fix').toBeGreaterThanOrEqual(75)
-  expect(receiverLabelAtFrame).toBeLessThanOrEqual(77)
+  for (let i = 1; i < legs.length; i += 1) expect(legs[i]!.startedAtMs, `leg ${i} starts when leg ${i - 1} arrives`).toBeCloseTo(legs[i - 1]!.startedAtMs + legs[i - 1]!.moveMs, 0)
+  // The label is pushed by a timer at the arrival and mounted by the frame after it.
+  expect(receiverLabelAtFrame, `the receiver label appears when the beam arrives (frame ${String(arrivalFrame)})`).toBeGreaterThanOrEqual(arrivalFrame!)
+  expect(receiverLabelAtFrame).toBeLessThanOrEqual(arrivalFrame! + 2)
 })
 
 // MEASUREMENT, not a verdict (spec 038, S1: "if an edge at k = 6 passes too fast to be read, S1 returns the number").
-// Six edges is the cap (`REAL_TX_MAX_ROUTE_EDGES`): the whole ring, 200 ms = 12.5 frames an edge. Displacement,
-// direction, route and order are judged here as everywhere. Composition is judged without its minimums ("3 frames,
-// 0.15 of the edge"): at 200 ms an edge is strongly painted in 2-4 frames only. Every strong buffer pixel must still
-// be on the page. What goes to the spec is the printed row: frames painted per edge and how far the head is seen.
-test('R3 - measurement at the cap: a 6-edge route, 200 ms an edge - frames painted per edge and head travel', async ({ page }) => {
+// Six edges is the cap (`REAL_TX_MAX_ROUTE_EDGES`): the whole ring. Displacement, direction, route and order are judged
+// here as everywhere, with the relaxed limits of the cap (`MOTION_LIMITS_AT_CAP`), and composition without its minimums.
+// Until 039 slice C the reason was the tempo: 200 ms = 12.5 frames an edge, strongly painted in 2-4 frames. Since
+// 2026-10-18 an edge lasts at least 450 ms (here about 600 ms) and is painted in 34-54 frames - the reason that is left
+// is the LAYOUT: the closed ring of six crosses itself, its last edge f > a runs within 9 px of another edge of the
+// route for about 85 px, the oracle gives such pixels to neither edge, and its head reading freezes there and then
+// jumps 0.24 of the edge in one frame (measured 2026-10-18). The tempo of six legs is judged by `motion-c.qa.ts` (FX
+// state, the handoffs and the painted share of every leg, on this same route).
+test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and head travel (the closed ring crosses itself)', async ({ page }) => {
   await flyAndJudge(page, 6, { compositionMinimums: false })
 })
 
@@ -160,7 +177,7 @@ test('prefers-reduced-motion: a payment draws no beam and schedules none, and it
   let maxSparks = 0
   let maxLabels = 0
   let painted = 0
-  for (let f = 0; f < 80; f += 1) { // the whole route time: a leg scheduled on a timer would show up here
+  for (let f = 0; f < 160; f += 1) { // the whole route time (039 slice C: 3 legs of at least 450 ms): a leg scheduled on a timer would show up here
     await frames(page, 1)
     const c = await fxCounts(page)
     maxSparks = Math.max(maxSparks, c.sparks)
