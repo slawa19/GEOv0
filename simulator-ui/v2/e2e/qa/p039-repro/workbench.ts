@@ -34,7 +34,8 @@ export async function openWorkbench(page: Page, o: { theme: string; quality: str
     await installCssClockSync(page)
   }
   await page.addInitScript(() => { try { localStorage.clear() } catch { /* ignore */ } })
-  await page.goto(`/?mode=fixtures&theme=${o.theme}`)
+  // 048 S1 (decision 5): the workbench and the quality are the developer's - `?debug=1`.
+  await page.goto(`/?mode=fixtures&debug=1&theme=${o.theme}`)
   await page.waitForSelector('[data-ready="1"]', { timeout: 60_000 })
   await page.waitForFunction(() => '__geoSim' in window)
   expect(await page.evaluate(() => (window as unknown as { __geoSim: { isTestMode: boolean } }).__geoSim.isTestMode), 'not test mode').toBe(false)

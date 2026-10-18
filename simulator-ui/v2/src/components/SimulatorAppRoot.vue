@@ -21,7 +21,7 @@ import RealMetricsPanel from './RealMetricsPanel.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
- import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+ import { isAdminViewer, provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
 import { canActOnTrustlineFigures } from '../composables/interact/trustlinesSourceState'
@@ -180,6 +180,13 @@ function toggleAnalyticsPanel(): void {
 }
 
 /**
+ * 048 S1 (decision 1): the analytics dock is the administrator's - its toggle is in "Admin ▾", and without an admin token
+ * the dock is neither mounted nor polled, whatever a browser remembers (`analyticsPanelOpen`). Written from the app's
+ * token below (`isAdminViewer`, the rule of the top bar); a ref here because the app is created after this line.
+ */
+const analyticsViewerIsAdmin = ref(false)
+
+/**
  * 043 S1: the one "Подробнее" toggle. Off by default (a first visit, or a browser that never chose); remembered in
  * this browser through the same `read01`/`write01` pair as the analytics flag above, and applied without a reload.
  * Every service control of the two bars is rendered only while it is on - and so is the analytics dock, whose toggle
@@ -205,7 +212,7 @@ const app = useSimulatorApp({
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
   optionalFxEnabled: () => !reducedMotion.value,
-  isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value,
+  isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value && analyticsViewerIsAdmin.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -349,6 +356,7 @@ const {
   // flags
   isDemoFixtures,
   isLiveUi,
+  isDebugUi,
   isTestMode,
   isWebDriver,
   isE2eScreenshots,
@@ -361,7 +369,6 @@ const {
   // state + prefs
   state,
   eq,
-  scene,
   layoutMode,
   quality,
   labelsLod,
@@ -608,6 +615,23 @@ watch(
  }
 
  provideTopBarContext(topBarCtx)
+
+watch(
+  () => isAdminViewer(real.accessToken, apiMode.value),
+  (admin) => {
+    analyticsViewerIsAdmin.value = admin
+  },
+  { immediate: true, flush: 'sync' },
+)
+
+/**
+ * 048 S1 (decision 4): the equivalents of the bottom bar's EQ. The offline demo snapshots are shipped for one equivalent
+ * (`useAppUiDerivedState.ts`: `VITE_DEMO_FIXTURES` pins the offline scene), so the bar is given that one and shows it as
+ * text - not a select whose choice the scene would ignore (it was a fixed "UAH" text branch until S1).
+ */
+const bottomBarEquivalentOptions = computed(() =>
+  apiMode.value === 'fixtures' && isDemoFixtures.value ? [sceneEq.value] : equivalentOptions.value,
+)
 
 /** True when initial data has loaded (or we already have a snapshot from a previous load). */
 const dataReady = computed(() => !state.loading || !!state.snapshot)
@@ -916,9 +940,9 @@ function setSource(next: 'real' | 'fixtures') {
   if (toLower(interactPhase.value) !== 'idle') interact.mode.cancel()
   const u = new URL(window.location.href)
   u.searchParams.set('mode', next)
-  // An old `?ui=` (`interact`, `demo` - both ignored since 043 S2/S3) and `?debug=` are not carried across the switch.
+  // An old `?ui=` (`interact`, `demo` - both ignored since 043 S2/S3) is not carried across the switch. `?debug=1` is
+  // (048 S1, decision 5): the switch lives behind it, and the developer who switched stays the developer.
   u.searchParams.delete('ui')
-  u.searchParams.delete('debug')
   // Setting href ensures a full re-init: the data pipeline is replaced (043 S3: the one navigation left on this screen).
   window.location.href = u.toString()
 }
@@ -1146,7 +1170,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     :data-motion="reducedMotion ? 'reduced' : 'full'"
     :aria-busy="state.loading || real.loadingScenarios || interact.mode.busy.value ? 'true' : 'false'"
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
-    :data-scene="scene"
     :data-layout="layoutMode"
     :data-quality="quality"
     :data-gpu="gpuAccelLikely ? '1' : '0'"
@@ -1175,12 +1198,21 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :edge="hoveredEdge"
       :style="edgeTooltipStyle"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
-      :interact-mode="isLiveUi"
     />
 
     <TopBar
       :details-open="detailsOpen"
+      :debug="isDebugUi"
+      :analytics-open="analyticsPanelOpen"
+      :run-files="{
+        runId: real.runId,
+        items: real.artifacts,
+        loading: real.artifactsLoading,
+        refresh: realActions.refreshArtifacts,
+        download: realActions.downloadArtifact,
+      }"
       @toggle-details="toggleDetails"
+      @toggle-analytics="toggleAnalyticsPanel"
       @set-ui-theme="setUiTheme"
       @refresh-scenarios="realActions.refreshScenarios"
       @start-run="realActions.startRun"
@@ -1377,25 +1409,16 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-else
       v-model:eq="eq"
       v-model:layoutMode="layoutMode"
-      v-model:scene="scene"
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
       :api-mode="apiMode"
       :set-source="setSource"
       :playlists="playlistWorkbench"
-      :is-demo-fixtures="isDemoFixtures"
-      :equivalent-options="equivalentOptions"
+      :equivalent-options="bottomBarEquivalentOptions"
       :show-reset-view="showResetView"
       :reset-view="resetView"
-      :run-id="real.runId"
-      :refresh-snapshot="realActions.refreshSnapshot"
-      :artifacts="real.artifacts"
-      :artifacts-loading="real.artifactsLoading"
-      :refresh-artifacts="realActions.refreshArtifacts"
-      :download-artifact="realActions.downloadArtifact"
-      :analytics-panel-open="analyticsPanelOpen"
-      :toggle-analytics-panel="toggleAnalyticsPanel"
       :details-open="detailsOpen"
+      :debug="isDebugUi"
     >
       <!-- 039 slice B: a row INSIDE the bottom bar, above its controls; the bar's measured height includes it. -->
       <template #legend>

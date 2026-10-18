@@ -165,8 +165,15 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-18 (rule of the stand's time, by the orchestrator): прогноз времени стенда берётся только из CI (шаг стенда
  *   в `ui-smoke` и длительности тестов из его отчёта), не из локальных прогонов: 2026-10-18 локальный прогноз 039 C
  *   занизил прирост вдвое.
+ * - 2026-10-18 (048 S1, the three addressees of the screen): gate 139 -> 137, full 235 -> 231. The bottom bar's
+ *   "Artifacts" menu moved INTO "Admin ▾" (the run files), so the matrix entry `menu-artifacts` is gone with its surface:
+ *   -2 in the gate (`matrix [saas|hud] menu-artifacts`, 2.69 and 2.67 s in the stand report of CI run 39149083576),
+ *   -2 under `@extended` (its gallery frames). `analytics-panel` opens its toggle in "Admin ▾" now (one menu click and
+ *   Escape more, well under a second); `layout.qa.ts` reads its service list by test id and also holds that the
+ *   developer's controls (`?debug=1`) are absent - no test added. Forecast from CI numbers: 599 - 37.8 (the R3 move
+ *   above) - 5.4 = about 556 s.
  */
-export const EXPECTED = { gate: 139, full: 235 }
+export const EXPECTED = { gate: 137, full: 231 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

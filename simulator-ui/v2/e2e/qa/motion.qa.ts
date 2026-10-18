@@ -50,8 +50,10 @@ async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: 
   expect.soft((await fxCounts(page)).sparks, 'and no spark is left in the FX state').toBe(0)
 }
 
-test.beforeEach(async ({ page }) => {
-  await boot(page, { snapshot: ringSnapshot(), clock: true })
+// 048 S1 (decision 5): the render quality is chosen under `?debug=1` (the developer's entry); a test that chooses it
+// carries the tag `@debug-ui` and is booted with it. Every other test here opens the page as a visitor.
+test.beforeEach(async ({ page }, info) => {
+  await boot(page, { snapshot: ringSnapshot(), clock: true, ...(info.tags.includes('@debug-ui') ? { query: '&debug=1' } : {}) })
 })
 
 // LIMITS OF R1 (adversarial pass 2026-10-11, AGENTS.md 11: a guard names what it does not check).
@@ -165,7 +167,7 @@ test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and 
 
 // The stand's browser has no GPU and the quality autoguard puts it on `low`, where a beam is its head dot only
 // (`renderFrame.ts`). `med` and `high` draw a trail and a bright segment behind the head; the same five properties
-// must hold there. The quality is chosen as a user chooses it, in the bottom bar.
+// must hold there. The quality is chosen as the developer chooses it, in the bottom bar under `?debug=1` (048 S1).
 //
 // `@extended` since 2026-10-18 (048 S1, the same R3 rule as above): the required stand step took 599 s of its 600 s
 // budget in CI (run 39149083576, head `2849685d`, 141 tests), and these two were the longest R3 tests left in the gate:
@@ -176,9 +178,9 @@ test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and 
 // (the halo trail and the bright packet behind the head) - no other gate test draws it; it is judged by the full stand
 // (`run-stand.mjs full`, the scheduled/manual job `simulator-qa-stand`).
 for (const quality of ['med', 'high'] as const) {
-  test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment) @extended`, async ({ page }) => {
-    await openDetails(page) // 043 S1: Quality is behind "Подробнее"
-    await page.getByRole('combobox', { name: 'Quality' }).selectOption(quality)
+  test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment) @extended`, { tag: '@debug-ui' }, async ({ page }) => {
+    await openDetails(page) // 043 S1: Quality is behind "Подробнее"; 048 S1: and `?debug=1` (the tag above)
+    await page.getByTestId('quality-select').selectOption(quality)
     await frames(page, 10)
     expect(await page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality)).toBe(quality)
     await flyAndJudge(page, 2)

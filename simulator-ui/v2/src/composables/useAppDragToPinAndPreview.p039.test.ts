@@ -93,7 +93,7 @@ function stand(first: GraphSnapshot = snapshotOf('UAH', [person('A'), person('B'
   let requested = ''
   const eq = ref('UAH')
   const scene = useSceneState({
-    eq, scene: ref('A'), layoutMode: ref('admin-force'),
+    eq, layoutMode: ref('admin-force'),
     allowEqDeepLink: () => true, isEqAllowed: () => true, effectiveEq: computed(() => eq.value),
     state,
     loadSnapshot: async () => { if (next instanceof Error) throw next; return next },

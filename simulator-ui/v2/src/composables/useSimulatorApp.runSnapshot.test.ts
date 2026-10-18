@@ -86,7 +86,6 @@ describe('the scene loader and a thrown timeout', () => {
     let fail = false
     const s = useSceneState({
       eq: ref('UAH'),
-      scene: ref<'A' | 'B' | 'C'>('A'),
       layoutMode: ref<'admin-force'>('admin-force'),
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,

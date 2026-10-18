@@ -18,22 +18,29 @@ import { expect, test, type Page } from '@playwright/test'
 import { boot, DETAILS_TOGGLE, ringSnapshot } from './stand.js'
 import { THEMES, VIEWPORT_MAIN } from './surfaceMatrix.js'
 
+// 048 S1 (decisions 1, 4 and 5; Verification plan, forbidden item 4 - by test id, not by the words 046 translates):
+// what "Подробнее" shows the stand's viewer (an admin token is set). Gone from this list: the "Run <state>" badge
+// (removed), the source select and the quality (`?debug=1` only - DEVELOPER below), the analytics toggle (inside the
+// "Admin ▾" menu: in the DOM, not on screen until the menu is opened - `surfaceMatrix.ts`, entry `analytics-panel`).
 const SERVICE: Array<[string, string]> = [
-  ['source select', 'select[aria-label="Источник"]'], // 043 S2: the mode segment is gone; the source is a service control
-  ['theme switcher', 'select[aria-label="UI theme"]'],
-  ['Admin menu', 'summary[aria-label="Admin"]'],
-  ['run state badge', '[aria-label="Run state"]'],
-  ['equivalent', '[aria-label="Equivalent"]'], // a select, or the code as text when the scene has one equivalent
-  ['layout', 'select[aria-label="Layout"]'],
-  ['quality', 'select[aria-label="Quality"]'],
-  ['labels', 'select[aria-label="Labels"]'],
-  ['analytics toggle', '[data-testid="bottombar-analytics-toggle"]'],
+  ['theme switcher', '[data-testid="theme-select"]'],
+  ['Admin menu', '[data-testid="admin-summary"]'],
+  ['equivalent', '[data-testid="equivalent-select"], [data-testid="equivalent-text"]'], // a select, or the code as text
+  ['layout', '[data-testid="layout-select"]'],
+  ['labels', '[data-testid="labels-select"]'],
   ['Inspect graph', '.graph-navigator'],
-  ['full metrics', '[aria-label="System metrics"]'],
+  ['full metrics', '[data-testid="system-metrics"]'],
+]
+/** 048 S1 (decision 5): the developer's controls - never on screen without `?debug=1`, not even with "Подробнее". */
+const DEVELOPER: Array<[string, string]> = [
+  ['source select', '[data-testid="source-select"]'],
+  ['quality', '[data-testid="quality-select"]'],
+  ['SSE badge', '[data-testid="sse-badge"]'],
+  ['playlist workbench', '[data-testid="playlist-workbench"]'],
 ]
 const ACTIONS = ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']
 
-const counts = (page: Page) => page.evaluate((service) => service.map(([name, sel]) => [name, document.querySelectorAll(sel).length] as const), SERVICE)
+const counts = (page: Page, list = SERVICE) => page.evaluate((service) => service.map(([name, sel]) => [name, document.querySelectorAll(sel).length] as const), list)
 
 test('043 S1 (d): every service surface is absent from the first view and on screen after a click on "Подробнее"', async ({ page }) => {
   await page.setViewportSize(VIEWPORT_MAIN)
@@ -47,6 +54,8 @@ test('043 S1 (d): every service surface is absent from the first view and on scr
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   for (const [name, sel] of SERVICE) await expect(page.locator(sel).first(), `${name} after "Подробнее"`).toBeVisible()
+  // 048 S1: and the developer's controls are not rendered for this viewer at all (no `?debug=1`).
+  expect(Object.fromEntries(await counts(page, DEVELOPER)), 'not rendered without ?debug=1').toEqual(Object.fromEntries(DEVELOPER.map(([n]) => [n, 0])))
 
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')

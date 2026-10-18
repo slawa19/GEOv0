@@ -2,6 +2,16 @@ import { inject, provide, type InjectionKey, type Ref } from 'vue'
 import type { RunStatus, ScenarioSummary } from '../api/simulatorTypes'
 import type { AdminRunSummary } from '../api/simulatorApi'
 import type { UiThemeId } from '../types/uiPrefs'
+import { isJwtLike } from '../utils/isJwtLike'
+
+/**
+ * Who sees the administrator's controls (TopBar "Admin ▾"; 048 S1: also the analytics dock and the run files): an admin
+ * token - not a participant JWT - on the server source. One rule for the top bar and the root that mounts the dock.
+ */
+export function isAdminViewer(accessToken: string | null | undefined, apiMode: 'fixtures' | 'real'): boolean {
+  const t = String(accessToken ?? '').trim()
+  return !!t && !isJwtLike(t) && apiMode === 'real'
+}
 
 export type TopBarContext = {
   // mode + env

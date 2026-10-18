@@ -20,7 +20,7 @@ import TopBar from './TopBar.vue'
 const EVENTS = [
   'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent',
   'set-ui-theme', 'refresh-scenarios', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
-  'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run',
+  'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run', 'toggle-analytics',
 ] as const
 
 function context(over: Partial<TopBarContext> = {}): TopBarContext {
@@ -90,26 +90,45 @@ describe('TopBar wiring - what each control emits', () => {
     done()
   })
 
-  it('buttons emit their events: scenarios, run lifecycle, intensity (043 S2: no mode segment)', async () => {
+  /**
+   * 048 S1 (decision 4): the service row had its own Pause/Resume beside "Поток" - two controls of one state. They are
+   * gone; "Поток" pauses a living run and resumes a paused one (rewritten here from "Pause"/"Resume", not deleted).
+   * Observed by behaviour, not by a button's words: EVERY button of the service row is clicked, in both states of the
+   * run, and none of them emits `pause` or `resume` - red before S1 (the row's Pause emitted `pause`, its Resume
+   * `resume`). The refresh of the scenario catalogue is in "Admin ▾" (decision 5) and still emits its event.
+   */
+  it('buttons emit their events: run lifecycle and intensity; "Поток" alone pauses and resumes (043 S2: no mode segment)', async () => {
     const runStatus = ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
     const { host, spies, done } = mountTopBar(context({ runStatus }), true)
     await nextTick()
     for (const gone of ['Sandbox', 'Auto-Run', 'Interact']) expect(button(host, gone), `${gone}: the mode segment is gone`).toBeUndefined()
 
-    host.querySelector<HTMLButtonElement>('button[aria-label="Refresh scenarios"]')!.click()
-    expect(spies['refresh-scenarios']).toHaveBeenCalledTimes(1)
-    button(host, 'Pause')!.click()
-    expect(spies.pause).toHaveBeenCalledTimes(1)
-    button(host, 'Apply')!.click()
-    expect(spies['apply-intensity']).toHaveBeenCalledTimes(1)
-    const stops = [...host.querySelectorAll<HTMLButtonElement>('.tb-run-controls button')].filter((b) => (b.textContent ?? '').trim() === 'Stop')
-    stops[0]!.click()
-    expect(spies.stop).toHaveBeenCalledTimes(1)
+    const row = host.querySelector<HTMLElement>('[data-testid="top-details-row"]')!
+    const runButtons = () => [...row.querySelectorAll<HTMLButtonElement>('.tb-run-controls button')]
+    for (const state of ['running', 'paused'] as const) {
+      runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state } as RunStatus
+      await nextTick()
+      // Counter-check: the run controls are rendered (Stop and Apply at least) - the clicks below reach something.
+      expect(runButtons().length, `${state}: the run controls are there`).toBeGreaterThanOrEqual(2)
+      for (const b of [...row.querySelectorAll<HTMLButtonElement>('button')]) b.click()
+      expect([spies.pause.mock.calls.length, spies.resume.mock.calls.length], `${state}: no button of the service row pauses or resumes`).toEqual([0, 0])
+    }
+    expect(spies.stop, 'Stop of the run controls').toHaveBeenCalled()
+    expect(spies['apply-intensity'], 'Apply of the tempo').toHaveBeenCalled()
 
+    // The flow button of the first row is the one that does.
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus
+    await nextTick()
+    host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')!.click()
+    expect(spies.pause).toHaveBeenCalledTimes(1)
     runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus
     await nextTick()
-    button(host, 'Resume')!.click()
+    host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')!.click()
     expect(spies.resume).toHaveBeenCalledTimes(1)
+
+    host.querySelector<HTMLButtonElement>('[data-testid="scenarios-refresh"]')!.click()
+    expect(spies['refresh-scenarios'], 'the catalogue refresh, in Admin').toHaveBeenCalled()
+    expect(row.querySelector('[data-testid="scenarios-refresh"]')?.closest('details[aria-label="Admin controls"]'), 'it lives in Admin').not.toBeNull()
     done()
   })
 

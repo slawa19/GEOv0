@@ -16,7 +16,6 @@ import { fillForNode } from '../render/nodeFill'
 import { sizeForNode } from '../render/nodeSizing'
 import type { ClearingDoneEvent, GraphSnapshot } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
-import type { SceneId } from '../scenes'
 import { classifyNode, createVizMapping, resolveVizColors as resolveVizColorsInto, type DataPalette } from '../vizMapping'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
@@ -175,6 +174,12 @@ export type SimulatorAppApi = {
    * server source; there is no `?ui=interact` / Auto-Run split any more, and no Demo UI (`?ui=demo`, removed by S3).
    */
   isLiveUi: ComputedRef<boolean>
+  /**
+   * 048 S1 (decision 5): `?debug=1` - the developer's entry. Only with it are the source (server / offline snapshot), the
+   * render quality, the SSE badge and the offline effects workbench (playlist) on screen; a visitor's "Подробнее" has
+   * none of them. Read once per page: nothing writes the parameter but a navigation (the source switch carries it).
+   */
+  isDebugUi: boolean
   isTestMode: ComputedRef<boolean>
   isWebDriver: boolean
   isE2eScreenshots: ComputedRef<boolean>
@@ -208,7 +213,6 @@ export type SimulatorAppApi = {
 
   state: SimulatorAppState
   eq: Ref<string>
-  scene: Ref<SceneId>
   layoutMode: Ref<LayoutMode>
   quality: Ref<Quality>
   labelsLod: Ref<LabelsLod>
@@ -468,7 +472,6 @@ export function useSimulatorApp(opts?: {
   isAnalyticsPanelOpen?: () => boolean
 }): SimulatorAppApi {
   const eq = ref('UAH')
-  const scene = ref<SceneId>('A')
 
   const layoutMode = ref<LayoutMode>('admin-force')
 
@@ -519,6 +522,15 @@ export function useSimulatorApp(opts?: {
   })
 
   const isRealMode = computed(() => apiMode.value === 'real')
+
+  // 048 S1 (decision 5): the one reader of `?debug=1` (see `SimulatorAppApi.isDebugUi`). Exactly `1`, like `?perf=1`.
+  const isDebugUi = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get('debug') === '1'
+    } catch {
+      return false
+    }
+  })()
 
   const isLocalhost = (() => {
     try {
@@ -1623,7 +1635,6 @@ export function useSimulatorApp(opts?: {
   let handleRealSceneContextChange: () => Promise<void> = async () => undefined
   const sceneState = useAppSceneState({
     eq,
-    scene,
     layoutMode,
     effectiveEq,
     state,
@@ -1842,6 +1853,7 @@ export function useSimulatorApp(opts?: {
     // flags
     isDemoFixtures,
     isLiveUi,
+    isDebugUi,
     isTestMode,
     isWebDriver,
     isE2eScreenshots,
@@ -1917,7 +1929,6 @@ export function useSimulatorApp(opts?: {
     // state + prefs
     state,
     eq,
-    scene,
     layoutMode,
     quality,
     labelsLod,

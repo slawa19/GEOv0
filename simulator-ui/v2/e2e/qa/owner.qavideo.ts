@@ -30,7 +30,8 @@ async function setQuality(page: Page, value: 'low' | 'med' | 'high'): Promise<vo
 }
 
 test('video 1 - the beam of a payment over a route of 3 edges (twice at the quality a no-GPU browser gets, twice at high)', async ({ page }) => {
-  await boot(page, { snapshot: ringSnapshot(), clock: false, cssClock: false })
+  // 048 S1 (decision 5): the quality is chosen under `?debug=1`.
+  await boot(page, { snapshot: ringSnapshot(), clock: false, cssClock: false, query: '&debug=1' })
   const g = await pickRingRoute(page, RING, 3)
   test.info().annotations.push({ type: 'route', description: g.ids.join(' > ') })
   await realFrames(page, 45)

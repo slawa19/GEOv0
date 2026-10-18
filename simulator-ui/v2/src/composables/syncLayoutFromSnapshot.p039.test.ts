@@ -66,7 +66,6 @@ function snapshotOf(links: GraphLink[], generatedAt: string): GraphSnapshot {
 
 async function loadTwice(first: GraphSnapshot, second: GraphSnapshot) {
   const eq = ref('UAH')
-  const scene = ref<'A' | 'B' | 'C'>('A')
   const layoutMode = ref<LayoutMode>('admin-force')
   const state = reactive({
     loading: false,
@@ -90,7 +89,6 @@ async function loadTwice(first: GraphSnapshot, second: GraphSnapshot) {
 
   const s = useSceneState({
     eq,
-    scene,
     layoutMode,
     allowEqDeepLink: () => true,
     isEqAllowed: () => true,

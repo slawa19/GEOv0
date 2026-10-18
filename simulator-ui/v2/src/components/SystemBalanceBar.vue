@@ -14,9 +14,9 @@ type Props = {
   /** Legacy alias of `variant: 'debt'`. */
   compact?: boolean
   /**
-   * 043 S1. `debt`: the total debt alone - the first view's bottom row. `metrics`: everything else (clean badge,
-   * capacity, trust lines, participants, utilization) - the row of "Подробнее", beside the total debt that stays in
-   * the bottom row. `full` (default): all of it.
+   * 043 S1. `debt`: the total debt alone - the first view's bottom row. `metrics`: everything else (capacity, trust
+   * lines, participants, utilization) - the row of "Подробнее", beside the total debt that stays in the bottom row.
+   * `full` (default): all of it. 048 S1 (decision 4): no "Clean" badge - it repeated the total debt of 0.00.
    */
   variant?: 'full' | 'debt' | 'metrics'
 }
@@ -45,34 +45,30 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
     class="system-balance-bar"
     :class="{ 'system-balance-bar--compact': shown === 'debt' }"
     :aria-label="shown === 'metrics' ? 'System metrics' : 'System balance'"
+    :data-testid="shown === 'metrics' ? 'system-metrics' : 'system-balance'"
   >
     <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
-      <div v-if="b.isClean && showMetrics" class="ds-panel ds-ov-metric">
-        <span class="ds-badge ds-badge--ok">Clean</span>
-        <span class="ds-label">System is clean — no debts</span>
-      </div>
-
-      <div v-if="showDebt" class="ds-panel ds-ov-metric">
+      <div v-if="showDebt" class="ds-panel ds-ov-metric" data-testid="sbb-total-debt">
         <span class="ds-label">Общий долг</span>
         <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available">
         <span class="ds-label">Available Capacity</span>
         <span class="ds-value ds-mono">{{ money(b.totalAvailable) }} {{ unit }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-trustlines">
         <span class="ds-label">Trustlines</span>
         <span class="ds-value ds-mono">{{ b.activeTrustlines }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-participants">
         <span class="ds-label">Participants</span>
         <span class="ds-value ds-mono">{{ b.activeParticipants }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util" data-testid="sbb-utilization">
         <span class="ds-label">Utilization</span>
         <span class="ds-value ds-mono">{{ utilPct }}%</span>
         <div class="ds-progress__track sbb-track">

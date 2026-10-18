@@ -13,7 +13,8 @@ export type SystemBalance = {
   activeTrustlines: number
   activeParticipants: number
   utilization: number
-  isClean: boolean
+  // 048 S1 (decision 4): no `isClean` - its only reader, the "Clean" badge of `SystemBalanceBar`, is gone (it repeated
+  // "Общий долг 0.00"); a clean or frozen debt is read from `totalUsed`.
 }
 
 // TD-3: debounce interval for balance recomputation.
@@ -56,7 +57,6 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
         activeTrustlines: 0,
         activeParticipants: 0,
         utilization: 0,
-        isClean: true,
       }
     }
 
@@ -95,7 +95,6 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
       activeTrustlines,
       activeParticipants,
       utilization: Number.isFinite(utilization) ? utilization : 0,
-      isClean: totalUsed.startsWith('-') || !/[1-9]/.test(totalUsed),
     }
   })
 

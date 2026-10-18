@@ -42,7 +42,6 @@ describe('item 2: message functions outside useSimulatorRealMode', () => {
     const noop = () => undefined
     const s = useSceneState({
       eq: ref('UAH'),
-      scene: ref<'A' | 'B' | 'C'>('A'),
       layoutMode: ref<'admin-force'>('admin-force'),
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
