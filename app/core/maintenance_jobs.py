@@ -76,7 +76,30 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tupl
 
 
 async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
+    """One attempt of the integrity job, ENDED by `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS` (047 class-1 fix, 2026-10-18).
+
+    Until then an attempt that blocked - a database lock wait, an unanswered Redis call - never returned: the
+    equivalents after the blocked one were never verified, the job stayed `running` and `/health` healthy, and money
+    moved. Past the deadline the attempt is cancelled and recorded as failed, `<reason>_timed_out` - NEVER as a
+    completed check (False). The cancellation leaves no half-state: each session's close is shielded and rolls back
+    whatever was not committed, and the Redis lock is released by its token on the way out (bounded) or expires.
+    A Redis call past its own bound (`INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS`) is recorded the same way.
+    """
+
+    deadline = float(settings.INTEGRITY_ATTEMPT_TIMEOUT_SECONDS)
+    try:
+        async with asyncio.timeout(deadline):
+            return await _attempt_integrity_checkpoints(app, reason=reason)
+    except TimeoutError as error:
+        logger.error("integrity.attempt_timed_out reason=%s deadline_seconds=%s", reason, deadline)
+        _emit_integrity_metric(f"{reason}_timed_out")
+        _record_background_job_event(app, name="integrity", status="failed", event=f"{reason}_timed_out", error=error)
+        return False
+
+
+async def _attempt_integrity_checkpoints(app: FastAPI, *, reason: str) -> bool:
     from app.core.integrity import compute_and_store_integrity_checkpoints
+    from app.core.ledger.reconciliation import bound_the_waits
     from app.db.session import AsyncSessionLocal
     from app.utils.distributed_lock import redis_distributed_lock
     from app.utils.exceptions import ConflictException
@@ -98,9 +121,11 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             "geo:integrity:checkpoints",
             ttl_seconds=lock_ttl_seconds,
             wait_timeout_seconds=0.0,
+            call_timeout_seconds=float(settings.INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS),
         ):
             try:  # 030 F-030-7: an error of the checkpoints does not cancel the reconciliation; both are recorded
                 async with AsyncSessionLocal() as session:
+                    await bound_the_waits(session)  # 047: a blocked checkpoint fails here, not at the deadline
                     await compute_and_store_integrity_checkpoints(session)
             except Exception as error:  # noqa: BLE001 - recorded below as the job's error, never as a success
                 checkpoint_error = error
@@ -121,6 +146,8 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             event=f"{reason}_skipped_locked",
         )
         return True
+    except TimeoutError:  # 047: a Redis call past its bound - recorded as timed out by the caller, never a success
+        raise
     except Exception as error:
         logger.exception("integrity.checkpoints_failed reason=%s", reason)
         _emit_integrity_metric(f"{reason}_error")
