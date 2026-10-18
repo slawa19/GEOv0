@@ -4,6 +4,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0053_c17c31a5",
+    "amount": "0.56",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -50,6 +54,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0060_1500857c",
+    "amount": "0.64",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -96,6 +104,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "EUR",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0001_9e3779b1",
+    "amount": "0.63",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {
@@ -142,6 +154,10 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "EUR",
+    "from": "PID_U0060_1500857c",
+    "to": "PID_U0001_9e3779b1",
+    "amount": "0.61",
+    "amount_flyout": true,
     "ttl_ms": 1200,
     "edges": [
       {

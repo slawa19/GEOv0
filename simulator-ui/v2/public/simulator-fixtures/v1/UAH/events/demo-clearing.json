@@ -5,6 +5,8 @@
     "type": "clearing.done",
     "equivalent": "UAH",
     "plan_id": "clearing-demo-UAH",
+    "cleared_cycles": 5,
+    "cleared_amount": "121.00",
     "cycle_edges": [
       {
         "from": "PID_U0039_1a7389f7",

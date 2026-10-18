@@ -95,6 +95,68 @@ describe('042 T4205: the committed recordings are playable on the live event pat
       expect(result.empty).toEqual(['demo-clearing'])
     }
   })
+
+  // 039 slice C (2026-10-18): the recordings carried no `amount` and no `cleared_amount` since 029 S4, so the workbench
+  // never showed an amount label. The amounts were added from the recorded patches by one rule, held here: a payment's
+  // amount is the receiver's net balance increase in its node patch (= the sender's decrease; nobody else moves), a
+  // clearing's the sum over its cycles of the reduction of `used` common to every line of the cycle. Both replayed from
+  // the snapshot in playlist order, in atoms of precision 2. The edge `used` deltas of a payment are NOT its amount:
+  // they differ leg to leg and from the node patches (inherited inconsistent patches; spec 039, Changelog).
+  it('every recorded amount follows from the recorded patches by the rule of 2026-10-18', () => {
+    const atoms = (p: { net_balance_atoms?: string | null; net_sign?: number | null }) => Number(p.net_balance_atoms) * (p.net_sign ?? 0)
+    const money = (cents: number) => (cents / 100).toFixed(2)
+    let payments = 0
+    let clearings = 0
+    for (const eq of ['EUR', 'HOUR', 'UAH']) {
+      const snap = readJson(`${FIXTURES}${eq}/snapshot.json`) as GraphSnapshot
+      for (const id of ['demo-tx', 'demo-clearing']) {
+        const used = new Map(snap.links.map((l) => [`${l.source}>${l.target}`, Math.round(Number(l.used) * 100)]))
+        const net = new Map(snap.nodes.map((n) => [n.id, atoms(n)]))
+        for (const e of readJson(`${FIXTURES}${eq}/events/${id}.json`) as Array<Record<string, any>>) {
+          const lineDelta = new Map<string, number>()
+          for (const p of e.edge_patch ?? []) {
+            const k = `${p.source}>${p.target}`
+            const v = Math.round(Number(p.used) * 100)
+            lineDelta.set(k, v - used.get(k)!)
+            used.set(k, v)
+          }
+          const moved = new Map<string, number>()
+          for (const p of e.node_patch ?? []) {
+            const v = atoms(p)
+            if (v !== net.get(p.id)) moved.set(p.id, v - net.get(p.id)!)
+            net.set(p.id, v)
+          }
+          if (e.type === 'tx.updated') {
+            payments += 1
+            const [first, last] = [e.edges[0], e.edges[e.edges.length - 1]]
+            expect([e.from, e.to], `${eq}/${id} ${e.event_id}: from/to are the route's ends`).toEqual([first.from, last.to])
+            expect([...moved.keys()].sort(), `${eq}/${id} ${e.event_id}: only sender and receiver move`).toEqual([e.from, e.to].sort())
+            expect(moved.get(e.from)).toBe(-moved.get(e.to)!)
+            expect(e.amount, `${eq}/${id} ${e.event_id}`).toBe(money(moved.get(e.to)!))
+            expect(e.amount_flyout).toBe(true)
+          } else if (e.type === 'clearing.done') {
+            clearings += 1
+            const left = e.cycle_edges.map((x: { from: string; to: string }) => [x.from, x.to] as const)
+            let total = 0
+            let cycles = 0
+            while (left.length) {
+              const cyc = [left.shift()!]
+              while (cyc[cyc.length - 1]![1] !== cyc[0]![0]) {
+                const i = left.findIndex((x: readonly [string, string]) => x[0] === cyc[cyc.length - 1]![1])
+                expect(i, `${eq}/${id}: the cycle lines close cycles`).toBeGreaterThanOrEqual(0)
+                cyc.push(left.splice(i, 1)[0]!)
+              }
+              cycles += 1
+              total += Math.min(...cyc.map(([a, b]) => -lineDelta.get(`${a}>${b}`)!))
+            }
+            expect([e.cleared_cycles, e.cleared_amount], `${eq}/${id} ${e.event_id}`).toEqual([cycles, money(total)])
+          }
+        }
+      }
+    }
+    // Anti-vacuum: the 44 recorded payments (UAH 20, EUR 4, HOUR 20) and the one recorded clearing were all judged.
+    expect({ payments, clearings }).toEqual({ payments: 44, clearings: 1 })
+  })
 })
 
 describe('parsePlaylist refuses a recording the live path would not play as such', () => {
