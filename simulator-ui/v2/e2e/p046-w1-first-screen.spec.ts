@@ -11,6 +11,8 @@
  *      places, and "Try again", which starts the run;
  *   4. a stopped run says why, in the interface language (a known reason, and an unknown one with its value);
  *   5. the shell of an action window is named in the interface language (wave 2 finding 9).
+ *   6. (044 stage 2 merged) a trust line create the server refuses with 409 `CONFLICT` and `details.reason`
+ *      `participant_suspended` - the body `test_p044_s2_trustline_create_conflict_kinds.py` pins - reads as that reason.
  *
  * `P046_FRAMES=1` also writes the owner's frames (`.local-run/owner-review/2026-10-18-046-w1/`); the default run writes none.
  *
@@ -190,6 +192,26 @@ for (const theme of THEMES) {
       await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
       await page.locator(DETAILS).click()
       await expect(value).toHaveText(t('runStop.unknown', { code: 'maintenance_window' }, lang))
+    })
+
+    test(`P046W1 (6) [${theme}] [${lang}] a trust line create refused for a suspended participant says so`, async ({ page }) => {
+      let creates = 0
+      await open(page, theme, lang, async () => {
+        await page.route(`**/simulator/runs/${RUN_ID}/actions/trustline-create`, (r) => {
+          creates += 1
+          return json(r, { code: 'CONFLICT', message: 'Participant carol is not active', details: { reason: 'participant_suspended', participants: ['carol'] } }, 409)
+        })
+      })
+      await ready(page, true)
+      await page.locator('[data-testid="actionbar-trustline"]').click()
+      await page.locator('#tl-from__trigger').click()
+      await page.locator('#tl-from__surface [role="option"][data-option-value="alice"]').click()
+      await page.locator('#tl-to__trigger').click()
+      await page.locator('#tl-to__surface [role="option"][data-option-value="carol"]').click()
+      await page.locator('#tl-limit').fill('20')
+      await page.locator('[data-testid="trustline-create"]').click()
+      await expect(page.locator('[data-testid="trustline-error"]')).toHaveText(t('actionReason.participant_suspended', undefined, lang))
+      expect(creates).toBe(1)
     })
 
     test(`P046W1 (5) [${theme}] [${lang}] the window shell is named in the interface language`, async ({ page }) => {
