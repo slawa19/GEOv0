@@ -156,8 +156,17 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   their titles and now pass `?lang=en`. Forecast before the run: +4 x about 0.55 s (the four English ones measured
  *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s locally; on CI, over 039 C's forecast of 532-586 s, about +3-4 s
  *   (589-590 s at the slower runner) - under 600 s with a thin margin; no further `@extended` move (R3 rule) made.
+ * - 2026-10-18 (048 S1, the stand over its CI time again): gate 141 -> 139, full unchanged at 235. The required step took
+ *   599 s of its 600 s budget in CI (run 39149083576, head `2849685d`, 141 tests, 591.3 s summed in its stand report).
+ *   By the R3 rule the two longest R3 tests left in the gate are tagged `@extended`: "R3 - the five properties hold at
+ *   quality "med" / "high" too" - 19.0 and 18.8 s in that report (18.4 and 18.2 s in run 39135012070), 37.8 s in all.
+ *   Forecast of the step from those CI numbers: 599 - 38 = about 561 s. What leaves the gate and what stays is named at
+ *   the tests (`motion.qa.ts`).
+ * - 2026-10-18 (rule of the stand's time, by the orchestrator): прогноз времени стенда берётся только из CI (шаг стенда
+ *   в `ui-smoke` и длительности тестов из его отчёта), не из локальных прогонов: 2026-10-18 локальный прогноз 039 C
+ *   занизил прирост вдвое.
  */
-export const EXPECTED = { gate: 141, full: 235 }
+export const EXPECTED = { gate: 139, full: 235 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

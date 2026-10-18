@@ -166,8 +166,17 @@ test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and 
 // The stand's browser has no GPU and the quality autoguard puts it on `low`, where a beam is its head dot only
 // (`renderFrame.ts`). `med` and `high` draw a trail and a bright segment behind the head; the same five properties
 // must hold there. The quality is chosen as a user chooses it, in the bottom bar.
+//
+// `@extended` since 2026-10-18 (048 S1, the same R3 rule as above): the required stand step took 599 s of its 600 s
+// budget in CI (run 39149083576, head `2849685d`, 141 tests), and these two were the longest R3 tests left in the gate:
+// 19.0 and 18.8 s in that run's stand report (18.4 and 18.2 s in run 39135012070). What stays in the gate: the five
+// properties of the same flights at quality `low` - the head position, its timing, the route and the leg order are
+// computed before the drawing branches on the quality (`renderFrame.ts`) - by the one-edge oracle above,
+// `motion-c.qa.ts` (3- and 6-edge PACE/HANDOFF) and `chord.qa.ts`. What leaves the gate: the med/high drawing itself
+// (the halo trail and the bright packet behind the head) - no other gate test draws it; it is judged by the full stand
+// (`run-stand.mjs full`, the scheduled/manual job `simulator-qa-stand`).
 for (const quality of ['med', 'high'] as const) {
-  test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment)`, async ({ page }) => {
+  test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment) @extended`, async ({ page }) => {
     await openDetails(page) // 043 S1: Quality is behind "Подробнее"
     await page.getByRole('combobox', { name: 'Quality' }).selectOption(quality)
     await frames(page, 10)
