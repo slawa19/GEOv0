@@ -1816,7 +1816,12 @@ export function useSimulatorApp(opts?: {
       // 043 S2: the entry the root makes without a flow transition (the full line editor of a line's popup).
       pauseForManualAction: async () => noteManualAction(),
       resume: realMode.resume,
-      stop: realMode.stop,
+      // 044 stage 2 (BACKLOG 043-23): a Stop pressed while the opening is still loading cancels its pending start -
+      // decision 2, a run a person stopped is not started again behind them.
+      stop: () => {
+        liveAutostart.cancel()
+        return realMode.stop()
+      },
       applyIntensity: realMode.applyIntensity,
       refreshSnapshot: realMode.refreshSnapshot,
       refreshArtifacts: realMode.refreshArtifacts,

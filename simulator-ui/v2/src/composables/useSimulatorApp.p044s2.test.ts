@@ -226,3 +226,71 @@ describe('044 stage 2 (decision 2): a run the server stopped for idleness says s
     expect(other.real.lastError).toBe('')
   })
 })
+
+describe('044 stage 2: the opening edge paths of BACKLOG 043-23 and 043-24', () => {
+  it('043-23: Stop during the first load does not produce a new run', async () => {
+    storedRun('R1', 'running')
+    let releaseSnapshot: () => void = () => undefined
+    vi.mocked(getSnapshot).mockImplementationOnce(
+      (async (_c: unknown, id: string) => {
+        await new Promise<void>((resolve) => { releaseSnapshot = resolve })
+        return snap(`${id}_NODE`)
+      }) as never,
+    )
+    const app = boot()
+    await settle()
+    expect(app.state.loading, 'the first snapshot is still loading').toBe(true)
+    expect(app.real.runStatus?.state).toBe('running')
+    await app.realActions.stop()
+    await settle()
+    expect(stopRun).toHaveBeenCalledTimes(1)
+    expect(app.real.runStatus?.state).toBe('stopped')
+    releaseSnapshot()
+    await settle()
+    expect(app.state.loading, 'the opening is over (non-vacuity: the autostart had its moment)').toBe(false)
+    expect(createRun, 'the run the person stopped is not replaced behind them').not.toHaveBeenCalled()
+  })
+
+  it('043-23 counter-check: without the Stop, the same opening attaches the running run and starts nothing', async () => {
+    storedRun('R1', 'running')
+    const app = boot()
+    await settle()
+    expect(app.state.loading).toBe(false)
+    expect(createRun).not.toHaveBeenCalled()
+    expect(app.real.runId).toBe('R1')
+  })
+
+  it('043-24: a manual entry while the found run\'s status is unknown does not lose its pause', async () => {
+    storedRun('R1', 'running')
+    vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 500 for /simulator/runs/R1', { status: 500 }))
+    const app = boot()
+    await settle()
+    expect([app.real.runId, app.real.runStatus], 'a run is held, its status unknown').toEqual(['R1', null])
+    expect(createRun).not.toHaveBeenCalled()
+    await app.realActions.pauseForManualAction()
+    expect(pauseRun, 'nothing to pause yet').not.toHaveBeenCalled()
+    // The run's state becomes known: it is running (a later read, as the stream's reconnect makes).
+    app.real.runStatus = status('R1') as never
+    await settle()
+    expect(pauseRun, 'the pause asked before the state was known is applied once it is known').toHaveBeenCalledTimes(1)
+  })
+
+  it('043-24 counter-check: the found run turns out paused or stopped - nothing more is asked', async () => {
+    for (const state of ['paused', 'stopped']) {
+      scope?.stop()
+      window.localStorage.clear()
+      vi.mocked(pauseRun).mockClear()
+      storedRun('R1', 'running')
+      vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 500 for /simulator/runs/R1', { status: 500 }))
+      const app = boot()
+      await settle()
+      await app.realActions.pauseForManualAction()
+      runs.set('R1', state)
+      app.real.runStatus = status('R1') as never
+      await settle()
+      app.real.runStatus = { ...status('R1'), state: 'running' } as never  // a later running is not an old pause
+      await settle()
+      expect(pauseRun, state).not.toHaveBeenCalled()
+    }
+  })
+})

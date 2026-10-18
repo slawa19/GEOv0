@@ -1257,7 +1257,9 @@ export function useSimulatorRealMode(opts: {
       manualPauseInFlight = p
       return p
     }
-    if (startRunInProgress || st === 'created') manualPausePending = true
+    // 044 stage 2 (BACKLOG 043-24): a run is held but its state is not known yet (a failed or pending status read of a
+    // found run) - the pause waits for that state too, instead of being dropped.
+    if (startRunInProgress || st === 'created' || (!st && !!real.runId)) manualPausePending = true
   }
   watch(
     () => toLower(real.runStatus?.state),

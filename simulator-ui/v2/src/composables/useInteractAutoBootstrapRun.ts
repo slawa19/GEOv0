@@ -71,6 +71,8 @@ export function useInteractAutoBootstrapRun(deps: {
   }
 }): {
   onOpened: () => Promise<AutostartDecision | 'no-scenario' | 'off'>
+  /** 044 stage 2 (BACKLOG 043-23): an explicit Stop spends the attempt not made yet - the opening starts nothing after it. */
+  cancel: () => void
 } {
   let attempted = false
 
@@ -99,5 +101,10 @@ export function useInteractAutoBootstrapRun(deps: {
     return 'start'
   }
 
-  return { onOpened }
+  return {
+    onOpened,
+    cancel: () => {
+      attempted = true
+    },
+  }
 }
