@@ -227,3 +227,21 @@ async def test_a_failed_stands_when_its_details_cannot_be_read_exit_1_not_2(comm
         out.getvalue()), out.getvalue()
     assert _DID_NOT_RUN not in err.getvalue(), err.getvalue()
     assert await _results(factory, faulty.equivalent.id) == [FAILED] and await _hold(factory, faulty.equivalent.id)
+
+
+@pytest.mark.asyncio
+async def test_an_empty_code_is_refused_exit_2_even_next_to_a_valid_one(committed_database, capsys) -> None:
+    """047 (Argon P3): `--equivalent CODE --equivalent ""` (an unset variable, say) checks nothing and exits 2 with the
+    reason; nothing is recorded. RED BEFORE (`34c5c8c4`): the empty code was dropped, CODE checked, exit 0."""
+
+    spec = importlib.util.spec_from_file_location("p047_reconcile_debts_empty", _SCRIPT)
+    command = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(command)
+    factory = committed_database.sessionmaker
+    (clean, _) = await _clean_equivalent(factory)
+
+    assert await command._run([clean.equivalent.code, ""], False, factory) == 2
+    assert "empty equivalent code" in capsys.readouterr().err
+    assert await command._run(["  "], False, factory) == 2
+    assert "empty equivalent code" in capsys.readouterr().err
+    assert await _results(factory, clean.equivalent.id) == [], "an empty code must check nothing"

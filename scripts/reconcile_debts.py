@@ -13,7 +13,7 @@ The database is the one `DATABASE_URL` names, as for the application. Exit codes
 
     0  every equivalent checked PASSED
     1  a discrepancy: some equivalent is FAILED or UNVERIFIABLE (named on stdout, with its findings)
-    2  the check did not happen, wholly or for some equivalent: usage, an unknown code, no equivalent at all,
+    2  the check did not happen, wholly or for some equivalent: usage, an empty or unknown code, no equivalent at all,
        the configuration or the database unusable, or the verifier erred - such an equivalent is printed as
        NOT CHECKED. A discrepancy found elsewhere in the same run still exits 1.
 
@@ -82,7 +82,10 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
     from app.core.ledger import reconciliation as rec
     from app.db.models import Equivalent
 
-    wanted = sorted({code.strip().upper() for code in codes if code.strip()})
+    if any(not code.strip() for code in codes):  # 047 (Argon P3): an empty code is refused, never silently dropped
+        print("an empty equivalent code was given (--equivalent \"\"); nothing was checked", file=sys.stderr)
+        return 2
+    wanted = sorted({code.strip().upper() for code in codes})
     async with session_factory() as session:
         query = select(Equivalent.id, Equivalent.code).order_by(Equivalent.code)
         if not check_all:
