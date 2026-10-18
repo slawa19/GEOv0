@@ -25,14 +25,27 @@
  * LIMITS: the frames are of a software-only browser; a GPU machine composites differently. Nothing here judges.
  * Until 2026-10-18 the recordings had no `amount` / `cleared_amount` and no amount label appeared on any frame; they
  * have them now (spec 039 Changelog), and a label's CSS fade is set to its JS age before every shot (`syncCssToClock`).
+ *
+ * 2026-10-18, 039 T3935: the recordings are re-recorded from a live run and each is played on its OWN start snapshot
+ * (the workbench shows it when a playback begins and returns to the offline snapshot when it ends), so the scene of
+ * these frames is the recording's graph, not `UAH/snapshot.json`. The receiver of the 3-line payment and the amounts
+ * are read from the recording (they were literals of the old one: `PID_U0036_`, `+33.30`, `121.00`); a Step that
+ * begins a playback loads that snapshot first (a real fetch, not on the page clock), so the script waits for the
+ * workbench's position before it moves the clock.
  */
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { expect, test, type Page } from '@playwright/test'
 
 import { syncCssToClock } from '../stand.js'
 import { FRAME_MS, choosePlaylist, openWorkbench } from './workbench.js'
+
+const EVENTS = fileURLToPath(new URL('../../../public/simulator-fixtures/v1/UAH/events/', import.meta.url))
+const TX = JSON.parse(readFileSync(`${EVENTS}demo-tx.json`, 'utf8')) as Array<{ to: string; amount: string; edges: unknown[] }>
+const CLEARING = JSON.parse(readFileSync(`${EVENTS}demo-clearing.json`, 'utf8')) as Array<{ cleared_amount: string }>
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const DIR = process.env.P039_FRAMES_DIR ?? ''
 const PHASE = process.env.P039_FRAMES_PHASE ?? ''
@@ -62,7 +75,11 @@ const markedShot = async (page: Page, name: string, expectText: RegExp) => {
   await shot(page, name)
   await style.evaluate((el) => el.remove())
 }
-const step = (page: Page) => page.locator('[data-testid="playlist-workbench"] button.ds-btn--ghost').click()
+/** "Шаг", then wait until the workbench says the event `position` was delivered (its scene may load first). */
+const step = async (page: Page, position: string) => {
+  await page.locator('[data-testid="playlist-workbench"] button.ds-btn--ghost').click()
+  await expect(page.locator('[data-testid="playlist-workbench"] .ds-mono')).toHaveText(position)
+}
 
 for (const theme of ['saas', 'hud'] as const) {
   for (const quality of ['low', 'med'] as const) {
@@ -71,14 +88,15 @@ for (const theme of ['saas', 'hud'] as const) {
       await openWorkbench(page, { theme, quality })
       const p = `${theme}-${quality}`
       // The recorded payments: 1st has one line, 2nd the 3-line route. Step the first and let it end.
-      await step(page)
+      expect(TX[1]!.edges, 'the second recorded payment has three lines').toHaveLength(3)
+      await step(page, `1 / ${TX.length}`)
       await page.clock.runFor(4000)
       await closeDetails(page)
       await page.clock.runFor(FRAME_MS * 2)
       await shot(page, `${p}-1-scene`)
-      // The second recorded payment: U0001 -> U0002 -> U0006 -> U0036. Open details only to press "Шаг", close again.
+      // The second recorded payment, the 3-line route. Open details only to press "Шаг", close again.
       await page.locator('[data-testid="details-toggle"]').click()
-      await step(page)
+      await step(page, `2 / ${TX.length}`)
       await closeDetails(page)
       const legs = async () => page.evaluate(() => (window as unknown as { __geoSim: { fxState: { sparks: Array<{ target: string; startedAtMs: number; ttlMs: number; moveMs?: number }> } } })
         .__geoSim.fxState.sparks.map((s) => ({ target: s.target, startedAtMs: s.startedAtMs, moveMs: s.moveMs ?? s.ttlMs })))
@@ -92,12 +110,12 @@ for (const theme of ['saas', 'hud'] as const) {
         await shot(page, `${p}-3-beam-leg2`)
         await page.clock.runFor(Math.round(second.moveMs / 2) + 16)
       }
-      // Wait for the last leg (the one into the receiver, U0036) and step to just after its arrival. Corrected
+      // Wait for the last leg (the one into the receiver) and step to just after its arrival. Corrected
       // 2026-10-18: this waited for three sparks alive at once, which the slice's beam (one leg at a time) never has,
       // so the wait ran out and the "arrived" frame of `after-no-amounts/` and earlier was taken about 2.5 s late.
       let last: { startedAtMs: number; moveMs: number } | undefined
       for (let i = 0; i < 400 && !last; i += 1) {
-        last = (await legs()).find((l) => l.target.startsWith('PID_U0036_'))
+        last = (await legs()).find((l) => l.target === TX[1]!.to)
         if (!last) await page.clock.runFor(16)
       }
       expect(last, 'the last leg of the 3-line payment was seen').toBeTruthy()
@@ -108,19 +126,19 @@ for (const theme of ['saas', 'hud'] as const) {
       }
       await shot(page, `${p}-4-beam-arrived`)
       await page.clock.runFor(600)
-      await markedShot(page, `${p}-7-amount-at-receiver-marked`, /^\+\s?33\.30/)
+      await markedShot(page, `${p}-7-amount-at-receiver-marked`, new RegExp(`^\\+\\s?${escapeRe(TX[1]!.amount)}`))
       await page.clock.runFor(3400)
       // The clearing.
       await page.locator('[data-testid="details-toggle"]').click()
       await choosePlaylist(page, 'clearing')
-      await step(page)
+      await step(page, '1 / 1')
       await closeDetails(page)
       await page.clock.runFor(600)
       await shot(page, `${p}-5-clearing-loop`)
       await page.clock.runFor(1200)
       await shot(page, `${p}-6-clearing-after`)
       await page.clock.runFor(200)
-      await markedShot(page, `${p}-8-amount-at-clearing-marked`, /121\.00/)
+      await markedShot(page, `${p}-8-amount-at-clearing-marked`, new RegExp(escapeRe(CLEARING[0]!.cleared_amount)))
     })
   }
 }
