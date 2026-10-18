@@ -241,20 +241,24 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 
 # ------------------------------------------------------------------------- a plan that is slow FOR THE PLANNER
 
-#: 041 `T4112`, 2026-10-18, after the Codex review of `4dcc6413`. The test below judges, with the module's fixed
-#: `_LOOP_DELAY_THRESHOLD_SECONDS`, only the part of each loop gap that OVERLAPS THE PLAN'S TIME IN FLIGHT: from its
-#: hand-over to the pool (stamped in this process just before `submit`) to the end of the plan in the worker (stamped
-#: there, `tests/p035_support.py::stamped_slow_rotated_plan`; same clock, see that docstring).
+#: 041 `T4112`, 2026-10-18, after the Codex reviews of `4dcc6413` and `b8ccc112`. The test below judges, with the
+#: module's fixed `_LOOP_DELAY_THRESHOLD_SECONDS`, the loop gaps of THE PLAN'S TIME IN FLIGHT: from its hand-over to
+#: the pool (stamped in this process just before `submit`) to the end of the plan in the worker (stamped there,
+#: `tests/p035_support.py::stamped_slow_rotated_plan`; same clock, see that docstring). A gap that STARTS in that span
+#: is judged by its full length, also past the plan's end (a wait or poll begun while the plan runs holds the loop
+#: for all of it); a gap that started BEFORE the hand-over only by its part inside the span.
 #:
 #: * Why: on ubuntu CI the test failed twice on branches with no backend change, 0.478 s (run 39031477460,
 #:   2026-10-17) and 0.454 s (run 39116205045, 2026-10-18), against the whole-request 0.25 s. Where in the request
 #:   those gaps lay was not recorded; their cause is not established. 32 busy processes on a 16-thread Windows
-#:   machine did not reproduce them (largest gap 0.094 s with a warm worker). From now on the failure message and
-#:   `p035_a1_loop_hold.json` give every gap's position against the plan's stamps.
+#:   machine did not reproduce them (largest gap 0.094 s with a warm worker). From now on `p035_a1_loop_hold.json`
+#:   lists every gap longer than `_GAP_KEPT_ABOVE_SECONDS` with its start, end and judged part against the plan's
+#:   stamps, and the failure message names the largest judged and the largest unjudged one.
 #: * `_PLAN_SECONDS` stays 0.6 s (the value of 035): a synchronous wait for the worker overlaps the plan by its whole
 #:   time (measured 0.606 s), and a 0.5 s partial wait during it fits inside the plan too. A longer plan only widens
 #:   the span in which runner noise is judged.
-#: * NOT JUDGED HERE, and said in the failure message: (1) gaps outside the plan's time in flight - authentication,
+#: * NOT JUDGED HERE, and said in the failure message and the JSON (`excluded`): (1) gaps that start after the plan
+#:   ended, and the part before the hand-over of a gap that started earlier - authentication,
 #:   the snapshot read, building and serializing the answer. The same route on the same graph is judged over the
 #:   WHOLE request at the same 0.25 s by the deepest-search test above. (2) The cold start of the diagnostic pool:
 #:   the request runs on a FRESH pool whose worker was started just before it by a direct submission, so the first
@@ -265,8 +269,13 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 _PLAN_SECONDS = 0.6
 
 
-def _overlap(gap: tuple[float, float], start: float, end: float) -> float:
+def _judged(gap: tuple[float, float], start: float, end: float) -> float:
+    """The part of `gap` the test judges for the span `[start, end)`: all of it if it starts in the span, else its
+    overlap with the span (nothing for a gap after it)."""
+
     gap_start, length = gap
+    if start <= gap_start < end:
+        return length
     return max(0.0, min(gap_start + length, end) - max(gap_start, start))
 
 
@@ -372,23 +381,31 @@ async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_th
     plan_start, plan_end = (float(stamp) for stamp in stamps.read_text(encoding="utf-8").split())
     handed_over, zero = handed.at[0], hold.started
     nothing = (0.0, (zero, 0.0))
-    inside = [(_overlap(gap, handed_over, plan_end), gap) for gap in hold.gaps]
+    inside = [(_judged(gap, handed_over, plan_end), gap) for gap in hold.gaps]
     held, worst = max(((part, gap) for part, gap in inside if part > 0), default=nothing)
     outside, outside_gap = max(((gap[1] - part, gap) for part, gap in inside if gap[1] > part), default=nothing)
     measured = (
-        f"held={held:.3f} s of the plan's time in flight (gap at {worst[0] - zero:.3f} s, {worst[1]:.3f} s long), "
+        f"held={held:.3f} s judged (gap at {worst[0] - zero:.3f} s, {worst[1]:.3f} s long), "
         f"threshold={_LOOP_DELAY_THRESHOLD_SECONDS} s; in flight {handed_over - zero:.3f}..{plan_end - zero:.3f} s "
         f"(in the worker from {plan_start - zero:.3f} s) of a {hold.window:.3f} s window, plan={_PLAN_SECONDS} s; "
-        f"NOT JUDGED: largest hold outside it {outside:.3f} s (gap at {outside_gap[0] - zero:.3f} s), creation and "
-        f"first submit() of the fresh pool {cold_start:.3f} s"
+        f"NOT JUDGED: largest unjudged part {outside:.3f} s (gap at {outside_gap[0] - zero:.3f} s), creation and "
+        f"first submit() of the fresh pool {cold_start:.3f} s; every gap: p035_a1_loop_hold.json"
     )
-    _record_hold(held=held, held_gap_at=worst[0] - zero, held_gap=worst[1], threshold=_LOOP_DELAY_THRESHOLD_SECONDS,
-                 handed_over=handed_over - zero, plan_start=plan_start - zero, plan_end=plan_end - zero,
-                 window=hold.window, outside=outside, outside_gap_at=outside_gap[0] - zero, cold_start=cold_start,
-                 plan=_PLAN_SECONDS)
+    _record_hold(
+        held=held, threshold=_LOOP_DELAY_THRESHOLD_SECONDS, plan=_PLAN_SECONDS, window=hold.window,
+        judged_window={"from": round(handed_over - zero, 4), "to": round(plan_end - zero, 4),
+                       "rule": "a gap starting in the window counts in full; one starting before it, its overlap"},
+        plan_start=plan_start - zero, cold_start=cold_start,
+        excluded=["gaps starting after the plan's end, and the part before the hand-over of earlier gaps",
+                  "pool creation and first submit (cold_start, not judged)"],
+        gaps_kept_above=_GAP_KEPT_ABOVE_SECONDS,
+        gaps=[{"start": round(gap[0] - zero, 4), "end": round(gap[0] + gap[1] - zero, 4), "judged": round(part, 4)}
+              for part, gap in inside],
+    )
 
-    # The mechanism, on one clock: handed over under the probe, computed in the worker for the plan's time, and only
-    # then answered. A clock that is not shared between the processes fails here, not silently below.
+    # The mechanism: handed over under the probe, computed in the worker for the plan's time, and only then answered.
+    # A sanity check of chronology and duration, not a proof that the two processes share a clock: that rests on
+    # `perf_counter` being system-wide in Python 3.11 (CLOCK_MONOTONIC on Linux, QueryPerformanceCounter on Windows).
     assert zero <= handed_over <= plan_start < plan_end <= answered, measured
     assert plan_end - plan_start >= _PLAN_SECONDS > _LOOP_DELAY_THRESHOLD_SECONDS, measured
     cycles = response.json()["cycles"]
