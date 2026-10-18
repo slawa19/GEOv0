@@ -111,7 +111,11 @@ export async function loadPlaylists(
   return out
 }
 
-/** The pause after an event before the next one: the event's own effect length plus a gap, so effects do not overlap. */
+/**
+ * The pause after an event before the next one: the event's own effect length plus a gap, so the drawn effects (beams,
+ * pulses, bursts) do not overlap. The amount labels may: they live their CSS fade (2.6 s, a clearing's 4.2 s after its
+ * loop), longer than the drawn effect - as before 039 slice C (adversarial pass 2026-10-18).
+ */
 export const PLAYLIST_GAP_PAD_MS = 400
 
 /**

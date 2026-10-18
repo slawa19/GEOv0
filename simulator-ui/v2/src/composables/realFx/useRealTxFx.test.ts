@@ -42,7 +42,7 @@ function harness(opts: { fxState?: FxState; isTestMode?: boolean; isWebDriver?: 
     resolveTxDirection: (i) => ({ from: i.from ?? '', to: i.to ?? '', edges: i.edges }),
     keyEdge: (a, b) => `${a}>${b}`,
     seedFn: (s) => s.length,
-    fxColors: () => colors,
+    fxColors: () => ({ ...colors }), // a copy, as the mapping hands out: only a read AFTER a change sees it
     fxColorForNode: (_id, fallback) => fallback,
     edgeLengthPx: (a, b) => {
       lengthAsks.push(`${a}>${b}`)
@@ -260,13 +260,11 @@ describe('runRealTxFx: the beam walks the route on its plan (039 slice C, P-3)',
     expect(h.pending()).toBe(0)
   })
 
-  it('the FX colours are read when an effect is spawned, not when the composable was made (a theme change reaches the next leg; BACKLOG 039-5 (zh))', () => {
+  it('the FX colours are read when each leg is spawned, not when the payment started: a theme change in the middle of a flight reaches the next leg (BACKLOG 039-5 (zh))', () => {
     const h = harness()
     h.fx.runRealTxFx(tx(route(2)))
     h.colors.txSparkTrail = '#123456'
-    h.fx.resetRateLimiter()
-    h.advance(200)
-    h.fx.runRealTxFx(tx(route(1)))
+    h.advance(450)
     expect(h.fxState.sparks.map((s) => s.colorTrail)).toEqual(['#0ff', '#123456'])
   })
 })

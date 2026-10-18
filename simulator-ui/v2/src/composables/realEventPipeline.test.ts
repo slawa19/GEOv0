@@ -425,6 +425,22 @@ describe('realEventPipeline state-before-effect ordering', () => {
     expect(trace).toEqual(['any', 'label:-1', 'label:+1', 'clearing', 'wake'])
   })
 
+  it('039 slice C: the receiver label is delayed by the route time the tx effects plan for THIS payment (routeArrivalMs), not by its wire ttl_ms', () => {
+    const txEvent = { event_id: 'evt_run_1_r', ts: TS, type: 'tx.updated' as const, equivalent: 'EUR', ttl_ms: 1200, edges: [{ from: 'A', to: 'B' }] }
+    const delays: number[] = []
+    const asked: unknown[] = []
+    executeRealEventIntents(
+      [{ type: 'tx-label-delayed', role: 'receiver', nodeId: 'B', signedAmount: '+1', unit: 'EUR', throttleMs: 0, txEvent, runId: 'run_1', equivalent: 'EUR' }],
+      {
+        getActiveRunId: () => 'run_1', refreshSnapshot: vi.fn(), runRealTxFx: vi.fn(), runRealClearingDoneFx: vi.fn(), pushTxAmountLabel: vi.fn(),
+        routeArrivalMs: (e) => { asked.push(e); return 1777 },
+        scheduleTimeout: (_fn, ms) => { delays.push(ms) },
+      },
+    )
+    expect(delays).toEqual([1777])
+    expect(asked, 'asked with the payment itself').toEqual([txEvent])
+  })
+
   it('reports an explicit amount flyout that lacks label data through an injectable contract warning', () => {
     const trace: string[] = []
     const draft = createDraft()

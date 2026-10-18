@@ -6,38 +6,19 @@
  * layer above the base graph. It supports three types of effects:
  *
  * 1. **Sparks** (`FxSpark`, `spawnSparks`)
- *    - Moving particles that travel along edges from source to target
- *    - Two styles: 'comet' (wobbly trail) and 'beam' (straight line + glowing dot head)
- *    - Use for: transaction animations, clearing micro-transactions
- *    - NOTE: 'beam' style renders trail from source to head position
+ *    - A beam travelling along an edge from source to target: trail + bright packet + head dot ('beam', the only kind
+ *      since 039 slice C; the wobbling 'comet' had no spawner left). `moveMs` / `motion` come from the route plan
+ *      (`composables/realFx/txRoutePlan.ts`); `ttlMs - moveMs` is the fade after the arrival (last leg only).
+ *    - Use for: the legs of a payment, the spark of a clearing going round its cycle.
  *
  * 2. **Edge Pulses** (`FxEdgePulse`, `spawnEdgePulses`)
- *    - Soft glow traveling along an edge with fading trail
- *    - Use for: highlighting cycle paths, showing routes (without spark head)
- *    - NOTE: Do NOT combine with 'beam' sparks on same edge — causes double animation
+ *    - The whole edge glows and fades (a clearing's lines, AFTER its spark went round: 039 slice C).
  *
  * 3. **Node Bursts** (`FxNodeBurst`, `spawnNodeBursts`)
- *    - Expanding/fading effects centered on nodes
- *    - Styles: 'glow' (soft circle), 'tx-impact' (rim + shockwave), 'clearing' (bloom + ring)
- *    - Use for: impact bursts when spark arrives, highlighting nodes
- *    - NOTE: Global (screen-space) flash overlay is handled in App.vue, not here.
+ *    - 'tx-impact', the only kind since 039 slice C: the node's contour glows as a beam or a clearing spark leaves,
+ *      passes or reaches it. The 'glow' and 'clearing' kinds and the full-screen flash were removed.
  *
- * Animation Pattern for Edge Transactions:
- * ----------------------------------------
- * For a single edge animation (tx or clearing micro-tx):
- *   1. spawnNodeBursts(source, 'glow') — optional source highlight
- *   2. spawnSparks(edge, 'beam') — spark flies, beam renders edge glow
- *   3. After ttlMs: spawnNodeBursts(target, 'glow'/'tx-impact') — impact flash
- *
- * DO NOT add spawnEdgePulses when using 'beam' sparks — the beam already
- * renders the edge glow internally. EdgePulses are for standalone edge
- * highlighting (e.g., showing a cycle path before animation starts).
- *
- * Color Conventions:
- * ------------------
- * - Cyan (#22d3ee): Single transactions (tx.updated)
- * - Gold (#fbbf24): Clearing operations
- * - Use colorCore for spark head, colorTrail for beam/trail
+ * Colours: cyan (`--ds-fx-tx-spark-*`) for payments, orange (`--ds-fx-clearing-debt`) for clearing; read at spawn.
  */
 
 export { __testing, resetFxRendererCaches } from './fxRenderer/outlineCache'

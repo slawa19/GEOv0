@@ -216,7 +216,6 @@ export function useRealTxFx(deps: {
     txFxLastSpawnAtMs = tNowMs
 
     const k = deps.intensityScale(evt.intensity_key ?? undefined)
-    const colors = deps.fxColors()
 
     // The beam walks the route one edge after another, from the sender to the receiver (spec 034, target 3;
     // F-038-3), on the plan (`txRoutePlan.ts`): one speed, a floor per leg, eased only into the receiver, then a
@@ -231,6 +230,8 @@ export function useRealTxFx(deps: {
       const startAtMs = tNowMs + leg.startMs
       const spawnLeg = () => {
         if (gen !== fxGeneration) return
+        // Read when the leg is spawned: a theme change in the middle of a flight reaches the next leg (039-5 (zh)).
+        const colors = deps.fxColors()
         spawnSparks(fxState, {
           edges: [{ from: leg.from, to: leg.to }],
           nowMs: startAtMs,
@@ -271,7 +272,7 @@ export function useRealTxFx(deps: {
         nodeIds: [src],
         nowMs: tNowMs,
         durationMs: BEAM_SENDER_BURST_MS,
-        color: deps.fxColorForNode(src, colors.txSparkTrail),
+        color: deps.fxColorForNode(src, deps.fxColors().txSparkTrail),
         kind: 'tx-impact',
         seedPrefix: 'real-tx-src',
         seedFn: deps.seedFn,
