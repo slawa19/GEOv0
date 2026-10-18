@@ -2,7 +2,7 @@
 
 Статус: Draft
 Область: simulator
-Последнее обновление: 2026-01-23
+Последнее обновление: 2026-10-18 (программа 039, срез C: движение — раздел 4.1 [visual-language.md](visual-language.md))
 
 Цель: минимизировать регрессии вида «двойная анимация», «сброс overlay съел искры», «цвет внезапно стал cyan», и ускорить разработку новых эффектов.
 
@@ -24,8 +24,8 @@ FX — это отдельный overlay canvas поверх базового г
 Назначение: «полет» вдоль ребра (tx или clearing step).
 
 Варианты:
-- `kind: 'comet'` — “хвостатая” искра (подходит для простых Tx).
-- `kind: 'beam'` — луч + яркий пакет + star head (подходит для “прототипной” Single Tx и клиринга).
+- `kind: 'beam'` — луч + яркий пакет + точка головы (платёж и искра клиринга). Поля `moveMs` (сколько движется голова) и `motion` (`linear` / `arrive`) задаёт расписание `composables/realFx/txRoutePlan.ts`; `ttlMs - moveMs` — угасание после прихода (только последняя нога).
+- ~~`kind: 'comet'`~~ — «хвостатая» искра с колебанием; удалена 2026-10-18 (039, срез C): ни один путь её не порождал.
 
 Важно: `beam` уже включает визуальный glow ребра.
 
@@ -38,7 +38,7 @@ FX — это отдельный overlay canvas поверх базового г
 
 ### 1.3 Node Bursts (`FxNodeBurst`)
 
-Назначение: вспышка/свечение на узле (impact/selection/clearing).
+Назначение: свечение контура узла, который проходит луч или искра клиринга (`kind: 'tx-impact'` — единственный вид с 039 C; `glow` и `clearing` с композицией `screen` удалены, их никто не порождал).
 
 Типичные кейсы:
 - impact на узле-получателе при прилёте искры;
@@ -68,18 +68,17 @@ FX — это отдельный overlay canvas поверх базового г
 
 ## 3) Рекомендованные паттерны для сценариев
 
-### 3.1 Single Tx (рекомендуемая последовательность)
+### 3.1 Платёж (как сделано, 039 C)
 
-1) (опционально) `spawnNodeBursts(source, 'glow')`
-2) `spawnSparks(edge, kind:'beam')`
-3) по окончании `ttlMs`: `spawnNodeBursts(target, 'tx-impact' или 'glow')`
+1) `spawnNodeBursts(sender, 'tx-impact')` — сразу;
+2) ноги по расписанию `planTxRoute` (одна скорость, не меньше 450 мс на ногу, последняя с замедлением и угасанием): `spawnSparks(edge, kind:'beam', moveMs, motion)`; в начале каждой ноги после первой — `spawnNodeBursts(посредник, 'tx-impact')`;
+3) в момент прихода (`routeArrivalMs`): `spawnNodeBursts(receiver, 'tx-impact')` и подпись суммы получателя.
 
-### 3.2 Clearing (рекомендуемая последовательность)
+### 3.2 Клиринг (как сделано, 039 C)
 
-- Сериализация шагов вдоль цикла:
-  - на каждом ребре: `spawnSparks(kind:'beam', gold)`
-  - на приходе: `spawnNodeBursts('glow', gold)`
-- DON’T: full-screen flash (если он нужен для отдельного режима — делать явно и настраиваемо).
+- Одна искра обходит каждый цикл за 1.2 с: на каждом ребре `spawnSparks(kind:'beam', оранжевый, motion:'linear')`, на уходе из узла — `spawnNodeBursts('tx-impact')`;
+- после обхода: `spawnEdgePulses` по линиям циклов (1.6 с), подсветка цикла на базовом графе, подпись суммы.
+- Полноэкранной вспышки нет (удалена 039 C).
 
 ## 4) Как добавлять новый эффект без регрессий
 
@@ -96,16 +95,9 @@ FX — это отдельный overlay canvas поверх базового г
 
 ## 6) Interact Mode — дополнительные эффекты
 
-### 6.1 Clearing node bursts
+### 6.1 Clearing node bursts (историческое, до 2026-10-18)
 
-После завершения клиринга в Interact Mode, помимо стандартных `spawnEdgePulses()` (gold pulse по рёбрам циклов), вызывается `spawnNodeBursts()` для узлов, участвующих в найденных циклах:
-
-- **Вызов:** `spawnNodeBursts({ kind: 'clearing', durationMs: 2800, color: VIZ_MAPPING.fx.clearing_debt })`
-- **Где:** callback `onClearingDone` в [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)
-- **Ограничение:** до 40 узлов (для производительности)
-- **Визуально:** bloom + shockwave ring на каждом узле цикла, gold-цвет, длительность 2.8 секунды
-
-> **Правило:** `spawnNodeBursts(clearing)` вызывается **после** `spawnEdgePulses()` — это дополняющий эффект, а не заменяющий. Edge pulses подсвечивают маршрут цикла, node bursts акцентируют участников.
+До среза C программы 039 клиринг из Interact (`onClearingDone` в [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)) зажигал вместе с пульсами всех линий до 40 узлов разом (`kind: 'clearing'`, bloom и ударная волна, 2.8 с, композиция `screen`) и полноэкранную вспышку. С 2026-10-18 клиринг из Interact и из SSE идут одним путём `runClearingFx` — раздел 3.2.
 
 ### 6.2 Picking dimming (затемнение недоступных узлов)
 

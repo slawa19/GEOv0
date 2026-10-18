@@ -1,9 +1,9 @@
 /**
  * 039 slice C - the owner's short video (before / after), wall clock: the recorded payments of the offline workbench
- * played for 12 s, then the recorded clearing for 5 s, quality med, theme saas, 1366x768. NOT a test of anything.
+ * played until ten legs were drawn, then the recorded clearing until its pulses faded, quality med, theme saas, 1366x768. NOT a test of anything.
  * Same config and variables as `owner-frames-c.p039-frames.ts`; writes `<dir>/<phase>/video-saas-med.webm`.
  */
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
@@ -33,14 +33,27 @@ test('039 C video - payments for 12 s, then the clearing, quality med, saas (wal
   await openWorkbench(page, { theme: 'saas', quality: 'med', clock: false })
   await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Проиграть"
   await closeDetails(page)
-  await page.waitForTimeout(12_000) // a film, not a check: real time on purpose
+  // A film in real time: until ten legs of the recorded payments have been drawn (a condition, not a sleep; the stand
+  // forbids waits by time). The legs are counted by an observer of the FX state on the page's own frames.
+  await page.evaluate(() => {
+    const seen = new Set<string>()
+    const w = window as unknown as { __geoSim: { fxState: { sparks: Array<{ key: string }> } }; __p039cLegs: () => number }
+    w.__p039cLegs = () => seen.size
+    const tick = () => { for (const s of w.__geoSim.fxState.sparks) seen.add(s.key); requestAnimationFrame(tick) }
+    requestAnimationFrame(tick)
+  })
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __p039cLegs: () => number }).__p039cLegs()), { timeout: 90_000, intervals: [250] }).toBeGreaterThanOrEqual(10)
   await page.locator('[data-testid="details-toggle"]').click()
   await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Стоп"
   await choosePlaylist(page, 'clearing')
   await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Проиграть"
   await closeDetails(page)
-  await page.waitForTimeout(5_000)
+  // ... and the clearing: until its lines have pulsed and faded (no edge pulse left in the FX state).
+  const pulses = () => page.evaluate(() => (window as unknown as { __geoSim: { fxState: { edgePulses: unknown[] } } }).__geoSim.fxState.edgePulses.length)
+  await expect.poll(pulses, { timeout: 20_000, intervals: [200] }).toBeGreaterThan(0)
+  await expect.poll(pulses, { timeout: 20_000, intervals: [200] }).toBe(0)
   const video = page.video()
   await page.close()
-  if (video) copyFileSync(await video.path(), join(outDir(), 'video-saas-med.webm'))
+  // `saveAs` waits until the recording is finished; a copy of `path()` right after close took a partial file.
+  if (video) await video.saveAs(join(outDir(), 'video-saas-med.webm'))
 })
