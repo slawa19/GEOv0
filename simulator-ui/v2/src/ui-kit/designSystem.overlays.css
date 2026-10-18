@@ -49,7 +49,8 @@
 
   /* WM constraints — keep aligned with DS overlay max widths to avoid first-frame jump */
   --ds-wm-interact-minw: var(--ds-ov-panel-minw, 320px);
-  --ds-wm-interact-minh: 120px;
+  /* 045 S2 (advisor 2026-10-17): 120 -> 100, under the shortest action window (clearing, 115 px); > 0 - the WM refuses 0. */
+  --ds-wm-interact-minh: 100px;
   --ds-wm-interact-prefw-trustline: 360px;
   --ds-wm-interact-prefw-payment: 360px;
   --ds-wm-interact-prefw-wide: 360px;

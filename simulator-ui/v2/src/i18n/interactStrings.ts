@@ -54,14 +54,20 @@ export const interactStrings = {
   // The progression of the form: what the form announces when it opens the next list for the user.
   nextChoiceRecipient: 'Choose the recipient.',
 
-  // The summary of the confirm step.
-  summaryTitle: 'Payment',
-  summaryPays: '{from} pays {to}',
-  summaryAmountTitle: 'Sum',
-  summaryNoAmount: 'amount not entered',
-
-  // The hint under the direct capacity of the confirm step.
+  // The hint under the direct capacity of the confirm step (045 S2: the `title` of the "Direct" figure of the information line).
   directCapacityHelp: '1-hop hint; recipients are server-routed (max hops: {hops}).',
+  directTitle: 'Direct',
+
+  // 045 S2: the windows of the actions. A hint lives in the placeholder of its field; Escape is said in the title's `title`;
+  // a disabled primary button says why in its own `title`.
+  pickPlaceholder: 'Pick on the canvas or choose',
+  escHint: 'Esc: one step back, then close',
+  confirmNeedsParties: 'Choose the sender and the recipient first.',
+  confirmNeedsRecipient: 'Choose the recipient first.',
+  trustlineNeedsParties: 'Choose From and To first.',
+  trustlineNeedsLimit: 'Enter a limit.',
+  trustlineNeedsNewLimit: 'Enter a new limit.',
+  trustlineCloseRequested: 'Close already requested.',
 
   // A success-shaped answer that is not a committed payment.
   notCommitted: 'The server did not confirm the payment (status {status}).',
@@ -73,7 +79,7 @@ export const interactStrings = {
   sourceFailed: 'snapshot, no answer',
 
   // The server's estimate for the chosen recipient (`payment-targets`, `include_max_available`).
-  estimateTitle: 'Estimated maximum',
+  estimateShort: 'Max',
   estimateSource: 'server estimate',
   shortestTitle: 'Shortest path',
   shortestSteps: '{n} steps',

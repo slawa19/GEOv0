@@ -478,6 +478,11 @@
   --ds-typo-label-font-size: 12px;
   --ds-typo-control-font-size: 12px;
   --ds-typo-button-font-size: 12px;
+  /*
+    045 S2 (the third size of decision 1, meta 10.5): the existing small-text token, set for the windows. Outside them it
+    stays 0.7rem (11.2 px on the 16 px root of the document - not 10.5: `--ds-root-font-size` 15 is the body's, not the root's).
+  */
+  --ds-typo-section-label-font-size: 10.5px;
 
   /* One height in both themes: the theme bases (34 saas, 32 hud) are replaced, not shifted. */
   --ds-control-height-base: 28px;

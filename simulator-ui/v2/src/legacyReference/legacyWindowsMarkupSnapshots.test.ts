@@ -3,13 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from '../components/NodeCardOverlay.vue'
 import EdgeDetailPopup from '../components/EdgeDetailPopup.vue'
-import ManualPaymentPanel from '../components/ManualPaymentPanel.vue'
-import TrustlineManagementPanel from '../components/TrustlineManagementPanel.vue'
-import ClearingPanel from '../components/ClearingPanel.vue'
 
 import type { GraphNode } from '../types'
 import { DATA_PALETTE_DEFAULT } from '../vizMapping'
-import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import type { TrustlineInfo } from '../api/simulatorTypes'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
 function normalizeHtml(raw: string): string {
@@ -42,6 +39,10 @@ async function renderOuterHtml(component: Component, props: Record<string, unkno
   }
 }
 
+// 045 S2 (2026-10-17): the snapshots of the three action panels (ManualPaymentPanel, TrustlineManagementPanel, ClearingPanel)
+// were removed with the markup they froze - the slice changed that markup on purpose, and regenerating a snapshot is not a
+// check (spec 045, Verification plan 4; 041 F-041-9). Those panels are held by their mount tests by `data-testid` and by
+// `e2e/p045-s2-panels.spec.ts`. The two inspectors below (S3 surface) keep theirs until S3 changes them.
 describe('Legacy windows reference — markup snapshots', () => {
   it('NodeCardOverlay', async () => {
     // 012 / `T1208`, `C-B4-3-002`. This node used to carry `net_balance: '42'` — a
@@ -127,144 +128,6 @@ describe('Legacy windows reference — markup snapshots', () => {
       onChangeLimit: () => {},
       onCloseLine: () => {},
       onSendPayment: () => {},
-    })
-
-    expect(html).toMatchSnapshot()
-  })
-
-  it('ManualPaymentPanel', async () => {
-    const phase: InteractPhase = 'confirm-payment'
-    const state: InteractState = {
-      phase,
-      fromPid: 'alice',
-      toPid: 'bob',
-      initiatedWithPrefilledFrom: true,
-      selectedEdgeKey: null,
-      edgeAnchor: null,
-      error: null,
-      lastClearing: null,
-    }
-
-    const participants: ParticipantInfo[] = [
-      { pid: 'alice', name: 'Alice', type: 'person', status: 'active' },
-      { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
-      { pid: 'carol', name: 'Carol', type: 'person', status: 'active' },
-    ]
-
-    const html = await renderOuterHtml(ManualPaymentPanel, {
-      phase,
-      state,
-      unit: 'UAH',
-      availableCapacity: '88',
-      trustlinesLoading: false,
-      trustlinesLastError: null,
-      paymentTargetsLoading: false,
-      paymentTargetsMaxHops: 6,
-      paymentTargetsLastError: null,
-      paymentToTargetIds: new Set(['bob', 'carol']),
-      trustlines: [],
-      participants,
-      setFromPid: () => {},
-      setToPid: () => {},
-      busy: false,
-      canSendPayment: true,
-      confirmPayment: () => {},
-      cancel: () => {},
-    })
-
-    expect(html).toMatchSnapshot()
-  })
-
-  it('TrustlineManagementPanel', async () => {
-    const phase: InteractPhase = 'editing-trustline'
-    const state: InteractState = {
-      phase,
-      fromPid: 'alice',
-      toPid: 'bob',
-      initiatedWithPrefilledFrom: true,
-      selectedEdgeKey: null,
-      edgeAnchor: null,
-      error: null,
-      lastClearing: null,
-    }
-
-    const participants: ParticipantInfo[] = [
-      { pid: 'alice', name: 'Alice', type: 'person', status: 'active' },
-      { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
-      { pid: 'carol', name: 'Carol', type: 'person', status: 'active' },
-    ]
-
-    const trustlines: TrustlineInfo[] = [
-      {
-        from_pid: 'alice',
-        from_name: 'Alice',
-        to_pid: 'bob',
-        to_name: 'Bob',
-        equivalent: 'UAH',
-        limit: '100',
-        used: '12',
-        reverse_used: '0',
-        available: '88',
-        status: 'active',
-      },
-    ]
-
-    const html = await renderOuterHtml(TrustlineManagementPanel, {
-      phase,
-      state,
-      unit: 'UAH',
-      // См. комментарий в EdgeDetailPopup выше: `figuresSource` — обязательный проп, и в этой
-      // фикстуре источник действительно ответил строкой alice→bob (`trustlines` ниже).
-      figuresSource: { kind: 'row' } as const,
-      used: '12',
-      currentLimit: '100',
-      available: '88',
-      participants,
-      trustlines,
-      setFromPid: () => {},
-      setToPid: () => {},
-      selectTrustline: () => {},
-      busy: false,
-      confirmTrustlineCreate: () => {},
-      confirmTrustlineUpdate: () => {},
-      confirmTrustlineClose: () => {},
-      cancel: () => {},
-    })
-
-    expect(html).toMatchSnapshot()
-  })
-
-  it('ClearingPanel', async () => {
-    const phase: InteractPhase = 'confirm-clearing'
-    const state: InteractState = {
-      phase,
-      fromPid: null,
-      toPid: null,
-      initiatedWithPrefilledFrom: false,
-      selectedEdgeKey: null,
-      edgeAnchor: null,
-      error: null,
-      lastClearing: {
-        ok: true,
-        equivalent: 'UAH',
-        cleared_cycles: 1,
-        total_cleared_amount: '10',
-        cycles: [
-          {
-            cleared_amount: '10',
-            edges: [{ from: 'alice', to: 'bob' }],
-          },
-        ],
-      },
-    }
-
-    const html = await renderOuterHtml(ClearingPanel, {
-      phase,
-      state,
-      busy: false,
-      equivalent: 'UAH',
-      confirmClearing: () => {},
-      cancel: () => {},
     })
 
     expect(html).toMatchSnapshot()

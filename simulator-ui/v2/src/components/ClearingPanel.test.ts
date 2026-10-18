@@ -40,7 +40,9 @@ describe('ClearingPanel', () => {
     app.mount(host)
     await nextTick()
 
-    expect(host.textContent ?? '').toContain('ESC to close')
+    // 045 S2: the title no longer says "(ESC to close)" (decision 2); Escape is announced to assistive technology by the
+    // panel's `aria-keyshortcuts` and still closes the window (e2e `p045-s2-panels.spec.ts`, the (г1) tests).
+    expect(host.querySelector('[data-testid="clearing-panel"]')?.getAttribute('aria-keyshortcuts')).toBe('Escape')
 
     const help = host.querySelector('[data-testid="clearing-confirm-help"]') as HTMLElement | null
     expect(help).toBeTruthy()

@@ -1817,16 +1817,17 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(confirmBtn).toBeTruthy()
       expect(cancelBtn).toBeTruthy()
       expect(panel?.contains(document.activeElement)).toBe(true)
+      // 045 S2: the row is [Cancel][Confirm] in the DOM as on screen; the first focus is still Confirm (`data-initial-focus`).
       expect(document.activeElement).toBe(confirmBtn)
 
-      cancelBtn?.focus()
-      cancelBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-      await nextTick()
-      expect(document.activeElement).toBe(confirmBtn)
-
-      confirmBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+      // Confirm is now the LAST focusable: Tab wraps to Cancel, Shift+Tab from Cancel wraps back to Confirm.
+      confirmBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
       await nextTick()
       expect(document.activeElement).toBe(cancelBtn)
+
+      cancelBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+      await nextTick()
+      expect(document.activeElement).toBe(confirmBtn)
 
       cancelBtn?.click()
       await nextTick()
