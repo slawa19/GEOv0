@@ -336,3 +336,18 @@ test('046 W2 frames: a failed analytics request and a clearing refused on a stop
     await frame(page, `saas-${lang}-10-clearing-stopped-equivalent`)
   }
 })
+
+test('046 W2 frames: the result of a clearing, both themes and languages (P046_FRAMES=1 only)', async ({ page }) => {
+  test.skip(!FRAMES, 'frames are written on request only (P046_FRAMES=1)')
+  for (const theme of THEMES) {
+    for (const lang of LANGS) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await open(page, theme, lang)
+      await page.locator('[data-testid="actionbar-clearing"]').click()
+      await page.locator('[data-testid="clearing-confirm"]').click()
+      await expect(page.locator('[data-testid="clearing-edge-line"]').first()).toBeVisible()
+      await settleShell(page, 'clearing-panel')
+      await frame(page, `${theme}-${lang}-11-clearing-result`)
+    }
+  }
+})

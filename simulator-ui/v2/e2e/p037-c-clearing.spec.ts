@@ -140,7 +140,7 @@ for (const vp of VIEWPORTS) {
       const confirm = await measure(page, 'confirm', ['[data-testid="clearing-confirm"]', '[data-testid="clearing-cancel"]'], 'clearing-panel')
 
       await page.locator('[data-testid="clearing-confirm"]').tap()
-      await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(3)
+      await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(5)
       await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
       const long = await measure(page, 'long-result', ['[data-testid="clearing-close"]'], 'clearing-panel')
 
@@ -166,7 +166,8 @@ for (const vp of VIEWPORTS) {
 
       expect.soft(problems(confirm), `clearing confirm in ${vp.w}x${vp.h}`).toEqual([])
       expect.soft(problems(long), `long clearing result in ${vp.w}x${vp.h}`).toEqual([])
-      expect.soft(tail.lines, 'fixture: three cycles of five edges').toBe(15)
+      // 046 round 1 (2026-10-18): five cycles (was three) - see `clearing: 'many'` in helpers/p037Mock.ts.
+      expect.soft(tail.lines, 'fixture: five cycles of five edges').toBe(25)
       expect.soft(tail.above, `the last line (${tail.text}) lies above Close`).toBe(true)
       expect.soft(tail.covered, 'nothing covers the last line').toBe(false)
       if (vp.h <= 667) expect.soft(tail.scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)

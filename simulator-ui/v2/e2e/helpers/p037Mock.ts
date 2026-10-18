@@ -100,15 +100,17 @@ export async function mockApp(
       return
     }
     // The edges of the answer run creditor -> debtor: { from: alice, to: bob } = "Bob owes Alice".
+    // `many` - a result longer than a phone screen. Five cycles since 2026-10-18 (046 round 1): the arrow form of a line
+    // ("x02 → x01: debt reduced by 1.00 UAH") is shorter than the old sentence, and three (and four: body 545 of 599 px) stopped overflowing 375x667.
     const cycles = kind === 'none' ? [] : kind === 'many'
-      ? [1, 2, 3].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
+      ? [1, 2, 3, 4, 5].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
       : [
           { cleared_amount: '7.00', edges: [edge('alice', 'bob'), edge('bob', 'carol'), edge('carol', 'alice')] },
           { cleared_amount: '3.00', edges: [edge('alice', 'carol'), edge('carol', 'alice')] },
         ]
     await json(r, {
       ok: true, equivalent: 'UAH', cleared_cycles: cycles.length,
-      total_cleared_amount: kind === 'none' ? '0.00' : kind === 'many' ? '6.00' : '10.00', cycles, client_action_id: null,
+      total_cleared_amount: kind === 'none' ? '0.00' : kind === 'many' ? '15.00' : '10.00', cycles, client_action_id: null,
     })
   })
   await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, async (r) => {
