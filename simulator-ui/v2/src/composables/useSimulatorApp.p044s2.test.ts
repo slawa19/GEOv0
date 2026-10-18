@@ -355,7 +355,7 @@ describe('044 stage 2 (Codex §15 P3): the deferred manual pause is deduplicated
     const app = boot()
     await settle()
     await app.realActions.pauseForManualAction()
-    app.real.runStatus = status('R1') as never // the state becomes known: running -> the deferred pause starts
+    app.real.runStatus = status('R1') as unknown as typeof app.real.runStatus // the state becomes known: running -> the deferred pause starts
     await settle()
     expect(pauseRun).toHaveBeenCalledTimes(1)
     void app.realActions.pauseForManualAction() // a second manual action before the first pause answered
