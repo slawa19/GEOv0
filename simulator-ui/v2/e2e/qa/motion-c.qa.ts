@@ -4,7 +4,7 @@
  * own SSE reader, normalizer and pipeline; FX state is only read.
  *
  * Four questions, one test each (each red on the product before slice C - the red output is in the Changelog of 039):
- *  1. PACE (a 3-edge and a 6-edge payment): every leg moves for at least 450 ms (criterion 4), at ONE speed along the
+ *  1. PACE (a 3-edge payment on the ring and a 6-edge payment on the open route, whose legs differ in length): every leg moves for at least 450 ms (criterion 4), at ONE speed along the
  *     route (visible length over time equal on every leg; the last one 1.5 x longer, eased into the receiver), the legs
  *     follow each other with no gap and no overlap, and the receiver's label comes when the beam arrives.
  *  2. HANDOFF (the same flights, pixels): the route is never dark between two legs for longer than the head needs to
@@ -24,8 +24,8 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { CORRIDOR_PX, NODE_CLEAR_PX, pickRingRoute, probeFrame, rememberBaseline, summarize, type FrameProbe, type RouteGeom } from './oracle.js'
-import { RING, boot, fixtureSnapshot100, frames, loopCounters, pretendGpu, pushEvent, ringSnapshot, sampleCanvas, screenNodes, txUpdated } from './stand.js'
+import { CORRIDOR_PX, NODE_CLEAR_PX, pickRingRoute, probeFrame, rememberBaseline, routeGeomOf, summarize, type FrameProbe, type RouteGeom } from './oracle.js'
+import { OPEN_ROUTE, RING, boot, fixtureSnapshot100, frames, loopCounters, openRouteSnapshot, pretendGpu, pushEvent, ringSnapshot, sampleCanvas, screenNodes, txUpdated } from './stand.js'
 
 /** The floor of criterion 4 (spec 039): a leg moves for no less than this. The spec's number, not the product's constant. */
 const LEG_FLOOR_MS = 450
@@ -58,8 +58,8 @@ async function liveSparks(page: Page, t0: number): Promise<Array<Leg & { alive: 
 const receiverLabel = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.floating-label-inner')].some((el) => (el.textContent ?? '').trim().startsWith('+')))
 
 /** One payment over `hops` edges of the ring, probed every frame (FX buffer only) until the beam is gone. */
-async function fly(page: Page, hops: number) {
-  const g = await pickRingRoute(page, RING, hops)
+async function fly(page: Page, route: number | readonly string[]) {
+  const g = typeof route === 'number' ? await pickRingRoute(page, RING, route) : await routeGeomOf(page, route)
   await rememberBaseline(page, g)
   const t0 = await page.evaluate(() => performance.now())
   await pushEvent(page, txUpdated(g.ids, '10.00'))
@@ -81,7 +81,7 @@ async function fly(page: Page, hops: number) {
 /** Visible length of a route edge on screen: centre to centre less the two node radii (the link terminations). */
 const visibleLen = (g: RouteGeom, i: number) => Math.hypot(g.edges[i]!.b.x - g.edges[i]!.a.x, g.edges[i]!.b.y - g.edges[i]!.a.y) - 2 * RING_NODE_R
 
-function judge(hops: number, r: Awaited<ReturnType<typeof fly>>) {
+function judge(hops: number, r: Awaited<ReturnType<typeof fly>>, o: { unequal?: boolean } = {}) {
   const { g, legs, probes, labelAtFrame } = r
   // 1. PACE.
   expect(legs.map((l) => l.edge), `PACE: one leg per edge, in route order (${g.ids.join(' > ')})`).toEqual(g.edges.map((e) => e.name))
@@ -90,7 +90,12 @@ function judge(hops: number, r: Awaited<ReturnType<typeof fly>>) {
     if (i > 0) expect.soft(l.startedAtMs, `PACE: leg ${l.edge} starts when leg ${legs[i - 1]!.edge} has arrived - no pause, no overlap`).toBeCloseTo(legs[i - 1]!.startedAtMs + legs[i - 1]!.moveMs, 0)
     expect.soft(l.motion, `PACE: easing only on the last leg (${l.edge})`).toBe(i === legs.length - 1 ? 'arrive' : 'linear')
   }
-  const speeds = legs.map((l, i) => (visibleLen(g, i) * (i === legs.length - 1 ? ARRIVE_STRETCH : 1)) / l.moveMs)
+  const lens = legs.map((_, i) => visibleLen(g, i))
+  const speeds = legs.map((l, i) => (lens[i]! * (i === legs.length - 1 ? ARRIVE_STRETCH : 1)) / l.moveMs)
+  if (o.unequal) {
+    // Anti-vacuum (adversarial pass 2026-10-18): on legs of equal length "equal time a leg" passes as "one speed".
+    expect(Math.max(...lens) / Math.min(...lens), `counter-check: the legs of this route differ in visible length (${lens.map(Math.round).join(', ')} px)`).toBeGreaterThan(1.15)
+  }
   for (const [i, v] of speeds.entries()) {
     expect.soft(Math.abs(v / speeds[0]! - 1), `PACE: one speed along the route - leg ${legs[i]!.edge} at ${v.toFixed(4)} px/ms, the first at ${speeds[0]!.toFixed(4)}`).toBeLessThan(0.02)
   }
@@ -120,7 +125,9 @@ function judge(hops: number, r: Awaited<ReturnType<typeof fly>>) {
   }
 
   // 3. READABLE WITHOUT A GPU, on the legs that have a judged part (the oracle's own precondition, `pickRingRoute`).
-  const readable = sum.map((e, i) => {
+  // Only the legs with a judged part (the oracle's own precondition in `pickRingRoute`: > 2 x NODE_CLEAR_PX + 60).
+  const readable = sum.flatMap((e, i) => (lens[i]! + 2 * RING_NODE_R > 2 * NODE_CLEAR_PX + 60 ? [i] : [])).map((i) => {
+    const e = sum[i]!
     const leg = legs[i]!
     const first = Math.floor(leg.startedAtMs / 16) + 1
     const lastF = Math.ceil((leg.startedAtMs + leg.moveMs) / 16)
@@ -143,11 +150,9 @@ test.describe('039 slice C - motion on the ring (no GPU, quality low)', () => {
     expect(await page.locator('.root').evaluate((el) => (el as HTMLElement).dataset.quality), 'precondition: the no-GPU profile, quality low').toBe('low')
   })
 
-  for (const hops of [3, 6]) {
-    test(`a ${hops}-edge payment: legs of at least 450 ms at one speed, a visible handoff, a beam readable without a GPU`, async ({ page }) => {
-      judge(hops, await fly(page, hops))
-    })
-  }
+  test('a 3-edge payment: legs of at least 450 ms at one speed, a visible handoff, a beam readable without a GPU', async ({ page }) => {
+    judge(3, await fly(page, 3))
+  })
 
   test('a clearing: one spark goes round the cycle in 1.2 s, then the lines pulse and the amount comes; nothing is painted away from the cycle', async ({ page }) => {
     const cycle = RING.map((id, i) => ({ from: id, to: RING[(i + 1) % RING.length]! }))
@@ -188,6 +193,14 @@ test.describe('039 slice C - motion on the ring (no GPU, quality low)', () => {
     expect.soft({ pulses: pulsesAfter, label: labelAfter }, 'then every line of the cycle pulses and the amount comes').toEqual({ pulses: cycle.length, label: true })
     expect.soft(awayLit, 'nothing is painted away from the cycle (until slice C a full-screen flash covered the canvas)').toBe(0)
   })
+})
+
+// Six legs (the cap) on legs of UNEQUAL length: the open route of seven nodes (`OPEN_ROUTE`, 039 slice A). On the
+// ring the legs are near equal, and "one speed" could not be told from "equal time a leg" (adversarial pass 2026-10-18).
+test('039 slice C - a 6-edge payment on legs of unequal length: at least 450 ms a leg at ONE speed, a visible handoff, a beam readable without a GPU', async ({ page }) => {
+  await boot(page, { snapshot: openRouteSnapshot(), clock: true })
+  expect(await page.locator('.root').evaluate((el) => (el as HTMLElement).dataset.quality), 'precondition: the no-GPU profile, quality low').toBe('low')
+  judge(6, await fly(page, OPEN_ROUTE), { unequal: true })
 })
 
 /** Base-canvas `drawImage` calls (the glow sprites) of the next pass and the composite each was drawn with. */

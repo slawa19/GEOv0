@@ -16,12 +16,12 @@
  *   <theme>-<quality>-4-beam-arrived     ... just after the beam reached the receiver (the fade-out)
  *   <theme>-<quality>-5-clearing-loop    the recorded clearing 600 ms after it came (the spark going round, after; before: the pulses)
  *   <theme>-<quality>-6-clearing-after   ... 1800 ms after it came (the lines pulse)
- * Video (wall clock, quality med, theme saas): the payments played for 12 s, then the clearing for 5 s - `video-*.webm`.
+ * The video is `owner-video-c.p039-frames.ts` (a file of its own: `video` is a worker option).
  *
  * LIMITS: the frames are of a software-only browser; a GPU machine composites differently. The recorded clearing has no
  * `cleared_amount` (042 T4205), so no amount label appears in it. Nothing here judges.
  */
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
@@ -101,23 +101,3 @@ for (const theme of ['saas', 'hud'] as const) {
     })
   }
 }
-
-test.describe('039 C video', () => {
-  test.use({ video: { mode: 'on', size: { width: 1366, height: 768 } } })
-  test('039 C video - payments for 12 s, then the clearing, quality med, saas (wall clock)', async ({ page }) => {
-    test.setTimeout(180_000)
-    await openWorkbench(page, { theme: 'saas', quality: 'med', clock: false })
-    await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Проиграть"
-    await closeDetails(page)
-    await page.waitForTimeout(12_000) // a film, not a check: real time on purpose
-    await page.locator('[data-testid="details-toggle"]').click()
-    await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Стоп"
-    await choosePlaylist(page, 'clearing')
-    await page.locator('[data-testid="playlist-workbench"] button.ds-btn--secondary').click() // "Проиграть"
-    await closeDetails(page)
-    await page.waitForTimeout(5_000)
-    const video = page.video()
-    await page.close()
-    if (video) copyFileSync(await video.path(), join(outDir(), 'video-saas-med.webm'))
-  })
-})

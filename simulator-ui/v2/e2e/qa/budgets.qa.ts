@@ -294,7 +294,8 @@ test('budget: at a sustained 10 fps the FX budget falls, the particle cap follow
 test('budget: a flood of amount labels stops at the cap', async ({ page }) => {
   await bootClocked(page, snapshot)
   // Two waves of payments from every participant to a neighbour, 600 ms apart: 200 sender labels and the receivers'
-  // (340 ms later, the lower TTL clamp) inside the 1900 ms a label lives - well above the cap of 120.
+  // (when each one-leg beam arrives, at the floor of 450 ms or so - 039 slice C; `ttl_ms: 340` below times nothing any
+  // more) inside the 2600 ms a label lives - well above the cap of 120.
   const adj = new Map<string, string>()
   for (const l of snapshot.links) {
     if (!adj.has(l.source)) adj.set(l.source, l.target)
