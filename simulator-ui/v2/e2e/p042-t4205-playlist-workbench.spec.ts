@@ -16,16 +16,31 @@
  * file: the product reads it as "screenshot stand" and then spawns no FX at all (`render/fxRenderer/spawn.ts`).
  *
  * The amount labels are read too (2026-10-18, 039 slice C): the recordings carried no `amount` / `cleared_amount` until
- * that day, so the workbench never showed one; the amounts now come from the recorded patches (rule:
- * `usePlaylistWorkbench.test.ts`, spec 039 Changelog). Until then this header said "the amount labels (the recorded
- * payments carry no amount)" under what the test does not see.
+ * that day, so the workbench never showed one. Until then this header said "the amount labels (the recorded payments
+ * carry no amount)" under what the test does not see.
+ *
+ * 2026-10-18, 039 T3935: the recordings are re-recorded from a live run (`scripts/record_workbench_playlists.py`) and
+ * each is played on ITS OWN start snapshot (`UAH/events/<id>-snapshot.json`): the amounts and the routes below moved to
+ * the new recording (first payment 135.00 instead of the hand-derived 38.93; the clearing 247.95 over 3 cycles and 8
+ * lines instead of 121.00 over 5 and 15), the participant ids are read from the recording, and the scene switch is held:
+ * Play shows the recording's snapshot, Stop returns to the offline source's `UAH/snapshot.json`.
  *
  * WHAT IT DOES NOT SEE: the timing of the effects against their CSS (the QA stand's business), where on screen a label
  * stands, a production build (no dev hook), the equivalents other than UAH (the offline screen shows UAH only while
  * `VITE_DEMO_FIXTURES=1`).
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { expect, test, type Page } from '@playwright/test'
 
+/** The committed recording (039 T3935): its events and its own start snapshot, and the offline source's snapshot. */
+const FIXTURES = fileURLToPath(new URL('../public/simulator-fixtures/v1/UAH/', import.meta.url))
+const readJson = (path: string): unknown => JSON.parse(readFileSync(`${FIXTURES}${path}`, 'utf8'))
+const TX = readJson('events/demo-tx.json') as Array<{ amount: string; edges: Array<{ from: string; to: string }> }>
+const idsOf = (path: string) => (readJson(path) as { nodes: Array<{ id: string }> }).nodes.map((n) => n.id).sort()
+const TX_SCENE_IDS = idsOf('events/demo-tx-snapshot.json')
+const OFFLINE_IDS = idsOf('snapshot.json')
 test.use({ launchOptions: { args: ['--disable-blink-features=AutomationControlled'] } })
 
 /** Screen pixels around a node left out of the sample: the outer reach of a node burst's glow (`renderFrame.ts`). */
@@ -114,10 +129,11 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
       }, { timeout: 8_000, intervals: [50] })
       .toBeGreaterThan(0)
     expect(last.live, 'a spark of the played payment is in the FX state').toBeGreaterThan(0)
-    // The first recorded payment, U0003 -> U0017, 38.93: the sender's label at once, the receiver's when the beam arrives.
+    // The first recorded payment, 135.00 (a direct one): the sender's label at once, the receiver's when the beam arrives.
+    expect(TX[0]!.amount).toBe('135.00')
     const seen = new Set<string>()
-    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('-38.93 UAH')
-    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('+38.93 UAH')
+    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('-135.00 UAH')
+    await expect.poll(() => seenLabels(page, seen), { timeout: 8_000, intervals: [50] }).toContain('+135.00 UAH')
 
     await page.getByRole('button', { name: 'Стоп', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Проиграть', exact: true })).toBeVisible()
@@ -136,10 +152,10 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
         return last.lit
       }, { timeout: 8_000, intervals: [50] })
       .toBeGreaterThan(0)
-    // The recorded clearing names 5 cycles of 3 lines: every line of it pulses.
-    expect(last.live).toBe(15)
-    // Then its amount, 121.00 (the sum over the five cycles, `cleared_amount`), as the clearing's label.
-    await expect.poll(() => labelTexts(page), { timeout: 8_000, intervals: [50] }).toContain('−121.00 UAH')
+    // The recorded clearing names 8 lines (3 cycles of 3 lines, two sharing one line): every line of it pulses.
+    expect(last.live).toBe(8)
+    // Then its amount, 247.95 (the sum over the three cycles, `cleared_amount`), as the clearing's label.
+    await expect.poll(() => labelTexts(page), { timeout: 8_000, intervals: [50] }).toContain('−247.95 UAH')
     expect(apiCalls, 'the workbench makes no request to a server').toEqual([])
   })
 
@@ -150,8 +166,14 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
       page.evaluate(() => ((window as unknown as { __geoSim?: { fxState: { sparks: Array<{ source: string; target: string }> } } })
         .__geoSim?.fxState.sparks ?? []).map((s) => `${s.source}>${s.target}`))
     await page.getByRole('button', { name: 'Проиграть', exact: true }).click()
-    // The second recorded event is the route U0001 -> U0002 -> U0006 -> U0036: wait for its first leg, then stop.
-    await expect.poll(sparkKeys, { timeout: 5_000, intervals: [20] }).toContain('PID_U0001_9e3779b1>PID_U0002_3c6ef362')
+    // The second recorded event is a three-line route: wait for its first leg, then stop.
+    // 2026-10-18, 039 T3935: Stop now also returns to the offline snapshot, and that scene load clears the pending legs by
+    // itself, so this test no longer isolates the playback's own guard (the generation bump of `resetTxFx`); that guard
+    // is held by the unit test "Stop during a three-line payment" in `usePlaylistWorkbench.test.ts`.
+    const route = TX[1]!.edges
+    expect(route).toHaveLength(3)
+    const firstLeg = `${route[0]!.from}>${route[0]!.to}`
+    await expect.poll(sparkKeys, { timeout: 5_000, intervals: [20] }).toContain(firstLeg)
     await page.getByRole('button', { name: 'Стоп', exact: true }).click()
     const seen = new Set<string>()
     const until = Date.now() + 2_000
@@ -159,9 +181,24 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
       for (const k of await sparkKeys()) seen.add(k)
       await page.waitForTimeout(30)
     }
-    expect([...seen].filter((k) => k !== 'PID_U0001_9e3779b1>PID_U0002_3c6ef362'), 'legs drawn after Stop').toEqual([])
+    expect([...seen].filter((k) => k !== firstLeg), 'legs drawn after Stop').toEqual([])
   })
 
+  test('039 T3935: Play shows the recording\'s own start snapshot, Stop returns to the offline snapshot', async ({ page }) => {
+    const { select } = await openWorkbench(page)
+    const sceneIds = () =>
+      page.evaluate(() => ((window as unknown as { __geoSim?: { layoutNodes: Array<{ id: string }> } }).__geoSim?.layoutNodes ?? [])
+        .map((n) => n.id).sort())
+    // Counter-check of the switch: the two scenes are different graphs (the recording's ids are its run's own).
+    expect(TX_SCENE_IDS).not.toEqual(OFFLINE_IDS)
+    // Before the workbench plays, the offline source shows its own snapshot.
+    await expect.poll(sceneIds, { timeout: 8_000, intervals: [50] }).toEqual(OFFLINE_IDS)
+    await select.selectOption({ label: 'Платежи (20)' })
+    await page.getByRole('button', { name: 'Проиграть', exact: true }).click()
+    await expect.poll(sceneIds, { timeout: 8_000, intervals: [50] }).toEqual(TX_SCENE_IDS)
+    await page.getByRole('button', { name: 'Стоп', exact: true }).click()
+    await expect.poll(sceneIds, { timeout: 8_000, intervals: [50] }).toEqual(OFFLINE_IDS)
+  })
   test('"Шаг" plays one recorded event at a time and says which', async ({ page }) => {
     const { select } = await openWorkbench(page)
     await select.selectOption({ label: 'Платежи (20)' })

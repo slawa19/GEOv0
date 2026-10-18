@@ -91,6 +91,15 @@ describe('fixtures validation - old colour keys still load (039 slice B)', () =>
       expect(snap.nodes.length, eq).toBe(raw.nodes.length)
       expect(snap.nodes.map((n) => n.net_sign), eq).toEqual(raw.nodes.map((n) => n.net_sign))
     }
+    // 039 T3935: the start snapshots the recorded playlists carry (`<EQ>/events/<id>-snapshot.json`, recorded from a live
+    // run) load through the same validator - the workbench shows them as the scene while it plays.
+    const { readdirSync } = await import('node:fs')
+    const starts = readdirSync(resolve(process.cwd(), 'public/simulator-fixtures/v1/UAH/events')).filter((f) => f.endsWith('-snapshot.json'))
+    expect(starts.sort()).toEqual(['demo-clearing-snapshot.json', 'demo-tx-snapshot.json'])
+    for (const f of starts) {
+      const start = JSON.parse(readFileSync(resolve(process.cwd(), `public/simulator-fixtures/v1/UAH/events/${f}`), 'utf8')) as RawSnapshot
+      expect(validateSnapshot(start, `fixture:UAH/events/${f}`).nodes.length, f).toBe(100)
+    }
     const raw = mkBaseSnapshot()
     raw.nodes[0]!.net_sign = null
     const snap = validateSnapshot(raw, 'mem:snapshot.json')
