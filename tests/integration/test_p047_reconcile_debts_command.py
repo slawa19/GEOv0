@@ -14,7 +14,10 @@ the Redis lock, which the command does not take.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -185,3 +188,42 @@ async def test_a_verifier_error_is_not_checked_exit_2_and_a_failed_elsewhere_sti
     assert await command._run([], True, factory) == 1
     out = capsys.readouterr().out
     assert _verdicts(out)[faulty.equivalent.code] == FAILED and f"{erring.equivalent.code}: NOT CHECKED" in out, out
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stands_when_its_details_cannot_be_read_exit_1_not_2(committed_database, monkeypatch) -> None:
+    """047 fix-delta (Codex §15 P2): the run commits FAILED and the hold, then reading the stored evidence fails. The
+    command keeps the verdict: exit 1 and `verdict FAILED; details could not be read`, never "did not run" and 2.
+    Through `main` (in a thread: it runs its own event loop), on the clone. RED BEFORE (`1304374b`): the read error
+    escaped `_run`, `main` printed "the reconciliation did not run" and returned 2. MUTATION: drop the guard around
+    the stored-result read - exit 2, red."""
+
+    import app.db.session as db_session_module
+
+    spec = importlib.util.spec_from_file_location("p047_reconcile_debts_details", _SCRIPT)
+    command = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(command)
+    factory = committed_database.sessionmaker
+    (faulty, debt) = await _clean_equivalent(factory)
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'")
+
+    async def unreadable(*_args):
+        raise ConnectionError("p047: the connection went away after the verdict")
+
+    monkeypatch.setattr(db_session_module, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(db_session_module, "engine", committed_database.engine)
+    for name in ("_latest_detail", "_stored_result"):  # the reader's name on `1304374b` and after the fix-delta
+        monkeypatch.setattr(command, name, unreadable, raising=False)
+
+    out, err = io.StringIO(), io.StringIO()
+
+    def run_main() -> int:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            return command.main(["--all"])
+
+    assert await asyncio.to_thread(run_main) == 1, (out.getvalue(), err.getvalue())
+    assert f"{faulty.equivalent.code}: FAILED hold=set - verdict FAILED; details could not be read: ConnectionError" in (
+        out.getvalue()), out.getvalue()
+    assert _DID_NOT_RUN not in err.getvalue(), err.getvalue()
+    assert await _results(factory, faulty.equivalent.id) == [FAILED] and await _hold(factory, faulty.equivalent.id)

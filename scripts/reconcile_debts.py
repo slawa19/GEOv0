@@ -17,9 +17,11 @@ The database is the one `DATABASE_URL` names, as for the application. Exit codes
        the configuration or the database unusable, or the verifier erred - such an equivalent is printed as
        NOT CHECKED. A discrepancy found elsewhere in the same run still exits 1.
 
-Not seen by this command: a scheduled run of the hub publishing at the same moment may leave its own verdict as
-the latest stored row (`record_outcome`); the printed line then says that the stored row differs. The Redis lock
-of the integrity loop is not taken.
+The verdict and the exit code are this run's. The details printed (`entries_read`, findings, `missing_evidence`) are
+those of the latest STORED result row, named with its id, `checked_at` and `last_checked_at`: an unchanged verdict only
+advances `last_checked_at` of the earlier row (`record_outcome`), and a scheduled run of the hub publishing at the same
+moment may replace it. Only a difference of STATUS is flagged; another run's row with the same status is not told
+apart. The Redis lock of the integrity loop is not taken.
 """
 
 from __future__ import annotations
@@ -34,7 +36,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-async def _latest_detail(session_factory, equivalent_id) -> tuple[str | None, dict]:
+def _report_error(error: BaseException) -> str:
+    message = re.sub(r"://[^@/\s]+@", "://***@", str(error))  # a URL in the message keeps no credentials
+    return f"{type(error).__name__}: {message}"
+
+
+async def _stored_result(session_factory, equivalent_id):
+    """The equivalent's latest stored result row: id, status, checked_at, last_checked_at and its detail, or None."""
+
     from sqlalchemy import select
 
     from app.db.reconciliation_tables import debt_reconciliation_results
@@ -43,17 +52,31 @@ async def _latest_detail(session_factory, equivalent_id) -> tuple[str | None, di
     async with session_factory() as session:
         row = (
             await session.execute(
-                select(results.status, results.detail).where(
+                select(results.id, results.status, results.checked_at, results.last_checked_at, results.detail).where(
                     results.equivalent_id == equivalent_id, results.is_latest.is_(True)
                 )
             )
         ).first()
     if row is None:
-        return None, {}
-    return row.status, row.detail if isinstance(row.detail, dict) else json.loads(row.detail or "{}")
+        return None
+    detail = row.detail if isinstance(row.detail, dict) else json.loads(row.detail or "{}")
+    return row, detail
+
+
+def _hold_text(rec, counts) -> str:
+    named = (
+        (rec.HOLD_SET, "set"), (rec.HOLD_ALREADY_HELD, "already held"),
+        (rec.HOLD_NOT_CONFIRMED, "not confirmed by the re-run"), (rec.HOLD_EQUIVALENT_GONE, "equivalent gone"),
+    )
+    return next((name for key, name in named if counts[f"hold_{key}"]),
+                "ERROR (see the log)" if counts["hold_errors"] else "unknown")
 
 
 async def _run(codes: list[str], check_all: bool, session_factory) -> int:
+    """Verify, then report. The exit code is decided by THIS run's verdicts (`run_scheduled_reconciliation`'s counts),
+    and a verdict once established is kept whatever fails afterwards: a failure to verify one equivalent, or to read
+    the stored evidence of another, never turns a FAILED into "did not run"."""
+
     from sqlalchemy import select
 
     from app.core.ledger import reconciliation as rec
@@ -76,26 +99,39 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
 
     discrepancy = not_checked = False
     for equivalent_id, code in rows:
-        counts = await rec.run_scheduled_reconciliation(session_factory, equivalent_ids=[equivalent_id])
+        try:
+            counts = await rec.run_scheduled_reconciliation(session_factory, equivalent_ids=[equivalent_id])
+        except Exception as error:  # noqa: BLE001 - this equivalent was not verified; verdicts of the others stand
+            not_checked = True
+            print(f"{code}: NOT CHECKED - the reconciliation did not run for it: {_report_error(error)}")
+            continue
         verdict = next((status for status in (rec.PASSED, rec.FAILED, rec.UNVERIFIABLE) if counts[status]), None)
         if verdict is None:
             not_checked = True
             print(f"{code}: NOT CHECKED - the verifier erred (see the log); no result was recorded")
             continue
         discrepancy |= verdict != rec.PASSED
-        stored, detail = await _latest_detail(session_factory, equivalent_id)
-        line = (
-            f"{code}: {verdict} - entries_read={detail.get('entries_read')} "
+        line = f"{code}: {verdict}"
+        if verdict == rec.FAILED:
+            line += f" hold={_hold_text(rec, counts)}"
+        try:
+            stored = await _stored_result(session_factory, equivalent_id)
+        except Exception as error:  # noqa: BLE001 - reporting only: the verdict above is this run's and stands
+            print(f"{line} - verdict {verdict}; details could not be read: {_report_error(error)}")
+            continue
+        if stored is None:
+            print(f"{line} - no stored result row was found to show its evidence")
+            continue
+        row, detail = stored
+        # The evidence is the STORED transition row, not this run's: an unchanged verdict only advances its
+        # `last_checked_at` (`record_outcome`), and a run publishing at the same moment may have replaced it.
+        line += (
+            f" - stored result {row.id} (status={row.status}, checked_at={row.checked_at.isoformat()}, "
+            f"last_checked_at={row.last_checked_at.isoformat()}): entries_read={detail.get('entries_read')} "
             f"findings={detail.get('findings_total', 0)} missing_evidence={detail.get('missing_evidence') or []}"
         )
-        if verdict == rec.FAILED:
-            hold = next((name for key, name in (
-                (rec.HOLD_SET, "set"), (rec.HOLD_ALREADY_HELD, "already held"),
-                (rec.HOLD_NOT_CONFIRMED, "not confirmed by the re-run"), (rec.HOLD_EQUIVALENT_GONE, "equivalent gone"),
-            ) if counts[f"hold_{key}"]), "ERROR (see the log)" if counts["hold_errors"] else "unknown")
-            line += f" hold={hold}"
-        if stored != verdict:
-            line += f" (the latest stored row says {stored}: another run published after this one)"
+        if row.status != verdict:
+            line += f" (the stored status differs from this run's {verdict})"
         print(line)
         for finding in detail.get("findings") or []:
             print(f"  {json.dumps(finding, sort_keys=True, default=str)}")
@@ -120,8 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     try:  # the application is imported here, so that a bad configuration is exit 2 as well, not a traceback's 1
         return asyncio.run(_main(args.equivalent, args.all))
     except Exception as error:  # noqa: BLE001 - whatever stopped the run, nothing was verified: exit 2, never 0
-        message = re.sub(r"://[^@/\s]+@", "://***@", str(error))  # a URL in the message keeps no credentials
-        print(f"the reconciliation did not run: {type(error).__name__}: {message}", file=sys.stderr)
+        print(f"the reconciliation did not run: {_report_error(error)}", file=sys.stderr)
         return 2
 
 
