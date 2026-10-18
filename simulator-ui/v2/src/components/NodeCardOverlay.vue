@@ -51,17 +51,6 @@ const emit = defineEmits<{ close: [] }>()
 
 const props = defineProps<Props>()
 
-const wrapperStyle = computed(() =>
-  // WM owns geometry. Keep NodeCardOverlay as a simple content block.
-  ({
-    position: 'static',
-    left: 'auto',
-    top: 'auto',
-    right: 'auto',
-    zIndex: 'auto',
-  }) as const,
-)
-
 function safeNum(v: unknown): number {
   // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not
   // parse as NaN). This is sort-only, not a guard, but inconsistent parsing would
@@ -199,7 +188,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 </script>
 
 <template>
-  <div class="ds-ov-node-card" :style="wrapperStyle">
+  <div class="ds-ov-node-card">
     <div class="ds-panel ds-panel--elevated">
       <div class="ds-panel__body ds-ov-node-card__body">
 

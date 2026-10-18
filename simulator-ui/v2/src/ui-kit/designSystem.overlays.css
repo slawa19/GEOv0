@@ -499,10 +499,8 @@ details[open].ds-ov-details > summary::after {
    ────────────────────────────────────────────────────────────── */
 
 .ds-ov-node-card {
-  position: absolute;
   width: var(--ds-ov-node-card-w);
   max-width: min(var(--ds-ov-node-card-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
-  z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   /* Layout-only wrapper.

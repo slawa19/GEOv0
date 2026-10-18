@@ -122,6 +122,18 @@ for (const theme of THEMES) {
       info.annotations.push({ type: 'P045S3-record9', description: JSON.stringify(rec) })
     })
 
+    test('(и) 045 S4: neither inspector positions itself - the card and the line window are static blocks inside their shell', async ({ page }) => {
+      await open(page, theme)
+      const card = await openCard(page)
+      const position = (l: Locator) => l.evaluate((el) => getComputedStyle(el).position)
+      expect(await position(card.locator('.ds-ov-node-card')), 'the card is a static block').toBe('static')
+      expect(await position(card), 'counter-check: the shell is what positions (it is not static)').not.toBe('static')
+      await page.keyboard.press('Escape')
+      await expect(card).toBeHidden()
+      const edge = await openLine(page)
+      expect(await position(edge.locator('[data-testid="edge-detail-popup"]')), 'the line window is a static block').toBe('static')
+    })
+
     test('(е1)(е2) card: the head is one line, the statistics are one line', async ({ page }, info) => {
       await open(page, theme)
       const card = await openCard(page)

@@ -137,7 +137,6 @@ describe('EdgeDetailPopup', () => {
   })
 
   it('keeps the edge-detail inspector on WM/DS contracts without introducing ds-inspector-row', () => {
-    expect(edgeDetailPopupSource).toContain("position: 'static'")
     expect(edgeDetailPopupSource).toContain('class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"')
     expect(edgeDetailPopupSource).not.toContain('ds-inspector-row')
   })
