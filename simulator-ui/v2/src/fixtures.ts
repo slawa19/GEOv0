@@ -137,8 +137,14 @@ export function fixturesBase(): string {
 }
 
 export async function loadSnapshot(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
-  const base = fixturesBase()
-  const sourcePath = `${base}/${encodeURIComponent(eq)}/snapshot.json`
+  return loadSnapshotAt(`${fixturesBase()}/${encodeURIComponent(eq)}/snapshot.json`)
+}
+
+/**
+ * One offline snapshot by its published path - the loader of `loadSnapshot` above, also used for the start snapshot a
+ * recorded playlist carries (039 `T3935`: `<EQ>/events/<playlist>-snapshot.json`, shown by the workbench while it plays).
+ */
+export async function loadSnapshotAt(sourcePath: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
   const raw = await loadJson<unknown>(sourcePath)
   const snapshot = validateSnapshot(raw, sourcePath)
   return { snapshot, sourcePath }

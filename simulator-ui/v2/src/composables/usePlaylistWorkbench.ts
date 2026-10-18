@@ -12,15 +12,26 @@
  * a run (offline there is none) and a `topology.changed` may ask for a snapshot refresh no offline source can answer.
  * Every event must be of the snapshot's equivalent - the folder's own; equivalents are never mixed in what is drawn.
  *
- * What it does NOT do: play on the server source (there the network lives on its own; no playlist is loaded), restore
- * the snapshot after a playlist (the recorded patches stay applied until the scene is loaded again), honour the
- * recorded `ts` (the recordings span days; events are spaced by their own effect length, see `gapAfterMs`).
+ * A recording is played on ITS OWN start snapshot (039 `T3935`, 2026-10-18): the playlists are recorded from a live run
+ * (`scripts/record_workbench_playlists.py`) whose participants are the run's own, so they cannot be played on the
+ * offline source's `<EQ>/snapshot.json`. Each playlist `<EQ>/events/<id>.json` carries `<EQ>/events/<id>-snapshot.json`,
+ * the snapshot the run had before its first event; a playlist without it is refused. Play (and a Step that begins a
+ * playback) first shows that snapshot through the offline source's own loader (`createRecordingSceneSource`), then
+ * plays; the end of the playback (Stop, another playlist, a replaced scene, or the last effect done) returns to the
+ * offline source's snapshot. Nothing else ever shows a recording's scene.
+ *
+ * What it does NOT do: play on the server source (there the network lives on its own; no playlist is loaded), honour the
+ * recorded `ts` (events are spaced by their own effect length, see `gapAfterMs`), check the money of a recording (that is
+ * the consistency guard of the committed recordings in `usePlaylistWorkbench.test.ts`), offer Stop during stepping (the
+ * bottom bar shows Stop only while a playlist plays: after a Step the way back is to step to the end or to choose the
+ * other playlist - BACKLOG 039-13), or recover when the offline snapshot itself fails to load on the way back (the
+ * recording's scene then stays, under the load error).
  */
 import { computed, reactive, ref, watch } from 'vue'
 
 import { normalizeSimulatorEvent, type AcceptedSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
-import type { ClearingDoneEvent, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import {
   applyAcceptedRealEvent,
@@ -37,7 +48,59 @@ export const PLAYLISTS = [
 ] as const
 
 export type PlaylistEvent = Extract<AcceptedSimulatorEvent, { type: 'tx.updated' | 'tx.failed' | 'clearing.done' }>
-export type LoadedPlaylist = { id: string; label: string; equivalent: string; events: PlaylistEvent[] }
+export type LoadedPlaylist = {
+  id: string
+  label: string
+  equivalent: string
+  events: PlaylistEvent[]
+  /** The published path of the recording's start snapshot (`<EQ>/events/<id>-snapshot.json`), shown while it plays. */
+  sceneSourcePath?: string
+}
+
+/** The published path of the start snapshot a recorded playlist carries (039 `T3935`). */
+export function recordingSnapshotPath(base: string, equivalent: string, playlistId: string): string {
+  return `${base}/${encodeURIComponent(canonicalEquivalent(equivalent))}/events/${playlistId}-snapshot.json`
+}
+
+/** Every participant a recorded event names: its ends, its route or cycle lines, its patches. */
+function participantsNamed(event: PlaylistEvent): string[] {
+  const e = event as PlaylistEvent & {
+    from?: string
+    to?: string
+    edges?: Array<{ from: string; to: string }>
+    cycle_edges?: Array<{ from: string; to: string }>
+    node_patch?: Array<{ id: string }>
+    edge_patch?: Array<{ source: string; target: string }>
+  }
+  return [
+    e.from ?? '',
+    e.to ?? '',
+    ...(e.edges ?? []).flatMap((x) => [x.from, x.to]),
+    ...(e.cycle_edges ?? []).flatMap((x) => [x.from, x.to]),
+    ...(e.node_patch ?? []).map((x) => x.id),
+    ...(e.edge_patch ?? []).flatMap((x) => [x.source, x.target]),
+  ].filter((id) => id !== '')
+}
+
+/**
+ * Why a recording's start snapshot cannot carry its events, or null: it is not a snapshot of the playlist's equivalent
+ * with nodes, or an event names a participant that is not a node of it (the events would be applied to nobody).
+ */
+export function recordingSceneProblem(raw: unknown, playlist: LoadedPlaylist, sourcePath: string): string | null {
+  const snap = raw as Partial<GraphSnapshot> | null
+  if (!snap || typeof snap !== 'object' || !Array.isArray(snap.nodes) || snap.nodes.length === 0) {
+    return `${sourcePath}: the recording's start snapshot has no nodes`
+  }
+  if (!sameEquivalent(snap.equivalent, playlist.equivalent)) {
+    return `${sourcePath}: the start snapshot is of '${String(snap.equivalent)}', the playlist of '${playlist.equivalent}'`
+  }
+  const nodes = new Set(snap.nodes.map((n) => n.id))
+  for (let i = 0; i < playlist.events.length; i += 1) {
+    const missing = participantsNamed(playlist.events[i]!).find((id) => !nodes.has(id))
+    if (missing !== undefined) return `${sourcePath}: events[${i}] names '${missing}', not a node of the start snapshot`
+  }
+  return null
+}
 
 export type PlaylistParse =
   | { status: 'ok'; playlist: LoadedPlaylist }
@@ -104,9 +167,29 @@ export async function loadPlaylists(
       continue
     }
     const parsed = parsePlaylist(raw, meta, eq, sourcePath)
-    if (parsed.status === 'ok') out.offered.push(parsed.playlist)
-    else if (parsed.status === 'empty') out.empty.push(meta.id)
-    else out.refused.push({ id: meta.id, reason: parsed.reason })
+    if (parsed.status === 'empty') {
+      out.empty.push(meta.id)
+      continue
+    }
+    if (parsed.status === 'refused') {
+      out.refused.push({ id: meta.id, reason: parsed.reason })
+      continue
+    }
+    // 039 T3935: a recording is played on its own start snapshot; without a usable one it is not offered.
+    const sceneSourcePath = recordingSnapshotPath(base, eq, meta.id)
+    let scene: unknown
+    try {
+      scene = await fetchJson(sceneSourcePath)
+    } catch (e) {
+      out.refused.push({ id: meta.id, reason: `${sceneSourcePath}: ${e instanceof Error ? e.message : String(e)}` })
+      continue
+    }
+    const problem = recordingSceneProblem(scene, parsed.playlist, sceneSourcePath)
+    if (problem !== null) {
+      out.refused.push({ id: meta.id, reason: problem })
+      continue
+    }
+    out.offered.push({ ...parsed.playlist, sceneSourcePath })
   }
   return out
 }
@@ -124,7 +207,15 @@ export const PLAYLIST_GAP_PAD_MS = 400
  * `CLEARING_EFFECT_MS` (`useRealClearingFx.ts`). Until then a payment was spaced by its wire `ttl_ms` and a clearing
  * by a literal 4200 here.
  */
-export type EffectLengths = { tx: (event: TxUpdatedEvent) => number; clearingMs: number }
+export type EffectLengths = {
+  tx: (event: TxUpdatedEvent) => number
+  clearingMs: number
+  /**
+   * 039 T3935: how long the recording's scene stays after the last event's effect before the workbench returns to the
+   * offline source's snapshot - the life of the amount labels, which outlive the drawn effect. 0 when not given.
+   */
+  afterLastMs?: number
+}
 
 export function gapAfterMs(event: PlaylistEvent, effects: EffectLengths): number {
   if (event.type === 'tx.updated') return effects.tx(event) + PLAYLIST_GAP_PAD_MS
@@ -155,6 +246,11 @@ const defaultTimers: Timers = {
  * Plays a loaded playlist: all of it (`play`, each event after the previous one's `gapAfterMs`) or one event at a time
  * (`step`, wrapping to the first after the last). A playback has its own id, passed with every event: the live path
  * uses it as the "run" a delayed receiver label must still belong to, so a stopped or replaced playback drops them.
+ *
+ * RECORD OF A DELIBERATE CHANGE (039 `T3935`, 2026-10-18): a playback that reaches its last event now COMPLETES only
+ * after that event's effect and `afterLastMs` (`onPlaybackComplete`; `playingId` stays set meanwhile, so Stop is still
+ * offered); until then `play` cleared `playingId` at the moment the last event was delivered and a playback never
+ * completed. The workbench returns to the offline source's snapshot on completion.
  */
 export function createPlaylistPlayer(deps: {
   deliver: (event: PlaylistEvent, playbackId: string) => void
@@ -167,6 +263,8 @@ export function createPlaylistPlayer(deps: {
    * the receiver's burst) must not fire. Not called when a playlist simply plays to its end.
    */
   onPlaybackEnd?: () => void
+  /** A playback delivered its last event and that event's effect is over (by Play or by the last Step). */
+  onPlaybackComplete?: () => void
   timers?: Timers
 }) {
   const timers = deps.timers ?? defaultTimers
@@ -181,12 +279,23 @@ export function createPlaylistPlayer(deps: {
   }
 
   function begin(playlist: LoadedPlaylist) {
+    clearTimer()
     seq += 1
     playbackId = `playlist:${playlist.equivalent}:${playlist.id}:${seq}`
     state.cursorId = playlist.id
     state.position = 0
     state.total = playlist.events.length
     deps.onPlaybackStart?.()
+  }
+
+  /** After the last event: the playback completes once its effect (and `afterLastMs`) is over. */
+  function completeAfter(event: PlaylistEvent) {
+    timer = timers.setTimeout(() => {
+      timer = null
+      state.playingId = null
+      playbackId = null
+      deps.onPlaybackComplete?.()
+    }, gapAfterMs(event, deps.effects) + (deps.effects.afterLastMs ?? 0))
   }
 
   function deliverAt(playlist: LoadedPlaylist, index: number) {
@@ -212,12 +321,18 @@ export function createPlaylistPlayer(deps: {
       timer = null
       const event = deliverAt(playlist, index)
       if (index + 1 >= playlist.events.length) {
-        state.playingId = null
+        completeAfter(event)
         return
       }
       timer = timers.setTimeout(() => run(index + 1), gapAfterMs(event, deps.effects))
     }
     run(0)
+  }
+
+  /** Whether the next `step(playlist)` begins a new playback (and so, in the workbench, shows its start snapshot). */
+  function stepBegins(playlist: LoadedPlaylist): boolean {
+    return state.playingId !== null || playbackId === null || state.cursorId !== playlist.id ||
+      state.position >= playlist.events.length
   }
 
   function step(playlist: LoadedPlaylist) {
@@ -226,7 +341,8 @@ export function createPlaylistPlayer(deps: {
     // A wrap after the last event is a fresh playback, as Play is: a new id and reset effect caches - otherwise the
     // clearing dedup (by plan id, `useRealClearingFx.ts`) would swallow a replayed clearing.
     if (playbackId === null || state.cursorId !== playlist.id || state.position >= playlist.events.length) begin(playlist)
-    deliverAt(playlist, state.position)
+    const event = deliverAt(playlist, state.position)
+    if (state.position >= playlist.events.length) completeAfter(event)
   }
 
   /** Forget the cursor and the playback (the scene was replaced: its playlists are of another snapshot). */
@@ -237,8 +353,66 @@ export function createPlaylistPlayer(deps: {
     state.total = 0
   }
 
-  return { state, play, step, stop, reset, activePlaybackId: () => playbackId }
+  return { state, play, step, stepBegins, stop, reset, activePlaybackId: () => playbackId }
 }
+
+/**
+ * 039 T3935: the offline source's snapshot loader with the recording's scene in it. `load(eq)` is what the offline
+ * source loads: the offline snapshot of `eq` (`fixtures.ts`, `loadSnapshot`) - or, between `enter` and `leave`, the
+ * recording's start snapshot for that same equivalent, by the same loader (`loadSnapshotAt`). `enter` and `leave`
+ * reload the scene through the app's own scene load, so the scene is replaced as any other scene is.
+ */
+export function createRecordingSceneSource(deps: {
+  loadOfflineSnapshot: (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
+  loadSnapshotAt: (sourcePath: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
+  /** The app's scene load (it asks `load` for the snapshot of the current equivalent). */
+  reloadScene: () => Promise<void>
+  /** The source of the scene on screen (`state.sourcePath`). */
+  getSceneSourcePath: () => string
+}) {
+  let recording: { equivalent: string; sourcePath: string } | null = null
+  /** Scene loads asked by `enter` that have not answered yet: one of them may still put the recording on screen. */
+  let entering = 0
+  return {
+    load: (eq: string) =>
+      recording !== null && sameEquivalent(recording.equivalent, eq)
+        ? deps.loadSnapshotAt(recording.sourcePath)
+        : deps.loadOfflineSnapshot(eq),
+    /** Shows the recording's start snapshot; true once it is the scene on screen. */
+    enter: async (equivalent: string, sourcePath: string): Promise<boolean> => {
+      recording = { equivalent: canonicalEquivalent(equivalent), sourcePath }
+      entering += 1
+      try {
+        await deps.reloadScene()
+      } finally {
+        entering -= 1
+      }
+      return recording?.sourcePath === sourcePath && deps.getSceneSourcePath() === sourcePath
+    },
+    /**
+     * Back to the offline source's snapshot; nothing when no recording was asked for. The scene is reloaded only when the
+     * recording is on screen or one of its loads is still under way - not when something else (another equivalent, the
+     * server source) has already replaced it (adversarial pass 2026-10-18: a reload there would be an extra load of the
+     * server source competing with its own).
+     */
+    leave: () => {
+      if (recording === null) return
+      const shown = recording.sourcePath
+      recording = null
+      if (entering > 0 || deps.getSceneSourcePath() === shown) void deps.reloadScene()
+    },
+    /** The recording's start snapshot asked for, or null. */
+    shown: () => recording?.sourcePath ?? null,
+  }
+}
+
+export type RecordingSceneSource = ReturnType<typeof createRecordingSceneSource>
+
+/**
+ * 039 T3935: the longest a playback waits for the physics to settle the recording's freshly laid-out graph before its
+ * first event (measured 2026-10-18 on the 100-node recording: ~4.4 s); past it the playback starts anyway.
+ */
+export const RECORDING_SCENE_SETTLE_MAX_MS = 8000
 
 /**
  * The delivery of a recorded event: the live connection's own steps (`useSimulatorRealMode.ts`): the replay owner
@@ -323,9 +497,28 @@ export function usePlaylistWorkbench(deps: {
   fx: { resetTxFx: () => void; resetClearingDedup: () => void }
   /** The length of each event's effect, from the effects themselves (`gapAfterMs`). */
   effects: EffectLengths
+  /**
+   * 039 T3935: the recording's own scene (`createRecordingSceneSource`): `enter` shows a recording's start snapshot and
+   * resolves true once it is on screen; `leave` returns to the offline source's snapshot.
+   */
+  recordingScene: { enter: (equivalent: string, sourcePath: string) => Promise<boolean>; leave: () => void }
   warn?: (message: string, context: Record<string, unknown>) => void
   timers?: Timers
 }) {
+  const warn = (message: string, context: Record<string, unknown>) => (deps.warn ?? console.warn)(message, context)
+  /** Bumped by every scene request of the workbench: a scene that finishes loading after a newer request is not played. */
+  let sceneSeq = 0
+  /** A recording's scene is being loaded: that scene change is the workbench's own and does not stop it. */
+  let entering = false
+  /** A new playback is replacing the current one: its scene is entered at once, not left first. */
+  let replacing = false
+
+  function leaveScene() {
+    sceneSeq += 1
+    entering = false
+    deps.recordingScene.leave()
+  }
+
   const player = createPlaylistPlayer({
     deliver: deps.deliver,
     effects: deps.effects,
@@ -338,9 +531,45 @@ export function usePlaylistWorkbench(deps: {
     onPlaybackEnd: () => {
       deps.fx.resetTxFx()
       deps.fx.resetClearingDedup()
+      if (!replacing) leaveScene()
     },
+    onPlaybackComplete: () => leaveScene(),
     timers: deps.timers,
   })
+
+  /** Ends the playback and any scene request of the workbench: the offline source's snapshot comes back. */
+  function halt() {
+    const wasEntering = entering
+    player.stop()
+    if (wasEntering) leaveScene()
+  }
+
+  /** Shows the recording's start snapshot, then begins its playback with `begin` - unless something newer came first. */
+  async function onItsScene(pl: LoadedPlaylist, begin: () => void) {
+    const mine = ++sceneSeq
+    replacing = true
+    player.stop()
+    replacing = false
+    if (!pl.sceneSourcePath) {
+      warn('offline playlist has no start snapshot', { id: pl.id })
+      return
+    }
+    entering = true
+    let shown = false
+    try {
+      shown = await deps.recordingScene.enter(pl.equivalent, pl.sceneSourcePath)
+    } finally {
+      if (mine === sceneSeq) entering = false
+    }
+    if (mine !== sceneSeq) return
+    if (!shown) {
+      warn('offline playlist start snapshot not shown', { id: pl.id, sourcePath: pl.sceneSourcePath })
+      leaveScene()
+      return
+    }
+    begin()
+  }
+
   const choice = ref('')
   const loaded = reactive<{ equivalent: string | null; playlists: LoadedPlaylist[] }>({ equivalent: null, playlists: [] })
   let loadSeq = 0
@@ -349,6 +578,7 @@ export function usePlaylistWorkbench(deps: {
     () => (deps.isOfflineSource() ? canonicalEquivalent(deps.getSnapshotEquivalent()) : ''),
     async (eq) => {
       const mine = ++loadSeq
+      halt()
       player.reset()
       loaded.equivalent = null
       loaded.playlists = []
@@ -357,12 +587,15 @@ export function usePlaylistWorkbench(deps: {
       if (mine !== loadSeq) return
       loaded.equivalent = result.equivalent
       loaded.playlists = result.offered
-      for (const r of result.refused) (deps.warn ?? console.warn)('offline playlist not offered', { id: r.id, reason: r.reason })
+      for (const r of result.refused) warn('offline playlist not offered', { id: r.id, reason: r.reason })
     },
     { immediate: true },
   )
 
-  watch(deps.getSceneIdentity, () => player.stop())
+  // Synchronous, so the workbench's own scene change (`entering`) is told apart from any other one.
+  watch(deps.getSceneIdentity, () => {
+    if (!entering) halt()
+  }, { flush: 'sync' })
 
   const find = (id: string) => loaded.playlists.find((p) => p.id === id) ?? null
 
@@ -386,7 +619,7 @@ export function usePlaylistWorkbench(deps: {
     /** Another playlist chosen: the current playback stops (its pending effects with it). */
     select: (id: string) => {
       if (id === selectedId.value) return
-      player.stop()
+      halt()
       choice.value = id
     },
     playingId: computed(() => player.state.playingId),
@@ -394,15 +627,20 @@ export function usePlaylistWorkbench(deps: {
     /** The position in the SELECTED playlist (0 until it is played), and its length. */
     position: computed(() => (player.state.cursorId === selectedId.value ? player.state.position : 0)),
     total: computed(() => offered.value.find((p) => p.id === selectedId.value)?.count ?? 0),
-    play: (id: string) => {
+    /** Shows the recording's start snapshot, then plays it (039 T3935). */
+    play: async (id: string) => {
       const pl = playable(id)
-      if (pl) player.play(pl)
+      if (pl) await onItsScene(pl, () => player.play(pl))
     },
-    step: (id: string) => {
+    /** One event; a Step that begins a playback shows the recording's start snapshot first. */
+    step: async (id: string) => {
       const pl = playable(id)
-      if (pl) player.step(pl)
+      if (!pl) return
+      if (player.stepBegins(pl)) await onItsScene(pl, () => player.step(pl))
+      else player.step(pl)
     },
-    stop: () => player.stop(),
+    /** Ends the playback; the offline source's snapshot comes back. */
+    stop: () => halt(),
     activePlaybackId: () => player.activePlaybackId(),
   })
 }
