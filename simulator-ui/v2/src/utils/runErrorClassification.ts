@@ -36,14 +36,14 @@ export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): st
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
 export const GLOBAL_ACTIVE_LIMIT_CONFLICT = 'global_active_limit'
 
-/** `error.details.conflict_kind` of an HTTP 409 answer in the server's envelope (`{"error": {"code", "message", "details"}}`), else null. */
-function conflictKindOf409(e: unknown): string | null {
+/** `error.details` of an HTTP 409 answer in the server's envelope (`{"error": {"code", "message", "details"}}`), else null. */
+function detailsOf409(e: unknown): Record<string, unknown> | null {
   const err = (e && typeof e === 'object' ? e : {}) as { status?: unknown; bodyText?: unknown }
   if (err.status !== 409 || typeof err.bodyText !== 'string') return null
   try {
-    const body = JSON.parse(err.bodyText) as { error?: { details?: { conflict_kind?: unknown } } }
-    const kind = body?.error?.details?.conflict_kind
-    return typeof kind === 'string' ? kind : null
+    const body = JSON.parse(err.bodyText) as { error?: { details?: unknown } }
+    const details = body?.error?.details
+    return details && typeof details === 'object' ? (details as Record<string, unknown>) : null
   } catch {
     return null
   }
@@ -57,7 +57,21 @@ function conflictKindOf409(e: unknown): string | null {
  * error - another 409 included - keeps the text it had (`fallback`).
  */
 export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, locale: UiLocale = uiLocale()): string {
-  if (conflictKindOf409(e) === GLOBAL_ACTIVE_LIMIT_CONFLICT) {
+  const details = detailsOf409(e)
+  if (details?.conflict_kind === GLOBAL_ACTIVE_LIMIT_CONFLICT) {
+    // 044 stage 2 (decision 3): the number of places comes from the answer (`details.max_active_runs`), never from here.
+    const raw = details.max_active_runs
+    const n = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null
+    if (n !== null) {
+      if (n === 1) {
+        return locale === 'ru'
+          ? 'Сейчас занято единственное место: демо смотрит 1 человек. Попробуйте через минуту — Start в «Подробнее».'
+          : 'The only place is taken right now: 1 person is watching the demo. Try again in a minute - Start under "Подробнее".'
+      }
+      return locale === 'ru'
+        ? `Сейчас заняты все ${n} ${ruPlural(n, 'место', 'места', 'мест')}: демо ${ruPlural(n, 'смотрит', 'смотрят', 'смотрят')} ${n} ${ruPlural(n, 'человек', 'человека', 'человек')}. Попробуйте через минуту — Start в «Подробнее».`
+        : `All ${n} places are taken right now: ${n} people are watching the demo. Try again in a minute - Start under "Подробнее".`
+    }
     return locale === 'ru'
       ? 'Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова — Start в «Подробнее».'
       : 'Someone is already watching the demo on this server; try again later. To start again, use Start under "Подробнее".'
@@ -68,6 +82,15 @@ export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, 
 /** 043 S2 (review B5): the error line when the server offers no scenario at all - the opening has nothing to show. */
 export function noScenarioText(locale: UiLocale = uiLocale()): string {
   return locale === 'ru' ? 'На сервере нет сценариев: показать нечего.' : 'The server offers no scenario: there is nothing to show.'
+}
+
+/** Russian plural of a count: 1 место, 2 места, 5 мест (forms: one, few, many). */
+function ruPlural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
 }
 
 /**

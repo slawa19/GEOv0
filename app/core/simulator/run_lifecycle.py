@@ -107,7 +107,8 @@ class RunLifecycle:
         active = self._count_active_runs_locked()
         if active >= max_active:
             raise ConflictException(
-                "Global active runs limit reached",
+                # 044 stage 2 (decision 3): the message names the number of places; `details` keep their shape.
+                f"Global active runs limit reached: all {max_active} places are taken",
                 details={
                     "conflict_kind": "global_active_limit",
                     "max_active_runs": max_active,
