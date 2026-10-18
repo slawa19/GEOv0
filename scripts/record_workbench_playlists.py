@@ -46,7 +46,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -119,11 +119,130 @@ def check_plan(scenario: dict[str, Any]) -> list[str]:
     return problems
 
 
-class Stream:
-    """The run's SSE stream, read on a thread into a queue of parsed events."""
+class EventSource(Protocol):
+    """The run's events in stream order. `next` returns None once the stream has ended (nothing more will come)."""
+
+    def next(self) -> dict[str, Any] | None: ...
+
+    def close(self) -> None: ...
+
+
+class Backend(Protocol):
+    """What the recording asks of the backend. `HttpBackend` is the real one; the tooling tests feed a canned stream."""
+
+    def start_run(self) -> str: ...
+
+    def pause(self, run_id: str) -> None: ...
+
+    def seed(self, run_id: str) -> None: ...
+
+    def snapshot(self, run_id: str) -> dict[str, Any]: ...
+
+    def pay(self, run_id: str, from_pid: str, to_pid: str, amount: str) -> dict[str, Any]: ...
+
+    def clear(self, run_id: str) -> dict[str, Any]: ...
+
+    def stop(self, run_id: str) -> None: ...
+
+    def events(self, run_id: str) -> EventSource: ...
+
+
+def take_until(source: EventSource, wanted: str) -> list[dict[str, Any]]:
+    """Every event up to and including the first of type `wanted`. Refuses an event of another type than `run_status`,
+    `tx.updated` or `clearing.done` (a `tx.failed` included) and a stream that ends first."""
+
+    seen: list[dict[str, Any]] = []
+    while True:
+        event = source.next()
+        if event is None:
+            raise RecordingRefused(f"the stream ended before an expected {wanted!r} event")
+        kind = str(event.get("type"))
+        if kind not in ("run_status", *EFFECT_TYPES):
+            raise RecordingRefused(f"an unexpected event type {kind!r}: {json.dumps(event)[:400]}")
+        seen.append(event)
+        if kind == wanted:
+            return seen
+
+
+def payment_event(effects: list[dict[str, Any]], n: int, sender: str, receiver: str, amount: str) -> dict[str, Any]:
+    """The one `tx.updated` of planned payment `n`: exactly one effect event, of its sender, receiver and amount."""
+
+    event = effects[-1] if effects else {}
+    if len(effects) != 1 or (event.get("from"), event.get("to"), event.get("amount")) != (sender, receiver, amount):
+        raise RecordingRefused(f"payment PLAN[{n}] {sender}->{receiver} {amount}: the stream answered {json.dumps(effects)[:400]}")
+    return event
+
+
+def record(backend: Backend) -> tuple[str, dict[str, Any]]:
+    """Drives one run by `PLAN` and returns its id and what was recorded; raises `RecordingRefused` on any doubt."""
+
+    out: dict[str, Any] = {}
+    run_id = backend.start_run()
+    source: EventSource | None = None
+    try:
+        backend.pause(run_id)
+        backend.seed(run_id)  # Interact's lazy seeding: the run's participants and lines are written here
+        source = backend.events(run_id)
+        take_until(source, "run_status")  # the stream answers its first status on connect: from here nothing is missed
+
+        def pid(ordinal: int) -> str:
+            return f"{run_id}:p{ordinal}"
+
+        def effects_until(wanted: str) -> list[dict[str, Any]]:
+            assert source is not None
+            return [e for e in take_until(source, wanted) if e["type"] != "run_status"]
+
+        out["demo-tx-snapshot"] = backend.snapshot(run_id)
+        payments: list[dict[str, Any]] = []
+        for n, (a, b, amount) in enumerate(PLAN):
+            answer = backend.pay(run_id, pid(a), pid(b), amount)
+            if len(answer.get("routes") or []) != 1:
+                raise RecordingRefused(f"payment PLAN[{n}] answered {len(answer.get('routes') or [])} routes")
+            payments.append(payment_event(effects_until("tx.updated"), n, pid(a), pid(b), amount))
+        out["demo-tx"] = payments
+
+        out["demo-clearing-snapshot"] = backend.snapshot(run_id)
+        cleared = backend.clear(run_id)
+        if int(cleared.get("cleared_cycles") or 0) < 1:
+            raise RecordingRefused(f"the clearing cleared nothing: {json.dumps(cleared)[:400]}")
+        clearing = effects_until("clearing.done")
+        if len(clearing) != 1:
+            raise RecordingRefused(f"the clearing: the stream answered {json.dumps(clearing)[:400]}")
+        out["demo-clearing"] = clearing
+        out["clearing-answer"] = cleared
+        out["after-clearing-snapshot"] = backend.snapshot(run_id)
+    finally:
+        if source is not None:
+            source.close()
+        backend.stop(run_id)
+    return run_id, out
+
+
+#: The files of a recording, in the folder of the playlists: each playlist next to its own start snapshot.
+RECORDED_FILES = ("demo-tx-snapshot", "demo-tx", "demo-clearing-snapshot", "demo-clearing")
+
+
+def _write(path: Path, data: Any) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def write_recording(out_dir: Path, out: dict[str, Any], evidence: Path | None = None) -> None:
+    """Writes the recording as it came: the server's dicts, untouched, as JSON."""
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name in RECORDED_FILES:
+        _write(out_dir / f"{name}.json", out[name])
+    if evidence is not None:
+        evidence.mkdir(parents=True, exist_ok=True)
+        _write(evidence / "clearing-answer.json", out["clearing-answer"])
+        _write(evidence / "after-clearing-snapshot.json", out["after-clearing-snapshot"])
+
+
+class _HttpStream:
+    """The run's SSE stream, read on a thread into a queue of parsed events; None in the queue marks its end."""
 
     def __init__(self, base_url: str, headers: dict[str, str], run_id: str) -> None:
-        self.events: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.events: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.error: BaseException | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._read, args=(base_url, headers, run_id), daemon=True)
@@ -142,9 +261,11 @@ class Stream:
                             self.events.put(json.loads(line.removeprefix("data: ")))
         except BaseException as exc:  # noqa: BLE001 - handed to the main thread, which refuses the recording
             self.error = exc
+        finally:
+            self.events.put(None)
 
-    def next(self, timeout: float = EVENT_TIMEOUT_SEC) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
+    def next(self) -> dict[str, Any] | None:
+        deadline = time.monotonic() + EVENT_TIMEOUT_SEC
         while True:
             if self.error is not None:
                 raise RecordingRefused(f"the SSE stream failed: {self.error!r}")
@@ -156,90 +277,58 @@ class Stream:
             except queue.Empty:
                 continue
 
-    def until(self, wanted: str) -> list[dict[str, Any]]:
-        """Every event up to and including the first of type `wanted`; refuses an unexpected type."""
-
-        seen: list[dict[str, Any]] = []
-        while True:
-            event = self.next()
-            kind = str(event.get("type"))
-            if kind not in ("run_status", *EFFECT_TYPES):
-                raise RecordingRefused(f"an unexpected event type {kind!r}: {json.dumps(event)[:400]}")
-            seen.append(event)
-            if kind == wanted:
-                return seen
-
     def close(self) -> None:
         self._stop.set()
 
 
-def _json(response: httpx.Response, what: str) -> Any:
-    if response.status_code != 200:
-        raise RecordingRefused(f"{what}: HTTP {response.status_code} {response.text[:400]}")
-    return response.json()
+class HttpBackend:
+    """The running backend, by its HTTP API and its admin token."""
+
+    def __init__(self, base_url: str, token: str) -> None:
+        self._base_url = base_url
+        self._headers = {"X-Admin-Token": token}
+        self._client = httpx.Client(base_url=base_url, headers=self._headers, timeout=60.0)
+        self._api = "/api/v1/simulator"
+
+    @staticmethod
+    def _json(response: httpx.Response, what: str) -> Any:
+        if response.status_code != 200:
+            raise RecordingRefused(f"{what}: HTTP {response.status_code} {response.text[:400]}")
+        return response.json()
+
+    def start_run(self) -> str:
+        body = {"scenario_id": SCENARIO_ID, "intensity_percent": 0}
+        return str(self._json(self._client.post(f"{self._api}/runs", json=body), "start the run")["run_id"])
+
+    def pause(self, run_id: str) -> None:
+        self._json(self._client.post(f"{self._api}/runs/{run_id}/pause"), "pause the run")
+
+    def seed(self, run_id: str) -> None:
+        url = f"{self._api}/runs/{run_id}/actions/trustlines-list"
+        self._json(self._client.get(url, params={"equivalent": EQUIVALENT}), "seed the run")
+
+    def snapshot(self, run_id: str) -> dict[str, Any]:
+        url = f"{self._api}/runs/{run_id}/graph/snapshot"
+        return self._json(self._client.get(url, params={"equivalent": EQUIVALENT}), "the snapshot")
+
+    def pay(self, run_id: str, from_pid: str, to_pid: str, amount: str) -> dict[str, Any]:
+        body = {"from_pid": from_pid, "to_pid": to_pid, "equivalent": EQUIVALENT, "amount": amount}
+        url = f"{self._api}/runs/{run_id}/actions/payment-real"
+        return self._json(self._client.post(url, json=body), f"payment {from_pid}->{to_pid} {amount}")
+
+    def clear(self, run_id: str) -> dict[str, Any]:
+        url = f"{self._api}/runs/{run_id}/actions/clearing-real"
+        return self._json(self._client.post(url, json={"equivalent": EQUIVALENT}), "the clearing")
+
+    def stop(self, run_id: str) -> None:
+        self._client.post(f"{self._api}/runs/{run_id}/stop")
+        self._client.close()
+
+    def events(self, run_id: str) -> EventSource:
+        return _HttpStream(self._base_url, self._headers, run_id)
 
 
-def record(base_url: str, token: str) -> tuple[str, dict[str, Any]]:
-    headers = {"X-Admin-Token": token}
-    out: dict[str, Any] = {}
-    with httpx.Client(base_url=base_url, headers=headers, timeout=60.0) as client:
-        api = "/api/v1/simulator"
-        run_id = str(_json(client.post(f"{api}/runs", json={"scenario_id": SCENARIO_ID, "intensity_percent": 0}),
-                           "start the run")["run_id"])
-        stream: Stream | None = None
-        try:
-            _json(client.post(f"{api}/runs/{run_id}/pause"), "pause the run")
-            # Interact's lazy seeding: the run's participants and lines are written to the database here.
-            _json(client.get(f"{api}/runs/{run_id}/actions/trustlines-list", params={"equivalent": EQUIVALENT}),
-                  "seed the run")
-            stream = Stream(base_url, headers, run_id)
-            stream.until("run_status")  # the stream answers its first status on connect: from here nothing is missed
-
-            def snapshot(what: str) -> dict[str, Any]:
-                return _json(client.get(f"{api}/runs/{run_id}/graph/snapshot", params={"equivalent": EQUIVALENT}), what)
-
-            def pid(ordinal: int) -> str:
-                return f"{run_id}:p{ordinal}"
-
-            out["demo-tx-snapshot"] = snapshot("the snapshot before the payments")
-            payments: list[dict[str, Any]] = []
-            for n, (a, b, amount) in enumerate(PLAN):
-                answer = _json(client.post(f"{api}/runs/{run_id}/actions/payment-real",
-                                           json={"from_pid": pid(a), "to_pid": pid(b), "equivalent": EQUIVALENT,
-                                                 "amount": amount}),
-                               f"payment PLAN[{n}] {a}->{b} {amount}")
-                if len(answer.get("routes") or []) != 1:
-                    raise RecordingRefused(f"payment PLAN[{n}] answered {len(answer.get('routes') or [])} routes")
-                effects = [e for e in stream.until("tx.updated") if e["type"] != "run_status"]
-                event = effects[-1]
-                if len(effects) != 1 or (event.get("from"), event.get("to"), event.get("amount")) != (pid(a), pid(b), amount):
-                    raise RecordingRefused(f"payment PLAN[{n}] {a}->{b} {amount}: the stream answered {json.dumps(effects)[:400]}")
-                payments.append(event)
-            out["demo-tx"] = payments
-
-            out["demo-clearing-snapshot"] = snapshot("the snapshot before the clearing")
-            cleared = _json(client.post(f"{api}/runs/{run_id}/actions/clearing-real", json={"equivalent": EQUIVALENT}),
-                            "the clearing")
-            if int(cleared.get("cleared_cycles") or 0) < 1:
-                raise RecordingRefused(f"the clearing cleared nothing: {json.dumps(cleared)[:400]}")
-            clearing = [e for e in stream.until("clearing.done") if e["type"] != "run_status"]
-            if len(clearing) != 1:
-                raise RecordingRefused(f"the clearing: the stream answered {json.dumps(clearing)[:400]}")
-            out["demo-clearing"] = clearing
-            out["clearing-answer"] = cleared
-            out["after-clearing-snapshot"] = snapshot("the snapshot after the clearing")
-        finally:
-            if stream is not None:
-                stream.close()
-            client.post(f"{api}/runs/{run_id}/stop")
-    return run_id, out
-
-
-def _write(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-
-
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, backend: Backend | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--base-url", default="http://127.0.0.1:18000")
     parser.add_argument("--out", required=True, type=Path, help="the folder of the UAH playlists")
@@ -247,27 +336,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="optional folder for what is not committed: the clearing answer, the snapshot after it")
     args = parser.parse_args(argv)
 
-    token = os.environ.get("GEO_ADMIN_TOKEN", "").strip()
-    if not token:
-        print("GEO_ADMIN_TOKEN is not set (the backend's ADMIN_TOKEN)", file=sys.stderr)
-        return 2
+    if backend is None:
+        token = os.environ.get("GEO_ADMIN_TOKEN", "").strip()
+        if not token:
+            print("GEO_ADMIN_TOKEN is not set (the backend's ADMIN_TOKEN)", file=sys.stderr)
+            return 2
+        backend = HttpBackend(args.base_url, token)
     problems = check_plan(json.loads(SCENARIO_PATH.read_text(encoding="utf-8")))
     if problems:
         print("\n".join(problems), file=sys.stderr)
         return 2
     try:
-        run_id, out = record(args.base_url, token)
+        run_id, out = record(backend)
     except RecordingRefused as exc:
         print(f"recording refused, nothing written: {exc}", file=sys.stderr)
         return 1
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    for name in ("demo-tx-snapshot", "demo-tx", "demo-clearing-snapshot", "demo-clearing"):
-        _write(args.out / f"{name}.json", out[name])
-    if args.evidence is not None:
-        args.evidence.mkdir(parents=True, exist_ok=True)
-        _write(args.evidence / "clearing-answer.json", out["clearing-answer"])
-        _write(args.evidence / "after-clearing-snapshot.json", out["after-clearing-snapshot"])
+    write_recording(args.out, out, args.evidence)
     print(f"recorded run {run_id}: {len(out['demo-tx'])} payment events, {len(out['demo-clearing'])} clearing events")
     return 0
 
