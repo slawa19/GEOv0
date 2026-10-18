@@ -141,10 +141,22 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
   return formatMoney(value, equivalentPrecision(tl.equivalent || props.equivalentText))
 }
 
+/**
+ * 045 S3 round (Codex P2): what is available on a line, with its unit - the accessible description of the row's Edit button
+ * and visible while the row holds the keyboard focus (the `title` of the row reaches a pointer only).
+ */
+function rowAvailableText(tl: TrustlineInfo): string {
+  return interactText('cardLineAvailable')
+    .replace('{amount}', renderAvailable(rowMoney(tl, tl.available)))
+    .replace('{unit}', String(tl.equivalent || props.equivalentText || '').trim())
+    .trim()
+}
+const rowAvailableId = (tl: TrustlineInfo) => `nco-avail-${tl.from_pid}-${tl.to_pid}`.replace(/[^A-Za-z0-9_-]/g, '_')
+
 // Ids are PRINTED in this card (a name falls back to the id), so they go through the display rule; keys and events keep the full id.
 const showPid = useParticipantDisplayId()
 const nodeName = computed(() => showPid(String(props.node.name ?? props.node.id)))
-/** 045 S3: the head is one line; the type and status of the participant are said in the name's `title`. */
+/** 045 S3 round (Codex P2): the type and status of the participant - a visible meta line under the name. */
 const nodeMeta = computed(() => `${props.node.type ?? '—'} · ${props.node.status ?? '—'}`)
 
 /** 043-4: why Pay and New line cannot start now, or null when they can. */
@@ -194,7 +206,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
         <!-- Head, one line (045 S3): name and role, balance and its equivalent, pin and close. -->
         <div class="ds-ov-node-card__identity">
           <div class="ds-ov-node-card__who">
-            <span class="ds-ov-node-card__name" data-testid="node-card-name" :title="`${nodeName} · ${nodeMeta}`">{{ nodeName }}</span>
+            <div class="ds-ov-node-card__who-line">
+            <span class="ds-ov-node-card__name" data-testid="node-card-name" :title="nodeName">{{ nodeName }}</span>
             <span class="nco-role" data-testid="node-card-role" :data-role="look.role">
               <span
                 class="ds-data-swatch"
@@ -205,6 +218,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               >{{ look.sign }}</span>
               <span class="nco-role__words">{{ roleWords }}</span>
             </span>
+            </div>
+            <div class="ds-ov-node-card__meta" data-testid="node-card-meta">{{ nodeMeta }}</div>
           </div>
           <span class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</span>
           <span v-if="equivalentText" class="ds-ov-node-card__unit">{{ equivalentText }}</span>
@@ -286,9 +301,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               >
                 <span class="nco-trustline-row__peer">{{ showPid(tl.to_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+                <span :id="rowAvailableId(tl)" class="nco-trustline-row__avail-desc" data-testid="node-card-line-available">{{ rowAvailableText(tl) }}</span>
                 <button
                   class="ds-btn ds-btn--ghost nco-trustline-row__edit"
                   type="button"
+                  :aria-describedby="rowAvailableId(tl)"
                   :disabled="!!interactBusy"
                   title="Edit trustline"
                   aria-label="Edit trustline"
@@ -310,9 +327,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               >
                 <span class="nco-trustline-row__peer">{{ showPid(tl.from_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+                <span :id="rowAvailableId(tl)" class="nco-trustline-row__avail-desc" data-testid="node-card-line-available">{{ rowAvailableText(tl) }}</span>
                 <button
                   class="ds-btn ds-btn--ghost nco-trustline-row__edit"
                   type="button"
+                  :aria-describedby="rowAvailableId(tl)"
                   :disabled="!!interactBusy"
                   :title="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
                   :aria-label="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
@@ -383,7 +402,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   color: var(--ds-text-3);
 }
 
-/* Row: [peer] [used / limit] [Edit]; what is available is in the row's `title`. */
+/* Row: [peer] [used / limit] [Edit]; what is available is in the row's `title`, and in a line of its own while the row
+   holds the keyboard focus (045 S3 round, Codex P2); otherwise that line is visually hidden but still describes Edit. */
 .nco-trustline-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -409,6 +429,33 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.nco-trustline-row {
+  position: relative;
+}
+
+.nco-trustline-row__avail-desc {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nco-trustline-row:focus-within .nco-trustline-row__avail-desc {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: var(--ds-typo-section-label-font-size);
+  color: var(--ds-text-2);
 }
 
 .nco-trustline-row__edit {

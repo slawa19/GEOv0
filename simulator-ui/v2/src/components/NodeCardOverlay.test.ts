@@ -340,4 +340,26 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     host.remove()
   })
 
+  // 045 S3 round (Codex §15 P2, 2026-10-18): what the card says must reach a keyboard and assistive technology, not only a
+  // pointer's `title`.
+  it('P2: the type and status of the participant are visible text (the meta line)', async () => {
+    const { app, host } = mountNodeCard()
+    await nextTick()
+    expect(host.querySelector('[data-testid="node-card-meta"]')?.textContent?.trim()).toBe('person · active')
+    app.unmount()
+    host.remove()
+  })
+
+  it('P2: the Edit button of a line is described by what is available on it, with the unit', async () => {
+    const tl = { from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH', limit: '10.00', used: '1.00', available: '9.00', status: 'active' }
+    const { app, host } = mountNodeCard({ interactTrustlines: [tl] })
+    await nextTick()
+    const edit = host.querySelector('.nco-trustline-row__edit') as HTMLButtonElement
+    const ids = (edit.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+    const described = ids.map((id) => host.querySelector(`[id="${id}"]`)?.textContent?.trim() ?? '').join(' ')
+    expect(described).toBe('available 9.00 UAH')
+    app.unmount()
+    host.remove()
+  })
+
 })

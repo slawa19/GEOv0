@@ -5,7 +5,7 @@
  * Measured in the DOM at 1366x768, in both product themes (`saas`, `hud`), on the mocked backend of the 037 specs
  * (`helpers/p037Mock.ts`; Alice holds the line Bob -> Alice, and with `aliceLines` eight more lines Alice -> x01..x08):
  *
- *   (е1) card: the head is one line - name, balance and the close button share a line;
+ *   (е1) card: the head is one block - name and role on a line, balance and close beside it (the meta line under the name);
  *   (е2) card: the statistics are one line (Out, In, Degree);
  *   (е3) card: a row of a line has no third column - what is available is in the row's `title`;
  *   (е4) card: with nine lines the list shows at most five rows and scrolls;
@@ -80,7 +80,7 @@ async function visualRows(root: Locator): Promise<Rows> {
       if (n.closest('details:not([open])') && !n.closest('summary')) continue
       const r = n.getBoundingClientRect()
       const s = getComputedStyle(n)
-      if (r.width === 0 || r.height === 0 || s.visibility === 'hidden' || s.display === 'none' || clipped(n, r)) continue
+      if (r.width <= 1 || r.height <= 1 || s.visibility === 'hidden' || s.display === 'none' || clipped(n, r)) continue
       items.push({ c: r.top + r.height / 2, t: n.matches('[role="progressbar"]') ? '[bar]' : (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24) })
     }
     items.sort((a, b) => a.c - b.c)
@@ -135,7 +135,11 @@ for (const theme of THEMES) {
       const values = await card.locator('.ds-ov-node-card__stats .ds-value').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }))
       info.annotations.push({ type: 'P045S3-e1e2', description: JSON.stringify({ head, stats, values }) })
       const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs)
-      expect(spread(Object.values(head)), `the head is one line: ${JSON.stringify(head)}`).toBeLessThan(4)
+      // 045 S3 round (Codex P2, 2026-10-18): the head is one block - name and role on a line, the meta line (type · status)
+      // under the name; balance and close share a line, beside the name (within the block, not a row of their own).
+      expect(spread([head.name, head.role]), `name and role are one line: ${JSON.stringify(head)}`).toBeLessThan(4)
+      expect(spread([head.balance, head.close]), `balance and close are one line: ${JSON.stringify(head)}`).toBeLessThan(4)
+      expect(Math.abs(head.balance - head.name), `balance is beside the name: ${JSON.stringify(head)}`).toBeLessThan(12)
       expect(spread([...stats, ...values]), `the statistics are one line: ${JSON.stringify({ stats, values })}`).toBeLessThan(4)
     })
 
@@ -144,7 +148,7 @@ for (const theme of THEMES) {
       const card = await openCard(page)
       const row = card.locator('.nco-trustline-row').first()
       await expect(row).toHaveAttribute('title', /avail: 100\.00/)
-      const texts = await row.evaluate((el) => Array.from(el.children).filter((c) => !c.matches('button') && c.getBoundingClientRect().width > 0).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()))
+      const texts = await row.evaluate((el) => Array.from(el.children).filter((c) => !c.matches('button') && c.getBoundingClientRect().width > 1).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()))
       expect(texts, 'peer and used / limit only').toEqual(['Bob', '0.00 / 100.00'])
       expect((await row.boundingBox())!.height, 'a row is 24 px (the smallest pointer target)').toBeLessThanOrEqual(24.5)
     })
@@ -184,6 +188,20 @@ for (const theme of THEMES) {
       await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeHidden()
       await expect(pay).toBeEnabled()
       await expect(reason).toHaveCount(0)
+    })
+
+    test('(е7) Codex P2: type and status are visible; focus on a line row shows what is available, with the unit', async ({ page }, info) => {
+      await open(page, theme)
+      const card = await openCard(page)
+      await expect(card.locator('[data-testid="node-card-meta"]'), 'type · status is visible text').toBeVisible()
+      await expect(card.locator('[data-testid="node-card-meta"]')).toHaveText('person · active')
+      const avail = card.locator('[data-testid="node-card-line-available"]').first()
+      await card.locator('.nco-trustline-row__edit').first().focus()
+      await expect(avail, 'keyboard focus on the row shows the availability').toBeVisible()
+      await expect(avail).toHaveText('available 100.00 UAH')
+      const box = (await avail.boundingBox())!
+      expect(box.width, 'shown, not a 1 px clip').toBeGreaterThan(20)
+      info.annotations.push({ type: 'P045S3-e7', description: JSON.stringify({ card: (await card.boundingBox())!.height }) })
     })
 
     test('(е6) card: buttons carry no emoji; Escape from a focused button closes the card', async ({ page }) => {

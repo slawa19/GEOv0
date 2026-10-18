@@ -550,8 +550,24 @@ details[open].ds-ov-details > summary::after {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
+  flex-direction: column;
+}
+
+.ds-ov-node-card__who-line {
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* The type and status of the participant (045 S3 round, Codex P2): visible meta text under the name. */
+.ds-ov-node-card__meta {
+  font-size: var(--ds-typo-section-label-font-size);
+  line-height: 1.3;
+  color: var(--ds-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ds-ov-node-card__name {
