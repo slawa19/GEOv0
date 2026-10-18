@@ -261,7 +261,7 @@ $taskSlug = "agent_payments_review"
 `-TaskSlug` разводит по `.local-run/test-runs/<slug>/`: `pytest` (basetemp), `cache`, `artifacts` (экспортируется как `GEO_TEST_ARTIFACT_ROOT`) и default `TEST_DATABASE_URL` вида `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>` (см. §5).
 
 - Postgres DB name также уникален на agent/task.
-- Для backend/Admin/Simulator/Playwright резервируйте уникальные порты и явно передавайте поддерживаемые env/CLI параметры (`PW_E2E_PORT` для Playwright-smoke; CI использует 41731/41732 — не занимайте их вслепую).
+- Для backend/Admin/Simulator/Playwright резервируйте уникальные порты и явно передавайте поддерживаемые env/CLI параметры (`PW_E2E_PORT` для Playwright-smoke; CI использует 24731–24738 — не занимайте их вслепую). Диапазон ниже эфемерного диапазона ядра (ubuntu 32768–60999, Windows 49152–65535); почему перенесены — 041 `T4111`.
 - Если entrypoint жёстко фиксирует порт, такой прогон сериализуется; нельзя молча запускать два экземпляра.
 - Runtime artifacts пишутся только в уникальную ignored директорию задачи.
 - **Никаких каталогов вне папки проекта** (решение владельца 2026-09-21, повод — worktree `GEOv0-wt-017`, заведённый рядом с проектом, и каталог ревью в `%TEMP%`). Дополнительный worktree — только в игнорируемом `.local-run/worktrees/<slug>/`; `.claude/worktrees/` не игнорируется и ломает проверку чистого дерева у соседних сессий. Убирается worktree командой `git worktree remove`, а не удалением папки, и только после того, как его коммиты сохранены на `origin`.

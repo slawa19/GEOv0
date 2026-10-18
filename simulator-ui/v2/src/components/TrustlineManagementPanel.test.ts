@@ -616,3 +616,62 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 })
+
+// 045 S3 (BACKLOG 045-1): the create step offers From (decision 3: From -> To -> Limit -> [Cancel][Create]); a change goes
+// through `setTrustlineFromPid` of the real interact state machine.
+describe('TrustlineManagementPanel - From on the create step (045-1)', () => {
+  it('shows From with the sender, and choosing another sender changes the pair of the create step', async () => {
+    const { useInteractFSM } = await import('../composables/interact/useInteractFSM')
+    const { ref } = await import('vue')
+    const fsm = useInteractFSM({ snapshot: ref(null), findActiveTrustline: () => null })
+    fsm.startTrustlineFlowWithFrom('alice')
+    fsm.setTrustlineToPid('carol')
+    expect(fsm.state.phase).toBe('confirm-trustline-create')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = createApp({
+      render: () =>
+        h(trustlineManagementPanelComponent, {
+          phase: fsm.state.phase,
+          state: fsm.state,
+          unit: 'UAH',
+          used: '0',
+          currentLimit: null,
+          available: null,
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+          figuresSource: { kind: 'no-row' } as const,
+          trustlines: [],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+          setFromPid: fsm.setTrustlineFromPid,
+          setToPid: fsm.setTrustlineToPid,
+        }),
+    })
+    try {
+      app.mount(host)
+      await nextTick()
+      const trigger = host.querySelector('#tl-from__trigger') as HTMLButtonElement | null
+      expect(trigger, 'From is on the create step').toBeTruthy()
+      expect((trigger!.textContent ?? '').trim()).toContain('Alice')
+
+      trigger!.click()
+      await nextTick()
+      await nextTick()
+      ;(document.querySelector('#tl-from__surface [data-option-value="bob"]') as HTMLElement).click()
+      await nextTick()
+      expect([fsm.state.phase, fsm.state.fromPid, fsm.state.toPid]).toEqual(['confirm-trustline-create', 'bob', 'carol'])
+      expect(host.querySelector('#tl-to__trigger'), 'To stays').toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+})

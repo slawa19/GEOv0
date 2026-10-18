@@ -24,6 +24,11 @@
  *   Interact; it is named only while it holds the run controls. `page` 2 -> 1 in both themes (`.wm-layer` stays);
  *   `top-bar-interact` 1 -> 0 in both themes (line removed). The two new entries, `top-bar-interact-details` and
  *   `bottom-bar-details`, measured 0 in both themes (no line). No other number moved.
+ * - 2026-10-18 (045 S3, the line window): one node FIXED, none added. `edge-popup` hud `color-contrast` 3 -> 2: the
+ *   ghost "Close" button of the last row is gone (the window closes from the x of its title, which passes); "Pay" and
+ *   "Change limit" remain (their colour is the hud secondary button's). The new texts of the window (the equivalent in
+ *   the title, the labels of the figures line, the direction summary) are `--ds-text-2`: as `--ds-text-3` they were five
+ *   new nodes in hud (measured, then fixed). No other number moved.
  */
 import type { Theme } from './surfaceMatrix.js'
 
@@ -43,8 +48,8 @@ export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string
 export const AXE_BASELINE: Record<string, Partial<Record<Theme, Record<string, number>>>> = {
   // `.wm-layer`: what is left of the S0 start value (R8); `.hud-bar__center` was fixed by 043 S1 (2026-10-16).
   page: { hud: { 'aria-prohibited-attr': 1 }, saas: { 'aria-prohibited-attr': 1 } },
-  // hud: "Send payment", "Change limit", the ghost close button.
-  'edge-popup': { hud: { 'color-contrast': 3 } },
+  // hud: "Pay <sender>", "Change limit" (045 S3, 2026-10-18: the ghost close button is gone).
+  'edge-popup': { hud: { 'color-contrast': 2 } },
   // The "Copy" button of a dev-only overlay (`?perf=1`).
   'dev-perf-overlay': { hud: { 'color-contrast': 1 } },
 }

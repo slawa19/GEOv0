@@ -204,21 +204,30 @@ function onCloseLine() {
     aria-label="Edge detail popup"
     :style="popupStyle"
   >
-    <div class="popup__title ds-label">Edge</div>
-    <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
-
-    <div class="popup__grid">
-      <div class="ds-label">Used</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(figures.used) }} {{ unit }}</div>
-      <div class="ds-label">Limit</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(figures.limit) }} {{ unit }}</div>
-      <div class="ds-label">Available</div>
-      <div class="ds-value ds-mono">{{ renderAvailable(figures.available) }} {{ unit }}</div>
-      <div class="ds-label">Status</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(figures.status) }}</div>
+    <!-- 045 S3 (decision 3): the pair and its equivalent are the title; the window closes from × (and Escape, handled by
+         the window manager). The equivalent is said once, here: the figures below are all of it. -->
+    <div class="popup__head">
+      <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
+      <span v-if="unit" class="popup__unit" data-testid="edge-unit">{{ unit }}</span>
+      <button
+        class="ds-btn ds-btn--ghost ds-btn--icon popup__close"
+        type="button"
+        aria-label="Close"
+        title="Close"
+        aria-keyshortcuts="Escape"
+        @click="close"
+      >×</button>
     </div>
 
-    <!-- ED-2: capacity utilization bar (used/limit), shown under the stats grid. -->
+    <!-- One line: Used / Limit · avail (the equivalent is in the title); the status ends the bar's line - at 320 px the hud
+         monospace does not hold all four on one line (measured 2026-10-18). -->
+    <div class="popup__stats" data-testid="edge-stats">
+      <span class="popup__k">Used</span>{{ ' ' }}<span data-testid="edge-used">{{ renderOrDash(figures.used) }}</span>{{ ' / ' }}<span
+        class="popup__k">Limit</span>{{ ' ' }}<span data-testid="edge-limit">{{ renderOrDash(figures.limit) }}</span>{{ ' · ' }}<span
+        class="popup__k">avail</span>{{ ' ' }}<span data-testid="edge-available">{{ renderAvailable(figures.available) }}</span>
+    </div>
+
+    <!-- ED-2: capacity utilization bar (used/limit), shown under the figures. -->
     <div class="popup__util" aria-label="Utilization">
       <div
         class="popup__util-bar"
@@ -232,37 +241,33 @@ function onCloseLine() {
         <div class="popup__util-fill" :style="{ width: utilizationWidth, background: utilizationColor }" />
       </div>
       <div class="popup__util-pct ds-label ds-mono" data-testid="edge-utilization-pct">{{ utilizationLabel }}</div>
+      <span class="popup__status" data-testid="edge-status">{{ renderOrDash(figures.status) }}</span>
     </div>
 
-    <div class="popup__actions">
-      <div
-        v-if="sourceUnavailableText"
-        class="popup__inline-warn ds-label ds-mono"
-        data-testid="edge-source-unavailable"
-      >
-        {{ sourceUnavailableText }} Closing the line is disabled until then.
-      </div>
-      <div
-        v-if="noTrustlineText"
-        class="popup__inline-warn ds-label ds-mono"
-        data-testid="edge-no-trustline"
-      >
-        {{ noTrustlineText }}
-      </div>
-      <div
-        v-if="frozenText"
-        class="popup__inline-warn ds-label ds-mono"
-        data-testid="edge-frozen-figures"
-      >
-        {{ frozenText }}
-      </div>
-      <div v-if="closeRequested" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-requested">
-        Close requested: limit stays 0; the line closes when its debt is repaid.
-      </div>
-      <div v-else-if="closeIsRequest" class="ds-label ds-mono" data-testid="edge-close-request-note">
-        Closing with debt (used: {{ renderOrDash(figures.used) }} {{ unit }}) is a request: limit becomes 0 until repaid.
-      </div>
+    <!-- Warnings: a line each, only when there is one. -->
+    <div v-if="sourceUnavailableText" class="ds-help popup__warn" data-testid="edge-source-unavailable">
+      {{ sourceUnavailableText }} Closing the line is disabled until then.
+    </div>
+    <div v-if="noTrustlineText" class="ds-help popup__warn" data-testid="edge-no-trustline">
+      {{ noTrustlineText }}
+    </div>
+    <div v-if="frozenText" class="ds-help popup__warn" data-testid="edge-frozen-figures">
+      {{ frozenText }}
+    </div>
+    <div v-if="closeRequested" class="ds-help popup__warn" data-testid="edge-close-requested">
+      Close requested: limit stays 0; the line closes when its debt is repaid.
+    </div>
+    <div v-else-if="closeIsRequest" class="ds-help" data-testid="edge-close-request-note">
+      Closing with debt (used: {{ renderOrDash(figures.used) }} {{ unit }}) is a request: limit becomes 0 until repaid.
+    </div>
 
+    <!-- F-037-4: why Pay runs against the line's arrow - closed by default, as on the payment panel. Always in the DOM. -->
+    <details class="ds-help popup__direction" data-testid="edge-payment-direction">
+      <summary>{{ interactText('lineDirectionTitle') }}</summary>
+      <div data-testid="edge-payment-direction-note">{{ interactText('lineDirectionNote') }}</div>
+    </details>
+
+    <div class="popup__actions">
       <button
         class="ds-btn ds-btn--secondary ds-btn--sm"
         type="button"
@@ -270,10 +275,9 @@ function onCloseLine() {
         data-testid="edge-send-payment"
         @click="emit('sendPayment')"
       >
-        💸 Pay {{ sendPaymentFromLabel }}
+        Pay {{ sendPaymentFromLabel }}
       </button>
-      <div class="ds-label ds-mono" data-testid="edge-payment-direction-note">{{ interactText('lineDirectionNote') }}</div>
-      <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" @click="emit('changeLimit')">
+      <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" data-testid="edge-change-limit" @click="emit('changeLimit')">
         Change limit
       </button>
       <button
@@ -296,35 +300,73 @@ function onCloseLine() {
       >
         Cancel
       </button>
-      <button class="ds-btn ds-btn--ghost ds-btn--sm" type="button" @click="close">Close</button>
     </div>
   </div>
 </template>
 
 <style scoped>
+/*
+  045 S3 (decision 3): the line window on the one scale of the windows - as wide as the shell's preferred width (the token the
+  window manager reads), the pair as the title, the figures on one line with the bar under them, warnings as `.ds-help`
+  lines, one row of small buttons.
+*/
 .popup {
   position: absolute;
   z-index: var(--ds-z-panel, 42);
-  min-width: var(--ds-edp-minw);
+  box-sizing: border-box;
+  width: var(--ds-wm-edge-detail-prefw);
   max-width: min(460px, calc(100vw - 24px));
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
 }
 
-.popup__title {
-  opacity: 0.9;
+.popup__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-width: 0;
 }
 
 .popup__subtitle {
-  margin-top: 2px;
-  margin-bottom: 8px;
-  opacity: 0.95;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ds-typo-panel-heading-font-size);
+  font-weight: 600;
+}
+
+.popup__unit {
+  flex: 0 0 auto;
+  margin-right: auto;
+  font-size: var(--ds-typo-section-label-font-size);
+  /* Not `--ds-text-3`: it fails contrast in hud (stand, axe, 2026-10-18). */
+  color: var(--ds-text-2);
+}
+
+.popup__close {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+
+.popup__stats {
+  font-size: var(--ds-typo-label-font-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-1);
+}
+
+.popup__k {
+  color: var(--ds-text-2);
 }
 
 .popup__util {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
 }
 
 .popup__util-bar {
@@ -340,16 +382,31 @@ function onCloseLine() {
   border-radius: 999px;
 }
 
+.popup__status {
+  font-size: var(--ds-typo-label-font-size);
+  color: var(--ds-text-1);
+  white-space: nowrap;
+}
+
 .popup__util-pct {
   opacity: 0.9;
   min-width: 3.5ch;
   text-align: right;
 }
 
-.popup__grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
+/* A warning is a hint line in the warning tone (no box). */
+.popup__warn {
+  color: color-mix(in srgb, var(--ds-warn) 55%, var(--ds-text-1));
+}
+
+.popup__direction {
+  color: var(--ds-text-2);
+}
+
+/* The summary is a pointer target: at least 24 px tall (`surfaces.qa.ts`, WCAG 2.2 target size). */
+.popup__direction > summary {
+  cursor: pointer;
+  line-height: 24px;
 }
 
 .popup__actions {
@@ -357,17 +414,5 @@ function onCloseLine() {
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
-  margin-top: 10px;
 }
-
-.popup__inline-warn {
-  flex: 1 0 100%;
-  padding: var(--ds-edp-warn-pad-y) var(--ds-edp-warn-pad-x);
-  border-radius: var(--ds-radius-md);
-  border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
-  background: color-mix(in srgb, var(--ds-warn) 14%, transparent);
-  color: color-mix(in srgb, var(--ds-warn) 18%, var(--ds-text-1));
-}
-
 </style>
-

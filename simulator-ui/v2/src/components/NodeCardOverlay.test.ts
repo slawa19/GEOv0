@@ -174,10 +174,11 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     })
 
     return nextTick().then(() => {
-      const avail = host.querySelector('.nco-trustline-row__avail') as HTMLElement | null
-      expect(avail).toBeTruthy()
-      expect(avail?.classList.contains('ds-mono')).toBe(true)
-      const text = (avail?.textContent ?? '').trim()
+      // 045 S3 (2026-10-18): the third column is gone; what is available is the row's `title`.
+      const row = host.querySelector('.nco-trustline-row') as HTMLElement | null
+      expect(row).toBeTruthy()
+      expect(host.querySelector('.nco-trustline-row__avail'), 'no third column').toBeNull()
+      const text = (row?.getAttribute('title') ?? '').trim()
       app.unmount()
       host.remove()
       return text
@@ -287,5 +288,78 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     host.remove()
   })
 
-})
+  // 045 S3, BACKLOG 043-4: Pay and New line start a flow only from `idle` (`useInteractMode` returns early otherwise); while
+  // another action is open the card says so instead of offering buttons that silently do nothing.
+  it('043-4: with another action open, Pay and New line are disabled and the reason is on a line and in their title', async () => {
+    const onPay = vi.fn()
+    const { app, host } = mountNodeCard({ interactPhase: 'picking-payment-from', onInteractSendPayment: onPay })
+    await nextTick()
+    const pay = host.querySelector('[data-testid="node-card-send-payment"]') as HTMLButtonElement
+    const line = host.querySelector('[data-testid="node-card-new-trustline"]') as HTMLButtonElement
+    const reason = host.querySelector('[data-testid="node-card-actions-reason"]')
+    expect([pay.disabled, line.disabled]).toEqual([true, true])
+    expect(reason?.textContent?.trim()).toBe('Cancel current action first (press ESC).')
+    expect(pay.title).toBe(reason?.textContent?.trim())
+    expect(pay.getAttribute('aria-describedby')).toBe('node-card-actions-reason')
+    pay.click()
+    expect(onPay).not.toHaveBeenCalled()
+    app.unmount()
+    host.remove()
+  })
 
+  it('043-4 counter-check: at idle the buttons are enabled, carry no reason and start the flow', async () => {
+    const onPay = vi.fn()
+    const { app, host } = mountNodeCard({ interactPhase: 'idle', onInteractSendPayment: onPay })
+    await nextTick()
+    const pay = host.querySelector('[data-testid="node-card-send-payment"]') as HTMLButtonElement
+    expect(pay.disabled).toBe(false)
+    expect(pay.hasAttribute('title')).toBe(false)
+    expect(host.querySelector('[data-testid="node-card-actions-reason"]')).toBeNull()
+    pay.click()
+    expect(onPay).toHaveBeenCalledWith('alice')
+    app.unmount()
+    host.remove()
+  })
+
+  it('043-4: while busy the reason says the operation is in progress', async () => {
+    const { app, host } = mountNodeCard({ interactPhase: 'idle', interactBusy: true })
+    await nextTick()
+    expect(host.querySelector('[data-testid="node-card-actions-reason"]')?.textContent?.trim()).toBe('Operation in progress… please wait.')
+    app.unmount()
+    host.remove()
+  })
+
+  // Owner's principle: equivalents are never mixed - a line of another equivalent is not listed under this card's one.
+  it('lists only the lines of the equivalent the card is labelled with', async () => {
+    const line = (to: string, equivalent: string) => ({ from_pid: 'alice', from_name: 'Alice', to_pid: to, to_name: to, equivalent, limit: '10.00', used: '1.00', available: '9.00', status: 'active' })
+    const { app, host } = mountNodeCard({ equivalentText: 'UAH', interactTrustlines: [line('bob', 'UAH'), line('carol', 'HOUR'), line('dave', 'uah')] })
+    await nextTick()
+    const peers = Array.from(host.querySelectorAll('.nco-trustline-row__peer')).map((e) => (e.textContent ?? '').trim())
+    expect(peers.sort(), 'the HOUR line is not listed under UAH').toEqual(['bob', 'dave'])
+    app.unmount()
+    host.remove()
+  })
+
+  // 045 S3 round (Codex §15 P2, 2026-10-18): what the card says must reach a keyboard and assistive technology, not only a
+  // pointer's `title`.
+  it('P2: the type and status of the participant are visible text (the meta line)', async () => {
+    const { app, host } = mountNodeCard()
+    await nextTick()
+    expect(host.querySelector('[data-testid="node-card-meta"]')?.textContent?.trim()).toBe('person · active')
+    app.unmount()
+    host.remove()
+  })
+
+  it('P2: the Edit button of a line is described by what is available on it, with the unit', async () => {
+    const tl = { from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH', limit: '10.00', used: '1.00', available: '9.00', status: 'active' }
+    const { app, host } = mountNodeCard({ interactTrustlines: [tl] })
+    await nextTick()
+    const edit = host.querySelector('.nco-trustline-row__edit') as HTMLButtonElement
+    const ids = (edit.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+    const described = ids.map((id) => host.querySelector(`[id="${id}"]`)?.textContent?.trim() ?? '').join(' ')
+    expect(described).toBe('available 9.00 UAH')
+    app.unmount()
+    host.remove()
+  })
+
+})

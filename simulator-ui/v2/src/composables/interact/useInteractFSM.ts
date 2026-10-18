@@ -355,6 +355,17 @@ export function useInteractFSM(opts: {
     }
 
     if (state.phase === 'editing-trustline' || state.phase === 'confirm-trustline-create') {
+      // 045 S3 (BACKLOG 045-1): the create step shows From. A cleared sender goes back to choosing it, and the recipient
+      // chosen as the sender is dropped - `recomputeTrustlinePhase` does nothing for a pair of one participant, which
+      // left the create step open for a line from a participant to itself.
+      if (!v || v === state.toPid) {
+        state.fromPid = v
+        state.toPid = null
+        state.selectedEdgeKey = null
+        state.edgeAnchor = null
+        state.phase = v ? 'picking-trustline-to' : 'picking-trustline-from'
+        return
+      }
       state.fromPid = v
       recomputeTrustlinePhase()
     }

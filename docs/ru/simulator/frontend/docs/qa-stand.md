@@ -21,7 +21,7 @@
 
 ## 2. Команды
 
-Все — из корня репозитория. Порт задаётся `PW_E2E_PORT` (не 41731–41737: они заняты CI), каталог вывода — `GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR` (по умолчанию `.local-run/playwright/simulator/qa`).
+Все — из корня репозитория. Порт задаётся `PW_E2E_PORT` (не 24731–24738: они заняты CI), каталог вывода — `GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR` (по умолчанию `.local-run/playwright/simulator/qa`).
 
 | Что нужно | Команда |
 |---|---|
