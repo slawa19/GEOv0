@@ -257,13 +257,6 @@ details[open].ds-ov-details > summary::after {
   padding: var(--ds-ov-panel-compact-pad);
 }
 
-.ds-ov-panel--legacy-positioned {
-  position: absolute;
-  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
-  top: calc(var(--ds-hud-stack-height, 110px) + var(--ds-ov-safe-top, 0px));
-  z-index: var(--ds-z-panel, 42);
-}
-
 /* Edge detail popup (Interact mode) — visuals only; placement comes from inline style */
 .ds-ov-edge-detail {
   padding: var(--ds-ov-edge-detail-pad-y) var(--ds-ov-edge-detail-pad-x);
@@ -506,10 +499,8 @@ details[open].ds-ov-details > summary::after {
    ────────────────────────────────────────────────────────────── */
 
 .ds-ov-node-card {
-  position: absolute;
   width: var(--ds-ov-node-card-w);
   max-width: min(var(--ds-ov-node-card-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
-  z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   /* Layout-only wrapper.
@@ -632,7 +623,7 @@ details[open].ds-ov-details > summary::after {
   box-shadow: var(--ds-focus-ring-btn);
 }
 
-/* ---- Statistics: one line "Out X · In Y · Degree N" (045 S3) ---------------- */
+/* ---- Statistics: one line "Out X · In Y" (045 S3; Degree dropped in S4) ---------------- */
 
 .ds-ov-node-card__stats {
   font-size: var(--ds-typo-label-font-size);

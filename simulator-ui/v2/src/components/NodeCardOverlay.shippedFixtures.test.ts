@@ -68,7 +68,7 @@ function renderBalance(node: GraphNode, equivalentText: string): string {
       h(component, {
         node,
         style: { left: '0px', top: '0px' },
-        edgeStats: { outLimitText: '0', inLimitText: '0', degree: 0 },
+        edgeStats: { outLimitText: '0', inLimitText: '0' },
         equivalentText,
         palette: DATA_PALETTE_DEFAULT,
 

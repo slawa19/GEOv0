@@ -13,7 +13,6 @@ import { interactText } from '../i18n/interactStrings'
 type NodeEdgeStats = {
   outLimitText: string
   inLimitText: string
-  degree: number
 }
 
 type Props = {
@@ -50,17 +49,6 @@ type Props = {
 const emit = defineEmits<{ close: [] }>()
 
 const props = defineProps<Props>()
-
-const wrapperStyle = computed(() =>
-  // WM owns geometry. Keep NodeCardOverlay as a simple content block.
-  ({
-    position: 'static',
-    left: 'auto',
-    top: 'auto',
-    right: 'auto',
-    zIndex: 'auto',
-  }) as const,
-)
 
 function safeNum(v: unknown): number {
   // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not
@@ -183,14 +171,14 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   )
 })
 
-/** OUT trustlines (node = debtor), sorted by used DESC */
+/** OUT trustlines (from -> to is creditor -> debtor: the node is the creditor), sorted by used DESC */
 const outTrustlines = computed<TrustlineInfo[]>(() =>
   nodeTrustlines.value
     .filter((tl) => tl.from_pid === props.node.id)
     .sort((a, b) => safeNum(b.used) - safeNum(a.used)),
 )
 
-/** IN trustlines (node = creditor), sorted by used DESC */
+/** IN trustlines (the node is the debtor), sorted by used DESC */
 const inTrustlines = computed<TrustlineInfo[]>(() =>
   nodeTrustlines.value
     .filter((tl) => tl.to_pid === props.node.id)
@@ -199,7 +187,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 </script>
 
 <template>
-  <div class="ds-ov-node-card" :style="wrapperStyle">
+  <div class="ds-ov-node-card">
     <div class="ds-panel ds-panel--elevated">
       <div class="ds-panel__body ds-ov-node-card__body">
 
@@ -247,11 +235,12 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
           </div>
         </div>
 
-        <!-- Statistics, one line (only unique fields: Out, In, Degree). -->
+        <!-- Statistics, one line: Out, In (the sums of the limits). 045 S4: no Degree - the group counters "OUT -> N" /
+             "IN <- N" below already say how many lines there are, from the same source as the rows; a second number of
+             the same fact from the snapshot was duplicate state. -->
         <div class="ds-ov-node-card__stats" data-testid="node-card-stats">
           <span class="ds-label">Out</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>{{ ' · ' }}<span
-            class="ds-label">In</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>{{ ' · ' }}<span
-            class="ds-label">Degree</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.degree ?? '—' }}</span>
+            class="ds-label">In</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>
         </div>
 
         <!-- BUG-1: Interact Mode Trustlines section --------------------------->
