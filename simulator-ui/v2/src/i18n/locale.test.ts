@@ -1,7 +1,7 @@
 /**
  * 046 wave 0 (T4601), decision 2 - which language the interface takes, and what the choice writes back.
- * Priority: `?lang=` -> stored `geo.sim.v2.lang` -> `navigator.languages` (ru/uk/be -> ru, en -> en, others skipped)
- * -> en. A link never writes storage; a switch does. A parameter in another spelling is rewritten by
+ * Priority: `?lang=` -> stored `geo.sim.v2.lang` -> the FIRST entry of `navigator.languages` (ru/uk/be -> ru, anything
+ * else -> en) -> en. A link never writes storage; a switch does. A parameter in another spelling is rewritten by
  * `history.replaceState` (no push, no reload), an unsupported one is removed and the next step decides. The module is
  * the one writer of `<html lang>`; `uiLocale()` of `paymentRefusalText.ts` reads it.
  *
@@ -69,11 +69,12 @@ describe('046 T4601 - the language on a load', () => {
     [['ru-RU', 'en'], 'ru'],
     [['uk-UA'], 'ru'],
     [['be'], 'ru'],
-    [['de-DE', 'ru'], 'ru'],
+    [['en-GB', 'ru'], 'en'],
+    [['de-DE', 'ru'], 'en'],
     [['de-DE', 'en-GB', 'ru'], 'en'],
     [['de-DE', 'fr'], 'en'],
     [[], 'en'],
-  ])('browser %j -> %s (the first language this interface serves; none -> en)', (languages, expected) => {
+  ])('browser %j -> %s (only the FIRST language decides: ru/uk/be -> ru, anything else -> en)', (languages, expected) => {
     browserSpeaks(languages)
     expect(resolve()).toBe(expected)
   })
@@ -215,8 +216,13 @@ describe('046 T4601 - the reader of <html lang> and the first import', () => {
     expect(normalizeUiLocale(raw)).toBe(expected)
   })
 
-  it('localeFromNavigatorLanguages skips what it cannot serve and says null when nothing is left', () => {
-    expect(localeFromNavigatorLanguages(['fr', 'uk'])).toBe('ru')
-    expect(localeFromNavigatorLanguages(['fr', 'de'])).toBeNull()
+  // Advisor's decision 2026-10-18: a person whose first language is German must not get Russian because Russian is
+  // second in the list. Only the first entry is read.
+  it('localeFromNavigatorLanguages reads only the first entry; an empty list says null', () => {
+    expect(localeFromNavigatorLanguages(['de', 'ru'])).toBe('en')
+    expect(localeFromNavigatorLanguages(['fr', 'uk'])).toBe('en')
+    expect(localeFromNavigatorLanguages(['uk-UA', 'en'])).toBe('ru')
+    expect(localeFromNavigatorLanguages(['en-US', 'ru'])).toBe('en')
+    expect(localeFromNavigatorLanguages([])).toBeNull()
   })
 })

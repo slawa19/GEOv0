@@ -7,8 +7,8 @@ import { readonly, shallowRef, type Ref } from 'vue'
  * Priority, on load and on `popstate`:
  *   1. `?lang=` of the address - a link chooses for this visit and is NEVER written into storage;
  *   2. the stored choice `geo.sim.v2.lang` - written only by a switch (`setUiLocale`);
- *   3. `navigator.languages`: the first entry this interface can serve - `ru`, `uk`, `be` -> ru, `en` -> en;
- *      an entry of another language is skipped;
+ *   3. the FIRST entry of `navigator.languages` only: `ru`, `uk`, `be` -> ru, anything else -> en (advisor's decision
+ *      2026-10-18: a reader whose first language is German is not given Russian because Russian is second);
  *   4. `en`.
  * A parameter that is a supported language in another spelling (`ru-RU`, `RU`, `uk`) is rewritten to its canonical form
  * through `history.replaceState` (no reload, no new history entry, other parameters and the hash kept), as
@@ -23,7 +23,7 @@ import { readonly, shallowRef, type Ref } from 'vue'
  * mounts. `uiLocale()` of `utils/paymentRefusalText.ts` reads `<html lang>` through `documentUiLocale`.
  *
  * NOT judged here: whether a component shows its text in this language - that is the dictionary's and the components'
- * (waves 1-3); a tab-to-tab change of the stored choice (`storage` event) is not followed.
+ * (waves 1-3); a tab-to-tab change of the stored choice (`storage` event) is not followed (BACKLOG 046-1).
  */
 
 export type UiLocale = 'en' | 'ru'
@@ -52,13 +52,10 @@ export function normalizeUiLocale(raw: unknown): UiLocale | null {
   return null
 }
 
-/** Step 3: the first browser language this interface can serve; null when none is. */
+/** Step 3: the FIRST browser language alone decides - ru/uk/be -> ru, anything else -> en; null for an empty list. */
 export function localeFromNavigatorLanguages(languages: readonly string[]): UiLocale | null {
-  for (const tag of languages) {
-    const l = normalizeUiLocale(tag)
-    if (l) return l
-  }
-  return null
+  if (languages.length === 0) return null
+  return normalizeUiLocale(languages[0]) === 'ru' ? 'ru' : 'en'
 }
 
 function browserLanguages(): readonly string[] {

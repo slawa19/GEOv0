@@ -10,7 +10,12 @@
  *      are the same in both languages. A text with no letters at all (`{amount} {unit}`, `→`) passes;
  *   4. the same placeholders under a key in both languages (union over the forms of a plural);
  *   5. a plural message has exactly the categories its language distinguishes (`Intl.PluralRules`: en one/other,
- *      ru one/few/many/other).
+ *      ru one/few/many/other);
+ *   6. no code of an equivalent (`EQUIVALENT_CODES`) as a literal word in either language: a code is data and enters a
+ *      text ONLY through a placeholder (`{unit}`, `{eq}`). Advisor's choice 2026-10-18, between "allow-list the codes"
+ *      and "placeholders only": a literal `UAH` in a dictionary is wrong the moment the equivalent is `EUR`, and an
+ *      allow-listed code would let exactly that through rule 3; a placeholder is also what spec 046 decision 1 asks.
+ *      The list is the codes of `seeds/` (and `USD`); a new equivalent code is added to it, not to `RU_LATIN_ALLOWED`.
  *
  * What it does NOT see: whether a translation is right, reads well or fits its control (ru is 20-35 % longer: the
  * width probes of 045 / `top-bar-long.qa.ts` decide that); a literal left in a component instead of a key (waves 1-3
@@ -26,10 +31,17 @@ import { en } from './en'
 import { isPluralMessage, PLURAL, placeholdersOf, plural, pluralCategoriesOf } from './messages'
 import { ru } from './ru'
 
-/** Latin words a Russian text may carry: names and codes, the same in both languages. Each with its reason. */
+/**
+ * Latin words a Russian text may carry: names and fixed technical labels, the same in both languages. Each with its
+ * date and reason; it grows explicitly, never by pattern. NOT here: codes of equivalents (rule 6 - placeholders only).
+ */
 const RU_LATIN_ALLOWED: ReadonlySet<string> = new Set([
-  'GEO', // the name of the protocol and the product
+  'GEO', // 2026-10-18: the name of the protocol and the product
+  'PID', // 2026-10-18: the participant identifier as the server names it; a label, not a value (named by the advisor for wave 1)
 ])
+
+/** Codes of equivalents (`seeds/communities/*`, plus USD): data, never a literal word of a dictionary (rule 6). */
+const EQUIVALENT_CODES: ReadonlySet<string> = new Set(['UAH', 'EUR', 'HOUR', 'KWH', 'USD'])
 
 type Leaf = { kind: 'text'; texts: string[] } | { kind: 'plural'; texts: string[]; categories: string[] }
 
@@ -56,6 +68,14 @@ function dictionaryProblems(enTree: unknown, ruTree: unknown, allowed: ReadonlyS
   const r = leaves(ruTree)
   for (const key of e.keys()) if (!r.has(key)) problems.push(`ru lacks ${key}`)
   for (const key of r.keys()) if (!e.has(key)) problems.push(`ru has ${key}, en does not`)
+  for (const [lang, tree] of [['en', e], ['ru', r]] as const) {
+    for (const [key, leaf] of tree) {
+      for (const text of leaf.texts) {
+        const codes = (withoutPlaceholders(text).match(LATIN_WORD) ?? []).filter((w) => EQUIVALENT_CODES.has(w.toUpperCase()))
+        if (codes.length > 0) problems.push(`${lang} ${key}: equivalent code ${JSON.stringify(codes)} as a literal in "${text}" - use a placeholder`)
+      }
+    }
+  }
   for (const [key, leaf] of e) {
     for (const text of leaf.texts) if (CYRILLIC.test(text)) problems.push(`en ${key}: Cyrillic in "${text}"`)
     if (leaf.kind === 'plural') {
@@ -131,6 +151,25 @@ describe('046 policy guard - every rule fails on a mutated copy', () => {
     const r = { a: 'Сеть GEO', b: '{amount} {unit}', c: '→' }
     expect(dictionaryProblems(e, r)).toEqual([])
     expect(dictionaryProblems(e, r, new Set())).toEqual(['ru a: Latin ["GEO"] in "Сеть GEO"'])
+  })
+
+  it('an equivalent code enters only through a placeholder: a literal code fails in either language, {unit} passes', () => {
+    expect(dictionaryProblems({ a: 'at most {max} {unit}' }, { a: 'не больше {max} {unit}' })).toEqual([])
+    expect(dictionaryProblems({ a: 'at most {max} UAH' }, { a: 'не больше {max} UAH' })).toEqual([
+      'en a: equivalent code ["UAH"] as a literal in "at most {max} UAH" - use a placeholder',
+      'ru a: equivalent code ["UAH"] as a literal in "не больше {max} UAH" - use a placeholder',
+      'ru a: Latin ["UAH"] in "не больше {max} UAH"',
+    ])
+    // Allow-listing a code would not let it through: rule 6 does not read RU_LATIN_ALLOWED.
+    expect(dictionaryProblems({ a: '{n} HOUR' }, { a: '{n} HOUR' }, new Set(['HOUR']))).toEqual([
+      'en a: equivalent code ["HOUR"] as a literal in "{n} HOUR" - use a placeholder',
+      'ru a: equivalent code ["HOUR"] as a literal in "{n} HOUR" - use a placeholder',
+    ])
+  })
+
+  it('PID is on the allow-list (a label, not a value), and only a listed word passes', () => {
+    expect(dictionaryProblems({ a: 'Participant PID' }, { a: 'PID участника' })).toEqual([])
+    expect(dictionaryProblems({ a: 'Participant PID' }, { a: 'PID участника' }, new Set())).toEqual(['ru a: Latin ["PID"] in "PID участника"'])
   })
 
   it('placeholders that differ', () => {
