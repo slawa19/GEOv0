@@ -82,10 +82,12 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tupl
 #: NOT a proven maximum duration of a run: a run longer than the TTL can still overlap one of another Redis-backed process
 #: (the limitation stated at `record_outcome`). An explicit TTL stays the deployment's choice.
 INTEGRITY_LOCK_TTL_DEFAULT_SECONDS = 300
-#: 047 fix-delta: how long the loop waits before it retries a start-up run that found the lock held.
-STARTUP_LOCK_RETRY_SECONDS = 30
-#: ... and for how long past the lock's TTL it keeps retrying before it gives up into the ordinary interval.
-STARTUP_LOCK_RETRY_MARGIN_SECONDS = 60
+#: 047 fix-delta 2 (2026-10-18, Codex §15 P1 on `34c5c8c4`): a run that did not COMPLETE - skipped on a held lock
+#: (`None`), or ended in an error or with verifier errors (`False`) - is retried: every `RETRY_FAST_SECONDS` while the
+#: time waited since the last completed run is under the lock's TTL + `RETRY_FAST_MARGIN_SECONDS`, then every TTL,
+#: without a limit. The daily interval starts only after a completed run.
+RETRY_FAST_SECONDS = 30
+RETRY_FAST_MARGIN_SECONDS = 60
 
 
 def _integrity_lock_ttl_seconds() -> int:
@@ -180,33 +182,46 @@ async def _stopped_within(stop_event: asyncio.Event, seconds: float) -> bool:
 
 
 async def _integrity_loop(app: FastAPI) -> None:
-    """The start-up run, then one run every interval after the previous run completes.
+    """The start-up run, then one run every interval after the previous run COMPLETED.
 
-    047 fix-delta (2026-10-18, Codex §15 P1): a start-up run that found the lock held - a run of another process, or
-    the lock a killed process left until its TTL - is retried every `STARTUP_LOCK_RETRY_SECONDS` for up to the lock's
-    TTL plus `STARTUP_LOCK_RETRY_MARGIN_SECONDS`, and only then does the loop give up into the ordinary interval, with
-    a recorded event. Until 047 the interval was 300 s and the next periodic run was the retry; at a daily interval it
-    is not. Periodic runs are not retried: a skipped periodic run means another holder is running one."""
+    047 fix-delta 2 (2026-10-18, Codex §15 P1 twice, class 1). A run completes only when
+    `_run_integrity_checkpoints_once` returns True: it ran under the lock, the checkpoints committed and the
+    reconciliation had no verifier or hold-reaction error. Anything else - the lock held (`None`: a live run of
+    another process, or the orphan a killed process left until its TTL; a skip proves no check happened), an error
+    or an incomplete reconciliation (`False`) - is retried, start-up and periodic alike: every `RETRY_FAST_SECONDS`
+    while the time waited since the last completed run is under the TTL + `RETRY_FAST_MARGIN_SECONDS` (the fast
+    phase: `RETRY_FAST_SECONDS x ceil((TTL + margin) / RETRY_FAST_SECONDS)` of waiting, plus the time the attempts
+    take), then every lock TTL, with no limit and no giving up. Past the fast phase the job reads `failed` -
+    `pending_not_checked` after skips, the run's own error event after an error - so `/health` is degraded until a
+    run completes; money is not held (only a confirmed FAILED holds). Every wait honours the stop event.
+
+    COST OF THE RULE: a lasting verifier error makes the loop run the whole reconciliation every TTL (300 s by
+    default), the cadence and memory peak before 047, until the error is gone."""
 
     interval = int(
         settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
     )
+    ttl = _integrity_lock_ttl_seconds()
+    fast_phase = ttl + RETRY_FAST_MARGIN_SECONDS
     stop = app.state._bg_stop_event
-    ran = await _run_integrity_checkpoints_once(app, reason="startup")
-    retries = -(-(_integrity_lock_ttl_seconds() + STARTUP_LOCK_RETRY_MARGIN_SECONDS) // STARTUP_LOCK_RETRY_SECONDS)
-    while ran is None and retries > 0:
-        if await _stopped_within(stop, STARTUP_LOCK_RETRY_SECONDS):
+    reason = "startup"
+    waited_since_completed = 0
+    while True:
+        ran = await _run_integrity_checkpoints_once(app, reason=reason)
+        if ran is True:
+            reason, waited_since_completed, delay = "periodic", 0, interval
+        else:
+            if waited_since_completed >= fast_phase:
+                state = _background_job_states(app).get("integrity", {})
+                if state.get("status") != "failed":
+                    logger.error("integrity.%s_pending_not_checked waited_seconds=%d", reason, waited_since_completed)
+                    _record_background_job_event(
+                        app, name="integrity", status="failed", event=f"{reason}_pending_not_checked"
+                    )
+            delay = RETRY_FAST_SECONDS if waited_since_completed < fast_phase else ttl
+            waited_since_completed += delay
+        if await _stopped_within(stop, delay):
             return
-        retries -= 1
-        ran = await _run_integrity_checkpoints_once(app, reason="startup")
-    if ran is None and _background_job_states(app).get("integrity", {}).get("status") != "failed":
-        logger.error("integrity.startup_run_skipped_locked_gave_up interval_seconds=%d", interval)
-        _record_background_job_event(app, name="integrity", status="running", event="startup_skipped_locked_gave_up")
-
-    while not stop.is_set():
-        if await _stopped_within(stop, interval):
-            break
-        await _run_integrity_checkpoints_once(app, reason="periodic")
 
 
 async def _run_periodic_clearing_once(app: FastAPI) -> None:
@@ -266,6 +281,8 @@ def debt_reconciliation_run_problem(app: FastAPI, equivalent_id) -> str | None:
     state = _background_job_states(app).get("integrity", {})
     if state.get("status") != "failed" or str(state.get("event", "")).endswith("_checkpoints_error"):
         return None
+    if str(state.get("event", "")).endswith("_pending_not_checked"):  # 047: skipped on a held lock past the fast phase
+        return "no scheduled run has completed since the lock was found held; the check is pending"
     errored = state.get("errored_equivalents")
     if errored is not None and str(equivalent_id) not in errored.split(","):
         return None
