@@ -94,6 +94,7 @@ for (const theme of THEMES) {
     await page.locator(DETAILS).click()
     const sw = page.locator('.tb-mode-row > .tb-theme-row + [data-testid="language-switch"]')
     await expect(sw, 'right after the theme row').toBeVisible()
+    await frame(page, `${theme}-1-switch-en`)
     await page.evaluate(() => { (window as unknown as { __p046SameDocument?: number }).__p046SameDocument = 1 })
     const href = page.url()
 
