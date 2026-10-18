@@ -36,7 +36,6 @@ function createDraft(snapshot: GraphSnapshot | null = null): RealEventDraft {
       sourcePath: '',
       snapshot,
       selectedNodeId: null,
-      flash: 0,
     } satisfies SimulatorAppState,
   }
 }
@@ -75,7 +74,7 @@ function execute(intents: ReturnType<typeof applyAcceptedRealEvent>, draft: Real
     runRealTxFx: () => trace.push(`effect:tx-fx:${draft.real.runStats.committed}`),
     runRealClearingDoneFx: () => trace.push(`effect:clearing-fx:${draft.state.snapshot?.nodes[0]?.net_balance}`),
     pushTxAmountLabel: (_nodeId, amount) => trace.push(`effect:label:${amount}`),
-    clampRealTxTtlMs: (ttl) => Number(ttl),
+    routeArrivalMs: (event) => event.ttl_ms,
     scheduleTimeout: (fn) => {
       trace.push('effect:schedule')
       fn()
@@ -349,7 +348,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
       runRealTxFx: txFx,
       runRealClearingDoneFx: vi.fn(),
       pushTxAmountLabel: vi.fn(),
-      clampRealTxTtlMs: () => 10,
+      routeArrivalMs: () => 10,
       scheduleTimeout: vi.fn(),
     })
     expect(draft.real.runStats).toMatchObject({ attempts: 1, rejected: 1, errors: 0, timeouts: 0 })
@@ -403,7 +402,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
           signedAmount: '+1',
           unit: 'EUR',
           throttleMs: 0,
-          delayMs: 10,
+          txEvent: { event_id: 'evt_run_1_7', ts: TS, type: 'tx.updated', equivalent: 'EUR', ttl_ms: 1200, edges: [{ from: 'A', to: 'B' }] },
           runId: 'run_1',
           equivalent: 'EUR',
         },
@@ -419,11 +418,27 @@ describe('realEventPipeline state-before-effect ordering', () => {
         runRealTxFx: () => trace.push('fx'),
         runRealClearingDoneFx: () => trace.push('clearing'),
         pushTxAmountLabel: (_nodeId, amount) => trace.push(`label:${amount}`),
-        clampRealTxTtlMs: () => 10,
+        routeArrivalMs: () => 10,
         scheduleTimeout: (fn) => fn(),
       },
     )
     expect(trace).toEqual(['any', 'label:-1', 'label:+1', 'clearing', 'wake'])
+  })
+
+  it('039 slice C: the receiver label is delayed by the route time the tx effects plan for THIS payment (routeArrivalMs), not by its wire ttl_ms', () => {
+    const txEvent = { event_id: 'evt_run_1_r', ts: TS, type: 'tx.updated' as const, equivalent: 'EUR', ttl_ms: 1200, edges: [{ from: 'A', to: 'B' }] }
+    const delays: number[] = []
+    const asked: unknown[] = []
+    executeRealEventIntents(
+      [{ type: 'tx-label-delayed', role: 'receiver', nodeId: 'B', signedAmount: '+1', unit: 'EUR', throttleMs: 0, txEvent, runId: 'run_1', equivalent: 'EUR' }],
+      {
+        getActiveRunId: () => 'run_1', refreshSnapshot: vi.fn(), runRealTxFx: vi.fn(), runRealClearingDoneFx: vi.fn(), pushTxAmountLabel: vi.fn(),
+        routeArrivalMs: (e) => { asked.push(e); return 1777 },
+        scheduleTimeout: (_fn, ms) => { delays.push(ms) },
+      },
+    )
+    expect(delays).toEqual([1777])
+    expect(asked, 'asked with the payment itself').toEqual([txEvent])
   })
 
   it('reports an explicit amount flyout that lacks label data through an injectable contract warning', () => {
@@ -447,7 +462,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
       runRealTxFx: vi.fn(),
       runRealClearingDoneFx: vi.fn(),
       pushTxAmountLabel: vi.fn(),
-      clampRealTxTtlMs: () => 10,
+      routeArrivalMs: () => 10,
       scheduleTimeout: vi.fn(),
       warnContract,
     })

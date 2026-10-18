@@ -42,7 +42,7 @@ function apply(snapshotEq: string, eventEq: string, kind: 'structural' | 'patch-
   const layoutLinks: LayoutLink[] = snapshot.links.map((l) => ({ ...l, __key: keyEdge(l.source, l.target) }))
   const draft: RealEventDraft = {
     real: { runId: 'run_1', runStatus: null, lastError: '', runStats: { attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} } },
-    state: { loading: false, error: '', sourcePath: '', snapshot, selectedNodeId: null, flash: 0 } satisfies SimulatorAppState,
+    state: { loading: false, error: '', sourcePath: '', snapshot, selectedNodeId: null } satisfies SimulatorAppState,
   }
   const event = {
     event_id: 'evt_run_1_000002', ts: '2026-01-01T00:00:01Z', type: 'topology.changed', equivalent: eventEq,

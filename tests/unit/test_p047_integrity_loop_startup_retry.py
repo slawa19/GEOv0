@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -89,7 +90,7 @@ class _ExpiringRedis:
 
 class _Session:
     async def __aenter__(self):
-        return object()
+        return SimpleNamespace(execute=AsyncMock(return_value=None))  # `bound_the_waits` on the checkpoint session
 
     async def __aexit__(self, *_exc) -> None:
         return None
@@ -333,3 +334,4 @@ async def test_the_stop_is_heard_by_a_wait_of_zero_or_less(seconds) -> None:
     assert await maintenance_jobs._stopped_within(stop, seconds) is False
     stop.set()
     assert await maintenance_jobs._stopped_within(stop, seconds) is True
+

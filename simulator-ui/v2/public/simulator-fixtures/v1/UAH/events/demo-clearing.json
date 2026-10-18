@@ -1,311 +1,204 @@
 [
   {
-    "event_id": "clearing-demo-UAH.done",
-    "ts": "2026-01-11T00:00:00Z",
+    "event_id": "evt_run_20261018_171301_af036628_000024",
+    "ts": "2026-10-18T17:13:03.658266Z",
     "type": "clearing.done",
     "equivalent": "UAH",
-    "plan_id": "clearing-demo-UAH",
+    "plan_id": "plan_interact_f1a4924502a2",
+    "cleared_cycles": 3,
+    "cleared_amount": "247.95",
     "cycle_edges": [
       {
-        "from": "PID_U0039_1a7389f7",
-        "to": "PID_U0001_9e3779b1"
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p2"
       },
       {
-        "from": "PID_U0006_b54cda26",
-        "to": "PID_U0039_1a7389f7"
+        "from": "run_20261018_171301_af036628:p11",
+        "to": "run_20261018_171301_af036628:p3"
       },
       {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0006_b54cda26"
+        "from": "run_20261018_171301_af036628:p2",
+        "to": "run_20261018_171301_af036628:p6"
       },
       {
-        "from": "PID_U0011_cc623a9b",
-        "to": "PID_U0003_daa66d13"
+        "from": "run_20261018_171301_af036628:p2",
+        "to": "run_20261018_171301_af036628:p7"
       },
       {
-        "from": "PID_U0036_3fcd1ce4",
-        "to": "PID_U0011_cc623a9b"
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p36"
       },
       {
-        "from": "PID_U0003_daa66d13",
-        "to": "PID_U0036_3fcd1ce4"
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p11"
       },
       {
-        "from": "PID_U0011_cc623a9b",
-        "to": "PID_U0004_78dde6c4"
+        "from": "run_20261018_171301_af036628:p6",
+        "to": "run_20261018_171301_af036628:p1"
       },
       {
-        "from": "PID_U0061_b337ff2d",
-        "to": "PID_U0011_cc623a9b"
-      },
-      {
-        "from": "PID_U0004_78dde6c4",
-        "to": "PID_U0061_b337ff2d"
-      },
-      {
-        "from": "PID_U0012_6a99b44c",
-        "to": "PID_U0004_78dde6c4"
-      },
-      {
-        "from": "PID_U0091_3db841eb",
-        "to": "PID_U0012_6a99b44c"
-      },
-      {
-        "from": "PID_U0004_78dde6c4",
-        "to": "PID_U0091_3db841eb"
-      },
-      {
-        "from": "PID_U0017_81af14c1",
-        "to": "PID_U0004_78dde6c4"
-      },
-      {
-        "from": "PID_U0071_e162c017",
-        "to": "PID_U0017_81af14c1"
-      },
-      {
-        "from": "PID_U0004_78dde6c4",
-        "to": "PID_U0071_e162c017"
+        "from": "run_20261018_171301_af036628:p7",
+        "to": "run_20261018_171301_af036628:p1"
       }
     ],
     "node_patch": [
       {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "46827",
-        "net_sign": -1,
-        "viz_color_key": "debt-5",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 42,
-          "h": 36
-        }
-      },
-      {
-        "id": "PID_U0003_daa66d13",
-        "net_balance_atoms": "807523",
-        "net_sign": -1,
-        "viz_color_key": "debt-8",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      },
-      {
-        "id": "PID_U0004_78dde6c4",
-        "net_balance_atoms": "32485",
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4500",
         "net_sign": 1,
+        "net_balance": "45.00",
         "viz_color_key": "business",
         "viz_shape_key": "rounded-rect",
         "viz_size": {
-          "w": 39,
-          "h": 33
-        }
-      },
-      {
-        "id": "PID_U0006_b54cda26",
-        "net_balance_atoms": "81436",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      },
-      {
-        "id": "PID_U0011_cc623a9b",
-        "net_balance_atoms": "103212",
-        "net_sign": 1,
-        "viz_color_key": "person",
-        "viz_shape_key": "circle",
-        "viz_size": {
-          "w": 30,
-          "h": 30
-        }
-      },
-      {
-        "id": "PID_U0012_6a99b44c",
-        "net_balance_atoms": "28848",
-        "net_sign": 1,
-        "viz_color_key": "person",
-        "viz_shape_key": "circle",
-        "viz_size": {
-          "w": 24,
-          "h": 24
-        }
-      },
-      {
-        "id": "PID_U0017_81af14c1",
-        "net_balance_atoms": "44021",
-        "net_sign": 1,
-        "viz_color_key": "person",
-        "viz_shape_key": "circle",
-        "viz_size": {
-          "w": 25,
-          "h": 25
-        }
-      },
-      {
-        "id": "PID_U0036_3fcd1ce4",
-        "net_balance_atoms": "720246",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      },
-      {
-        "id": "PID_U0039_1a7389f7",
-        "net_balance_atoms": "74487",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0061_b337ff2d",
-        "net_balance_atoms": "9248",
-        "net_sign": -1,
-        "viz_color_key": "debt-2",
-        "viz_shape_key": "circle",
-        "viz_size": {
-          "w": 21,
-          "h": 21
-        }
-      },
-      {
-        "id": "PID_U0071_e162c017",
-        "net_balance_atoms": "11194",
-        "net_sign": -1,
-        "viz_color_key": "debt-3",
-        "viz_shape_key": "circle",
-        "viz_size": {
-          "w": 22,
+          "w": 26,
           "h": 22
         }
       },
       {
-        "id": "PID_U0091_3db841eb",
-        "net_balance_atoms": "5003",
+        "id": "run_20261018_171301_af036628:p11",
+        "net_balance_atoms": "975",
         "net_sign": 1,
+        "net_balance": "9.75",
         "viz_color_key": "person",
         "viz_shape_key": "circle",
         "viz_size": {
-          "w": 21,
-          "h": 21
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p2",
+        "net_balance_atoms": "4500",
+        "net_sign": -1,
+        "net_balance": "-45.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "2500",
+        "net_sign": 1,
+        "net_balance": "25.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p6",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p7",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
         }
       }
     ],
     "edge_patch": [
       {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0006_b54cda26",
-        "viz_alpha_key": "active",
-        "used": 460.0,
-        "available": 540.0
-      },
-      {
-        "source": "PID_U0003_daa66d13",
-        "target": "PID_U0036_3fcd1ce4",
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p2",
+        "used": "72.30",
+        "available": "1613.53",
         "viz_alpha_key": "bg",
-        "used": 35.0,
-        "available": 665.0
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       },
       {
-        "source": "PID_U0004_78dde6c4",
-        "target": "PID_U0061_b337ff2d",
+        "source": "run_20261018_171301_af036628:p11",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "9.75",
+        "available": "1697.52",
         "viz_alpha_key": "bg",
-        "used": 4.0,
-        "available": 396.0
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       },
       {
-        "source": "PID_U0004_78dde6c4",
-        "target": "PID_U0071_e162c017",
-        "viz_alpha_key": "muted",
-        "used": 84.0,
-        "available": 316.0
-      },
-      {
-        "source": "PID_U0004_78dde6c4",
-        "target": "PID_U0091_3db841eb",
-        "viz_alpha_key": "active",
-        "used": 188.0,
-        "available": 212.0
-      },
-      {
-        "source": "PID_U0006_b54cda26",
-        "target": "PID_U0039_1a7389f7",
-        "viz_alpha_key": "active",
-        "used": 253.0,
-        "available": 297.0
-      },
-      {
-        "source": "PID_U0011_cc623a9b",
-        "target": "PID_U0003_daa66d13",
-        "viz_alpha_key": "hi",
-        "used": 680.0,
-        "available": 170.0
-      },
-      {
-        "source": "PID_U0011_cc623a9b",
-        "target": "PID_U0004_78dde6c4",
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p6",
+        "used": "0.00",
+        "available": "4981.53",
         "viz_alpha_key": "bg",
-        "used": 0.0,
-        "available": 550.0
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       },
       {
-        "source": "PID_U0012_6a99b44c",
-        "target": "PID_U0004_78dde6c4",
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p7",
+        "used": "27.30",
+        "available": "11079.37",
         "viz_alpha_key": "bg",
-        "used": 0.0,
-        "available": 550.0
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       },
       {
-        "source": "PID_U0017_81af14c1",
-        "target": "PID_U0004_78dde6c4",
-        "viz_alpha_key": "active",
-        "used": 280.5,
-        "available": 269.5
-      },
-      {
-        "source": "PID_U0036_3fcd1ce4",
-        "target": "PID_U0011_cc623a9b",
-        "viz_alpha_key": "active",
-        "used": 252.0,
-        "available": 148.0
-      },
-      {
-        "source": "PID_U0039_1a7389f7",
-        "target": "PID_U0001_9e3779b1",
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "150.65",
+        "available": "5170.69",
         "viz_alpha_key": "bg",
-        "used": 110.5,
-        "available": 739.5
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       },
       {
-        "source": "PID_U0061_b337ff2d",
-        "target": "PID_U0011_cc623a9b",
-        "viz_alpha_key": "active",
-        "used": 188.0,
-        "available": 212.0
-      },
-      {
-        "source": "PID_U0071_e162c017",
-        "target": "PID_U0017_81af14c1",
-        "viz_alpha_key": "active",
-        "used": 244.0,
-        "available": 156.0
-      },
-      {
-        "source": "PID_U0091_3db841eb",
-        "target": "PID_U0012_6a99b44c",
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p11",
+        "used": "0.00",
+        "available": "505.64",
         "viz_alpha_key": "bg",
-        "used": 33.0,
-        "available": 517.0
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p6",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "5155.63",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p7",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "11472.39",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       }
     ]
   }

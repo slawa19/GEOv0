@@ -68,7 +68,8 @@ describe('TopBar wiring - what each control emits', () => {
   })
 
   it('selects and inputs emit update events with the value (the intensity clamped to 0..100)', async () => {
-    const { host, spies, done } = mountTopBar(context(), true)
+    // No run: the scenario select is enabled only then (BACKLOG 043-3, 046 wave 1 - `TopBar.p046w1.test.ts`).
+    const { host, spies, done } = mountTopBar(context({ runId: ref(null) }), true)
     await nextTick()
     const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
     scenario.value = 'sc-2'

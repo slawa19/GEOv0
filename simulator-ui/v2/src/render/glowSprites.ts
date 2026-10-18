@@ -23,7 +23,7 @@ type NodeGlowSpriteOpts = {
 type FxGlowSpriteOpts =
   | {
       /**
-       * Small radial glow used for spark/comet/edge-pulse heads.
+       * Small radial glow used for the head of a beam (payment leg or clearing spark).
        * Caller controls intensity via ctx.globalAlpha when drawing.
        */
       kind: 'fx-dot'

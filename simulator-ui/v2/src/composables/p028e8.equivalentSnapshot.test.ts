@@ -90,8 +90,8 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
   it('B5: the clearing FX of the same edges in another equivalent is not deduplicated away', () => {
     const addActiveEdge = vi.fn()
     const fx = useRealClearingFx({ fxState: {}, isTestMode: ref(true), isWebDriver: false, keyEdge: (a, b) => `${a}>${b}`,
-      seedFn: () => 0, clearingColor: '#000', addActiveNode: vi.fn(), addActiveEdge, scheduleTimeout: vi.fn(),
-      getLayoutNodeById: () => null, setFlash: vi.fn(), nowEpochMs: () => 1000 })
+      seedFn: () => 0, clearingColor: () => '#000', sparkCoreColor: () => '#fff', addActiveNode: vi.fn(), addActiveEdge, scheduleTimeout: vi.fn(),
+      clearingLabelLifeMs: () => 4200, getLayoutNodeById: () => null, nowEpochMs: () => 1000 })
     const edges = [{ from: 'alice', to: 'bob' }]
     fx.runClearingFx({ edges, totalAmount: '1', equivalent: 'UAH' })
     fx.runClearingFx({ edges, totalAmount: '1', equivalent: 'HOUR' })

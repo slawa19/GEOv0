@@ -357,6 +357,31 @@ export async function watchFlight(page: Page, g: RouteGeom, nFrames: number, sho
   return out
 }
 
+/**
+ * 039 slice C (2026-10-18): step and probe every frame until no spark of the FX state is alive any more (and `tail`
+ * frames after), at most `maxFrames`. A route lasts as long as its legs since slice C (at least 450 ms a leg, one speed,
+ * then a fade), so a fixed number of frames (`watchFlight`, 76 = the old 1200 ms) no longer covers it. Throws when the
+ * beam is still alive at `maxFrames`: a watch that ends in flight judges half a beam.
+ */
+export async function watchUntilGone(page: Page, g: RouteGeom, o: { shotEvery?: number; maxFrames?: number; tail?: number } = {}): Promise<FrameProbe[]> {
+  const shotEvery = o.shotEvery ?? 1
+  const maxFrames = o.maxFrames ?? 400
+  const tail = o.tail ?? 3
+  const out: FrameProbe[] = []
+  let quiet = 0
+  for (let f = 1; f <= maxFrames && quiet < tail; f += 1) {
+    await frames(page, 1)
+    out.push(await probeFrame(page, g, f, shotEvery > 0 && f % shotEvery === 0))
+    const alive = await page.evaluate(() => {
+      const now = performance.now()
+      return (window as unknown as { __geoSim: { fxState: { sparks: Array<{ startedAtMs: number; ttlMs: number }> } } }).__geoSim.fxState.sparks.some((s) => now - s.startedAtMs < s.ttlMs)
+    })
+    quiet = alive ? 0 : quiet + 1
+  }
+  if (quiet < tail) throw new Error(`038 oracle: the beam is still alive after ${maxFrames} frames`)
+  return out
+}
+
 export type EdgeSummary = {
   name: string
   litFrames: number[]
@@ -429,6 +454,9 @@ export const MOTION_LIMITS_AT_CAP = { minDistinctHeads: 4, maxStepPerFrame: 0.3,
  *  - the schedule of the product (`composables/realFx/useRealTxFx.ts`): leg i starts at i x legMs and lives legMs, so no
  *    INSTANT belongs to two legs, whatever legMs is; and the judged parts of two legs that meet at a node are
  *    2 x NODE_CLEAR_PX apart along the route. From the schedule alone the number would be 0;
+ *    039 slice C (2026-10-18): the schedule is now `composables/realFx/txRoutePlan.ts` - leg i starts exactly when leg
+ *    i-1 ARRIVES and lives as long as it moves; only the last leg lives on after its arrival (its fade, at the
+ *    receiver, where no next leg follows). Still no instant of two legs, so the constant is not moved;
  *  - the grain of the oracle: `watchFlight` probes once a frame, and one frame is the unit a handoff can be told to.
  *    1 is that grain, and it is what the rule of common frames allowed - this rule is nowhere weaker than that one
  *    (two common frames f < g give firstLit(k) <= f < g <= lastLit(k-1), two shared frames here).
@@ -437,8 +465,10 @@ export const MOTION_LIMITS_AT_CAP = { minDistinctHeads: 4, maxStepPerFrame: 0.3,
  * that lets the tail of a leg live on into the next one (a cross-fade) changes the schedule above: then this constant
  * is moved, with a dated line, by whoever changes the schedule.
  *
- * Not judged: how long the route stays DARK between two legs (measured 2026-10-12: 6-18 frames - a beam fades inside its leg; the
- * visible handoff is slice C of 039, reproducer R6); legs whose lives overlap while their painted intervals do not.
+ * Not judged HERE: how long the route stays DARK between two legs (measured 2026-10-12: 6-18 frames - a beam faded inside
+ * its leg). Since 039 slice C (2026-10-18) that is judged by `motion-c.qa.ts` (HANDOFF), against a bound derived from
+ * `NODE_CLEAR_PX` and the leg's own speed in FX state, not from the frames the beam was seen in. Not judged anywhere:
+ * legs whose lives overlap while their painted intervals do not (the FX-state test of `motion.qa.ts` holds that).
  */
 export const HANDOFF_FRAMES = 1
 export type LegOrder = {

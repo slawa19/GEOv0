@@ -485,7 +485,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         getLayoutNodeById: (id: string) => TEST_LAYOUT_NODES.find((n) => n.id === id),
         sizeForNode: () => ({ w: 40, h: 40 }),
         getCameraZoom: () => 1,
-        setFlash: () => undefined,
         resetFxState: () => undefined,
         nowMs: () => 0,
       })
@@ -585,7 +584,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           sourcePath: '',
           snapshot: getGeoTestGlobal('__GEO_TEST_SNAPSHOT') ?? null,
           selectedNodeId: null as string | null,
-          flash: 0,
         }),
         eq: ref('UAH'),
         sceneEq: computed(() => sceneEqRef.value),

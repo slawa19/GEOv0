@@ -40,7 +40,7 @@ test('R4 - measurement: after 3 s of rest the loop draws nothing for 2 s, and an
 })
 
 // S1: the beam of a route is spawned leg by leg on timers (useRealTxFx.ts). Sleep and wake are judged by completed
-// draws of the loop owner here too: a route started from deep sleep is drawn on EVERY frame of its 1200 ms, the leg
+// draws of the loop owner here too: a route started from deep sleep is drawn on EVERY frame of its life, the leg
 // boundaries included (no frame is lost between the end of one leg and the timer of the next), and when nothing is
 // left to animate the loop falls asleep again. Not judged: wall-clock latency of the wake-up (this is `page.clock`).
 test('R4 - a 3-edge beam started from deep sleep is drawn on every frame of its flight, and the loop sleeps again afterwards', async ({ page }) => {
@@ -51,11 +51,13 @@ test('R4 - a 3-edge beam started from deep sleep is drawn on every frame of its 
   const asleep = await loopCounters(page)
   expect(asleep.draws - rested.draws, 'precondition: deep sleep, no draw in 2 s').toBe(0)
 
-  // The life of the beam is a span of CLOCK time, 1200 ms from the event; whether a given frame falls inside it depends
+  // The life of the beam is a span of CLOCK time from the event; whether a given frame falls inside it depends
   // on where frames stand on that span, so every frame is judged by its own time and not by its number. (It used to
   // read "a spark on each of 75 frames": 75 x 16 ms is exactly 1200, and the last frame is INSIDE the life at fifteen
   // phases of the paused clock and ON its end at one - 038 S2, D1.)
-  const LIFE_MS = 1200 // `ttl_ms` of `txUpdated`, the upper clamp of the product; 3 legs of 400 ms
+  // 039 slice C (2026-10-18, P-4): the life was the constant 1200 ms (3 legs of 400). It is now what the product
+  // scheduled - the legs back to back, the last one with its fade - read from FX state as the legs appear: the end of
+  // the latest-ending leg. The test judges that the loop draws on every frame of THAT life, not its length.
   // The time of a frame is the clock time at which the loop DREW it (the stand's counter stamps every draw), not the
   // time after the 16 ms step: inside a step the frame fires on the browser's own grid, up to 16 ms before its end.
   type Raf = { __qaRaf: { record: boolean; drawAt: number[] } }
@@ -67,18 +69,27 @@ test('R4 - a 3-edge beam started from deep sleep is drawn on every frame of its 
   })
   await pushEvent(page, txUpdated(['a', 'b', 'c', 'd'], '10.00', { amount_flyout: false }))
   const perFrame: Array<{ ageMs: number; sparks: number }> = []
+  let lifeEndMs = 0
+  let legs = 0
   const step = async () => {
     await frames(page, 1)
     const drawn = await page.evaluate(() => (window as unknown as Raf).__qaRaf.drawAt.slice())
     expect(drawn.length, 'one draw of the loop for this frame').toBe(perFrame.length + 1)
     perFrame.push({ ageMs: drawn.at(-1)! - sentAt, sparks: (await fxCounts(page)).sparks })
+    const ends = await page.evaluate((t0) => (window as unknown as { __geoSim: { fxState: { sparks: Array<{ startedAtMs: number; ttlMs: number }> } } })
+      .__geoSim.fxState.sparks.map((s) => s.startedAtMs + s.ttlMs - t0), sentAt)
+    for (const e of ends) if (e > lifeEndMs) { lifeEndMs = e; legs += 1 }
   }
-  for (let f = 0; f < 75; f += 1) await step() // the whole route
+  // The whole route: until the latest-ending leg seen is over, and the three legs were all seen (at most 400 frames).
+  for (let f = 0; f < 400 && (legs < 3 || (perFrame.at(-1)?.ageMs ?? 0) < lifeEndMs); f += 1) await step()
+  const LIFE_MS = lifeEndMs
+  const flownFrames = perFrame.length
   const flown = await loopCounters(page)
   for (let f = 0; f < 3; f += 1) await step() // and past its end: the boundary is inside what is looked at, at every phase
   const inside = perFrame.filter((f) => f.ageMs < LIFE_MS)
   const after = perFrame.filter((f) => f.ageMs >= LIFE_MS)
-  expect(inside.length, 'counter-check: frames inside the life of the beam were looked at').toBeGreaterThanOrEqual(74)
+  expect(legs, 'counter-check: the three legs of the route were seen').toBe(3)
+  expect(inside.length, 'counter-check: frames inside the life of the beam were looked at').toBeGreaterThanOrEqual(Math.floor(LIFE_MS / 16) - 1)
   expect(after.length, 'counter-check: and frames at or past its end').toBeGreaterThanOrEqual(3)
   await page.clock.runFor(420 + 250 + 3000 + 600) // the receiver's burst, the hold, the idle delay, one idle period and slack
   const settling = await loopCounters(page)
@@ -86,7 +97,8 @@ test('R4 - a 3-edge beam started from deep sleep is drawn on every frame of its 
   const asleepAgain = await loopCounters(page)
 
   const row = {
-    drawsIn75FramesOfFlight: flown.draws - asleep.draws,
+    lifeMs: Math.round(LIFE_MS), flownFrames,
+    drawsInTheFramesOfFlight: flown.draws - asleep.draws,
     framesInsideLifeWithoutASpark: inside.filter((f) => f.sparks === 0).map((f) => f.ageMs),
     framesAtOrPastTheEndWithASpark: after.filter((f) => f.sparks > 0).map((f) => f.ageMs),
     lastInsideMs: inside.at(-1)?.ageMs, firstAfterMs: after[0]?.ageMs,
@@ -94,8 +106,8 @@ test('R4 - a 3-edge beam started from deep sleep is drawn on every frame of its 
   }
   console.log('[038 R4 route]', JSON.stringify(row))
   test.info().annotations.push({ type: '038-R4-route', description: JSON.stringify(row) })
-  expect(row.drawsIn75FramesOfFlight, 'the loop draws every frame of the route, leg boundaries included').toBe(75)
-  expect(row.framesInsideLifeWithoutASpark, 'and there is a spark in the FX state on every frame strictly inside the 1200 ms of the route').toEqual([])
+  expect(row.drawsInTheFramesOfFlight, 'the loop draws every frame of the route, leg boundaries included').toBe(flownFrames)
+  expect(row.framesInsideLifeWithoutASpark, 'and there is a spark in the FX state on every frame strictly inside the life of the route').toEqual([])
   expect(row.framesAtOrPastTheEndWithASpark, 'and none on a frame at the end of the route or after it').toEqual([])
   expect(row.drawsIn2sAsleepAgain, 'deep sleep again when nothing is left to animate').toBe(0)
 })

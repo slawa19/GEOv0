@@ -33,6 +33,25 @@ def slow_rotated_plan(delay_seconds: float, edges):
     return _rotated(plan_clearing(edges))
 
 
+def stamped_slow_rotated_plan(stamp_path: str, delay_seconds: float, edges):
+    """`slow_rotated_plan`, and the plan's own start and end in the worker written to `stamp_path` as
+    `"<start> <end>"` on `time.perf_counter`.
+
+    The test compares them with loop gaps measured on the same clock in its own process. `perf_counter` is one clock
+    for every process of a machine on both platforms the tier runs on: CLOCK_MONOTONIC on Linux, QueryPerformanceCounter
+    on Windows (041 `T4112`, 2026-10-18: parent minus child read back over a pool round trip was +0.2..+0.5 ms idle).
+    """
+
+    import time
+
+    started = time.perf_counter()
+    plan = slow_rotated_plan(delay_seconds, edges)
+    ended = time.perf_counter()
+    with open(stamp_path, "w", encoding="utf-8") as out:
+        out.write(f"{started!r} {ended!r}")
+    return plan
+
+
 def held_rotated_plan(started_path: str, release_path: str, edges):
     """A plan that stays IN FLIGHT until the test lets it go - a barrier, not a duration.
 

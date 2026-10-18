@@ -236,7 +236,8 @@ async def test_integrity_failure_degrades_and_later_success_recovers(
 
     class SessionContext:
         async def __aenter__(self):
-            return object()
+            # 047: the job bounds the checkpoint transaction's waits (`bound_the_waits`) before the checkpoints.
+            return SimpleNamespace(execute=AsyncMock(return_value=None))
 
         async def __aexit__(self, exc_type, exc, traceback) -> None:
             return None

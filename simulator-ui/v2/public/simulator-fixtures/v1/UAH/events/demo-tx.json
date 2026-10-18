@@ -1,965 +1,1754 @@
 [
   {
-    "event_id": "0cb59f2a-e5ea-5db7-9d5e-ffb7a654e7d9",
-    "ts": "2026-01-07T20:33:00Z",
+    "event_id": "evt_run_20261018_171301_af036628_000004",
+    "ts": "2026-10-18T17:13:02.629554Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p36",
+    "to": "run_20261018_171301_af036628:p3",
+    "amount": "135.00",
+    "amount_flyout": true,
     "ttl_ms": 1200,
+    "intensity_key": null,
     "edges": [
       {
-        "from": "PID_U0003_daa66d13",
-        "to": "PID_U0017_81af14c1"
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
       }
     ],
+    "node_badges": null,
     "node_patch": [
       {
-        "id": "PID_U0003_daa66d13",
-        "net_balance_atoms": "811193",
-        "net_sign": -1,
-        "viz_color_key": "debt-8",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      },
-      {
-        "id": "PID_U0017_81af14c1",
-        "net_balance_atoms": "47893",
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "13500",
         "net_sign": 1,
-        "viz_color_key": "person",
-        "viz_shape_key": "circle",
+        "net_balance": "135.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
         "viz_size": {
           "w": 26,
-          "h": 26
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "13500",
+        "net_sign": -1,
+        "net_balance": "-135.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
         }
       }
     ],
     "edge_patch": [
       {
-        "source": "PID_U0003_daa66d13",
-        "target": "PID_U0017_81af14c1",
-        "viz_alpha_key": "hi",
-        "used": 429.0,
-        "available": 121.0
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "135.00",
+        "available": "5186.34",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       }
     ]
   },
   {
-    "event_id": "tx.demo.multi-hop.1",
-    "ts": "2026-01-11T00:00:00Z",
+    "event_id": "evt_run_20261018_171301_af036628_000005",
+    "ts": "2026-10-18T17:13:02.676791Z",
     "type": "tx.updated",
     "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p70",
+    "to": "run_20261018_171301_af036628:p17",
+    "amount": "42.70",
+    "amount_flyout": true,
     "ttl_ms": 1200,
+    "intensity_key": null,
     "edges": [
       {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0002_3c6ef362"
+        "from": "run_20261018_171301_af036628:p70",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
       },
       {
-        "from": "PID_U0002_3c6ef362",
-        "to": "PID_U0006_b54cda26"
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
       },
       {
-        "from": "PID_U0006_b54cda26",
-        "to": "PID_U0036_3fcd1ce4"
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p17",
+        "style": null
       }
     ],
+    "node_badges": null,
     "node_patch": [
       {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "50280",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 43,
-          "h": 37
-        }
-      },
-      {
-        "id": "PID_U0036_3fcd1ce4",
-        "net_balance_atoms": "723480",
+        "id": "run_20261018_171301_af036628:p17",
+        "net_balance_atoms": "4270",
         "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0002_3c6ef362",
-        "viz_alpha_key": "muted",
-        "used": 160.0,
-        "available": 840.0
-      },
-      {
-        "source": "PID_U0002_3c6ef362",
-        "target": "PID_U0006_b54cda26",
-        "viz_alpha_key": "hi",
-        "used": 654.5,
-        "available": 195.5
-      },
-      {
-        "source": "PID_U0006_b54cda26",
-        "target": "PID_U0036_3fcd1ce4",
-        "viz_alpha_key": "muted",
-        "used": 154.0,
-        "available": 546.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.multi-hop.2",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0002_3c6ef362"
-      },
-      {
-        "from": "PID_U0002_3c6ef362",
-        "to": "PID_U0006_b54cda26"
-      },
-      {
-        "from": "PID_U0006_b54cda26",
-        "to": "PID_U0036_3fcd1ce4"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "52897",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 44,
-          "h": 37
-        }
-      },
-      {
-        "id": "PID_U0036_3fcd1ce4",
-        "net_balance_atoms": "726097",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0002_3c6ef362",
-        "viz_alpha_key": "muted",
-        "used": 280.0,
-        "available": 720.0
-      },
-      {
-        "source": "PID_U0002_3c6ef362",
-        "target": "PID_U0006_b54cda26",
-        "viz_alpha_key": "hi",
-        "used": 739.5,
-        "available": 110.5
-      },
-      {
-        "source": "PID_U0006_b54cda26",
-        "target": "PID_U0036_3fcd1ce4",
-        "viz_alpha_key": "muted",
-        "used": 252.0,
-        "available": 448.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.1",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0002_3c6ef362"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "55839",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 44,
-          "h": 37
-        }
-      },
-      {
-        "id": "PID_U0002_3c6ef362",
-        "net_balance_atoms": "176442",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 41
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0002_3c6ef362",
-        "viz_alpha_key": "muted",
-        "used": 390.0,
-        "available": 610.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.2",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0003_daa66d13"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "58903",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 44,
-          "h": 37
-        }
-      },
-      {
-        "id": "PID_U0003_daa66d13",
-        "net_balance_atoms": "808129",
-        "net_sign": -1,
-        "viz_color_key": "debt-8",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0003_daa66d13",
-        "viz_alpha_key": "muted",
-        "used": 290.0,
-        "available": 710.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.3",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0004_78dde6c4"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "62040",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 44,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0004_78dde6c4",
-        "net_balance_atoms": "35137",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 39,
-          "h": 33
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0004_78dde6c4",
-        "viz_alpha_key": "active",
-        "used": 400.0,
-        "available": 600.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.4",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0005_17156075"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "64802",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0005_17156075",
-        "net_balance_atoms": "82762",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0005_17156075",
-        "viz_alpha_key": "active",
-        "used": 520.0,
-        "available": 480.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.5",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0006_b54cda26"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "68335",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0006_b54cda26",
-        "net_balance_atoms": "77767",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0006_b54cda26",
-        "viz_alpha_key": "active",
-        "used": 640.0,
-        "available": 360.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.6",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0007_538453d7"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "71196",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0007_538453d7",
-        "net_balance_atoms": "6689",
-        "net_sign": -1,
-        "viz_color_key": "debt-2",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 34,
-          "h": 29
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0007_538453d7",
-        "viz_alpha_key": "active",
-        "used": 730.0,
-        "available": 270.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.7",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0036_3fcd1ce4"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "74485",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      },
-      {
-        "id": "PID_U0036_3fcd1ce4",
-        "net_balance_atoms": "729386",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 49,
-          "h": 42
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0036_3fcd1ce4",
-        "viz_alpha_key": "hi",
-        "used": 790.0,
-        "available": 210.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.8",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0037_de049695"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "77125",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      },
-      {
-        "id": "PID_U0037_de049695",
-        "net_balance_atoms": "34610",
-        "net_sign": -1,
-        "viz_color_key": "debt-4",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 39,
-          "h": 33
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0037_de049695",
-        "viz_alpha_key": "hi",
-        "used": 890.0,
-        "available": 110.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.9",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0038_7c3c1046"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "80075",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      },
-      {
-        "id": "PID_U0038_7c3c1046",
-        "net_balance_atoms": "10450",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 35,
-          "h": 30
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0038_7c3c1046",
-        "viz_alpha_key": "muted",
-        "used": 160.0,
-        "available": 840.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.10",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0039_1a7389f7"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "82795",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 46,
-          "h": 39
-        }
-      },
-      {
-        "id": "PID_U0039_1a7389f7",
-        "net_balance_atoms": "71780",
-        "net_sign": -1,
-        "viz_color_key": "debt-6",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 45,
-          "h": 38
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0039_1a7389f7",
-        "viz_alpha_key": "muted",
-        "used": 230.0,
-        "available": 770.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.11",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0040_b8ab03a8"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "85571",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 47,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0040_b8ab03a8",
-        "net_balance_atoms": "3776",
-        "net_sign": 1,
-        "viz_color_key": "business",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 33,
-          "h": 28
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0040_b8ab03a8",
-        "viz_alpha_key": "muted",
-        "used": 350.0,
-        "available": 650.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.12",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0041_56e27d59"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "88315",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 47,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0041_56e27d59",
-        "net_balance_atoms": "8756",
-        "net_sign": -1,
-        "viz_color_key": "debt-3",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 35,
-          "h": 29
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0041_56e27d59",
-        "viz_alpha_key": "active",
-        "used": 490.0,
-        "available": 510.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.13",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0042_f519f70a"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "91389",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 47,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0042_f519f70a",
-        "net_balance_atoms": "44574",
-        "net_sign": 1,
-        "viz_color_key": "suspended",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 41,
-          "h": 35
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0042_f519f70a",
-        "viz_alpha_key": "active",
-        "used": 510.0,
-        "available": 490.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.14",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0043_935170bb"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "95147",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 47,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0043_935170bb",
-        "net_balance_atoms": "48992",
-        "net_sign": -1,
-        "viz_color_key": "debt-5",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 43,
-          "h": 36
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0043_935170bb",
-        "viz_alpha_key": "active",
-        "used": 670.0,
-        "available": 330.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.15",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0044_3188ea6c"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "98030",
-        "net_sign": -1,
-        "viz_color_key": "debt-7",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 47,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0044_3188ea6c",
-        "net_balance_atoms": "9617",
-        "net_sign": -1,
-        "viz_color_key": "debt-3",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 35,
-          "h": 30
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0044_3188ea6c",
-        "viz_alpha_key": "hi",
-        "used": 770.0,
-        "available": 230.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.16",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0045_cfc0641d"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "101223",
-        "net_sign": -1,
-        "viz_color_key": "debt-8",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 48,
-          "h": 40
-        }
-      },
-      {
-        "id": "PID_U0045_cfc0641d",
-        "net_balance_atoms": "7307",
-        "net_sign": -1,
-        "viz_color_key": "debt-2",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 34,
-          "h": 29
-        }
-      }
-    ],
-    "edge_patch": [
-      {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0045_cfc0641d",
-        "viz_alpha_key": "hi",
-        "used": 850.0,
-        "available": 150.0
-      }
-    ]
-  },
-  {
-    "event_id": "tx.demo.edge.17",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0046_6df7ddce"
-      }
-    ],
-    "node_patch": [
-      {
-        "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "104961",
-        "net_sign": -1,
-        "viz_color_key": "debt-8",
-        "viz_shape_key": "rounded-rect",
-        "viz_size": {
-          "w": 48,
-          "h": 41
-        }
-      },
-      {
-        "id": "PID_U0046_6df7ddce",
-        "net_balance_atoms": "988",
-        "net_sign": 1,
+        "net_balance": "42.70",
         "viz_color_key": "person",
         "viz_shape_key": "circle",
         "viz_size": {
-          "w": 17,
-          "h": 17
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "13500",
+        "net_sign": 1,
+        "net_balance": "135.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "13500",
+        "net_sign": -1,
+        "net_balance": "-135.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p70",
+        "net_balance_atoms": "4270",
+        "net_sign": -1,
+        "net_balance": "-42.70",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
         }
       }
     ],
     "edge_patch": [
       {
-        "source": "PID_U0001_9e3779b1",
-        "target": "PID_U0046_6df7ddce",
-        "viz_alpha_key": "active",
-        "used": 346.5,
-        "available": 203.5
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p70",
+        "used": "42.70",
+        "available": "1545.07",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "177.70",
+        "available": "5143.64",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p17",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "42.70",
+        "available": "1494.79",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p17",
+        "used": "0.00",
+        "available": "2562.17",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000006",
+    "ts": "2026-10-18T17:13:02.706861Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p2",
+    "to": "run_20261018_171301_af036628:p1",
+    "amount": "120.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p2",
+        "to": "run_20261018_171301_af036628:p1",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "12000",
+        "net_sign": 1,
+        "net_balance": "120.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p2",
+        "net_balance_atoms": "12000",
+        "net_sign": -1,
+        "net_balance": "-120.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p2",
+        "used": "120.00",
+        "available": "1565.83",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "10749.68",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000007",
+    "ts": "2026-10-18T17:13:02.740098Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p6",
+    "to": "run_20261018_171301_af036628:p2",
+    "amount": "80.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p6",
+        "to": "run_20261018_171301_af036628:p2",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p2",
+        "net_balance_atoms": "4000",
+        "net_sign": -1,
+        "net_balance": "-40.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p6",
+        "net_balance_atoms": "8000",
+        "net_sign": -1,
+        "net_balance": "-80.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p6",
+        "used": "80.00",
+        "available": "4901.53",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000008",
+    "ts": "2026-10-18T17:13:02.781655Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p65",
+    "to": "run_20261018_171301_af036628:p14",
+    "amount": "18.40",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p65",
+        "to": "run_20261018_171301_af036628:p4",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p4",
+        "to": "run_20261018_171301_af036628:p14",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p14",
+        "net_balance_atoms": "1840",
+        "net_sign": 1,
+        "net_balance": "18.40",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p4",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p65",
+        "net_balance_atoms": "1840",
+        "net_sign": -1,
+        "net_balance": "-18.40",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p4",
+        "target": "run_20261018_171301_af036628:p65",
+        "used": "18.40",
+        "available": "3616.76",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p14",
+        "target": "run_20261018_171301_af036628:p4",
+        "used": "18.40",
+        "available": "3178.13",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000009",
+    "ts": "2026-10-18T17:13:02.814178Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p1",
+    "to": "run_20261018_171301_af036628:p6",
+    "amount": "80.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p6",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4000",
+        "net_sign": 1,
+        "net_balance": "40.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p6",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p6",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "80.00",
+        "available": "5075.63",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p6",
+        "used": "0.00",
+        "available": "10668.62",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000010",
+    "ts": "2026-10-18T17:13:02.855925Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p11",
+    "to": "run_20261018_171301_af036628:p36",
+    "amount": "110.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p11",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p11",
+        "net_balance_atoms": "11000",
+        "net_sign": -1,
+        "net_balance": "-110.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p11",
+        "used": "110.00",
+        "available": "395.64",
+        "viz_alpha_key": "muted",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p11",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "0.00",
+        "available": "1620.40",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000011",
+    "ts": "2026-10-18T17:13:02.899815Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p49",
+    "to": "run_20261018_171301_af036628:p46",
+    "amount": "27.30",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p49",
+        "to": "run_20261018_171301_af036628:p7",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p7",
+        "to": "run_20261018_171301_af036628:p1",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p46",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4000",
+        "net_sign": 1,
+        "net_balance": "40.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p46",
+        "net_balance_atoms": "2730",
+        "net_sign": 1,
+        "net_balance": "27.30",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p49",
+        "net_balance_atoms": "2730",
+        "net_sign": -1,
+        "net_balance": "-27.30",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p7",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p7",
+        "target": "run_20261018_171301_af036628:p49",
+        "used": "27.30",
+        "available": "1614.71",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p49",
+        "target": "run_20261018_171301_af036628:p7",
+        "used": "0.00",
+        "available": "1499.80",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p7",
+        "used": "27.30",
+        "available": "10271.52",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p7",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "11472.39",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p46",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "27.30",
+        "available": "2038.16",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p46",
+        "used": "0.00",
+        "available": "549.97",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000012",
+    "ts": "2026-10-18T17:13:02.933345Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p7",
+    "to": "run_20261018_171301_af036628:p2",
+    "amount": "95.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p7",
+        "to": "run_20261018_171301_af036628:p2",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p2",
+        "net_balance_atoms": "5500",
+        "net_sign": 1,
+        "net_balance": "55.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p7",
+        "net_balance_atoms": "9500",
+        "net_sign": -1,
+        "net_balance": "-95.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p7",
+        "used": "95.00",
+        "available": "11011.67",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000013",
+    "ts": "2026-10-18T17:13:02.966657Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p2",
+    "to": "run_20261018_171301_af036628:p1",
+    "amount": "100.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p2",
+        "to": "run_20261018_171301_af036628:p1",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "14000",
+        "net_sign": 1,
+        "net_balance": "140.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p2",
+        "net_balance_atoms": "4500",
+        "net_sign": -1,
+        "net_balance": "-45.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p2",
+        "used": "220.00",
+        "available": "1465.83",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p2",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "10749.68",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000014",
+    "ts": "2026-10-18T17:13:03.019624Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p88",
+    "to": "run_20261018_171301_af036628:p19",
+    "amount": "15.60",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p88",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p19",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p19",
+        "net_balance_atoms": "1560",
+        "net_sign": 1,
+        "net_balance": "15.60",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "13500",
+        "net_sign": 1,
+        "net_balance": "135.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p88",
+        "net_balance_atoms": "1560",
+        "net_sign": -1,
+        "net_balance": "-15.60",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p88",
+        "used": "15.60",
+        "available": "1616.58",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "193.30",
+        "available": "5128.04",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p19",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "15.60",
+        "available": "1235.47",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000015",
+    "ts": "2026-10-18T17:13:03.053676Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p3",
+    "to": "run_20261018_171301_af036628:p11",
+    "amount": "110.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p11",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p11",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "2500",
+        "net_sign": 1,
+        "net_balance": "25.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p11",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "110.00",
+        "available": "1597.27",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p11",
+        "used": "0.00",
+        "available": "1599.33",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000016",
+    "ts": "2026-10-18T17:13:03.090299Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p1",
+    "to": "run_20261018_171301_af036628:p7",
+    "amount": "95.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p7",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4500",
+        "net_sign": 1,
+        "net_balance": "45.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p7",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p7",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "67.70",
+        "available": "11404.69",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p7",
+        "used": "0.00",
+        "available": "10298.82",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000017",
+    "ts": "2026-10-18T17:13:03.227793Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p43",
+    "to": "run_20261018_171301_af036628:p56",
+    "amount": "12.90",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p43",
+        "to": "run_20261018_171301_af036628:p1",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p56",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4500",
+        "net_sign": 1,
+        "net_balance": "45.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p43",
+        "net_balance_atoms": "1290",
+        "net_sign": -1,
+        "net_balance": "-12.90",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p56",
+        "net_balance_atoms": "1290",
+        "net_sign": 1,
+        "net_balance": "12.90",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p43",
+        "used": "12.90",
+        "available": "4440.87",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p43",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "7520.58",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p56",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "12.90",
+        "available": "2544.11",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p56",
+        "used": "0.00",
+        "available": "575.89",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000018",
+    "ts": "2026-10-18T17:13:03.272883Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p22",
+    "to": "run_20261018_171301_af036628:p14",
+    "amount": "31.20",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p22",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p14",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p14",
+        "net_balance_atoms": "4960",
+        "net_sign": 1,
+        "net_balance": "49.60",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p22",
+        "net_balance_atoms": "3120",
+        "net_sign": -1,
+        "net_balance": "-31.20",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "2500",
+        "net_sign": 1,
+        "net_balance": "25.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p22",
+        "used": "31.20",
+        "available": "2188.11",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "224.50",
+        "available": "5096.84",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p14",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "31.20",
+        "available": "547.87",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p14",
+        "used": "0.00",
+        "available": "2930.40",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000019",
+    "ts": "2026-10-18T17:13:03.311155Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p84",
+    "to": "run_20261018_171301_af036628:p11",
+    "amount": "9.75",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p84",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p11",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p11",
+        "net_balance_atoms": "975",
+        "net_sign": 1,
+        "net_balance": "9.75",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p84",
+        "net_balance_atoms": "975",
+        "net_sign": -1,
+        "net_balance": "-9.75",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p84",
+        "used": "9.75",
+        "available": "2120.33",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p11",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "0.00",
+        "available": "1620.40",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p11",
+        "used": "100.25",
+        "available": "405.39",
+        "viz_alpha_key": "muted",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000020",
+    "ts": "2026-10-18T17:13:03.356742Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p81",
+    "to": "run_20261018_171301_af036628:p43",
+    "amount": "22.00",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p81",
+        "to": "run_20261018_171301_af036628:p4",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p4",
+        "to": "run_20261018_171301_af036628:p1",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p1",
+        "to": "run_20261018_171301_af036628:p43",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p1",
+        "net_balance_atoms": "4500",
+        "net_sign": 1,
+        "net_balance": "45.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p4",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p43",
+        "net_balance_atoms": "910",
+        "net_sign": 1,
+        "net_balance": "9.10",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p81",
+        "net_balance_atoms": "2200",
+        "net_sign": -1,
+        "net_balance": "-22.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p4",
+        "target": "run_20261018_171301_af036628:p81",
+        "used": "22.00",
+        "available": "2069.13",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p4",
+        "used": "22.00",
+        "available": "8995.15",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p4",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "0.00",
+        "available": "2743.68",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p43",
+        "target": "run_20261018_171301_af036628:p1",
+        "used": "9.10",
+        "available": "7511.48",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p1",
+        "target": "run_20261018_171301_af036628:p43",
+        "used": "0.00",
+        "available": "4453.77",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000021",
+    "ts": "2026-10-18T17:13:03.425759Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p48",
+    "to": "run_20261018_171301_af036628:p14",
+    "amount": "16.80",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p48",
+        "to": "run_20261018_171301_af036628:p6",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p6",
+        "to": "run_20261018_171301_af036628:p14",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p14",
+        "net_balance_atoms": "6640",
+        "net_sign": 1,
+        "net_balance": "66.40",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p48",
+        "net_balance_atoms": "1680",
+        "net_sign": -1,
+        "net_balance": "-16.80",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p6",
+        "net_balance_atoms": "0",
+        "net_sign": 0,
+        "net_balance": "0.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p6",
+        "target": "run_20261018_171301_af036628:p48",
+        "used": "16.80",
+        "available": "2920.37",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p48",
+        "target": "run_20261018_171301_af036628:p6",
+        "used": "0.00",
+        "available": "2436.11",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p14",
+        "target": "run_20261018_171301_af036628:p6",
+        "used": "16.80",
+        "available": "1195.77",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000022",
+    "ts": "2026-10-18T17:13:03.470819Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p72",
+    "to": "run_20261018_171301_af036628:p27",
+    "amount": "26.40",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p72",
+        "to": "run_20261018_171301_af036628:p36",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p36",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p27",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p27",
+        "net_balance_atoms": "2640",
+        "net_sign": 1,
+        "net_balance": "26.40",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "2500",
+        "net_sign": 1,
+        "net_balance": "25.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p36",
+        "net_balance_atoms": "2500",
+        "net_sign": -1,
+        "net_balance": "-25.00",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p72",
+        "net_balance_atoms": "2640",
+        "net_sign": -1,
+        "net_balance": "-26.40",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p36",
+        "target": "run_20261018_171301_af036628:p72",
+        "used": "26.40",
+        "available": "3553.98",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p36",
+        "used": "250.90",
+        "available": "5070.44",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p27",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "26.40",
+        "available": "2515.75",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      }
+    ]
+  },
+  {
+    "event_id": "evt_run_20261018_171301_af036628_000023",
+    "ts": "2026-10-18T17:13:03.512014Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "from": "run_20261018_171301_af036628:p32",
+    "to": "run_20261018_171301_af036628:p35",
+    "amount": "14.10",
+    "amount_flyout": true,
+    "ttl_ms": 1200,
+    "intensity_key": null,
+    "edges": [
+      {
+        "from": "run_20261018_171301_af036628:p32",
+        "to": "run_20261018_171301_af036628:p3",
+        "style": null
+      },
+      {
+        "from": "run_20261018_171301_af036628:p3",
+        "to": "run_20261018_171301_af036628:p35",
+        "style": null
+      }
+    ],
+    "node_badges": null,
+    "node_patch": [
+      {
+        "id": "run_20261018_171301_af036628:p3",
+        "net_balance_atoms": "2500",
+        "net_sign": 1,
+        "net_balance": "25.00",
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 26,
+          "h": 22
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p32",
+        "net_balance_atoms": "1410",
+        "net_sign": -1,
+        "net_balance": "-14.10",
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      },
+      {
+        "id": "run_20261018_171301_af036628:p35",
+        "net_balance_atoms": "1410",
+        "net_sign": 1,
+        "net_balance": "14.10",
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 16,
+          "h": 16
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p32",
+        "used": "14.10",
+        "available": "1539.57",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p32",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "0.00",
+        "available": "1972.38",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p35",
+        "target": "run_20261018_171301_af036628:p3",
+        "used": "14.10",
+        "available": "472.34",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
+      },
+      {
+        "source": "run_20261018_171301_af036628:p3",
+        "target": "run_20261018_171301_af036628:p35",
+        "used": "0.00",
+        "available": "2345.55",
+        "viz_alpha_key": "bg",
+        "viz_width_key": "hairline",
+        "close_requested_at": null
       }
     ]
   }

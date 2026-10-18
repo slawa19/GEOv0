@@ -10,7 +10,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -33,7 +32,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -57,7 +55,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -77,7 +74,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -104,7 +100,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -129,7 +124,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -151,7 +145,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
       sizeForNode: () => ({ w: 40, h: 40 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -171,7 +164,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => ({ __x: 100, __y: 200 }),
       sizeForNode: () => ({ w: 40, h: 20 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
     })
@@ -194,7 +186,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: (id) => (nodeAvailable ? { __x: 50, __y: 60 } : undefined),
       sizeForNode: () => ({ w: 20, h: 20 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
       layoutVersion,
@@ -230,7 +221,6 @@ describe('useOverlayState', () => {
       getLayoutNodeById: () => undefined, // always missing
       sizeForNode: () => ({ w: 20, h: 20 }),
       getCameraZoom: () => 1,
-      setFlash: () => undefined,
       resetFxState: () => undefined,
       nowMs: () => now,
       layoutVersion,

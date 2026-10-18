@@ -8,7 +8,15 @@ export type FxSpark = {
   colorTrail: string
   thickness: number
   seed: number
-  kind: 'comet' | 'beam'
+  /** The only kind since 039 slice C: the wobbling 'comet' had no spawner left and was removed. */
+  kind: 'beam'
+  /**
+   * 039 slice C. How long the head moves; `ttlMs - moveMs` is the fade after it arrived (the last leg of a route only).
+   * Absent: the head moves for the whole `ttlMs`.
+   */
+  moveMs?: number
+  /** `linear` (constant speed, every leg but the last) or `arrive` (eased into the receiver, `easeArrive`). */
+  motion?: 'linear' | 'arrive'
 }
 
 export type FxEdgePulse = {
@@ -29,7 +37,7 @@ export type FxNodeBurst = {
   durationMs: number
   color: string
   seed: number
-  kind: 'clearing' | 'tx-impact' | 'glow'
+  kind: 'tx-impact'
 }
 
 export type FxState = {

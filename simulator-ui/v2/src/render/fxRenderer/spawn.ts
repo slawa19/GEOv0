@@ -60,7 +60,7 @@ export function spawnNodeBursts(
   if (budget <= 0) return
 
   const { nodeIds, nowMs, durationMs, color, seedPrefix, seedFn } = opts
-  const kind = opts.kind ?? 'clearing'
+  const kind = opts.kind ?? 'tx-impact'
   for (const id of nodeIds) {
     if (budget-- <= 0) return
     const seed = seedFn(`${seedPrefix}:${id}`)
@@ -86,6 +86,8 @@ export function spawnSparks(
     colorTrail: string
     thickness: number
     kind?: FxSpark['kind']
+    moveMs?: number
+    motion?: FxSpark['motion']
     seedPrefix: string
     countPerEdge: number
     keyEdge: (a: string, b: string) => string
@@ -99,7 +101,7 @@ export function spawnSparks(
   if (budget <= 0) return
 
   const { edges, nowMs, ttlMs, colorCore, colorTrail, thickness, seedPrefix, countPerEdge, keyEdge, seedFn } = opts
-  const kind = opts.kind ?? 'comet'
+  const kind = opts.kind ?? 'beam'
   for (const e of edges) {
     const k = keyEdge(e.from, e.to)
     for (let i = 0; i < Math.max(1, countPerEdge); i++) {
@@ -116,6 +118,8 @@ export function spawnSparks(
         thickness,
         seed,
         kind,
+        ...(opts.moveMs !== undefined ? { moveMs: opts.moveMs } : {}),
+        ...(opts.motion !== undefined ? { motion: opts.motion } : {}),
       })
     }
   }

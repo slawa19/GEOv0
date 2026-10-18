@@ -332,6 +332,31 @@ class Settings(BaseSettings):
     # at the daily default, and a killed run's lock then silenced the replacement's start-up run for a day).
     # `INTEGRITY_LOCK_TTL_DEFAULT_SECONDS` in `app/core/maintenance_jobs.py` holds the value and its limitation.
     INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
+    # 047 class-1 fix, 2026-10-18 (Codex §15 static review): an integrity attempt that blocks must END, as a failed
+    # attempt, not hang - a hung attempt stopped detection with the job still `running` while money moved.
+    # MEASURED (one equivalent, full `run_scheduled_reconciliation`): 8 000 payments (≈9 600 journal entries) - run
+    # 0.61-0.67 s, slowest statement 118-140 ms (the operations read with their intents), the publication's INSERT
+    # 1.6 ms (this machine, 2026-10-18, spec 047 Changelog); 044 stage 2 - 4.0 -> 11.1 s at 1 522 -> 7 436 simulator
+    # operations (≈1.5 s per 1 000, under `tracemalloc`), peak memory ≈6.5 KB per operation; 015 step 5b - 19.4 s at
+    # 100 000 journal rows. The rate taken is the WORST measured, 1.5 s per 1 000 operations.
+    # The deadline of one attempt (checkpoints + reconciliation + reactions; `app/core/maintenance_jobs.py`): at the
+    # worst rate 1 800 s is ≈1.2 M operations, whose peak memory (≈7.8 GB) fails before the deadline does; ≈90x the
+    # largest run measured. A run cut by it is `<reason>_timed_out`, visible - raise it with a new measurement.
+    INTEGRITY_ATTEMPT_TIMEOUT_SECONDS: float = 1800.0
+    # `lock_timeout` / `statement_timeout` of each transaction the scheduled reconciliation and the checkpoints open
+    # (`SET LOCAL`, `app/core/ledger/reconciliation.py` `bound_the_waits`); the money writers keep their own.
+    # Lock: the longest LEGITIMATE holder of a lock these transactions wait for is the admin's hold clear (the
+    # equivalent `FOR UPDATE` and its latest result `FOR SHARE` for one full verification: 11.1 s at the worst measured
+    # rate and size) or a money writer's `FOR SHARE` on the equivalent (bounded by `PAYMENT_TOTAL_TIMEOUT_SECONDS`,
+    # 10 s); 60 s is ≈5x the first and 6x the second. Statement: the slowest statement measured, 140 ms at 8 000
+    # operations, is ≈17.5 s at 1 M by linear extrapolation; 120 s is ≈7x that. A wait or a statement past its bound
+    # is an error of that equivalent alone (55P03 / 57014); the next equivalent is still verified.
+    INTEGRITY_DB_LOCK_TIMEOUT_MS: int = 60_000
+    INTEGRITY_DB_STATEMENT_TIMEOUT_MS: int = 120_000
+    # One Redis round trip of the integrity lock (`SET NX EX`, the release `EVAL`): the same bound the clearing lease
+    # already uses for one round trip on this client (`renew_timeout_seconds`, `app/core/clearing/runner.py`, 023).
+    # NOT measured on this path (the tier runs without Redis): a precedent, not a measurement.
+    INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS: float = 5.0
 
     # --- Guardrails ---
     # Fail-fast on obviously insecure secrets outside dev/test.
