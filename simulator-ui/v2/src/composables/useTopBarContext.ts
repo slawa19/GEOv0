@@ -24,6 +24,11 @@ export type TopBarContext = {
   runStatus: Readonly<Ref<RunStatus | null>>
   sseState: Readonly<Ref<string>>
   lastError: Readonly<Ref<string | null>>
+  /**
+   * 046 wave 1: the error line is a start the global limit of runs refused, and may be tried again ("Try again" beside
+   * it). Optional: a context without it offers no retry.
+   */
+  startRetryable?: Readonly<Ref<boolean>>
 
   runStats: Readonly<
     Ref<{

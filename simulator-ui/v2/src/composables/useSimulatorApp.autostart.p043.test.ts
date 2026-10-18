@@ -223,14 +223,45 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       const app = boot()
       await settle()
       expect(app.real.runId).toBeNull()
-      expect(app.real.lastError).toBe('Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова — Start в «Подробнее».')
+      // 046 wave 1: the server's number of places (`max_active_runs: 1` here), and no pointer to Start - the line offers a retry.
+      expect(app.real.lastError).toBe('Сейчас занято единственное место: демо смотрит 1 человек. Попробуйте через минуту.')
+      expect(app.real.retryableStartError, '046 wave 1: this refusal may be tried again').toBe(app.real.lastError)
     } finally {
       document.documentElement.lang = ''
     }
     scope?.stop()
     const en = boot()
     await settle()
-    expect(en.real.lastError).toBe('Someone is already watching the demo on this server; try again later. To start again, use Start under "Подробнее".')
+    expect(en.real.lastError).toBe('The only place of the demo is taken right now: 1 person is watching it. Try again in a minute.')
+  })
+
+  it('046 wave 1: "Try again" after the limit refusal starts again; a success clears the line and the offer; another error offers nothing', async () => {
+    vi.mocked(createRun).mockRejectedValueOnce(conflict('global_active_limit'))
+    const app = boot()
+    await settle()
+    expect(createRun).toHaveBeenCalledTimes(1)
+    expect(app.real.retryableStartError).toBe(app.real.lastError)
+    expect(app.real.lastError).not.toBe('')
+
+    // A place freed: the retry (the top bar's start-run, the same action as Start) starts the run.
+    await app.realActions.startRun()
+    await settle()
+    expect(createRun).toHaveBeenCalledTimes(2)
+    expect(app.real.runId).toBe('R_NEW')
+    expect([app.real.lastError, app.real.retryableStartError]).toEqual(['', ''])
+
+    // A retry that meets another error: that error is on the line and nothing offers a retry of it.
+    scope?.stop()
+    window.localStorage.clear()
+    vi.mocked(createRun).mockReset()
+    vi.mocked(createRun).mockRejectedValueOnce(conflict('global_active_limit')).mockRejectedValueOnce(new ApiError('HTTP 503 for /simulator/runs', { status: 503 }))
+    const again = boot()
+    await settle()
+    expect(again.real.retryableStartError).not.toBe('')
+    await again.realActions.startRun()
+    await settle()
+    expect(again.real.lastError).toBe('HTTP 503 for /simulator/runs')
+    expect(again.real.retryableStartError).toBe('')
   })
 
   it('counter-check: a 409 of another kind (owner_active_exists) and a non-409 error keep their old text', async () => {
@@ -238,6 +269,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     const app = boot()
     await settle()
     expect(app.real.lastError, 'another 409: the raw message as before').toBe('HTTP 409 Conflict for /simulator/runs')
+    expect(app.real.retryableStartError, '046 wave 1: another 409 offers no retry').toBe('')
     scope?.stop()
     window.localStorage.clear()
     vi.mocked(createRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs', { status: 500, bodyText: JSON.stringify({ error: { details: { conflict_kind: 'global_active_limit' } } }) }))

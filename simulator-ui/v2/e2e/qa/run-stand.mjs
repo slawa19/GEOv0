@@ -126,8 +126,13 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   and a 64-character stop summary no control of the service row overlaps another or leaves the viewport, and the
  *   Scenario select carries the full option text as its title. Red before the fix in all four (the select overlapped
  *   the theme and the status cluster; in `hud` at 1280x720 it left the screen at x -25). About 0.5 s each.
+ * - 2026-10-18 (046 wave 1, the language switch in the service row): gate 133 -> 137, full 224 -> 228. `top-bar-long.qa.ts`
+ *   runs in both languages: +4 tests `[ru]` (the same two viewports and two themes, `?lang=ru`); the English four keep
+ *   their titles and now pass `?lang=en`. Forecast before the run: +4 x about 0.55 s (the four English ones measured
+ *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s, far under the 600 s budget; no
+ *   `@extended` move (R3 rule) needed.
  */
-export const EXPECTED = { gate: 133, full: 224 }
+export const EXPECTED = { gate: 137, full: 228 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

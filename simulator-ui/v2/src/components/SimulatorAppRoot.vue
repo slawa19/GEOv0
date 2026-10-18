@@ -591,6 +591,7 @@ watch(
    runStatus: computed(() => real.runStatus),
    sseState: computed(() => real.sseState),
    lastError: computed(() => real.lastError),
+  startRetryable: computed(() => !!real.retryableStartError && real.retryableStartError === real.lastError),
 
    runStats: computed(() => real.runStats),
 

@@ -32,7 +32,7 @@ import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
-import { noScenarioText, runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
+import { isGlobalLimitRefusal, noScenarioText, runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -52,6 +52,12 @@ export type RealModeState = {
   sseState: string
   lastEventId: string | null
   lastError: string
+  /**
+   * 046 wave 1: the text of the last start the global limit of runs refused (`isGlobalLimitRefusal`), '' otherwise. The
+   * top bar offers "Try again" while `lastError` is still exactly this text - any later error replaces the line and the
+   * offer with it. Optional: a state built without it offers nothing.
+   */
+  retryableStartError?: string
   artifacts: ArtifactIndexItem[]
   artifactsLoading: boolean
   runStats: {
@@ -1144,6 +1150,7 @@ export function useSimulatorRealMode(opts: {
     }
 
     real.lastError = ''
+    real.retryableStartError = ''
     startRunInProgress = true
     try {
       stopSse()
@@ -1211,6 +1218,7 @@ export function useSimulatorRealMode(opts: {
     } catch (e: unknown) {
       // The one place a failed start is written to the error line (every start goes through here).
       real.lastError = startRunErrorText(e, getErrorMessage)
+      real.retryableStartError = isGlobalLimitRefusal(e) ? real.lastError : ''
     } finally {
       startRunInProgress = false
       // A start that ended without a run, or with a run that has ended, leaves no pause to wait for (043 S2). A run

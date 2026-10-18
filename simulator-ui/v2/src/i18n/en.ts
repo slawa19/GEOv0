@@ -382,4 +382,56 @@ export const en = {
       CLEARING_PRESSURE: 'Run clearing',
     },
   },
+  // ------------------------------------------------------------------------------------------------------------------
+  // 046 wave 1 (T4602), narrowed by the owner's word 2026-10-18 (the first screen is under review; its strings are NOT
+  // moved yet): the run's stop reason, the start the limit of runs refused and its retry, the scenario lock under a
+  // live run (BACKLOG 043-3) and the accessible names of the window shell (wave 2 finding 9).
+  // ------------------------------------------------------------------------------------------------------------------
+
+  /** The few top bar texts of the narrowed wave 1 (`TopBar.vue`); the rest of the bar keeps its literals until its review. */
+  topBar: {
+    /** BACKLOG 043-3: the scenario cannot be changed under a live run; the select is disabled and says why. */
+    scenarioLocked: 'Stop the run to choose another scenario.',
+    /** The line of a start the global limit of runs refused (409 `conflict_kind: global_active_limit`): a new attempt. */
+    retry: 'Try again',
+    errorAria: 'Error',
+    errorLabel: 'Error',
+    stopReasonAria: 'Stop reason',
+    stopLabel: 'Stop',
+  },
+
+  /**
+   * Why a run stopped (`RunStatus.stop_reason`), a closed set: the reasons the clients of this repository send
+   * (`user_stop` - Stop of the top bar; `admin_stop` - Stop of the operator's list; `admin_stop_all` - the default of the
+   * operator's stop-all, `app/api/v1/simulator.py`) and the server's idle stop (`idle_no_subscribers`, 044 stage 2,
+   * PR #299). Any other value (a free text of another client) is `unknown` with the value itself - for correlation.
+   */
+  runStop: {
+    user_stop: 'stopped with the Stop button',
+    admin_stop: 'stopped by the operator',
+    admin_stop_all: 'stopped by the operator (all runs)',
+    idle_no_subscribers: 'stopped by the server: nobody watched it',
+    unknown: 'stopped ({code})',
+  },
+
+  /** A start that did not begin a run (`startRunErrorText`, `noScenarioText`). The retry button is `topBar.retry`. */
+  runStart: {
+    limitBusy: 'Someone is already watching the demo on this server; try again later.',
+    limitOne: 'The only place of the demo is taken right now: 1 person is watching it. Try again in a minute.',
+    limitAll: plural({
+      one: 'All {count} places of the demo are taken right now: {count} people are watching it. Try again in a minute.',
+      other: 'All {count} places of the demo are taken right now: {count} people are watching it. Try again in a minute.',
+    }),
+    noScenario: 'The server offers no scenario: there is nothing to show.',
+  },
+
+  /**
+   * The accessible names of the window shell (`overlaySurfaceCatalog.ts` -> `WindowShell.vue`). An action window's
+   * shell is named by its panel's `*.panelAria`; these are the rest.
+   */
+  windowShell: {
+    window: 'Window',
+    closeWindow: 'Close window',
+    clearingTitle: 'Clearing',
+  },
 } as const

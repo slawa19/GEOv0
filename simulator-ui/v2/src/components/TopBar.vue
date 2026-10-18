@@ -6,9 +6,13 @@ import { isJwtLike } from '../utils/isJwtLike'
 
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { useTopBarContext } from '../composables/useTopBarContext'
+import { useUiLocale } from '../composables/useUiLocale'
+import { runStopText } from '../i18n/statusText'
 import HudBar from './common/HudBar.vue'
+import LanguageSwitch from './LanguageSwitch.vue'
 
 const ctx = useTopBarContext()
+const { t } = useUiLocale()
 
 /**
  * 043 S1: `detailsOpen` is the one "Подробнее" toggle (owned and remembered by the root). Off: the first row only -
@@ -205,14 +209,29 @@ function onThemeChange(v: string) {
   emit('set-ui-theme', normalizeUiThemeId(v))
 }
 
-const stopSummary = computed(() => {
+/**
+ * 046 wave 1: why the run stopped, in the language of the interface - the server's `stop_reason` through its closed set
+ * (`runStopText`: a known reason is a sentence, any other value the general text with the value itself). A stop with a
+ * source but no reason says nothing readable, so it shows no line. The raw `source: reason` is the line's `title`, for
+ * correlation with the server's log (AGENTS.md section 12).
+ */
+const stopSummary = computed(() => runStopText(ctx.runStatus.value?.stop_reason))
+const stopSummaryRaw = computed(() => {
   const st = ctx.runStatus.value
-  if (!st) return ''
-  const src = String(st.stop_source ?? '').trim()
-  const reason = String(st.stop_reason ?? '').trim()
-  if (!src && !reason) return ''
-  return `${src || 'unknown'}${reason ? `: ${reason}` : ''}`
+  const src = String(st?.stop_source ?? '').trim()
+  const reason = String(st?.stop_reason ?? '').trim()
+  return [src, reason].filter(Boolean).join(': ')
 })
+
+/**
+ * BACKLOG 043-3 (046 wave 1): the scenario select changed the choice under a live run while the run went on - nothing
+ * happened. While a run is live (`isRunActive`: running, paused, created, stopping, or a run whose status is not read
+ * yet) the select is disabled and a line beside it says that the run has to be stopped first; Stop is in this row.
+ */
+const scenarioLocked = computed(() => isRunActive.value)
+
+/** 046 wave 1: the error line is a start the global limit of runs refused - "Try again" starts again (as Start does). */
+const startRetryable = computed(() => !!ctx.startRetryable?.value)
 
 // ============================
 // §10: Admin controls
@@ -400,6 +419,8 @@ function onApplyIntensity() {
                 <option value="hud">HUD (sci-fi)</option>
               </select>
             </div>
+            <!-- 046 (decision 2): the language, beside the theme - behind "Подробнее", not on the first view (043: <= 7 stops). -->
+            <LanguageSwitch />
 
             <span v-if="showTestModeBadge" class="ds-badge ds-badge--warn">TEST MODE</span>
           </div>
@@ -413,6 +434,9 @@ function onApplyIntensity() {
               class="ds-select tb-scenario-select"
               :value="ctx.selectedScenarioId.value"
               :title="selectedScenarioText || undefined"
+              :disabled="scenarioLocked"
+              :aria-describedby="scenarioLocked ? 'tb-scenario-locked' : undefined"
+              data-testid="scenario-select"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
             >
@@ -430,6 +454,7 @@ function onApplyIntensity() {
             >
               ↻
             </button>
+            <span v-if="scenarioLocked" id="tb-scenario-locked" class="ds-label tb-scenario-locked" data-testid="scenario-locked">{{ t('topBar.scenarioLocked') }}</span>
 
             <button
               v-if="!isRunActive"
@@ -510,8 +535,14 @@ function onApplyIntensity() {
               <span class="ds-dot" aria-hidden="true" /> Run {{ ctx.runStatus.value?.state ?? (ctx.runId.value ? '…' : '—') }}
             </span>
 
-            <div v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric tb-fade-92" aria-label="Stop reason">
-              <span class="ds-label">Stop</span>
+            <div
+              v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary"
+              class="ds-panel ds-ov-metric tb-fade-92"
+              :aria-label="t('topBar.stopReasonAria')"
+              data-testid="stop-reason"
+              :title="stopSummaryRaw || undefined"
+            >
+              <span class="ds-label">{{ t('topBar.stopLabel') }}</span>
               <span class="ds-value ds-mono tb-fade-90">{{ short(stopSummary, 64) }}</span>
             </div>
 
@@ -633,13 +664,24 @@ function onApplyIntensity() {
       <div
         v-if="ctx.lastError.value"
         class="ds-alert ds-alert--err"
-        aria-label="Error"
+        :aria-label="t('topBar.errorAria')"
         role="alert"
         aria-atomic="true"
+        data-testid="top-error"
       >
         <span class="ds-alert__icon">✕</span>
-        <span class="ds-label">Error</span>
+        <span class="ds-label">{{ t('topBar.errorLabel') }}</span>
         <span class="ds-value ds-mono tb-fade-92" :title="String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
+        <!-- 046 wave 1: a start refused by the limit of runs (409 global_active_limit) can be tried again from here, on the first view. -->
+        <button
+          v-if="startRetryable"
+          type="button"
+          class="ds-btn ds-btn--secondary ds-btn--sm tb-retry"
+          data-testid="start-retry"
+          @click="onStartRun"
+        >
+          {{ t('topBar.retry') }}
+        </button>
       </div>
 
       <div v-if="props.detailsOpen && isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">
@@ -779,6 +821,16 @@ function onApplyIntensity() {
 
 .tb-select-28 {
   height: var(--ds-tb-control-h);
+}
+
+/* BACKLOG 043-3: the reason the scenario select is disabled; it may wrap, never pushes the row past the screen. */
+.tb-scenario-locked {
+  white-space: normal;
+}
+
+.tb-retry {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .tb-run-controls {

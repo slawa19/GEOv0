@@ -5,6 +5,7 @@ import {
   type InteractPanelData,
   type WindowInstance,
 } from '../composables/windowManager/types'
+import { t } from '../i18n/t'
 
 export type OverlaySurfaceFamily =
   | 'interact-panel'
@@ -351,25 +352,31 @@ export const overlaySurfaceCatalog = {
 
 type InteractPanelKind = InteractPanelData['panel']
 
+/**
+ * 046 wave 1 (wave 2 finding 9): the shell of an action window is named in the language of the interface, with the
+ * same words as the panel inside it (`payment.title` / `payment.panelAria`, ...): the panels moved to the dictionary in
+ * wave 2 and the shell around them stayed English. Read at render time (`t` reads the reactive language), so a switch
+ * renames an open window too. The English text is the earlier one, byte for byte.
+ */
 function interactPanelTitle(panel: InteractPanelKind): string {
   switch (panel) {
     case 'payment':
-      return 'Manual payment'
+      return t('payment.title')
     case 'trustline':
-      return 'Trustline'
+      return t('trustline.title')
     case 'clearing':
-      return 'Clearing'
+      return t('windowShell.clearingTitle')
   }
 }
 
 function interactPanelAriaLabel(panel: InteractPanelKind): string {
   switch (panel) {
     case 'payment':
-      return 'Manual payment panel'
+      return t('payment.panelAria')
     case 'trustline':
-      return 'Trustline management panel'
+      return t('trustline.panelAria')
     case 'clearing':
-      return 'Clearing panel'
+      return t('clearing.panelAria')
   }
 }
 
@@ -446,6 +453,8 @@ export function resolveWindowSurfaceDescriptor(
 
   const descriptor = getOverlaySurfaceDescriptor('wm-inspector-window')
 
+  // The two inspector windows (the line window, the participant card) are English as a whole until wave 3 of 046 moves
+  // them; their shells keep the English names below, so no window is named in one language and written in another.
   if (isEdgeDetailWindow(win)) {
     const fromPid = String(win.data.fromPid ?? '').trim()
     const toPid = String(win.data.toPid ?? '').trim()
@@ -475,6 +484,6 @@ export function resolveWindowSurfaceDescriptor(
     descriptor,
     title: '',
     role: descriptor.a11y?.role ?? 'region',
-    ariaLabel: 'Window',
+    ariaLabel: t('windowShell.window'),
   }
 }
