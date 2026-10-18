@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { toLower } from '../utils/stringHelpers'
@@ -149,10 +149,23 @@ onBeforeUnmount(() => {
 })
 watch(networkName, () => void nextTick(measureNetworkName))
 
+/**
+ * 048 S1 (decision 5; §15 Codex P2, 2026-10-18): a living run (running or paused) whose event stream is lost - SSE
+ * `reconnecting` or `closed`; a stream that ends normally is followed by `reconnecting` while REST still says
+ * `running`, and no error line is written (`useSimulatorRealMode.ts`, `runSseLoop`) - is "no connection" in the state
+ * of the network: the raw SSE badge is the developer's (`?debug=1`), and a green "живёт" over a dead stream hid the
+ * loss from the visitor. `connecting` (the first connection of a run) is not a loss.
+ */
+const streamLost = computed(() => {
+  const sse = toLower(ctx.sseState.value)
+  return sse === 'reconnecting' || sse === 'closed'
+})
+
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
 const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
   if (ctx.apiMode.value !== 'real') return { text: 'снимок без сервера', tone: 'info' }
   const s = toLower(ctx.runStatus.value?.state)
+  if ((s === 'running' || s === 'paused') && streamLost.value) return { text: t('topBar.noConnection'), tone: 'err' }
   if (s === 'running') return { text: 'живёт', tone: 'ok' }
   if (s === 'paused') return { text: 'на паузе', tone: 'warn' }
   if (s === 'created') return { text: 'запускается', tone: 'info' }
@@ -267,24 +280,28 @@ const startRetryable = computed(() => !!ctx.startRetryable?.value)
 const showAdminControls = computed(() => isAdminViewer(ctx.accessToken.value, ctx.apiMode.value))
 
 /**
- * 048 S1 (decision 5): the run files under "Admin ▾". Their number is shown only once the index of THIS run has been
- * read: "not read yet" is not "no files". A read counts when it replaced the index (the array) of the same run - a
- * failed read leaves the array and writes the error line instead (`useSimulatorRealMode.ts`, `refreshArtifacts`).
+ * 048 S1 (decision 5): the run files under "Admin ▾". Their number is shown only once the index ON SCREEN has been
+ * read: "not read yet" is not "no files". The marker is the index itself, not the run: a read that succeeded replaced
+ * the array (`useSimulatorRealMode.ts`, `refreshArtifacts`), and that very array is remembered; a failed read leaves the
+ * array and writes the error line instead. Every reset of the index - a start, an attach (also of the same run again),
+ * a stale run - assigns a new empty array, which is not the remembered one, so the panel is "not read" again
+ * (§15 Codex P2, 2026-10-18: the marker was the run id, and attaching run A again, or A -> B -> A, showed "0 / No
+ * artifacts" for an index nobody had read).
  */
-const runFilesReadFor = ref<string | null>(null)
+const runFilesReadIndex = shallowRef<readonly ArtifactIndexItem[] | null>(null)
 const runFilesRead = computed(() => {
   const f = props.runFiles
-  return !!f?.runId && (runFilesReadFor.value === f.runId || f.items.length > 0)
+  return !!f?.runId && ((runFilesReadIndex.value !== null && toRaw(f.items) === runFilesReadIndex.value) || f.items.length > 0)
 })
 async function onRefreshRunFiles() {
   const f = props.runFiles
   if (!f?.runId || f.loading) return
   const runId = f.runId
-  const before = f.items
+  const before = toRaw(f.items)
   await f.refresh()
   await nextTick() // the owner's new index reaches this bar's props on the next render
   const after = props.runFiles
-  if (after?.runId === runId && after.items !== before) runFilesReadFor.value = runId
+  if (after?.runId === runId && toRaw(after.items) !== before) runFilesReadIndex.value = toRaw(after.items)
 }
 
 const adminRunsCountLabel = computed(() => {

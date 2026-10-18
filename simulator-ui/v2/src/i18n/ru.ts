@@ -360,6 +360,7 @@ export const ru = {
     errorLabel: 'Ошибка',
     stopReasonAria: 'Причина остановки',
     stopLabel: 'Остановка',
+    noConnection: 'нет связи с сервером',
   },
 
   // The subject is «прогон» (м. р.).

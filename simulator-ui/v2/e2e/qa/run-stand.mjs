@@ -172,8 +172,16 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   Escape more, well under a second); `layout.qa.ts` reads its service list by test id and also holds that the
  *   developer's controls (`?debug=1`) are absent - no test added. Forecast from CI numbers: 599 - 37.8 (the R3 move
  *   above) - 5.4 = about 556 s.
+ * - 2026-10-18 (048 S1, §15 Codex P2 on the R3 moves): gate 137 -> 138, full 231 -> 232. One test of `motion.qa.ts`
+ *   in the gate, "R3 short - a 2-edge payment: the intermediate leg goes forward, and the later leg is seen on the
+ *   composed page (quality low)": what only the full multi-leg oracles (now `@extended`) held - direction on an
+ *   intermediate (`linear`) leg, composition of a later leg on the page. A short watch (4 frames a step, probes only
+ *   while a leg is alive, at most three screenshots). Cost from CI numbers: the one-edge oracle took 13.4 s in CI
+ *   (run 39149083576; 13.1 s in 39135012070); locally, side by side, the new test takes 0.40 of it (4.3-4.4 s
+ *   against 10.8 s) - about 5.4 s in CI. Forecast of the step: 592 s on main (run 39154847251) - 43.0 s moved out
+ *   (R3 med/high 18.81 + 18.98 s, menu-artifacts 2.61 + 2.61 s in its report) + 5.4 s = about 554 s.
  */
-export const EXPECTED = { gate: 137, full: 231 }
+export const EXPECTED = { gate: 138, full: 232 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

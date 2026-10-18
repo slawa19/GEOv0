@@ -400,6 +400,11 @@ export const en = {
     errorLabel: 'Error',
     stopReasonAria: 'Stop reason',
     stopLabel: 'Stop',
+    /**
+     * 048 S1 (decision 5, §G): the state of the network while a living run has lost its event stream (SSE
+     * reconnecting or closed) - the visitor's form of the SSE badge, which is `?debug=1`'s.
+     */
+    noConnection: 'no connection to the server',
   },
 
   /**

@@ -88,6 +88,55 @@ test('oracle - a payment over one edge: the beam moves, from sender to receiver,
   await flyAndJudge(page, 1)
 })
 
+// 048 S1, §15 Codex P2 (2026-10-18): the full multi-leg oracles (the R3 tests below) are `@extended` since 039 C and
+// 048 S1 - the stand's CI time. What only they held in the gate, kept here on a SHORT watch of a 2-edge payment at the
+// stand's quality `low`: (a) DIRECTION on the INTERMEDIATE leg - a `linear` leg, which the one-edge oracle above (a
+// final `arrive` leg) never draws; (b) COMPOSITION of the LATER leg on the page - a screenshot of the composed page
+// changes where the FX buffer paints the second leg (`motion-c.qa.ts` samples the buffer only). The watch steps four
+// frames at a time and probes only while a leg is alive: the first leg without screenshots, the second with up to three.
+// NOT judged here (they are judged by the oracle of one edge, `motion-c.qa.ts`, `leg-order.qa.ts`, `chord.qa.ts`):
+// displacement minimums, the route, the order of the legs. Mutations (each red, 048 Changelog): the intermediate leg
+// drawn backwards (`renderFrame.ts`), the FX layer hidden on the page once the second leg starts.
+test('R3 short - a 2-edge payment: the intermediate leg goes forward, and the later leg is seen on the composed page (quality low)', async ({ page }) => {
+  expect(await page.locator('.root').getAttribute('data-quality'), 'precondition: the no-GPU profile, quality low').toBe('low')
+  const g = await pickRingRoute(page, RING, 2)
+  await rememberBaseline(page, g)
+  const [first, second] = g.edges
+  await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
+  const aliveLeg = () => page.evaluate(() => {
+    const now = performance.now()
+    const s = (window as unknown as { __geoSim: { fxState: { sparks: Array<{ source: string; target: string; startedAtMs: number; ttlMs: number }> } } })
+      .__geoSim.fxState.sparks.find((x) => now - x.startedAtMs < x.ttlMs)
+    return s ? `${s.source}>${s.target}` : null
+  })
+  const heads: number[] = []
+  const shots: Array<{ strong: number; shown: number; head: number | null }> = []
+  for (let step = 0; step < 100 && shots.length < 3; step += 1) {
+    await frames(page, 4)
+    const leg = await aliveLeg()
+    if (leg === first!.name) {
+      const h = (await probeFrame(page, g, step, false)).edges[first!.name]!.head
+      if (h !== null) heads.push(h)
+    } else if (leg === second!.name) {
+      const p = (await probeFrame(page, g, step, true)).edges[second!.name]!
+      if (p.strong > 0) shots.push({ strong: p.strong, shown: p.shown, head: p.head })
+    } else if (heads.length > 0 && leg === null) break
+  }
+  let maxStepBack = 0
+  for (let i = 1; i < heads.length; i += 1) maxStepBack = Math.max(maxStepBack, heads[i - 1]! - heads[i]!)
+  console.log('[048 R3 short]', JSON.stringify({ route: g.ids, heads: heads.map((h) => h.toFixed(3)), shots }))
+  expect(heads.length, 'counter-check: the intermediate leg was painted in at least 3 probes').toBeGreaterThanOrEqual(3)
+  expect.soft(
+    { startsInSourceHalf: heads[0]! < 0.5, endsNearerTarget: heads[heads.length - 1]! > heads[0]! + 0.2, neverStepsBack: maxStepBack <= 0.02 },
+    `direction on the intermediate leg ${first!.name}: from its source to its target (heads ${heads.map((h) => h.toFixed(2)).join(' ')})`,
+  ).toEqual({ startsInSourceHalf: true, endsNearerTarget: true, neverStepsBack: true })
+  expect(shots.length, 'counter-check: the later leg had strongly painted buffer pixels in at least 2 screenshot probes').toBeGreaterThanOrEqual(2)
+  expect.soft(
+    shots.filter((s) => s.shown * 2 < s.strong).length,
+    `composition of the later leg ${second!.name}: the page shows it where the FX buffer paints it (${JSON.stringify(shots)})`,
+  ).toBe(0)
+})
+
 // R3 (F-038-3 = F-034-D4), FIXED IN S1. Until 2026-10-11 the product drew a route of more than two edges as ONE
 // straight beam sender -> receiver (a chord that is no edge of the route) and started the edges of a two-edge route
 // at the same instant; both were recorded here as the current behaviour, the second and third test below stood under
@@ -106,7 +155,8 @@ test('oracle - a payment over one edge: the beam moves, from sender to receiver,
 // route now lasts as long as its legs, so each flight is watched for hundreds of frames. What they held stays in the
 // gate on smaller watches: the leg order and the handoff of a 3- and a 6-edge route (`motion-c.qa.ts`, PACE and
 // HANDOFF), the judge of leg order on made-up legs (`leg-order.qa.ts`), the chord refusal (`chord.qa.ts`). They still
-// run in the full stand (`run-stand.mjs full`).
+// run in the full stand (`run-stand.mjs full`). 048 S1 (§15 Codex P2): that list held neither the DIRECTION of an
+// intermediate (`linear`) leg nor the COMPOSITION of a later leg on the page - the test "R3 short" above keeps both.
 test('R3 - a payment over two edges: the second edge lights up only after the first has gone dark (F-038-3, property 4) @extended', async ({ page }) => {
   await flyAndJudge(page, 2)
 })
@@ -174,7 +224,8 @@ test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and 
 // 19.0 and 18.8 s in that run's stand report (18.4 and 18.2 s in run 39135012070). What stays in the gate: the five
 // properties of the same flights at quality `low` - the head position, its timing, the route and the leg order are
 // computed before the drawing branches on the quality (`renderFrame.ts`) - by the one-edge oracle above,
-// `motion-c.qa.ts` (3- and 6-edge PACE/HANDOFF) and `chord.qa.ts`. What leaves the gate: the med/high drawing itself
+// `motion-c.qa.ts` (3- and 6-edge PACE/HANDOFF), `chord.qa.ts` and "R3 short" (direction on an intermediate leg,
+// composition of a later leg on the page). What leaves the gate: the med/high drawing itself
 // (the halo trail and the bright packet behind the head) - no other gate test draws it; it is judged by the full stand
 // (`run-stand.mjs full`, the scheduled/manual job `simulator-qa-stand`).
 for (const quality of ['med', 'high'] as const) {

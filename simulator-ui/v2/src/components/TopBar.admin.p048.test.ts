@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ArtifactIndexItem, RunStatus } from '../api/simulatorTypes'
 import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+import { t } from '../i18n/t'
 import TopBar from './TopBar.vue'
 
 function context(over: Partial<TopBarContext> = {}): TopBarContext {
@@ -126,6 +127,43 @@ describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there
     done()
   })
 
+  // §15 Codex P2 (2026-10-18): the "read" marker follows the index, not the run id. Every reset of the index by its
+  // owner (`useSimulatorRealMode.ts`: a start, an attach - also of the same run again -, a stale run) assigns a new
+  // empty array. Red before the fix: after attaching run A again, and after A -> B -> A, the panel said "0" and
+  // "No artifacts" for an index nobody had read.
+  it('the run files: attaching the same run again, or A -> B -> A, is "not read" again until the index is read', async () => {
+    const runId = ref<string | null>('run-A')
+    const items = ref<readonly ArtifactIndexItem[]>([])
+    const f = files()
+    f.refresh = vi.fn(async () => { items.value = [] }) // a successful read of an empty index replaces the array
+    const { host, done } = mountTopBar(context(), { get runFiles() { return { ...f, runId: runId.value, items: items.value } } })
+    await nextTick()
+    const count = () => host.querySelector('[data-testid="admin-run-files-count"]')
+    const read = async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="admin-run-files"] button[aria-label="Refresh artifacts"]')!.click()
+      await vi.waitFor(() => expect(count()?.textContent, 'read: the number').toBe('0'))
+    }
+    await read()
+
+    // Attach A again: the owner resets the index (a new empty array), the run id is the same.
+    items.value = []
+    await nextTick()
+    expect(count(), 'attached A again: not read').toBeNull()
+    expect(host.querySelector('[data-testid="admin-run-files"]')!.textContent, 'and no "No artifacts"').not.toContain('No artifacts')
+    await read()
+
+    // A -> B -> A without reading B: each attach resets the index.
+    runId.value = 'run-B'
+    items.value = []
+    await nextTick()
+    expect(count(), 'B, not read').toBeNull()
+    runId.value = 'run-A'
+    items.value = []
+    await nextTick()
+    expect(count(), 'back to A, not read').toBeNull()
+    done()
+  })
+
   it('the run files: a failed read (the index not replaced) shows no number; a listed file downloads by its name', async () => {
     const items = ref<readonly ArtifactIndexItem[]>([])
     const f = files()
@@ -167,6 +205,48 @@ describe('048 S1 - the capacity stall is on the first view (decision 2)', () => 
       expect(host.querySelector('[data-testid="capacity-stall"]'), `3 ticks, details ${detailsOpen}: the alert`).not.toBeNull()
       done()
     }
+  })
+})
+
+describe('048 S1 - a lost event stream is said in the state of the network (decision 5; §15 Codex P2)', () => {
+  // Red before the fix: with the stream `reconnecting` (a stream that ended normally) and REST still `running`, the
+  // state read the same as with an open stream - the loss was visible only in the SSE badge, which is `?debug=1`'s.
+  it('a living run whose stream is lost: "no connection" in the one live region; an open or a first connection is not a loss', async () => {
+    const runStatus = ref({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
+    const sseState = ref('open')
+    const { host, done } = mountTopBar(context({ runStatus, sseState }), { detailsOpen: false })
+    await nextTick()
+    const state = () => host.querySelector<HTMLElement>('[data-testid="network-state"]')!
+    const lost = t('topBar.noConnection')
+    const open = state().textContent!.trim()
+    expect(open, 'counter-check: an open stream of a running run is not "no connection"').not.toBe(lost)
+
+    sseState.value = 'reconnecting'
+    await nextTick()
+    expect(state().textContent!.trim()).toBe(lost)
+    // Said once: in the one live region of the bar (the first row's state), nowhere else.
+    const regions = [...host.querySelectorAll('[aria-live]')].filter((el) => (el.textContent ?? '').includes(lost))
+    expect(regions, 'one live region carries it').toHaveLength(1)
+    expect(regions[0]).toBe(state())
+
+    sseState.value = 'closed'
+    await nextTick()
+    expect(state().textContent!.trim(), 'closed under a running run: still lost').toBe(lost)
+
+    sseState.value = 'connecting'
+    await nextTick()
+    expect(state().textContent!.trim(), 'a (re)connection in progress is not shown as a loss').toBe(open)
+
+    sseState.value = 'reconnecting'
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus
+    await nextTick()
+    expect(state().textContent!.trim(), 'a paused run is living too').toBe(lost)
+
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'stopped' } as RunStatus
+    sseState.value = 'closed'
+    await nextTick()
+    expect(state().textContent!.trim(), 'a stopped run closes its stream: that is the stop, not a loss').not.toBe(lost)
+    done()
   })
 })
 
