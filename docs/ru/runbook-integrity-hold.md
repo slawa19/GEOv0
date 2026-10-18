@@ -43,9 +43,11 @@
 **Прогон, который не может закончиться** (047, 2026-10-18): ожидание блокировки или запрос сверки дольше
 `INTEGRITY_DB_LOCK_TIMEOUT_MS` / `INTEGRITY_DB_STATEMENT_TIMEOUT_MS` — ошибка только этого эквивалента (SQLSTATE `55P03`
 / `57014` в записи лога `debt_reconciliation.error`), следующие эквиваленты сверяются в том же прогоне; попытка целиком
-дольше `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS` или вызов Redis дольше `INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS` — задание
+дольше `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS` или ВЗЯТИЕ замка Redis дольше `INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS` — задание
 `integrity` в состоянии `failed` с событием `<reason>_timed_out` (`/health` — `degraded`). Ни то ни другое не
-результат и не удержание. Повторяющийся `_timed_out` на выросшей истории — поднять `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS`
+результат и не удержание. Иначе с ОСВОБОЖДЕНИЕМ замка (исправлено 2026-10-19 по §15-ревью Codex): если освобождение
+не ответило в срок, завершённая проверка остаётся завершённой, в лог пишется `lock.release_uncertain`, а ключ
+истекает по TTL. Повторяющийся `_timed_out` на выросшей истории — поднять `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS`
 по замеру длительности прогона (`app/config.py`), а не выключать цикл.
 
 Как увидеть: `summary` — `status: critical`, `hold: true`; `status` (админ) — alert `Integrity hold on <CODE>` с
