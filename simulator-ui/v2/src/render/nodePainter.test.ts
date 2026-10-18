@@ -20,7 +20,7 @@ const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: PALETTE } 
 const rgb = (hex: string) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},`
 
 type Op = { op: string; args: number[] }
-type Draw = { kind: 'stroke' | 'fill'; path: Op[]; strokeStyle: string; fillStyle: string; lineWidth: number; dash: number[]; lineCap: string }
+type Draw = { kind: 'stroke' | 'fill'; path: Op[]; strokeStyle: string; fillStyle: string; lineWidth: number; dash: number[]; lineCap: string; globalCompositeOperation: string }
 
 function recorder() {
   const draws: Draw[] = []
@@ -30,7 +30,7 @@ function recorder() {
   const stack: State[] = []
   const rec = (op: string) => (...args: number[]) => { path.push({ op, args }) }
   const emit = (kind: Draw['kind']) => () => {
-    draws.push({ kind, path: [...path], strokeStyle: String(s.strokeStyle), fillStyle: String(s.fillStyle), lineWidth: s.lineWidth, dash: [...s.dash], lineCap: s.lineCap })
+    draws.push({ kind, path: [...path], strokeStyle: String(s.strokeStyle), fillStyle: String(s.fillStyle), lineWidth: s.lineWidth, dash: [...s.dash], lineCap: s.lineCap, globalCompositeOperation: s.globalCompositeOperation })
   }
   const ctx = {
     save: () => { stack.push({ ...s, dash: [...s.dash] }) },
@@ -56,9 +56,9 @@ const node = (over: Partial<LayoutNode> = {}): LayoutNode => ({
   id: 'n', type: 'person', status: 'active', net_sign: 0, viz_shape_key: 'circle', viz_size: { w: 20, h: 20 }, __x: 100, __y: 100, ...over,
 } as LayoutNode)
 
-const paint = (n: LayoutNode, o: { zoom?: number; quality?: 'low' | 'med' | 'high' } = {}) => {
+const paint = (n: LayoutNode, o: { zoom?: number; quality?: 'low' | 'med' | 'high'; glow?: boolean; glowComposite?: GlobalCompositeOperation } = {}) => {
   const r = recorder()
-  drawNodeShape(r.ctx, n, { mapping: MAPPING, cameraZoom: o.zoom ?? 1, quality: o.quality ?? 'low' })
+  drawNodeShape(r.ctx, n, { mapping: MAPPING, cameraZoom: o.zoom ?? 1, quality: o.quality ?? 'low', glow: o.glow, glowComposite: o.glowComposite })
   return r
 }
 
@@ -80,7 +80,7 @@ describe('node painter - the fill is the role', () => {
 
   it('three debtors of different kinds and colour keys get ONE colour - body and glow', () => {
     const kinds = [node({ net_sign: -1, viz_color_key: 'debt-2' }), node({ net_sign: -1, viz_color_key: 'debt-8' }), node({ net_sign: -1, type: 'business', viz_color_key: 'business', viz_shape_key: 'rounded-rect', viz_size: { w: 26, h: 22 } })]
-    const bodies = kinds.map((n) => paint(n).draws.find((d) => d.kind === 'fill')!.fillStyle)
+    const bodies = kinds.map((n) => paint(n, { glow: true }).draws.find((d) => d.kind === 'fill')!.fillStyle)
     expect(new Set(bodies).size).toBe(1)
     expect(vi.mocked(drawGlowSprite).mock.calls.map((c) => c[1].color)).toEqual(Array(6).fill(PALETTE.debtor))
   })
@@ -169,12 +169,15 @@ describe('node painter - a freeze is a dashed outline', () => {
     expect(at(0.25)[1]).toBeCloseTo(at(1)[1]!, 6)
   })
 
-  it('a frozen node has no continuous rim under its dashes (the bloom stays)', () => {
-    paint(node({ status: 'frozen' }))
+  it('a frozen node has no continuous rim under its dashes (the bloom of an active node stays)', () => {
+    paint(node({ status: 'frozen' }), { glow: true })
     expect(vi.mocked(drawGlowSprite).mock.calls.map((c) => c[1].kind)).toEqual(['bloom'])
     vi.mocked(drawGlowSprite).mockClear()
-    paint(node({ status: 'active' }))
+    paint(node({ status: 'active' }), { glow: true })
     expect(vi.mocked(drawGlowSprite).mock.calls.map((c) => c[1].kind)).toEqual(['bloom', 'rim'])
+    // ... and an idle frozen node draws no rim stroke either: its outline is the dashes.
+    const rimStrokes = paint(node({ status: 'frozen', net_sign: 1 })).draws.filter((d) => d.kind === 'stroke' && d.strokeStyle.startsWith('rgba(') && !d.strokeStyle.includes('rgba(255,255,255,'))
+    expect(rimStrokes).toHaveLength(0)
   })
 
   it('the canvas state is restored: nothing drawn after a frozen node inherits its dash', () => {
@@ -183,8 +186,27 @@ describe('node painter - a freeze is a dashed outline', () => {
     expect(r.ctx.getLineDash(), 'the dash after the painter returns').toEqual([])
     expect(r.ctx.depth, 'every save has its restore').toBe(0)
     drawNodeShape(r.ctx, node({ status: 'active', type: 'hub' }), { mapping: MAPPING, cameraZoom: 1, quality: 'low' })
-    const second = r.draws.slice(r.draws.length / 2)
-    expect(second.filter((d) => d.kind === 'stroke').map((d) => d.dash)).toEqual([[], [], []])
+    const second = r.draws.slice(r.draws.findIndex((d, i) => i > 0 && d.kind === 'fill' && r.draws.slice(0, i).some((x) => x.kind === 'fill')))
+    // The idle rim, the outline, the hub ring and the sign (039 slice C: the rim of an idle node is a stroke).
+    expect(second.filter((d) => d.kind === 'stroke').map((d) => d.dash)).toEqual([[], [], [], []])
+  })
+})
+
+describe('node painter - glow only on an active node (039 slice C)', () => {
+  it('an idle node draws NO glow sprite: a crisp rim stroke of its role colour instead', () => {
+    const { draws } = paint(node({ net_sign: -1 }))
+    expect(vi.mocked(drawGlowSprite)).not.toHaveBeenCalled()
+    const rim = draws.filter((d) => d.kind === 'stroke' && d.strokeStyle.includes(rgb(PALETTE.debtor)))
+    expect(rim, 'one rim stroke in the debtor colour').toHaveLength(1)
+    expect(rim[0]!.globalCompositeOperation, 'composited as plain paint').toBe('source-over')
+  })
+
+  it('an active node draws the bloom and the rim sprites, with the composite it is given (lighter without a GPU, screen by default)', () => {
+    paint(node({ net_sign: -1 }), { glow: true })
+    expect(vi.mocked(drawGlowSprite).mock.calls.map((c) => [c[1].kind, c[1].composite])).toEqual([['bloom', 'screen'], ['rim', 'screen']])
+    vi.mocked(drawGlowSprite).mockClear()
+    paint(node({ net_sign: -1 }), { glow: true, glowComposite: 'lighter' })
+    expect(vi.mocked(drawGlowSprite).mock.calls.map((c) => [c[1].kind, c[1].composite])).toEqual([['bloom', 'lighter'], ['rim', 'lighter']])
   })
 })
 

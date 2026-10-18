@@ -67,6 +67,8 @@ export function renderFxFrame(opts: {
   quality?: 'low' | 'med' | 'high'
   /** Pass snapshot identity key so the Path2D cache can be invalidated on scene changes. */
   snapshotKey?: string | null
+  /** The product believes there is no GPU (`data-gpu=0`): accepted for symmetry with the base pass; no FX uses `screen` since 039 slice C. */
+  noGpu?: boolean
 }): void {
   const { nowMs, ctx, pos, w, h, mapping, fxState } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))

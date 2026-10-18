@@ -131,6 +131,8 @@ type UseRenderLoopDeps = {
 
   isTestMode: () => boolean
   getQuality: () => Quality
+  /** 039 slice C: the product's own verdict on a GPU (`useQualityAutoguards`); absent = a GPU is assumed. */
+  isGpuLikely?: () => boolean
 
   getFlash: () => number
   setFlash: (v: number) => void
@@ -159,6 +161,7 @@ type UseRenderLoopDeps = {
     dragMode: boolean
     hiddenNodeId: string | null
     pos: Map<string, LayoutNode>
+    noGpu: boolean
   }) => Map<string, LayoutNode>
   renderFxFrame: (opts: {
     nowMs: number
@@ -172,6 +175,7 @@ type UseRenderLoopDeps = {
     cameraZoom: number
     quality: Quality
     snapshotKey: string
+    noGpu: boolean
   }) => void
   mapping: VizMapping
   fxState: FxState
@@ -538,6 +542,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     }
 
     const linkLod = deps.getLinkLod ? deps.getLinkLod() : 'full'
+    const noGpu = deps.isGpuLikely ? !deps.isGpuLikely() : false
     const pos = deps.drawBaseGraph(ctx, {
       w: layout.w,
       h: layout.h,
@@ -555,6 +560,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       dragMode: linkLod === 'focus',
       hiddenNodeId: deps.getHiddenNodeId ? deps.getHiddenNodeId() : null,
       pos: cachedPos,
+      noGpu,
     })
 
     deps.renderFxFrame({
@@ -571,6 +577,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       // Pass snapshot identity so the fxRenderer can invalidate its Path2D cache
       // when the scene changes, rather than clearing it every single frame.
       snapshotKey: key,
+      noGpu,
     })
 
     // Mark only after we've made it through the draw path (no early-return).

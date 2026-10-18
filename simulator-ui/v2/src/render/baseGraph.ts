@@ -60,6 +60,11 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   dragMode?: boolean
   hiddenNodeId?: string | null
   pos?: Map<string, LayoutNode>
+  /**
+   * 039 slice C: the product believes there is no GPU (`data-gpu=0`, `useQualityAutoguards`). Then no glow is
+   * composited with `screen` (the sprites are made for it, black is neutral under `lighter` too).
+   */
+  noGpu?: boolean
 }) {
   const { nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
   const activeNodes = opts.activeNodes
@@ -73,6 +78,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
   const allowDevWarn = import.meta.env.DEV && !isTestRuntime()
+  const glowComposite: GlobalCompositeOperation = opts.noGpu ? 'lighter' : 'screen'
 
   function drawNodeOverlayGlow(
     n: LayoutNode,
@@ -92,7 +98,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       color: glow,
       blurPx: r * params.blurK,
       lineWidthPx: Math.max(params.lineWidthMinPx * invZ, r * params.lineWidthK),
-      composite: 'screen',
+      composite: glowComposite,
     })
   }
 
@@ -245,6 +251,9 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       mapping,
       cameraZoom: z,
       quality: q,
+      // 039 slice C: glow only on an ACTIVE node - selected, or highlighted by an effect / for picking.
+      glow: isSelected || isActiveNode,
+      glowComposite,
     })
 
     if (isDimmed) ctx.globalAlpha = 1

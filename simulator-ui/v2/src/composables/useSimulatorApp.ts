@@ -1081,6 +1081,7 @@ export function useSimulatorApp(opts?: {
     getCamera: () => camera,
     isTestMode: () => isTestMode.value,
     getQuality: () => quality.value,
+    isGpuLikely: () => gpuAccelLikely.value,
     getFlash: () => state.flash,
     setFlash: (v) => {
       state.flash = v
