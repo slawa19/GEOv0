@@ -3,10 +3,13 @@
  * The REAL `simulatorApi`/`http` run here; only `fetch` is a stub, and the clock is controlled.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { ApiError, LONG_REQUEST_TIMEOUT_MS } from '../api/http'
-import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
+import { setUiLocale } from '../i18n/locale'
+import { t } from '../i18n/t'
+import { actionErrorText, clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
+import { useInteractMode } from './useInteractMode'
 import { isInteractActionError, useInteractActions, type InteractActionError } from './useInteractActions'
 
 function actions() {
@@ -66,7 +69,9 @@ describe('item 1: the request id survives the Interact path', () => {
     expect(clearingRefusalText(error, 'UAH', 'en')).toContain('(ref: req-409)')
   })
 
-  it('a refusal the client has no text for keeps the server message and gets the ref too', async () => {
+  // 046 wave 2 (decision 3): was "keeps the server message" - a code the client has no text for is told by the general
+  // text WITH the code (the server's English is no longer shown); the reference is kept.
+  it('a refusal the client has no text for shows the general text with its code and gets the ref too', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -80,8 +85,8 @@ describe('item 1: the request id survives the Interact path', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const text = paymentRefusalText(await call, 'UAH', 'en')
-    expect(text).toContain('server words')
-    expect(text).toContain('(ref: req-new)')
+    expect(text).toBe('The action failed (SOMETHING_NEW). (ref: req-new)')
+    expect(text).not.toContain('server words')
   })
 
   it('counter-check: no id, no ref', async () => {
@@ -205,5 +210,68 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     const error = await call
 
     expect(paymentRefusalText(error, 'UAH', 'en')).toBe('No payment route between these participants (available now: 3.00 UAH).')
+  })
+})
+
+// Codex §15 round 1 (P2): a value the client threw (not an HTTP answer) is marked as the client's own message, so a SERVER
+// answer that happens to carry the code `UNKNOWN` is no longer taken for one.
+describe('046 round 1: the client marks its own failures', () => {
+  it('a missing run id is the client\'s own message (clientMessage), in the language of the interface', async () => {
+    const a = useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('') })
+    const e = await rejection(a.createTrustline('a', 'b', '10', 'UAH'))
+    expect(e.code).toBe('UNKNOWN')
+    expect(e.clientMessage).toBe(true)
+    expect(e.message).toBe('No active run_id')
+  })
+  it('counter-check: a server answer with the code UNKNOWN is not marked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'UNKNOWN', message: '' }), { status: 500, headers: { 'Content-Type': 'application/json' } })))
+    const e = await rejection(actions().createTrustline('a', 'b', '10', 'UAH'))
+    expect(e.code).toBe('UNKNOWN')
+    expect(e.clientMessage).toBeUndefined()
+  })
+})
+
+// Codex §15 fix-delta (F2, 2026-10-18): every non-HTTP rejection was marked as the client's own text, so a network failure
+// showed the browser's English "Failed to fetch" in the trust line and clearing windows under ?lang=ru. Only a text the
+// client composed from its dictionary passes as its own; a network failure is told in the language of the interface.
+describe('046 fix-delta F2: a network failure is told in the language of the interface', () => {
+  const failingFetch = () => vi.fn(async () => { throw new TypeError('Failed to fetch') })
+  const im = () => useInteractMode({ actions: actions(), runId: computed(() => 'run-1'), equivalent: computed(() => 'UAH'), snapshot: ref(null) })
+
+  afterEach(() => setUiLocale('en'))
+
+  it('the trust line window: no "Failed to fetch", the Russian text of a lost connection', async () => {
+    setUiLocale('ru')
+    vi.stubGlobal('fetch', failingFetch())
+    const mode = im()
+    mode.startTrustlineFlow()
+    mode.selectNode('alice')
+    mode.selectNode('bob')
+    await mode.confirmTrustlineCreate('10')
+    expect(mode.state.error).toBe(t('actionError.NETWORK', {}, 'ru'))
+    expect(mode.state.error).not.toContain('Failed to fetch')
+  })
+
+  it('the clearing window: the same', async () => {
+    setUiLocale('ru')
+    vi.stubGlobal('fetch', failingFetch())
+    const mode = im()
+    mode.startClearingFlow()
+    await mode.confirmClearing()
+    expect(mode.state.clearingFailure).toBe(t('actionError.NETWORK', {}, 'ru'))
+    expect(mode.state.error).not.toContain('Failed to fetch')
+  })
+
+  it('another thrown value is the general text with a code, never its own English message; the client\'s own text passes', async () => {
+    const a = actions()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted.', 'AbortError') }))
+    const aborted = await rejection(a.createTrustline('a', 'b', '10', 'UAH'))
+    expect(aborted.clientMessage).toBeUndefined()
+    expect(actionErrorText(aborted, 'ru')).toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
+    // Counter-check: the text the client composed (a missing run id) is still its own.
+    setUiLocale('ru')
+    const own = await rejection(useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('') }).createTrustline('a', 'b', '10', 'UAH'))
+    expect(own.clientMessage).toBe(true)
+    expect(actionErrorText(own, 'ru')).toBe(t('actionError.noRun', {}, 'ru'))
   })
 })

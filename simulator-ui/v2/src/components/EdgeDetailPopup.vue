@@ -109,17 +109,6 @@ const emit = defineEmits<{
   (e: 'sendPayment'): void
 }>()
 
-const popupStyle = computed(() =>
-  // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
-  ({
-    position: 'static',
-    left: 'auto',
-    top: 'auto',
-    right: 'auto',
-    zIndex: 'auto',
-  }) as const,
-)
-
 // Ids are PRINTED here, so they go through the display rule; `state` keeps the full ids.
 const showPid = useParticipantDisplayId()
 
@@ -202,7 +191,6 @@ function onCloseLine() {
     class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"
     data-testid="edge-detail-popup"
     aria-label="Edge detail popup"
-    :style="popupStyle"
   >
     <!-- 045 S3 (decision 3): the pair and its equivalent are the title; the window closes from × (and Escape, handled by
          the window manager). The equivalent is said once, here: the figures below are all of it. -->
@@ -311,8 +299,6 @@ function onCloseLine() {
   lines, one row of small buttons.
 */
 .popup {
-  position: absolute;
-  z-index: var(--ds-z-panel, 42);
   box-sizing: border-box;
   width: var(--ds-wm-edge-detail-prefw);
   max-width: min(460px, calc(100vw - 24px));

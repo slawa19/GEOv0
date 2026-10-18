@@ -38,6 +38,7 @@ import { ru } from './ru'
 const RU_LATIN_ALLOWED: ReadonlySet<string> = new Set([
   'GEO', // 2026-10-18: the name of the protocol and the product
   'PID', // 2026-10-18: the participant identifier as the server names it; a label, not a value (named by the advisor for wave 1)
+  'Esc', // 2026-10-18 (wave 2): the name of the key printed on the keyboard, the same in both languages
 ])
 
 /** Codes of equivalents (`seeds/communities/*`, plus USD): data, never a literal word of a dictionary (rule 6). */
@@ -116,7 +117,12 @@ describe('046 policy guard - the dictionary parity of en.ts and ru.ts', () => {
 })
 
 describe('046 policy guard - every rule fails on a mutated copy', () => {
-  const clone = <T>(v: T): T => structuredClone(v)
+  // A deep copy that keeps plural leaves as they are: `structuredClone` drops their symbol brand (wave 2: the shipped
+  // dictionaries hold plurals now, and a copy without them would be a different dictionary, not a mutated one).
+  const clone = <T>(v: T): T => {
+    if (typeof v !== 'object' || v === null || isPluralMessage(v)) return v
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)])) as T
+  }
 
   it('a key removed from ru', () => {
     const r = clone(ru) as { locale: Record<string, string> }

@@ -9,6 +9,7 @@ import type {
   MetricsResponse,
 } from '../api/simulatorTypes'
 import type { MetricsStreamPhase } from '../composables/useMetricsPolling'
+import { t, type MessageKey } from '../i18n/t'
 import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import BottlenecksList from './BottlenecksList.vue'
 import MetricsKpiCard from './MetricsKpiCard.vue'
@@ -71,11 +72,10 @@ const equivalent = computed(() => String(props.metrics?.equivalent ?? '').trim()
  * A 503 here means the backend HAS no measurements and refused to invent plausible ones
  * (spec 007, F-007-1). That is the system being honest, so the panel says "no data" — a neutral,
  * non-alert surface. `error` is a different sentence with a different surface: something broke.
+ *
+ * 046 wave 2: one whole sentence per section and reason (`metrics.*StorageOff` / `*ReadFailed` / `*None`) - no noun is
+ * glued into a shared sentence; the reason token is a closed set, an unknown one gets the "none yet" sentence.
  */
-const UNAVAILABLE_DETAIL: Record<string, (noun: string) => string> = {
-  storage_disabled: (noun) => `Metric storage is off for this run, so no ${noun} were recorded.`,
-  db_read_failed: (noun) => `The metric store could not be read, so there are no ${noun} to show.`,
-}
 
 /** What one section says while it is not showing content. `null` means "show the content". */
 type SectionState = {
@@ -91,28 +91,31 @@ type SectionState = {
 }
 
 type SectionCopy = {
-  /** Plural noun this section is about, used inside the "no data" sentences. */
-  noun: string
-  idle: string
-  loading: string
-  unavailableTitle: string
-  errorTitle: string
+  idle: MessageKey
+  loading: MessageKey
+  unavailableTitle: MessageKey
+  errorTitle: MessageKey
+  /** The "no data" sentence by the unavailable reason token, and for any other token. */
+  unavailable: Readonly<Record<string, MessageKey>>
+  none: MessageKey
 }
 
 const METRICS_COPY: SectionCopy = {
-  noun: 'measurements',
-  idle: 'Analytics updates while a run is running.',
-  loading: 'Loading measurements…',
-  unavailableTitle: 'No measurements recorded',
-  errorTitle: 'Analytics request failed',
+  idle: 'metrics.measurementsIdle',
+  loading: 'metrics.measurementsLoading',
+  unavailableTitle: 'metrics.measurementsUnavailableTitle',
+  errorTitle: 'metrics.measurementsErrorTitle',
+  unavailable: { storage_disabled: 'metrics.measurementsStorageOff', db_read_failed: 'metrics.measurementsReadFailed' },
+  none: 'metrics.measurementsNone',
 }
 
 const BOTTLENECKS_COPY: SectionCopy = {
-  noun: 'bottlenecks',
-  idle: 'Bottlenecks update while a run is running.',
-  loading: 'Loading bottlenecks…',
-  unavailableTitle: 'No bottlenecks recorded',
-  errorTitle: 'Bottlenecks request failed',
+  idle: 'metrics.bottlenecksIdle',
+  loading: 'metrics.bottlenecksLoading',
+  unavailableTitle: 'metrics.bottlenecksUnavailableTitle',
+  errorTitle: 'metrics.bottlenecksErrorTitle',
+  unavailable: { storage_disabled: 'metrics.bottlenecksStorageOff', db_read_failed: 'metrics.bottlenecksReadFailed' },
+  none: 'metrics.bottlenecksNone',
 }
 
 function sectionState(
@@ -124,28 +127,28 @@ function sectionState(
   if (phase === 'ready') return null
 
   if (phase === 'error') {
+    // 046 wave 2 (Codex §15 round 1): the prose is the panel's; the failure's reference (its status or code and request
+    // id, `useMetricsPolling` -> `errorReference`) is shown apart, labelled, in the token's element.
     const text = String(error ?? '').trim()
     return {
       kind: 'error',
-      title: copy.errorTitle,
-      detail: text || 'The analytics request did not complete.',
-      token: '',
+      title: t(copy.errorTitle),
+      detail: t('metrics.errorDetail'),
+      token: text ? t('metrics.errorReference', { ref: text }) : '',
     }
   }
 
   if (phase === 'unavailable') {
     const token = String(reason ?? '').trim()
-    const detail =
-      UNAVAILABLE_DETAIL[token]?.(copy.noun) ??
-      `This run has no recorded ${copy.noun} yet. Nothing is being substituted for them.`
-    return { kind: 'unavailable', title: copy.unavailableTitle, detail, token }
+    const known = Object.hasOwn(copy.unavailable, token) ? copy.unavailable[token] : undefined
+    return { kind: 'unavailable', title: t(copy.unavailableTitle), detail: t(known ?? copy.none), token }
   }
 
   if (phase === 'loading') {
-    return { kind: 'loading', title: copy.loading, detail: '', token: '' }
+    return { kind: 'loading', title: t(copy.loading), detail: '', token: '' }
   }
 
-  return { kind: 'idle', title: copy.idle, detail: '', token: '' }
+  return { kind: 'idle', title: t(copy.idle), detail: '', token: '' }
 }
 
 const metricsState = computed(() =>
@@ -179,19 +182,19 @@ function stateRole(state: SectionState): string | undefined {
   <section
     class="rmp ds-ov-item ds-ov-surface ds-panel"
     :role="surface.a11y?.role"
-    :aria-label="surface.a11y?.ariaLabel"
+    :aria-label="surface.a11y?.ariaLabel ? t('metrics.panelAria') : undefined"
     :data-metrics-phase="metricsPhase"
     :data-bottlenecks-phase="bottlenecksPhase"
   >
     <header class="rmp__header ds-panel__header">
-      <span class="rmp__title">Analytics</span>
+      <span class="rmp__title">{{ t('metrics.title') }}</span>
       <span v-if="equivalent" class="rmp__equivalent ds-mono ds-muted">{{ equivalent }}</span>
     </header>
 
     <div class="rmp__body ds-panel__body">
       <!-- Measurements: this section answers for `GET /metrics` and for nothing else. -->
       <div class="rmp__section" data-section="metrics">
-        <div class="ds-section-label">Measurements</div>
+        <div class="ds-section-label">{{ t('metrics.measurements') }}</div>
 
         <div
           v-if="metricsState"
@@ -217,14 +220,14 @@ function stateRole(state: SectionState): string | undefined {
             :equivalent="equivalent"
           />
           <p v-if="orderedSeries.length === 0" class="rmp__empty ds-muted" data-state="no-series">
-            No series in this window
+            {{ t('metrics.noSeries') }}
           </p>
         </div>
       </div>
 
       <!-- Bottlenecks: this section answers for `GET /bottlenecks` and for nothing else. -->
       <div class="rmp__section" data-section="bottlenecks">
-        <div class="ds-section-label">Bottlenecks</div>
+        <div class="ds-section-label">{{ t('bottlenecks.title') }}</div>
 
         <div
           v-if="bottlenecksState"

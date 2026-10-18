@@ -89,6 +89,8 @@ There are two relevant modes controlled by Vite env vars:
 
 The demo snapshots behind `VITE_DEMO_FIXTURES` (`public/simulator-fixtures/v1/<EQ>/snapshot.json`, `events/demo-tx.json`, `events/demo-clearing.json`) are static, versioned assets. Their generator, `scripts/sync_demo_fixtures.ps1` and the `predev` / `prebuild` hooks (`npm run sync:demo-fixtures`) were deleted on 2026-10-07 (programme 032, slice S4): edit the files directly when a demo needs to change. The Simulator UI's own fixtures mode stays.
 
+**Offline effects workbench (042 `T4205`, 2026-10-18).** On the offline source («Подробнее» → «Источник» → «Снимок без сервера», or `?mode=fixtures`) the bottom service row offers «Плейлист» with «Проиграть» / «Стоп» / «Шаг»: the recorded playlists of the snapshot's equivalent (`events/*.json`) are played through the same event path as the server's SSE events (`normalizeSimulatorEvent` → `applyAcceptedRealEvent` → `executeRealEventIntents`, `src/composables/usePlaylistWorkbench.ts`), so beams, bursts and clearing pulses can be watched and tuned without a server. A playlist must be in the SSE event form: only `tx.updated`, `tx.failed` and `clearing.done`, all of the folder's equivalent; a playlist with any other event is not offered (a warning in the console names the event), an empty one is not offered either. The recorded patches stay applied until the scene is loaded again. The amount labels appear only for events that carry `amount` (the committed recordings do not).
+
 ### Enable test-mode manually (PowerShell)
 
 From `simulator-ui/v2`:

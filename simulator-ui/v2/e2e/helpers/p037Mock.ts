@@ -15,7 +15,12 @@ export const RUN_ID = 'run-p037'
 export const SCENARIO_ID = 'greenfield-village-100-realistic-v2'
 export const PAYMENT_ID = 'payment-p037-1'
 
-export function snapshot(more: Participant[] = []) {
+/**
+ * `aliceLines` = N: the snapshot also carries the N lines alice -> `more[0..N-1]` that the trust-line list answers with (same
+ * pair, creditor -> debtor, limit 50, used 0..N-1): the card's totals (from the snapshot) and its rows (from the list) then
+ * describe the same lines. Needs `more.length` >= N.
+ */
+export function snapshot(more: Participant[] = [], aliceLines = 0) {
   return {
     equivalent: 'UAH',
     generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
@@ -30,6 +35,8 @@ export function snapshot(more: Participant[] = []) {
       // payment alice -> bob is carried by the line bob -> alice (creditor -> debtor)
       { source: 'bob', target: 'alice', trust_limit: '100', used: '0', available: '100', status: 'active',
         viz_color_key: 'default', viz_width_key: 'default', viz_alpha_key: 'default' },
+      ...more.slice(0, aliceLines).map((x, i) => ({ source: 'alice', target: x.pid, trust_limit: '50', used: String(i), available: String(50 - i),
+        status: 'active', viz_color_key: 'default', viz_width_key: 'default', viz_alpha_key: 'default' })),
     ],
   }
 }
@@ -40,7 +47,7 @@ export async function mockApp(
     /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
     /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean;
     /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean;
-    /** N more lines alice -> `x01`.. (needs `extraTargets` >= N): a participant card with a long list of lines (045 S3). */ aliceLines?: number;
+    /** N more lines alice -> `x01`.. (needs `extraTargets` >= N): a participant card with a long list of lines (045 S3); the snapshot carries the same N lines (S4). */ aliceLines?: number;
     /** What `clearing-real` answers. `many` needs `extraTargets` >= 5. */ clearing?: 'cycles' | 'many' | 'none' | 'refused'; clearingRequests?: { n: number } },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
@@ -69,11 +76,11 @@ export async function mockApp(
       items: [{ api_version: 'simulator-api/1', scenario_id: SCENARIO_ID, name: 'Greenfield-village-100',
         participants_count: 3, trustlines_count: 1, equivalents: ['UAH'] }],
     }))
-  await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, (r) => json(r, snapshot(extras())))
+  await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, (r) => json(r, snapshot(extras(), o.aliceLines)))
   await page.route(/\/simulator\/runs$/i, (r) => json(r, { run_id: RUN_ID }))
   await page.route(`**/simulator/runs/${RUN_ID}/pause`, (r) => json(r, runBody))
   await page.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, runBody))
-  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/graph/snapshot`, 'i'), (r) => json(r, snapshot(extras())))
+  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/graph/snapshot`, 'i'), (r) => json(r, snapshot(extras(), o.aliceLines)))
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/events`, 'i'), (r) =>
     r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' }, body: ':ok\n\n' }))
   await page.route(`**/simulator/runs/${RUN_ID}/actions/participants-list`, (r) => json(r, { items: [...PARTICIPANTS, ...extras()] }))
@@ -100,15 +107,17 @@ export async function mockApp(
       return
     }
     // The edges of the answer run creditor -> debtor: { from: alice, to: bob } = "Bob owes Alice".
+    // `many` - a result longer than a phone screen. Five cycles since 2026-10-18 (046 round 1): the arrow form of a line
+    // ("x01 → x02: debt reduced by 1.00 UAH") is shorter than the old sentence, and three (and four: body 545 of 599 px) stopped overflowing 375x667.
     const cycles = kind === 'none' ? [] : kind === 'many'
-      ? [1, 2, 3].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
+      ? [1, 2, 3, 4, 5].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
       : [
           { cleared_amount: '7.00', edges: [edge('alice', 'bob'), edge('bob', 'carol'), edge('carol', 'alice')] },
           { cleared_amount: '3.00', edges: [edge('alice', 'carol'), edge('carol', 'alice')] },
         ]
     await json(r, {
       ok: true, equivalent: 'UAH', cleared_cycles: cycles.length,
-      total_cleared_amount: kind === 'none' ? '0.00' : kind === 'many' ? '6.00' : '10.00', cycles, client_action_id: null,
+      total_cleared_amount: kind === 'none' ? '0.00' : kind === 'many' ? '15.00' : '10.00', cycles, client_action_id: null,
     })
   })
   await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, async (r) => {

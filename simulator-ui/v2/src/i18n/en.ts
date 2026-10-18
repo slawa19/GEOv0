@@ -1,15 +1,385 @@
+import { plural } from './messages'
+
 /**
  * 046: the English dictionary of the interface - the reference one: its keys are the keys of every other language
  * (`ru.ts` is typed against it). Areas of the screen nest; a leaf is a whole sentence with `{name}` placeholders (never
  * a sentence glued from fragments), or a `plural(...)` message for a count. Names of participants and scenarios, codes
  * of equivalents and amounts are data and never live here.
  *
- * Wave 0 (T4601) holds only what the language switcher needs; the strings of the screen move in by waves 1-3
- * (`interactStrings.ts` and the refusal maps of `utils/paymentRefusalText.ts` included). See spec 046.
+ * Wave 0 (T4601) brought the language switcher; wave 2 (T4603) the windows of the actions - payment, trust line,
+ * clearing - with the texts they compose (`interactStrings.ts`, the refusal maps of `utils/paymentRefusalText.ts`, the
+ * notices of `trustlinesSourceState.ts`, the toasts and history lines of `useInteractMode.ts`) and the analytics panel.
+ * Wave 2 keeps every English text that existed byte for byte; a new key is new text. See spec 046.
  */
 export const en = {
   locale: {
     switcherLabel: 'Language',
     switcherAria: 'Interface language',
+  },
+
+  /** Shared by the three windows of the actions. */
+  common: {
+    cancel: 'Cancel',
+    close: 'Close',
+    escHint: 'Esc: one step back, then close',
+    pickPlaceholder: 'Pick on the canvas or choose',
+    invalidAmount: "Invalid amount format. Use digits and '.' for decimals.",
+    /** 046 decision 4 (advisor, round 1, 2026-10-18): a comma in an amount is refused, with the amount as it should be typed. */
+    commaRefused: 'Use a dot: {example}',
+    /** 028 F-028-48: the client's hint of the equivalent's step; the server decides. */
+    stepHint: '{eq} allows at most {precision} decimal places; the server will refuse this amount.',
+    /** 026 `T2602`: a negative `available` is the debt's excess over a lowered limit. */
+    overLimit: 'over limit by {amount}',
+    /** 034 S5a / AGENTS section 12: the server's correlation id after a text. */
+    requestRef: '{text} (ref: {id})',
+    requestRefOnly: '(ref: {id})',
+  },
+
+  /** Participant statuses (`chk_participant_status`, plus the scenario's `frozen`); an unknown one is shown as it came. */
+  participantStatus: {
+    active: 'active',
+    frozen: 'frozen',
+    suspended: 'suspended',
+    left: 'left',
+    deleted: 'deleted',
+  },
+
+  /** Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. */
+  paymentStatus: {
+    COMMITTED: 'COMMITTED',
+    ABORTED: 'ABORTED',
+  },
+
+  payment: {
+    panelAria: 'Manual payment panel',
+    title: 'Manual payment',
+    titlePair: 'Manual payment: {from} → {to}',
+    fromLabel: 'From',
+    toLabel: 'To',
+    amountLabel: 'Amount',
+    fromTrigger: 'From participant',
+    toTrigger: 'To participant',
+    toSurface: 'To participant options',
+    updating: '(updating…)',
+    confirm: 'Confirm',
+    sending: 'Sending…',
+
+    // The progression of the form and why Confirm is disabled.
+    nextChoiceRecipient: 'Choose the recipient.',
+    needsParties: 'Choose the sender and the recipient first.',
+    needsRecipient: 'Choose the recipient first.',
+    enterPositive: 'Enter a positive amount.',
+    selfPayment: 'You cannot send a payment to yourself.',
+    selfPaymentReselect: 'You cannot send a payment to yourself. Please select a different recipient.',
+    recipientGone: 'Selected recipient is no longer available. Please re-select.',
+    noRoutesBetween: 'Backend reports no payment routes between selected participants.',
+    noRoutesFromSender: 'Backend reports no payment routes from selected sender (max hops: {hops}).',
+    senderNotActive: 'Selected sender is not active (status: {status}); a participant that is not active takes no part in payments.',
+    recipientNotActive: 'Selected recipient is not active (status: {status}); a participant that is not active takes no part in payments.',
+    routesUpdating: 'Routes are updating.',
+    routesUpdatingWait: 'Routes are updating; a recipient can be chosen once the server answers.',
+    routesUpdatingLastAnswer: 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.',
+    routesFailedUnreachable: 'Routes update failed; showing fallback data. Some recipients may be unreachable.',
+    routesFailedMissing: 'Routes update failed; showing fallback data. Some recipients may be missing.',
+    exceedsDirect: 'Amount may exceed direct trustline capacity ({capacity} {unit}). Multi-hop may still succeed; backend will validate.',
+    noSelection: 'Select From and To first',
+
+    // The result screen of a committed payment.
+    resultTitle: 'Payment sent',
+    resultPaymentId: 'Payment ID',
+    resultStatus: 'Status',
+    resultAmount: 'Amount',
+    resultParties: 'From → To',
+    resultRoute: 'Route',
+    resultRoutes: 'Route {n} of {total}',
+    resultRouteStep: '{from} → {to}: {amount} {unit}',
+    resultNoRoutes: 'The server did not report the route of this payment.',
+    resultAnother: 'Another payment',
+    resultClose: 'Close',
+
+    // An outcome that is not known, and what the user can do about it.
+    unknownTitle: 'Result unknown',
+    unknownNoAnswer: 'No usable answer arrived; the payment of {amount} {unit} ({from} → {to}) may have been made.',
+    unknownFrozen: 'Unresolved payment: {amount} {unit}, {from} → {to}.',
+    unknownOtherRun: 'This payment belongs to another run, so it cannot be checked from here. Go back to that run, or discard it.',
+    unknownBlocksNew: 'A payment with an unknown result has to be checked or discarded before another payment is sent.',
+    noValidKey: 'The payment has no valid key, so nothing was sent.',
+    storageRefused: 'The browser would not save a record of this payment, so it was not sent: after a reload it could not be checked safely. Free the storage or allow it, then repeat.',
+    storageUnreadable: 'The browser storage could not be read, so it is not known whether an earlier payment is unresolved; no payment was sent. Allow the storage, then repeat.',
+    unknownDiscard: 'Discard and start over',
+    unknownDiscardWarning: 'The first payment may have been made; a new one could be a second. Discard only after checking.',
+    unknownDiscardConfirm: 'Discard it',
+    unknownDiscardKeep: 'Keep checking',
+    unknownRetry: 'Check / repeat',
+    unknownRetryHint: 'A repeat uses the same key: the payment is made once.',
+    /** A success-shaped answer that is not a committed payment. */
+    notCommitted: 'The server did not confirm the payment (status {status}).',
+
+    // A payment started from a line goes against the line's arrow (F-037-4).
+    lineDirectionTitle: 'Why is the direction reversed?',
+    lineDirectionNote: 'This line runs from creditor to debtor; Pay starts a payment from debtor to creditor. For the part sent directly, any reverse debt is offset first, and only the remainder increases the debtor’s debt under this line’s limit; it does not repay that debt. The server may route some or all of the payment through other participants.',
+
+    // The information line of the confirm step (045 S2).
+    directTitle: 'Direct',
+    directCapacityHelp: '1-hop hint; recipients are server-routed (max hops: {hops}).',
+    sourceServer: 'server',
+    sourceSnapshot: 'snapshot, unconfirmed',
+    sourceLoading: 'waiting…',
+    sourceFailed: 'snapshot, no answer',
+    estimateShort: 'Max',
+    estimateSource: 'server estimate',
+    shortestTitle: 'Shortest path',
+    shortestSteps: plural({ one: '{count} step', other: '{count} steps' }),
+    routeNote: 'The route is chosen when the payment is executed.',
+    shortestNote: '{title}. {note}',
+    estimateNotEstimated: 'not estimated',
+    estimateLoading: 'waiting for the server',
+    estimateFailed: 'not received',
+    estimateExceeded: 'The amount is above the server\'s estimate of the maximum ({max} {unit}); the server decides.',
+  },
+
+  trustline: {
+    panelAria: 'Trustline management panel',
+    title: 'Trustline',
+    titlePair: 'Trustline: {from} → {to}',
+    fromLabel: 'From',
+    toLabel: 'To',
+    fromTrigger: 'Trustline from participant',
+    toTrigger: 'Trustline to participant',
+    toSurface: 'Trustline to participant options',
+    toNeedsFrom: "Select 'From' participant first",
+    existingLabel: 'Existing',
+    existingTitle: 'Available only in edit/create mode',
+    existingTrigger: 'Pick existing trustline',
+    exists: '{label} (exists)',
+    limitLabel: 'Limit',
+    newLimitLabel: 'New limit',
+    statsAria: 'Trustline stats',
+    // Advisor, round 1 (2026-10-18): one sentence, the unit after EACH figure (was "Used 12 / Limit 100 UAH · avail 88 UAH");
+    // a no-break space keeps a figure with its unit when the line wraps (hud).
+    stats: 'Used {used}\u00a0{unit} · Limit {limit}\u00a0{unit} · Available {available}\u00a0{unit}',
+    statsOverLimit: 'Used {used}\u00a0{unit} · Limit {limit}\u00a0{unit} · Over limit by {over}\u00a0{unit}',
+    needsParties: 'Choose From and To first.',
+    needsLimit: 'Enter a limit.',
+    needsNewLimit: 'Enter a new limit.',
+    closeAlreadyRequested: 'Close already requested.',
+    closeRequested: 'Close requested: limit stays 0; the line closes when its debt (used: {used} {unit}) is repaid.',
+    closeRequestNote: 'Closing with debt (used: {used} {unit}) is a request: limit becomes 0, the line closes when the debt is repaid.',
+    cancelClose: 'Cancel close',
+    confirmClose: 'Confirm close',
+    // Advisor, round 1: a line without debt closes; a line with debt only gets a close request (026, `closeIsRequest`).
+    close: 'Close line',
+    requestClose: 'Request close',
+    update: 'Update',
+    updating: 'Updating…',
+    create: 'Create',
+    creating: 'Creating…',
+    noSelection: 'Select From and To first',
+    noTrustlineSelected: 'Select trustline first',
+  },
+
+  /**
+   * `F-013-7` (`trustlinesSourceState.ts`): what stands behind the figures of one pair. Facts about the DATA, not a
+   * policy about buttons.
+   */
+  trustlineSource: {
+    neverAsked: 'Trustline data for this pair has not been requested from the backend; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.',
+    loading: 'Trustline data is still loading from the backend; the figures for this pair are not available yet.',
+    loadingFrozen: 'Trustline data for this pair was still being requested when this window was frozen; that request will not update these figures, and nothing has confirmed them for this pair.',
+    failed: 'Trustline data could not be loaded: {message}. The figures for this pair are not available, and what the graph shows may be out of date.',
+    frozenAnswer: 'These figures are a frozen copy of an earlier backend answer, kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
+    frozenOther: 'The figures in this window are a frozen copy kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
+    noRow: 'The backend answered for this pair: there is no trustline. The figures on the graph come from the snapshot and do not describe an existing line — there is nothing to update or close here; create the line instead.',
+    trustlinesFailed: 'Trustlines refresh failed',
+    paymentTargetsFailed: 'Payment targets refresh failed',
+  },
+
+  clearing: {
+    panelAria: 'Clearing panel',
+    runTitle: 'Run clearing',
+    confirmHelp: 'This will run a clearing cycle in backend.',
+    confirm: 'Confirm',
+    runningShort: 'Running…',
+    // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}").
+    resultTitle: 'Clearing result',
+    running: 'Running clearing…',
+    cycles: 'Cycles cleared',
+    total: 'Total over cycles',
+    totalNote: 'Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.',
+    cycle: 'Cycle {n} of {total}: {amount} {unit}',
+    // Advisor, 2026-10-18: the arrow form, names undeclined, and ONE arrow meaning across the interface - creditor -> debtor,
+    // the protocol's from -> to, as the line window's title and the graph's edge (was "{debtor}’s debt to {creditor} ...";
+    // round 1 had it debtor-first, corrected the same day).
+    edgeLine: '{creditor} → {debtor}: debt reduced by {amount} {unit}',
+    // Codex §15 round 1: a clearing refused because of the equivalent's state (`CONFLICT` + `details.reason`).
+    equivalentInactive: 'The equivalent is stopped — clearing is unavailable.',
+    equivalentIntegrityHold: 'The equivalent is under an integrity check — operations are on hold.',
+    nothing: 'Nothing was cleared: no cycle of debts was found.',
+  },
+
+  /** 028 F-028-51 (owner В-6): the client's text of a payment or clearing refusal, by `details.reason` / code. */
+  refusal: {
+    noRoute: 'No payment route between these participants.',
+    noRouteMax: 'No payment route between these participants (available now: {max} {eq}).',
+    insufficientCapacity: 'Not enough capacity on the route.',
+    insufficientCapacityMax: 'Not enough capacity: at most {max} {eq} can be sent now.',
+    policy: 'The route breaks a trust line policy.',
+    participantSuspended: 'A participant of this payment is suspended.',
+    amountPrecisionExceeded: '{eq} allows at most {precision} decimal places.',
+    equivalentIntegrityHold: 'Payments in {eq} are on hold after an integrity check.',
+    equivalentInactive: '{eq} is not active.',
+    busy: 'The system is busy.',
+    busyKeyed: 'The system is busy; send the same payment again.',
+    timeout: 'The payment timed out.',
+    txIdReused: 'This payment id was already used.',
+    unverifiableLegacyIdentity: 'The earlier payment with this id cannot be verified.',
+    invalidSignature: 'The payment signature is invalid.',
+    recipientNotFound: 'The recipient was not found.',
+    amountNotPositive: 'The amount must be positive.',
+    selfPayment: 'You cannot pay yourself.',
+    equivalentNotFound: 'Equivalent {eq} was not found.',
+    other: 'The payment was refused.',
+    generic: 'The payment was not accepted.',
+    clearingStep: 'Clearing refused: the database holds debts finer than the accounting step of {eq}. Reseed the database.',
+    clearingStepNoEq: 'Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.',
+    outcomeUnknown: 'No answer; the result is unknown - the action may have been carried out. Check the current state before repeating it.',
+    outcomeUnknownSeconds: 'No answer within {seconds} s; the result is unknown - the action may have been carried out. Check the current state before repeating it.',
+  },
+
+  /**
+   * The error codes the simulator action endpoints answer with (`app/api/v1/simulator.py`), and the transport codes of
+   * `api/http.ts`. An English text equals the server's own message where that message is fixed, so English reads as
+   * before. A code not listed: `unknown` with the code (046 decision 3).
+   */
+  actionError: {
+    RUN_NOT_FOUND: 'Run not found',
+    RUN_TERMINAL: 'Run is in terminal state',
+    ACCESS_DENIED: 'Access denied',
+    ACTIONS_DISABLED: 'Simulator actions are disabled',
+    RUN_PERIMETER_UNAVAILABLE: 'Run perimeter could not be established',
+    PARTICIPANT_NOT_FOUND: 'Participant not found',
+    EQUIVALENT_NOT_FOUND: 'Equivalent not found',
+    INVALID_AMOUNT: 'Invalid amount',
+    INVALID_REQUEST: 'Invalid request',
+    TRUSTLINE_USED_UNAVAILABLE: 'Temporary error while reading current used amount',
+    USED_EXCEEDS_NEW_LIMIT: 'Limit is below current used amount',
+    TRUSTLINE_EXISTS: 'Active trustline already exists',
+    TRUSTLINE_NOT_FOUND: 'Trustline not found',
+    TRUSTLINE_CLOSE_REQUESTED: 'Trustline close is requested; its limit stays 0 until it closes',
+    TRUSTLINE_CLOSED: 'Trustline is already closed',
+    SEEDING_FAILED: 'Failed to seed scenario into database. Please retry.',
+    SIMULATOR_PID_TAKEN: 'The scenario names a participant that exists and was not created by the simulator.',
+    SCENARIO_TRUSTLINE_REFUSED: 'A trust line of the scenario breaks the trust line rules.',
+    NO_ROUTE: 'No payment route between these participants.',
+    INSUFFICIENT_CAPACITY: 'Not enough capacity on the route.',
+    CONFLICT: 'The system is busy; try again.',
+    CLEARING_FAILED: 'Clearing failed',
+    CLEARING_INTERRUPTED: 'Clearing pass interrupted before the plan was exhausted',
+    CLEARING_REFUSED: 'Clearing refused',
+    PAYMENT_REJECTED: 'The payment was not accepted.',
+    ENGINE_TIMEOUT: 'The payment timed out.',
+    TIMEOUT: 'No answer from the server in time.',
+    INVALID_JSON: 'The server answer could not be read.',
+    /** 046 fix-delta F2: `fetch` rejected (a `TypeError`) - no answer reached the client. */
+    NETWORK: 'No connection to the server — try again.',
+    noRun: 'No active run_id',
+    unknown: 'The action failed ({code}).',
+  },
+
+  /**
+   * Codex §15 round 1: the equivalent's state named by `details.reason` of a coded answer - told before the code's own
+   * text (a `CONFLICT` with these reasons is not "the system is busy").
+   */
+  actionReason: {
+    equivalent_inactive: 'The equivalent is stopped — operations are unavailable.',
+    equivalent_integrity_hold: 'The equivalent is under an integrity check — operations are on hold.',
+  },
+
+  /** Toasts and history lines of the actions (`useInteractMode.ts`). Amounts arrive as decimal strings. */
+  history: {
+    paymentToast: 'Payment sent: {amount} {unit}',
+    payment: 'Payment {amount} {unit}: {from} → {to}',
+    trustlineCreatedToast: 'Trustline created: {from} → {to}',
+    trustlineCreated: 'Trustline created: {from} → {to} ({limit})',
+    limitUpdatedToast: 'Limit updated: {limit} {unit}',
+    trustlineUpdated: 'Trustline updated: {from} → {to} → limit {limit}',
+    trustlineClosed: 'Trustline closed: {from} → {to}',
+    closeRequested: 'Close requested: {from} → {to} (closes when the debt is repaid)',
+    clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
+    clearingNothing: 'Clearing: no cycles found',
+    clearingToast: 'Clearing done: {cleared}/{total} cycles',
+  },
+
+  /** 045 S3: the participant card's reasons and its line description (read through `interactStrings.ts` until wave 3). */
+  card: {
+    flowOpenReason: 'Cancel current action first (press ESC).',
+    busyReason: 'Operation in progress… please wait.',
+    lineAvailable: 'available {amount} {unit}',
+  },
+
+  metrics: {
+    panelAria: 'Run analytics',
+    title: 'Analytics',
+    measurements: 'Measurements',
+    noSeries: 'No series in this window',
+    trendAria: '{title} trend',
+    malformed: 'Series value outside the wire contract',
+    gaps: plural({ one: '{gaps} of {count} points have no measurement', other: '{gaps} of {count} points have no measurement' }),
+    errorDetail: 'The analytics request did not complete.',
+    /** Codex §15 round 1: the failure is shown as its status or code and request id (`errorReference`), apart from the prose. */
+    errorReference: 'Reference: {ref}',
+    series: {
+      success_rate: 'Success rate',
+      avg_route_length: 'Avg route length',
+      total_debt: 'Total debt',
+      clearing_volume: 'Clearing volume',
+      bottlenecks_score: 'Bottlenecks score',
+      active_participants: 'Active participants',
+      active_trustlines: 'Active trustlines',
+    },
+    // One whole sentence per section and reason (no noun glued into a shared sentence).
+    measurementsIdle: 'Analytics updates while a run is running.',
+    measurementsLoading: 'Loading measurements…',
+    measurementsUnavailableTitle: 'No measurements recorded',
+    measurementsErrorTitle: 'Analytics request failed',
+    measurementsStorageOff: 'Metric storage is off for this run, so no measurements were recorded.',
+    measurementsReadFailed: 'The metric store could not be read, so there are no measurements to show.',
+    measurementsNone: 'This run has no recorded measurements yet. Nothing is being substituted for them.',
+    bottlenecksIdle: 'Bottlenecks update while a run is running.',
+    bottlenecksLoading: 'Loading bottlenecks…',
+    bottlenecksUnavailableTitle: 'No bottlenecks recorded',
+    bottlenecksErrorTitle: 'Bottlenecks request failed',
+    bottlenecksStorageOff: 'Metric storage is off for this run, so no bottlenecks were recorded.',
+    bottlenecksReadFailed: 'The metric store could not be read, so there are no bottlenecks to show.',
+    bottlenecksNone: 'This run has no recorded bottlenecks yet. Nothing is being substituted for them.',
+  },
+
+  /**
+   * The bottlenecks list. `reason_code` is a closed set (`simulatorContracts.ts` BOTTLENECK_REASON_CODES); the server's
+   * English `label` / `suggested_action` are no longer shown - these are (their English is the server's where it has
+   * one). A code not listed: `unknownReason` with the code.
+   */
+  bottlenecks: {
+    title: 'Bottlenecks',
+    empty: 'No bottlenecks reported',
+    focus: 'Focus',
+    focusAria: 'Focus {target}',
+    unknownReason: 'Bottleneck ({code})',
+    reason: {
+      LOW_AVAILABLE: 'Low available capacity',
+      HIGH_USED: 'High utilization',
+      FREQUENT_ABORTS: 'Frequent failures',
+      TOO_MANY_TIMEOUTS: 'Too many timeouts',
+      ROUTING_TOO_DEEP: 'Routes too long',
+      CLEARING_PRESSURE: 'Debts waiting for clearing',
+    },
+    action: {
+      LOW_AVAILABLE: 'Raise trust limits or add alternative routes',
+      HIGH_USED: 'Consider clearing or adding alternative routes',
+      FREQUENT_ABORTS: 'Increase trust limits, add alternative routes, or clear',
+      TOO_MANY_TIMEOUTS: 'Reduce load or increase routing timeouts',
+      ROUTING_TOO_DEEP: 'Add shorter links between participants',
+      CLEARING_PRESSURE: 'Run clearing',
+    },
   },
 } as const

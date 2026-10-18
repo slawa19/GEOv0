@@ -11,8 +11,7 @@ function mountNodeCard(overrides: Record<string, unknown> = {}) {
 
   const defaultProps: Record<string, unknown> = {
     node: { id: 'alice', name: 'Alice', status: 'active', type: 'person' },
-    style: { left: '0px', top: '0px' },
-    edgeStats: { outLimitText: '0', inLimitText: '0', degree: 0 },
+    edgeStats: { outLimitText: '0', inLimitText: '0' },
     equivalentText: 'UAH',
     palette: DATA_PALETTE_DEFAULT,
 
@@ -273,14 +272,16 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     }
   })
 
-  it('leaves geometry and the dialog role to the WM window: a static content block, no nested dialog', async () => {
+  it('leaves geometry and the dialog role to the WM window: no inline geometry on the card, no nested dialog', async () => {
     // F-041-9 (041 T4107): was a read of the .vue text; now the rendered card is observed.
+    // 045 S4: the card no longer overrides its own position inline (it is a static block by the stylesheet; the computed
+    // value is read in a browser by e2e/p045-s3-inspectors.spec.ts, (и)) - here: nothing positions it from inside.
     const { app, host } = mountNodeCard()
     await nextTick()
 
     const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
     expect(card).toBeTruthy()
-    expect(card!.style.position).toBe('static')
+    expect(card!.getAttribute('style'), 'no inline style: geometry belongs to the WM shell').toBeNull()
     expect(host.querySelector('[role="dialog"]')).toBeNull()
     expect(host.querySelector('.ds-inspector-row')).toBeNull()
 
