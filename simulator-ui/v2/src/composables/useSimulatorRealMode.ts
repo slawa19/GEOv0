@@ -33,6 +33,8 @@ import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
 import { isGlobalLimitRefusal, noScenarioText, runStatusErrorText, startRunErrorText, zeroIntensityText } from '../utils/runErrorClassification'
+import { relocalizeLine } from '../i18n/localizedLine'
+import { uiLocaleRef } from '../i18n/locale'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -571,6 +573,18 @@ export function useSimulatorRealMode(opts: {
       }),
     })
   }
+
+  /**
+   * 046 wave 1 (§15 Codex P2): the error line in the language of the interface. A line made from the dictionary (the
+   * limit refusal, the idle stop, tempo 0, no scenario, the clearing step refusal) is remade on a switch from its cause
+   * (`relocalizeLine`); the retry offer follows the line it stood beside. A line no dictionary made stays as it is.
+   */
+  watch(uiLocaleRef, (locale) => {
+    const next = relocalizeLine(real.lastError, locale)
+    if (next === null || next === real.lastError) return
+    if (real.retryableStartError && real.retryableStartError === real.lastError) real.retryableStartError = next
+    real.lastError = next
+  })
 
   // The HUD copy of a scene-load error (034 S8, review C2): only this copy is removed, what the HUD showed before
   // (a run's own `last_error`) comes back, and an error written over the copy is left alone.

@@ -72,3 +72,23 @@ describe('046 wave 1 - "Try again" stands only beside the refusal it would fix',
     expect(startRetryOffered(null, undefined)).toBe(false)
   })
 })
+
+describe('046 wave 1 (§15 Codex P2) - every line of the error line made from the dictionary can be remade in the other language', () => {
+  it('no scenario, the clearing step refusal of a run, the idle stop, tempo 0, the limit refusal', async () => {
+    const { relocalizeLine } = await import('../i18n/localizedLine')
+    const { idleStopText, runErrorText, zeroIntensityText } = await import('./runErrorClassification')
+    const makers: Array<(l: 'en' | 'ru') => string> = [
+      (l) => noScenarioText(l),
+      (l) => runErrorText({ code: 'CLEARING_REFUSED', message: 'refused', at: '2026-10-18T00:00:00Z' }, l),
+      (l) => idleStopText(l),
+      (l) => zeroIntensityText(l),
+      (l) => startRunErrorText(limit({ max_active_runs: 4 }), raw, l),
+    ]
+    for (const make of makers) {
+      expect(relocalizeLine(make('ru'), 'en')).toBe(make('en'))
+      expect(relocalizeLine(make('en'), 'ru')).toBe(make('ru'))
+    }
+    // Counter-check: a run error that is the server's own `CODE: message` is not a dictionary line.
+    expect(relocalizeLine(runErrorText({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' }, 'ru'), 'en')).toBeNull()
+  })
+})

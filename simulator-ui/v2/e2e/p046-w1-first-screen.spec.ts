@@ -169,6 +169,18 @@ for (const theme of THEMES) {
       await expect(line.locator('.ds-label')).toHaveText(t('topBar.errorLabel', undefined, lang))
       expect(creates).toBe(1)
       await frame(page, `${theme}-${lang}-3-limit-retry`)
+      // §15 Codex P2: the refusal on screen follows a language switch - its text and title - and keeps its "Try again".
+      const other: Lang = lang === 'en' ? 'ru' : 'en'
+      const body = line.locator('.ds-value')
+      await page.locator(DETAILS).click()
+      for (const l of [other, lang]) {
+        await page.locator('[data-testid="language-select"]').selectOption(l)
+        await expect(page.locator('html')).toHaveAttribute('lang', l)
+        await expect(body).toHaveText(tn('runStart.limitAll', 10, undefined, l))
+        await expect(body).toHaveAttribute('title', tn('runStart.limitAll', 10, undefined, l))
+        await expect(retry).toHaveText(t('topBar.retry', undefined, l))
+      }
+      await page.locator(DETAILS).click()
       await retry.click()
       await expect(line, 'a place freed: the run starts, the line is gone').toHaveCount(0)
       expect(creates).toBe(2)

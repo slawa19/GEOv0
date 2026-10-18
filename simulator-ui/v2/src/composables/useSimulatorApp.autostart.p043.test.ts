@@ -12,6 +12,8 @@ import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
+import { setUiLocale } from '../i18n/locale'
+import { t, tn } from '../i18n/t'
 import { connectSse } from '../api/sse'
 import {
   createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, stopRun,
@@ -263,6 +265,38 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     await settle()
     expect(again.real.lastError).toBe('HTTP 503 for /simulator/runs')
     expect(again.real.retryableStartError).toBe('')
+  })
+
+  // §15 Codex P2 (2026-10-18): the refusal was stored translated - a switch left it in the old language beside a label
+  // and a button in the new one. The line is remade from its cause; the retry offer stays with it.
+  it('046 wave 1: a refusal on screen follows a language switch (RU -> EN -> RU), the retry offer with it', async () => {
+    const ten = new ApiError('HTTP 409 Conflict for /simulator/runs', {
+      status: 409,
+      bodyText: JSON.stringify({ error: { code: 'E008', message: 'x', details: { conflict_kind: 'global_active_limit', max_active_runs: 10, active_runs: 10 } } }),
+    })
+    vi.mocked(createRun).mockRejectedValue(ten)
+    setUiLocale('ru')
+    try {
+      const app = boot()
+      await settle()
+      expect(app.real.lastError).toBe(tn('runStart.limitAll', 10, undefined, 'ru'))
+      setUiLocale('en')
+      await settle()
+      expect(app.real.lastError).toBe('All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.')
+      expect(app.real.retryableStartError, 'the offer follows the line').toBe(app.real.lastError)
+      setUiLocale('ru')
+      await settle()
+      expect(app.real.lastError).toBe('Сейчас заняты все 10 мест: демо смотрят 10 человек. Попробуйте через минуту.')
+      expect(app.real.retryableStartError).toBe(app.real.lastError)
+      // Counter-check: a line no dictionary made (a raw transport text) is left as it is by a switch.
+      app.real.lastError = 'HTTP 503 for /simulator/runs'
+      setUiLocale('en')
+      await settle()
+      expect(app.real.lastError).toBe('HTTP 503 for /simulator/runs')
+      expect(t('topBar.retry', undefined, 'en')).toBe('Try again')
+    } finally {
+      setUiLocale('en')
+    }
   })
 
   it('counter-check: a 409 of another kind (owner_active_exists) and a non-409 error keep their old text', async () => {

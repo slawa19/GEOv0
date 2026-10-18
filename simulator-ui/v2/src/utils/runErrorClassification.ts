@@ -1,4 +1,5 @@
 import type { RunError } from '../api/simulatorTypes'
+import { localizedLine } from '../i18n/localizedLine'
 import { t, tn } from '../i18n/t'
 import { clearingStepRefusalText, uiLocale, type UiLocale } from './paymentRefusalText'
 
@@ -32,7 +33,8 @@ export function runStatusErrorText(
 
 /** The run-level error line: the step refusal is a human text in the interface language, the rest is `CODE: message`. */
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
-  if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)
+  // 046 wave 1 (§15 P2): a line kept in the error line is made through `localizedLine`, so a switch remakes it.
+  if (error.code.toUpperCase() === 'CLEARING_REFUSED') return localizedLine((l) => clearingStepRefusalText(null, l), locale)
   return `${error.code}: ${error.message}`
 }
 
@@ -45,7 +47,7 @@ export const IDLE_STOP_REASON = 'idle_no_subscribers'
  * Russian word in the English text and an English one in the Russian (the service row is not translated yet).
  */
 export function idleStopText(locale: UiLocale = uiLocale()): string {
-  return t('runLine.idleStopped', undefined, locale)
+  return localizedLine((l) => t('runLine.idleStopped', undefined, l), locale)
 }
 
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
@@ -95,16 +97,16 @@ export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, 
   if (isGlobalLimitRefusal(e)) {
     const raw = detailsOf409(e)?.max_active_runs
     const n = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null
-    if (n === null) return t('runStart.limitBusy', undefined, locale)
-    if (n === 1) return t('runStart.limitOne', undefined, locale)
-    return tn('runStart.limitAll', n, undefined, locale)
+    // 046 wave 1 (§15 P2): the line keeps its cause (the kind and the server's number), not one language's text.
+    return localizedLine((l) => (n === null ? t('runStart.limitBusy', undefined, l) : n === 1 ? t('runStart.limitOne', undefined, l)
+      : tn('runStart.limitAll', n, undefined, l)), locale)
   }
   return fallback(e)
 }
 
 /** 043 S2 (review B5): the error line when the server offers no scenario at all - the opening has nothing to show. */
 export function noScenarioText(locale: UiLocale = uiLocale()): string {
-  return t('runStart.noScenario', undefined, locale)
+  return localizedLine((l) => t('runStart.noScenario', undefined, l), locale)
 }
 
 /**
@@ -113,5 +115,5 @@ export function noScenarioText(locale: UiLocale = uiLocale()): string {
  * value is not replaced by another one behind the person's back. Stopping the payments is the pause.
  */
 export function zeroIntensityText(locale: UiLocale = uiLocale()): string {
-  return t('runLine.zeroIntensity', undefined, locale)
+  return localizedLine((l) => t('runLine.zeroIntensity', undefined, l), locale)
 }
