@@ -95,11 +95,21 @@ test('oracle - a payment over one edge: the beam moves, from sender to receiver,
 // (P3), all edges of the route started at once (P4), and for P5 all three: FX canvas under the base canvas, FX canvas
 // with opacity 0, a DOM panel over the path. The red output of each is in the changelog of spec 038.
 // DO NOT put `test.fail` back to make a red run green: a red test here is the beam leaving its route.
-test('R3 - a payment over two edges: the second edge lights up only after the first has gone dark (F-038-3, property 4)', async ({ page }) => {
+//
+// `@extended` since 2026-10-18 (039 slice C, the stand's time rule): the required stand step was over its 600 s budget
+// in CI (657 s on `da415b30`, 596 s on `c8d9efbc` against about 452 s for the base on #297), and the three R3 tests that
+// took longest in CI went out of the gate - these three, by their measured CI durations in the stand report of run
+// 39133364307 (head `c8d9efbc`): the 6-edge measurement 26.1 s, the 3-edge route 21.0 s, the 2-edge route 17.2 s (30.0,
+// 23.7 and 19.3 s in run 39135012070, head `e43cf317`). A
+// route now lasts as long as its legs, so each flight is watched for hundreds of frames. What they held stays in the
+// gate on smaller watches: the leg order and the handoff of a 3- and a 6-edge route (`motion-c.qa.ts`, PACE and
+// HANDOFF), the judge of leg order on made-up legs (`leg-order.qa.ts`), the chord refusal (`chord.qa.ts`). They still
+// run in the full stand (`run-stand.mjs full`).
+test('R3 - a payment over two edges: the second edge lights up only after the first has gone dark (F-038-3, property 4) @extended', async ({ page }) => {
   await flyAndJudge(page, 2)
 })
 
-test('R3 - the beam of a 3-edge payment follows the edges of its route, one after another (F-038-3 = F-034-D4)', async ({ page }) => {
+test('R3 - the beam of a 3-edge payment follows the edges of its route, one after another (F-038-3 = F-034-D4) @extended', async ({ page }) => {
   await flyAndJudge(page, 3)
 })
 
@@ -149,7 +159,7 @@ test('R3 - FX state of a 3-edge payment: one spark alive at a time, in route ord
 // route for about 85 px, the oracle gives such pixels to neither edge, and its head reading freezes there and then
 // jumps 0.24 of the edge in one frame (measured 2026-10-18). The tempo of six legs is judged by `motion-c.qa.ts` (FX
 // state, the handoffs and the painted share of every leg, on this same route).
-test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and head travel (the closed ring crosses itself)', async ({ page }) => {
+test('R3 - measurement at the cap: a 6-edge route - frames painted per edge and head travel (the closed ring crosses itself) @extended', async ({ page }) => {
   await flyAndJudge(page, 6, { compositionMinimums: false })
 })
 

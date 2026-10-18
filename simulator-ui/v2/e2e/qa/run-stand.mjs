@@ -137,8 +137,21 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   test of one cycle now observes pixels along the cycle too). About 6 s.
  * - 2026-10-18 (039 slice C, fix-delta round): gate 139 -> 140, full 230 -> 231. The glow test of `motion-c.qa.ts`
  *   runs in `saas` and `hud` (one test more); the clearing judge also counts head places and bounds the head's step.
+ * - 2026-10-18 (039 slice C, the stand over its CI time): gate 140 -> 137, full unchanged at 231. The required step took
+ *   657 s on `da415b30` and 596 s on `c8d9efbc` in CI (threshold 600 s; the base on #297 about 452 s): routes now last
+ *   as long as their legs. The three R3 tests of `motion.qa.ts` that took longest in CI are tagged `@extended`, by
+ *   their durations in the stand report of run 39133364307 (head `c8d9efbc`, 139 tests, 594 s summed): "R3 -
+ *   measurement at the cap: a 6-edge route ..." 26.1 s, "R3 - the beam of a 3-edge payment follows ..." 21.0 s, "R3 - a
+ *   payment over two edges ..." 17.2 s - 64.3 s in all. None of the new clearing pixel oracles of `motion-c.qa.ts` is
+ *   in that top three. In the next run, 39135012070 (head `e43cf317`, 140 tests, step 659 s, 652 s summed), the same
+ *   three were the longest R3 tests: 30.0, 23.7 and 19.3 s - 73.0 s. Forecast of the step from those CI numbers: about
+ *   596 - 64 = 532 s from the faster run, 659 - 73 = 586 s from the slower - under 600, with a thin margin on the
+ *   slower runner; the next R3 tests by CI time are "R3 - the five properties hold at quality "med" / "high" too"
+ *   (18.4 and 18.2 s in run 39135012070). In "ran N (as expected M, failed F, ...)" of the verdict line,
+ *   `as expected` counts the tests whose outcome was the expected one, so "ran 139 (as expected 138, failed 1)" on
+ *   `c8d9efbc` was 139 recorded, one red (the budget) - not a mismatch of this number.
  */
-export const EXPECTED = { gate: 140, full: 231 }
+export const EXPECTED = { gate: 137, full: 231 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
