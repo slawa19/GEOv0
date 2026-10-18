@@ -19,6 +19,8 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "record_workbench_playlists.py"
 
@@ -31,7 +33,7 @@ def _recorder() -> ModuleType:
     return module
 
 
-def test_the_plan_names_active_participants_and_the_lines_of_its_direct_payments() -> None:
+def test_the_plan_names_active_participants_and_the_lines_of_its_direct_payments(monkeypatch: pytest.MonkeyPatch) -> None:
     rec = _recorder()
     scenario = json.loads(rec.SCENARIO_PATH.read_text(encoding="utf-8"))
     assert rec.check_plan(scenario) == []
@@ -50,3 +52,9 @@ def test_the_plan_names_active_participants_and_the_lines_of_its_direct_payments
     fewer = copy.deepcopy(scenario)
     fewer["participants"] = fewer["participants"][:10]
     assert any("is not in the scenario" in p for p in rec.check_plan(fewer))
+
+    # The kinds that depend on the plan itself: an amount finer than the precision, a direct payment not in the plan.
+    monkeypatch.setattr(rec, "PLAN", ((rec.PLAN[0][0], rec.PLAN[0][1], "1.005"),) + tuple(rec.PLAN[1:]))
+    assert any("is not at precision 2" in p for p in rec.check_plan(scenario))
+    monkeypatch.setattr(rec, "PLAN", tuple(x for x in rec.PLAN if (x[0], x[1]) != rec.DIRECT[0]))
+    assert any(f"DIRECT {a}->{b} is not a payment of the plan" in p for p in rec.check_plan(scenario))

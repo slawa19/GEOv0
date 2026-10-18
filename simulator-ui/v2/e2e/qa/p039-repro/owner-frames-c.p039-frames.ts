@@ -75,10 +75,15 @@ const markedShot = async (page: Page, name: string, expectText: RegExp) => {
   await shot(page, name)
   await style.evaluate((el) => el.remove())
 }
-/** "Шаг", then wait until the workbench says the event `position` was delivered (its scene may load first). */
+/**
+ * "Шаг", then run the paused clock until the workbench says the event `position` was delivered: a Step that begins a
+ * playback first loads the recording's snapshot and waits for its layout to settle (on the page's own timers).
+ */
 const step = async (page: Page, position: string) => {
   await page.locator('[data-testid="playlist-workbench"] button.ds-btn--ghost').click()
-  await expect(page.locator('[data-testid="playlist-workbench"] .ds-mono')).toHaveText(position)
+  const pos = page.locator('[data-testid="playlist-workbench"] .ds-mono')
+  for (let i = 0; i < 700 && (await pos.textContent())?.trim() !== position; i += 1) await page.clock.runFor(FRAME_MS)
+  await expect(pos).toHaveText(position)
 }
 
 for (const theme of ['saas', 'hud'] as const) {

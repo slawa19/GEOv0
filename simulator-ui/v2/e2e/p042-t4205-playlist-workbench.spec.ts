@@ -167,6 +167,9 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
         .__geoSim?.fxState.sparks ?? []).map((s) => `${s.source}>${s.target}`))
     await page.getByRole('button', { name: 'Проиграть', exact: true }).click()
     // The second recorded event is a three-line route: wait for its first leg, then stop.
+    // 2026-10-18, 039 T3935: Stop now also returns to the offline snapshot, and that scene load clears the pending legs by
+    // itself, so this test no longer isolates the playback's own guard (the generation bump of `resetTxFx`); that guard
+    // is held by the unit test "Stop during a three-line payment" in `usePlaylistWorkbench.test.ts`.
     const route = TX[1]!.edges
     expect(route).toHaveLength(3)
     const firstLeg = `${route[0]!.from}>${route[0]!.to}`

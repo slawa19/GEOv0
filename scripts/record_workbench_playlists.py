@@ -24,7 +24,9 @@ What it does NOT do: check the money (that is ``simulator-ui/v2/src/composables/
 on the written files); start the backend; record the EUR or HOUR playlists (no shipped scenario carries those
 equivalents). It refuses to write anything when a planned payment is refused, when a payment answers more than one
 route (the plan relies on single-route payments), when an event of a type other than ``run_status``, ``tx.updated``
-or ``clearing.done`` arrives, or when an expected event does not arrive in time.
+or ``clearing.done`` arrives (a ``tx.failed`` included), when a payment's stream answer is not exactly one ``tx.updated``
+of its sender, receiver and amount, when the clearing's is not exactly one ``clearing.done``, or when an expected event
+does not arrive in time.
 
 Usage (PowerShell; the backend runs with ``SIMULATOR_ACTIONS_ENABLE=1`` and ``SIMULATOR_CLEARING_EVERY_N_TICKS``
 large enough that no automatic clearing runs; the admin token is read from the environment, never from argv)::
@@ -85,7 +87,7 @@ PLAN: tuple[tuple[int, int, str], ...] = (
 #: Direct payments of the plan (sender, receiver): each needs the scenario line receiver -> sender.
 DIRECT = ((36, 3), (2, 1), (6, 2), (1, 6), (11, 36), (7, 2), (3, 11), (1, 7))
 
-EFFECT_TYPES = ("tx.updated", "tx.failed", "clearing.done")
+EFFECT_TYPES = ("tx.updated", "clearing.done")
 EVENT_TIMEOUT_SEC = 30.0
 
 
@@ -209,7 +211,10 @@ def record(base_url: str, token: str) -> tuple[str, dict[str, Any]]:
                 if len(answer.get("routes") or []) != 1:
                     raise RecordingRefused(f"payment PLAN[{n}] answered {len(answer.get('routes') or [])} routes")
                 effects = [e for e in stream.until("tx.updated") if e["type"] != "run_status"]
-                payments.extend(effects)
+                event = effects[-1]
+                if len(effects) != 1 or (event.get("from"), event.get("to"), event.get("amount")) != (pid(a), pid(b), amount):
+                    raise RecordingRefused(f"payment PLAN[{n}] {a}->{b} {amount}: the stream answered {json.dumps(effects)[:400]}")
+                payments.append(event)
             out["demo-tx"] = payments
 
             out["demo-clearing-snapshot"] = snapshot("the snapshot before the clearing")
@@ -217,7 +222,10 @@ def record(base_url: str, token: str) -> tuple[str, dict[str, Any]]:
                             "the clearing")
             if int(cleared.get("cleared_cycles") or 0) < 1:
                 raise RecordingRefused(f"the clearing cleared nothing: {json.dumps(cleared)[:400]}")
-            out["demo-clearing"] = [e for e in stream.until("clearing.done") if e["type"] != "run_status"]
+            clearing = [e for e in stream.until("clearing.done") if e["type"] != "run_status"]
+            if len(clearing) != 1:
+                raise RecordingRefused(f"the clearing: the stream answered {json.dumps(clearing)[:400]}")
+            out["demo-clearing"] = clearing
             out["clearing-answer"] = cleared
             out["after-clearing-snapshot"] = snapshot("the snapshot after the clearing")
         finally:

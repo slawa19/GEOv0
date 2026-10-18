@@ -108,16 +108,20 @@ describe('042 T4205: the committed recordings are playable on the live event pat
  * pictures. Until that day the hand-made recordings of 029 S4 were inconsistent in every payment and in the clearing, and
  * their amounts were derived by a temporary rule (039 slice C, `f2ef9d83`) that this replaces.
  *
- * A payment (`tx.updated`): `amount` a decimal string at precision 2; `from`/`to` the ends of its route; on every leg
- * a -> b the debt of a towards b grows by exactly `amount` (`used` of the line b -> a up, or of a -> b down: the debt of a
- * leg may net an opposite one); no other line moves; the balance of `from` falls by `amount`, of `to` rises by it, of
- * anyone else in the patch does not move. A clearing (`clearing.done`): no balance moves; the lines it patches are its
- * `cycle_edges`, each reduced; those reductions decompose into cycles, each reducing its lines by one amount, and
- * `cleared_cycles` / `cleared_amount` are their number and sum (a line of two cycles is reduced by both amounts).
+ * Every event: every `used` (of the start snapshot and of a patch) a non-negative decimal string at precision 2; every
+ * balance change equal to the change of the participant's lines (credit minus debt), and every participant whose lines
+ * moved patched. A payment (`tx.updated`): `amount` a decimal string at precision 2; `from`/`to` the ends of its route;
+ * on every leg a -> b the debt of a towards b grows by exactly `amount` (`used` of the line b -> a up, or of a -> b down:
+ * the debt of a leg may net an opposite one; neither line moves the other way); no other line moves; the balance of
+ * `from` falls by `amount`, of `to` rises by it, of anyone else in the patch does not move. A clearing
+ * (`clearing.done`): no balance moves; the lines it patches are its `cycle_edges`, each reduced; those reductions
+ * decompose into cycles, each reducing its lines by one amount, and `cleared_cycles` / `cleared_amount` are their number
+ * and sum (a line of two cycles is reduced by both amounts).
  *
  * What it does NOT see: a payment's money on lines its event does not patch (the replay of the payments is checked to end
  * exactly on the clearing's start snapshot, which catches a missing patch only on that path); the fees or limits of the
- * lines; whether the decomposition the guard finds is the one the server cleared when two decompositions exist.
+ * lines; whether the decomposition the guard finds is the one the server cleared when two decompositions exist (the
+ * greedy walk may also fail to close a cycle on an unusual graph - a false red, named).
  */
 type RecSnapshot = {
   equivalent: string
@@ -128,6 +132,8 @@ type RecEvent = Record<string, any>
 type RecStats = { payments: number; clearings: number; cycles: number; linesOfTwoCycles: number }
 type RecState = { used: Map<string, number>; net: Map<string, number | null> }
 
+/** A non-negative amount at precision 2, as the server writes `used` (a negative or finer one is a defect). */
+const MONEY_RE = /^\d+\.\d{2}$/
 const cents = (v: unknown) => Math.round(Number(v) * 100)
 const money = (c: number) => (c / 100).toFixed(2)
 const lineKey = (a: string, b: string) => `${a}>${b}`
@@ -142,6 +148,11 @@ function recState(snap: RecSnapshot): RecState {
 /** Replays `events` over `state` (mutated) and names every inconsistency; `stats` counts what was judged. */
 function recordingProblems(snap: RecSnapshot, events: RecEvent[], where: string, state = recState(snap), stats?: RecStats): string[] {
   const problems: string[] = []
+  for (const l of snap.links) {
+    if (typeof l.used !== 'string' || !MONEY_RE.test(l.used)) {
+      problems.push(`${where} start snapshot: used ${JSON.stringify(l.used)} of ${lineKey(l.source, l.target)} is not a non-negative decimal string at precision 2`)
+    }
+  }
   events.forEach((e, i) => {
     const at = `${where}[${i}] ${e.type}`
     const mark = problems.length
@@ -150,6 +161,9 @@ function recordingProblems(snap: RecSnapshot, events: RecEvent[], where: string,
     for (const p of e.edge_patch ?? []) {
       const k = lineKey(p.source, p.target)
       if (!state.used.has(k)) problems.push(`${at}: patches ${k}, not a line of the start snapshot`)
+      if (!MONEY_RE.test(String(p.used)) || typeof p.used !== 'string') {
+        problems.push(`${at}: used ${JSON.stringify(p.used)} of ${k} is not a non-negative decimal string at precision 2`)
+      }
       lineDelta.set(k, cents(p.used) - (state.used.get(k) ?? 0))
       state.used.set(k, cents(p.used))
     }
@@ -161,6 +175,20 @@ function recordingProblems(snap: RecSnapshot, events: RecEvent[], where: string,
       else if (before === null || after === null) problems.push(`${at}: the balance of ${p.id} is unknown`)
       else moved.set(p.id, after - before)
       state.net.set(p.id, after)
+    }
+    // Conservation (adversarial pass 2026-10-18): a balance is what the participant's lines say - credit minus debt - so
+    // the change of every balance is the change of the lines around it, and a participant whose lines moved is patched.
+    const implied = new Map<string, number>()
+    for (const [k, d] of lineDelta) {
+      const [creditor, debtor] = k.split('>') as [string, string]
+      implied.set(creditor, (implied.get(creditor) ?? 0) + d)
+      implied.set(debtor, (implied.get(debtor) ?? 0) - d)
+    }
+    for (const [id, d] of implied) {
+      if (d !== 0 && !moved.has(id)) problems.push(`${at}: the lines of ${id} move its balance by ${money(d)}, and it is not patched`)
+    }
+    for (const [id, d] of moved) {
+      if (d !== (implied.get(id) ?? 0)) problems.push(`${at}: the balance of ${id} moves by ${money(d)}, its lines by ${money(implied.get(id) ?? 0)}`)
     }
     if (e.type === 'tx.updated') {
       if (stats) stats.payments += 1
@@ -177,8 +205,12 @@ function recordingProblems(snap: RecSnapshot, events: RecEvent[], where: string,
       for (const { from: a, to: b } of legs) {
         onRoute.add(lineKey(a, b))
         onRoute.add(lineKey(b, a))
-        const grows = (lineDelta.get(lineKey(b, a)) ?? 0) - (lineDelta.get(lineKey(a, b)) ?? 0)
+        const up = lineDelta.get(lineKey(b, a)) ?? 0
+        const down = lineDelta.get(lineKey(a, b)) ?? 0
+        const grows = up - down
         if (grows !== amount) problems.push(`${at}: leg ${a} -> ${b} moves the debt by ${money(grows)}, the amount is ${e.amount}`)
+        // The debt of a towards b grows on b -> a; a debt of b towards a (a -> b) can only be netted, never grow.
+        if (up < 0 || down > 0) problems.push(`${at}: leg ${a} -> ${b} moves ${lineKey(b, a)} by ${money(up)} and ${lineKey(a, b)} by ${money(down)}`)
       }
       for (const [k, d] of lineDelta) if (!onRoute.has(k) && d !== 0) problems.push(`${at}: line ${k} off the route moves by ${money(d)}`)
       for (const who of [e.from, e.to]) if (!moved.has(who)) problems.push(`${at}: no balance patch for ${who}`)
@@ -312,6 +344,47 @@ describe('039 T3935: every committed recording is consistent in money with its o
       p.net_balance_atoms = String(Number(p.net_balance_atoms) + 1)
       p.net_sign = p.net_sign === 0 ? 1 : p.net_sign
       expect(recordingProblems(cl.snap, events, 'clearing').join('\n')).toMatch(/a clearing moves the balance of/)
+    })
+
+    // Adversarial pass 2026-10-18: the defects below passed the first version of the guard (its event checks).
+    it('a direct payment that grows BOTH lines of its pair (the leg sum still equals the amount)', () => {
+      const events = clone(tx.events)
+      const i = events.findIndex((e) => e.edges.length === 1 && e.edge_patch.length === 2)
+      const [x, y] = events[i]!.edge_patch
+      x.used = money(cents(x.used) + 500)
+      y.used = money(cents(y.used) + 500)
+      expect(recordingProblems(tx.snap, events, 'tx').join('\n')).toMatch(new RegExp(`tx\\[${i}\\] tx\\.updated: leg .* moves .* by .* and .* by `))
+    })
+
+    it('a clearing that clears a cycle below zero (a negative `used`)', () => {
+      const events = clone(cl.events)
+      const p = events[0]!.edge_patch[0]
+      p.used = '-1.00'
+      expect(recordingProblems(cl.snap, events, 'clearing').join('\n')).toMatch(/used "-1\.00" of .* is not a non-negative decimal string/)
+    })
+
+    it('a wrong `cleared_cycles`', () => {
+      const events = clone(cl.events)
+      events[0]!.cleared_cycles += 1
+      expect(recordingProblems(cl.snap, events, 'clearing').join('\n')).toMatch(/cleared_cycles\/cleared_amount 4\/247\.95, the lines clear 3\/247\.95/)
+    })
+
+    it('a route with a gap: its middle leg and that leg\'s lines removed (the intermediaries\' lines no longer balance)', () => {
+      const events = clone(tx.events)
+      const i = events.findIndex((e) => e.edges.length === 3)
+      const route = events[i]!
+      const [mid] = route.edges.splice(1, 1) as Array<{ from: string; to: string }>
+      const pair = new Set([lineKey(mid!.from, mid!.to), lineKey(mid!.to, mid!.from)])
+      route.edge_patch = route.edge_patch.filter((p: { source: string; target: string }) => !pair.has(lineKey(p.source, p.target)))
+      expect(recordingProblems(tx.snap, events, 'tx').join('\n')).toMatch(new RegExp(`tx\\[${i}\\] tx\\.updated: the balance of .* moves by 0\\.00, its lines by`))
+    })
+
+    it('a line off the route that moves', () => {
+      const events = clone(tx.events)
+      const onRoute = new Set(events[0]!.edges.flatMap((x: { from: string; to: string }) => [lineKey(x.from, x.to), lineKey(x.to, x.from)]))
+      const other = tx.snap.links.find((l) => !onRoute.has(lineKey(l.source, l.target)))!
+      events[0]!.edge_patch.push({ source: other.source, target: other.target, used: '1.00' })
+      expect(recordingProblems(tx.snap, events, 'tx').join('\n')).toMatch(new RegExp(`tx\\[0\\] tx\\.updated: line .* off the route moves by 1\\.00`))
     })
 
     it('an event of another equivalent', () => {
@@ -725,12 +798,15 @@ describe('039 T3935: a recording is played on its own start snapshot, and only w
     expect(app.scene.value?.sourcePath).toBe(OFFLINE)
     await app.wb.play('demo-clearing')
     expect(app.scene.value?.sourcePath).toBe('/f/UAH/events/demo-clearing-snapshot.json')
-    // The app replaces the scene (another equivalent): the playback stops and the source no longer gives the recording.
+    // The app replaces the scene (another equivalent): the playback stops and the source no longer gives the recording -
+    // and the workbench does not load a scene of its own over the app's (adversarial pass 2026-10-18).
+    const loadsBefore = app.loads.length
     app.eq.value = 'EUR'
     app.scene.value = { sourcePath: '/f/EUR/snapshot.json', snapshot: {} }
     await flush()
     expect(app.wb.playingId).toBeNull()
     expect(app.source.shown()).toBeNull()
+    expect(app.loads.length).toBe(loadsBefore)
   })
 
   it('a start snapshot that fails to load: nothing is played and the offline snapshot stays', async () => {

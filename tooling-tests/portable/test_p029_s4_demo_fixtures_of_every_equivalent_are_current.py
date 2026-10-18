@@ -88,8 +88,10 @@ def test_demo_snapshots_of_every_equivalent_have_no_signed_net_and_no_frozen_lin
     (tmp_path / "b.json").write_text('[{"type": "tx.updated"}]', encoding="utf-8")
     (tmp_path / "b-snapshot.json").write_text('{"equivalent": "EUR", "nodes": [{"id": "A"}]}', encoding="utf-8")
     (tmp_path / "c.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "d.json").write_text('[{"type": "tx.updated"}]', encoding="utf-8")
+    (tmp_path / "d-snapshot.json").write_text('{"equivalent": "UAH", "nodes": []}', encoding="utf-8")
     synthetic_found, synthetic_judged = _start_snapshot_problems("UAH", tmp_path)
-    assert (len(synthetic_found), synthetic_judged) == (2, 1), "the start-snapshot rule no longer sees its defects"
+    assert (len(synthetic_found), synthetic_judged) == (3, 2), "the start-snapshot rule no longer sees its defects"
     synthetic = {
         "nodes": [{"id": "A", "status": "frozen", "net_balance_atoms": "-5"}],
         "links": [{"source": "A", "target": "B", "status": "frozen"}],

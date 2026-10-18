@@ -78,6 +78,7 @@ import { useRealTxFx } from './realFx/useRealTxFx'
 import {
   createLivePathDelivery,
   createRecordingSceneSource,
+  RECORDING_SCENE_SETTLE_MAX_MS,
   usePlaylistWorkbench,
   type PlaylistWorkbench,
 } from './usePlaylistWorkbench'
@@ -1370,7 +1371,20 @@ export function useSimulatorApp(opts?: {
       clearingMs: CLEARING_EFFECT_MS,
       afterLastMs: Math.max(vizMapping.motion.txLabelMs, vizMapping.motion.clearingLabelMs),
     },
-    recordingScene: { enter: recordingSceneSource.enter, leave: recordingSceneSource.leave },
+    recordingScene: {
+      // The recording's graph is a new scene: its layout is laid out afresh and the physics settles it for a few seconds
+      // (measured 2026-10-18: ~4.4 s, nodes moving up to ~25 px per 250 ms). The playback waits for the physics to
+      // stop, at most RECORDING_SCENE_SETTLE_MAX_MS, so its effects play on a still graph as they did on the offline one.
+      enter: async (equivalent, sourcePath) => {
+        if (!(await recordingSceneSource.enter(equivalent, sourcePath))) return false
+        const until = performance.now() + RECORDING_SCENE_SETTLE_MAX_MS
+        while (physics.isRunning() && performance.now() < until && recordingSceneSource.shown() === sourcePath) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 50))
+        }
+        return state.sourcePath === sourcePath
+      },
+      leave: recordingSceneSource.leave,
+    },
   })
   playlistWorkbenchActivePlayback = playlistWorkbench.activePlaybackId
 

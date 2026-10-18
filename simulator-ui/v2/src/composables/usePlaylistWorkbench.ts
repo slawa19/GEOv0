@@ -22,7 +22,10 @@
  *
  * What it does NOT do: play on the server source (there the network lives on its own; no playlist is loaded), honour the
  * recorded `ts` (events are spaced by their own effect length, see `gapAfterMs`), check the money of a recording (that is
- * the consistency guard of the committed recordings in `usePlaylistWorkbench.test.ts`).
+ * the consistency guard of the committed recordings in `usePlaylistWorkbench.test.ts`), offer Stop during stepping (the
+ * bottom bar shows Stop only while a playlist plays: after a Step the way back is to step to the end or to choose the
+ * other playlist - BACKLOG 039-13), or recover when the offline snapshot itself fails to load on the way back (the
+ * recording's scene then stays, under the load error).
  */
 import { computed, reactive, ref, watch } from 'vue'
 
@@ -368,6 +371,8 @@ export function createRecordingSceneSource(deps: {
   getSceneSourcePath: () => string
 }) {
   let recording: { equivalent: string; sourcePath: string } | null = null
+  /** Scene loads asked by `enter` that have not answered yet: one of them may still put the recording on screen. */
+  let entering = 0
   return {
     load: (eq: string) =>
       recording !== null && sameEquivalent(recording.equivalent, eq)
@@ -376,14 +381,25 @@ export function createRecordingSceneSource(deps: {
     /** Shows the recording's start snapshot; true once it is the scene on screen. */
     enter: async (equivalent: string, sourcePath: string): Promise<boolean> => {
       recording = { equivalent: canonicalEquivalent(equivalent), sourcePath }
-      await deps.reloadScene()
+      entering += 1
+      try {
+        await deps.reloadScene()
+      } finally {
+        entering -= 1
+      }
       return recording?.sourcePath === sourcePath && deps.getSceneSourcePath() === sourcePath
     },
-    /** Back to the offline source's snapshot; nothing when no recording was asked for. */
+    /**
+     * Back to the offline source's snapshot; nothing when no recording was asked for. The scene is reloaded only when the
+     * recording is on screen or one of its loads is still under way - not when something else (another equivalent, the
+     * server source) has already replaced it (adversarial pass 2026-10-18: a reload there would be an extra load of the
+     * server source competing with its own).
+     */
     leave: () => {
       if (recording === null) return
+      const shown = recording.sourcePath
       recording = null
-      void deps.reloadScene()
+      if (entering > 0 || deps.getSceneSourcePath() === shown) void deps.reloadScene()
     },
     /** The recording's start snapshot asked for, or null. */
     shown: () => recording?.sourcePath ?? null,
@@ -391,6 +407,12 @@ export function createRecordingSceneSource(deps: {
 }
 
 export type RecordingSceneSource = ReturnType<typeof createRecordingSceneSource>
+
+/**
+ * 039 T3935: the longest a playback waits for the physics to settle the recording's freshly laid-out graph before its
+ * first event (measured 2026-10-18 on the 100-node recording: ~4.4 s); past it the playback starts anyway.
+ */
+export const RECORDING_SCENE_SETTLE_MAX_MS = 8000
 
 /**
  * The delivery of a recorded event: the live connection's own steps (`useSimulatorRealMode.ts`): the replay owner
