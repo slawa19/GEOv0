@@ -343,7 +343,8 @@ function onCloseLine() {
   flex: 0 0 auto;
   margin-right: auto;
   font-size: var(--ds-typo-section-label-font-size);
-  color: var(--ds-text-3);
+  /* Not `--ds-text-3`: it fails contrast in hud (stand, axe, 2026-10-18). */
+  color: var(--ds-text-2);
 }
 
 .popup__close {
@@ -359,7 +360,7 @@ function onCloseLine() {
 }
 
 .popup__k {
-  color: var(--ds-text-3);
+  color: var(--ds-text-2);
 }
 
 .popup__util {
@@ -398,8 +399,14 @@ function onCloseLine() {
   color: color-mix(in srgb, var(--ds-warn) 55%, var(--ds-text-1));
 }
 
+.popup__direction {
+  color: var(--ds-text-2);
+}
+
+/* The summary is a pointer target: at least 24 px tall (`surfaces.qa.ts`, WCAG 2.2 target size). */
 .popup__direction > summary {
   cursor: pointer;
+  line-height: 24px;
 }
 
 .popup__actions {
