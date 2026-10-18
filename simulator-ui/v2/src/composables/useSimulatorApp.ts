@@ -10,7 +10,7 @@
  */
 
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
-import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
+import { fixturesBase, loadJson, loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode } from '../render/nodeFill'
 import { sizeForNode } from '../render/nodeSizing'
@@ -74,6 +74,7 @@ import { useSystemBalance } from './useSystemBalance'
 
 import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
 import { useRealTxFx } from './realFx/useRealTxFx'
+import { createLivePathDelivery, usePlaylistWorkbench, type PlaylistWorkbench } from './usePlaylistWorkbench'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
 
@@ -259,6 +260,9 @@ export type SimulatorAppApi = {
     runTxOnce: () => Promise<void>
     runClearingOnce: () => Promise<void>
   }
+
+  /** 042 T4205: the offline effects workbench (recorded playlists, offline source only; empty on the server source). */
+  playlistWorkbench: PlaylistWorkbench
 
   hasNodeCardInspectorOpen: ComputedRef<boolean>
   hoveredEdge: FxOverlaysApi['hoveredEdge']
@@ -1303,6 +1307,37 @@ export function useSimulatorApp(opts?: {
   const runRealTxFx = realTxFx.runRealTxFx
   const clampRealTxTtlMs = realTxFx.clampRealTxTtlMs
 
+  // ── 042 T4205: the offline effects workbench ─────────────
+  // The recorded playlists of the offline snapshot, played through the live event path with the FX functions above
+  // (`usePlaylistWorkbench.ts`). Offline source only, and not on the screenshot stand (its pictures read no playlist).
+  let playlistWorkbenchActivePlayback: () => string | null = () => null
+  const deliverPlaylistEvent = createLivePathDelivery({
+    state,
+    patchApplier: realPatchApplier,
+    isUserFacingRunError,
+    inc,
+    getActivePlaybackId: () => playlistWorkbenchActivePlayback(),
+    optionalFxEnabled: opts?.optionalFxEnabled,
+    wakeUp,
+    runRealTxFx,
+    runRealClearingDoneFx,
+    pushTxAmountLabel,
+    clampRealTxTtlMs,
+    scheduleTimeout,
+  })
+  const playlistWorkbench = usePlaylistWorkbench({
+    isOfflineSource: () => !isRealMode.value && !isE2eScreenshots.value,
+    getSnapshotEquivalent: () => state.snapshot?.equivalent ?? null,
+    getSceneIdentity: () => state.snapshot,
+    fetchJson: (path) => loadJson<unknown>(path),
+    base: fixturesBase(),
+    deliver: deliverPlaylistEvent,
+    // A playback is a new "run" for the effect caches (a replayed clearing is not deduplicated against the last one);
+    // an ended one invalidates its pending beam legs and receiver burst.
+    fx: { resetTxFx: () => realTxFx.resetRateLimiter(), resetClearingDedup: () => resetClearingFxDedupImpl() },
+  })
+  playlistWorkbenchActivePlayback = playlistWorkbench.activePlaybackId
+
   const labelNodes = useLabelNodes({
     isTestMode: () => isTestMode.value,
     getLabelsLod: () => labelsLod.value,
@@ -1898,6 +1933,8 @@ export function useSimulatorApp(opts?: {
       runTxOnce: e2eTxOnce,
       runClearingOnce: e2eClearingOnce,
     },
+
+    playlistWorkbench,
 
     // selection + overlays
     hasNodeCardInspectorOpen,

@@ -20,7 +20,14 @@ What this checks, and what it does not:
 - the scan itself is checked first on a synthetic snapshot that holds both defects, otherwise a green run
   would only prove the scan is blind (AGENTS.md section 9, anti-vacuum);
 - it does not compare bytes: the assets are no longer regenerated, so a change to them is a reviewed diff
-  of a versioned file.
+  of a versioned file;
+- it does not check that the event playlists (`events/*.json`) are valid SSE events of the wire contract:
+  that is held by the offline workbench's playlist tests (042 `T4205`,
+  `simulator-ui/v2/src/composables/usePlaylistWorkbench.test.ts`, which parse every committed playlist with
+  the live SSE normaliser);
+- it does not check the financial coherence of the recorded patches (that a recorded clearing's decreases
+  close a cycle, that a payment's patches add up): the playlists are recordings for the workbench's effects,
+  not money documents.
 """
 
 from __future__ import annotations
