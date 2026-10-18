@@ -100,6 +100,11 @@ describe('two cycles sharing a line: the SSE set and the Interact flattening are
   it('the same sparks and the same pulses whichever path the clearing came by', () => {
     expect(draw(HTTP, 'http')).toEqual(draw(SSE, 'sse'))
   })
+  it('the same also when Interact lists the cycles in the order unfavourable to the reconstruction (fix-delta review, 2026-10-18)', () => {
+    // Execution order A>B>D>A first: in first-seen order the union rebuilds ABD; the server's sorted set rebuilds ABC.
+    const HTTP_REORDERED = [{ from: 'A', to: 'B' }, { from: 'B', to: 'D' }, { from: 'D', to: 'A' }, { from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }]
+    expect(draw(HTTP_REORDERED, 'http')).toEqual(draw(SSE, 'sse'))
+  })
   it('what is drawn: one spark round the one cycle the union rebuilds; every line of both cycles pulses, the shared one once', () => {
     const d = draw(SSE, 'sse')
     expect(d.sparks).toHaveLength(3)

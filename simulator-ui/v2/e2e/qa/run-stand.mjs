@@ -135,8 +135,10 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-18 (039 slice C, Codex §15 round): gate 138 -> 139, full 229 -> 230. One test of `motion-c.qa.ts`: a
  *   clearing of two cycles, each traversed by its own spark, seen on the FX canvas in order and forward (the clearing
  *   test of one cycle now observes pixels along the cycle too). About 6 s.
+ * - 2026-10-18 (039 slice C, fix-delta round): gate 139 -> 140, full 230 -> 231. The glow test of `motion-c.qa.ts`
+ *   runs in `saas` and `hud` (one test more); the clearing judge also counts head places and bounds the head's step.
  */
-export const EXPECTED = { gate: 139, full: 230 }
+export const EXPECTED = { gate: 140, full: 231 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

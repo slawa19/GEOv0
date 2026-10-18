@@ -66,7 +66,14 @@ function nodesFromEdges(edges: Edge[]): string[] {
   return out
 }
 
-/** The edge union: each line `from>to` once, in first-seen order. */
+/**
+ * The edge union in CANONICAL order: each line `from>to` once, sorted by `from`, then `to`, by code point - the order the
+ * server sorts `clearing.done.cycle_edges` in (`app/api/v1/simulator.py` ≈`:212`, `tick.py` `sorted(touched_edges)`).
+ * The reconstruction (`cyclesOf`: its first line and its tie-breaks) and the 30-line cut follow this order, so the same
+ * union gives the same cycles whichever path brought it - Interact lists its cycles in execution order (fix-delta
+ * review, 2026-10-18: in first-seen order HTTP A>B>D>A, A>B>C>A rebuilt ABD, the sorted SSE set ABC).
+ */
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 export function uniqueEdges(edges: Edge[]): Edge[] {
   const seen = new Set<string>()
   const out: Edge[] = []
@@ -76,7 +83,7 @@ export function uniqueEdges(edges: Edge[]): Edge[] {
     seen.add(k)
     out.push({ from: e.from, to: e.to })
   }
-  return out
+  return out.sort((x, y) => byCodePoint(x.from, y.from) || byCodePoint(x.to, y.to))
 }
 
 /**

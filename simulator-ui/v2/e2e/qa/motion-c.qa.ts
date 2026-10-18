@@ -21,7 +21,10 @@
  *     Codex §15: a glow drawn without sprites); a selected node gets its glow and its halo is seen; without a GPU no
  *     glow is composited with `screen`, with a GPU believed present it is. LIMIT of the halo measure: it does not see a
  *     glow as faint as the old bloom of an idle node at quality low (median 0 on the base too) - the sprite count holds
- *     that; it sees a blurred stroke (median 5.7) and a glowing line (61).
+ *     that; it sees a blurred stroke (median 5.7) and a glowing line (61). Further limits (fix-delta review 2026-10-18):
+ *     dense and non-circle nodes are excluded from the sample, and it is a median over the sampled nodes (and two
+ *     lines), so a glow on a minority of nodes, or on excluded nodes and lines, can pass; the threshold is a one-sided
+ *     empirical +3 over the background, not a measured cross-platform bound. Run in `saas` and `hud`.
  *
  * What this does NOT see: colour and shape of the beam; the composed page (the oracle's property 5, `motion.qa.ts`);
  * what happens inside `NODE_CLEAR_PX` of a node (the head passes through it unjudged - that is the bound of 2);
@@ -196,6 +199,8 @@ test.describe('039 slice C - motion on the ring (no GPU, quality low)', () => {
       awayLit = Math.max(awayLit, (await sampleCanvas(page, { away }, { halfPx: 2, alphaMin: 12 })).away!.lit)
     }
     const traversal = judgeLoopPixels(g, loopProbes, 'the ring')
+    // Anti-vacuum (fix-delta review 2026-10-18): every line of the ring is long enough to be judged.
+    expect(traversal.judged, 'counter-check: lines of the ring judged by pixels').toBe(6)
     const row = { seen, maxAlive, loopMs: Math.round(loopMs), pulsesBefore, labelBefore, pulsesAfter, labelAfter, awayLit, traversal }
     console.log('[039 C] clearing', JSON.stringify(row))
     expect.soft(seen, 'one spark goes round the whole cycle, line after line').toEqual(cycle.map((e) => `${e.from}>${e.to}`))
@@ -221,11 +226,21 @@ function judgeLoopPixels(g: RouteGeom, probes: FrameProbe[], name: string, only?
   const len = (n: string) => { const e = g.edges.find((x) => x.name === n)!; return Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) }
   const sum = only ? only.map((n) => all.find((e) => e.name === n)!) : all
   const judged = sum.filter((e) => len(e.name) > 2 * NODE_CLEAR_PX + 30)
+  // The spark goes round in CLEARING_LOOP_MS at one speed over the VISIBLE lengths (centre to centre less the two
+  // radii of the 24 px nodes of these scenes), so a line takes loop x its share, and the head advances 16 ms / that
+  // time of the line per frame. MAX_STEP_K of that is allowed in one frame (the frame grid and the brightest-pixel
+  // reading); a head that holds and then jumps (fix-delta review 2026-10-18: "teleporting") steps further.
+  const vis = (n: string) => len(n) - 2 * RING_NODE_R
+  const loopLen = sum.reduce((acc, e) => acc + vis(e.name), 0)
   for (const e of judged) {
+    const lineMs = (CLEARING_LOOP_MS * vis(e.name)) / loopLen
+    const maxStep = (MAX_STEP_K * 16) / lineMs
     expect.soft(e.litFrames.length, `CLEARING ${name}: the spark is painted on ${e.name} while it goes round (painted in ${e.litFrames.length} frames)`).toBeGreaterThanOrEqual(2)
     const moved = e.headFirst === null || e.headLast === null ? 0 : e.headLast - e.headFirst
     expect.soft(moved, `CLEARING ${name}: on ${e.name} the spark moves forward, source to target (head ${String(e.headFirst?.toFixed(3))} -> ${String(e.headLast?.toFixed(3))})`).toBeGreaterThanOrEqual(0.3)
     expect.soft(e.maxStepBack, `CLEARING ${name}: on ${e.name} the spark never steps back`).toBeLessThanOrEqual(0.02)
+    expect.soft(e.distinctHeads, `CLEARING ${name}: on ${e.name} the spark is seen at several places, not two (${e.distinctHeads} places)`).toBeGreaterThanOrEqual(MIN_PLACES)
+    expect.soft(e.maxStepPerFrame, `CLEARING ${name}: on ${e.name} the spark advances at most ${maxStep.toFixed(3)} of the line a frame (${MAX_STEP_K} x 16 ms / ${Math.round(lineMs)} ms of the line), largest step ${e.maxStepPerFrame.toFixed(3)}`).toBeLessThanOrEqual(maxStep)
   }
   // In the cycle's order, starting wherever the spark started (a cycle has no first line: the product starts at the line
   // the reconstruction met first).
@@ -235,8 +250,21 @@ function judgeLoopPixels(g: RouteGeom, probes: FrameProbe[], name: string, only?
   for (let i = 1; i < order.length; i += 1) {
     expect.soft(order[i]!.firstLit ?? -1, `CLEARING ${name}: ${order[i]!.name} lights up after ${order[i - 1]!.name} (first painted frames ${order.map((e) => `${e.name} ${String(e.firstLit)}`).join(', ')})`).toBeGreaterThan(order[i - 1]!.firstLit ?? Infinity)
   }
-  return { judged: judged.length, of: sum.length, lines: judged.map((e) => ({ edge: e.name, lit: [e.firstLit, e.lastLit], head: [e.headFirst?.toFixed(2), e.headLast?.toFixed(2)] })) }
+  return { judged: judged.length, of: sum.length, lines: judged.map((e) => ({ edge: e.name, lit: [e.firstLit, e.lastLit], head: [e.headFirst?.toFixed(2), e.headLast?.toFixed(2)], places: e.distinctHeads, maxStep: Number(e.maxStepPerFrame.toFixed(3)) })) }
 }
+
+/** The clearing loop of the product (`CLEARING_LOOP_MS`, `useRealClearingFx.ts`): the spec's 1.2 s, written here independently. */
+const CLEARING_LOOP_MS = 1200
+/**
+ * A head step may be this many times the planned advance of one frame (see `judgeLoopPixels`). Measured 2026-10-18 on
+ * the product: up to 3.3 times where a line passes near another line of the cycle (pixels there go to neither line, and
+ * the brightest-pixel reading jumps across the gap): f > a of the ring 0.260 against 0.078, n2 > n4 0.154 against 0.040.
+ * LIMIT: with 4 the bound on a ring line is 0.31 of it a frame - a single jump of 0.3 alone would pass it; what refuses
+ * a head that holds and jumps is `MIN_PLACES` (two or three places, not a traversal).
+ */
+const MAX_STEP_K = 4
+/** Distinct head places on a judged line: a traversal is seen moving, a jump between two places is not one. */
+const MIN_PLACES = 4
 
 // Counter-check with TWO cycles (Codex §15): each is traversed by its own spark at the same time. The open route's
 // scene has two edge-disjoint cycles over its lines: n2 > n3 > n6 > n0 > n1 > n2 and n5 > n2 > n4 > n5.
@@ -270,8 +298,9 @@ test('039 slice C - a clearing of two cycles: a spark goes round EACH, seen on t
   console.log('[039 C] clearing, two cycles', JSON.stringify({ maxAlive, t1, t2 }))
   expect(maxAlive, 'two sparks at once: one per cycle').toBe(2)
   // Anti-vacuum: the judged lines of each cycle (long enough to have a part outside the nodes' 46 px).
-  expect.soft(t1.judged, `counter-check: lines of cycle 1 judged (${t1.judged} of ${t1.of})`).toBeGreaterThanOrEqual(3)
-  expect.soft(t2.judged, `counter-check: lines of cycle 2 judged (${t2.judged} of ${t2.of})`).toBeGreaterThanOrEqual(2)
+  // Exactly as recorded (fix-delta review 2026-10-18: "at least" was weaker than the record): all lines of both cycles.
+  expect.soft(t1.judged, `counter-check: lines of cycle 1 judged (${t1.judged} of ${t1.of})`).toBe(5)
+  expect.soft(t2.judged, `counter-check: lines of cycle 2 judged (${t2.judged} of ${t2.of})`).toBe(3)
 })
 
 // Six legs (the cap) on legs of UNEQUAL length: the open route of seven nodes (`OPEN_ROUTE`, 039 slice A). On the
@@ -418,8 +447,11 @@ async function haloSamples(page: Page) {
 }
 
 test.describe('039 slice C - glow only on active nodes (the 100-node scene)', () => {
-  test('a static frame draws no glow sprite on the base canvas; a selected node gets its glow, composited without `screen` when there is no GPU', async ({ page }) => {
-    await boot(page, { snapshot: fixtureSnapshot100(), clock: true })
+  // Both themes (fix-delta review 2026-10-18): the graph canvas is filled with `#020617` in either (`useRenderLoop.ts`),
+  // so the background and the tolerance are the same.
+  for (const theme of ['saas', 'hud'] as const) test(`[${theme}] a static frame draws no glow sprite on the base canvas; a selected node gets its glow, composited without \`screen\` when there is no GPU`, async ({ page }) => {
+    await boot(page, { snapshot: fixtureSnapshot100(), clock: true, query: `&theme=${theme}` })
+    expect(await page.locator('.root').getAttribute('data-theme'), 'precondition: the theme').toBe(theme)
     expect(await page.locator('.root').getAttribute('data-gpu'), 'precondition: no GPU').toBe('0')
     const idle = await spritesOfOnePass(page)
     const samples = await haloSamples(page)

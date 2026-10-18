@@ -3,8 +3,8 @@
  *
  * `S3-MIXED-V1`, a pure function of the snapshot and the slot number (no randomness, no clock):
  *   - one SSE event every 150 ms; slots repeat with a period of 24 (3.6 s);
- *   - slot 12 of every period: `clearing.done` over 20 trust lines of the fixture (not a closed cycle: the FX does not
- *     read the topology), cleared amount 5.00. Since 039 slice C (2026-10-18) the product draws a spark round each cycle
+ *   - slot 12 of every period: `clearing.done` over 20 trust lines of the fixture (an arbitrary sample, not a closed
+ *     cycle), cleared amount 5.00. Since 039 slice C (2026-10-18) the product draws a spark round each cycle
  *     it can rebuild from these lines (an arbitrary sample is mostly none), then 20 edge pulses and one amount label;
  *     until then 20 pulses, up to 40 node bursts and a full-screen flash at once. So this load does NOT measure the
  *     cost of a multi-cycle clearing traversal (Codex review of 039 C);
