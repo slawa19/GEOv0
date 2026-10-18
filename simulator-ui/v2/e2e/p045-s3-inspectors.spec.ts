@@ -6,7 +6,7 @@
  * (`helpers/p037Mock.ts`; Alice holds the line Bob -> Alice, and with `aliceLines` eight more lines Alice -> x01..x08):
  *
  *   (е1) card: the head is one block - name and role on a line, balance and close beside it (the meta line under the name);
- *   (е2) card: the statistics are one line (Out, In, Degree);
+ *   (е2) card: the statistics are one line (Out, In - Degree was dropped in S4: the group counters carry the number of lines);
  *   (е3) card: a row of a line has no third column - what is available is in the row's `title`;
  *   (е4) card: with nine lines the list shows at most five rows and scrolls;
  *   (е5) card: while another action is open, Pay and New line are `disabled` and say why on a visible line (043-4);
@@ -143,7 +143,7 @@ for (const theme of THEMES) {
         balance: await centreY(card.locator('.ds-ov-node-card__balance')),
         close: await centreY(card.getByRole('button', { name: 'Close' })),
       }
-      const stats = await Promise.all(['Out', 'In', 'Degree'].map(async (t) => centreY(card.locator('.ds-label', { hasText: new RegExp(`^${t}$`) }))))
+      const stats = await Promise.all(['Out', 'In'].map(async (t) => centreY(card.locator('.ds-label', { hasText: new RegExp(`^${t}$`) }))))
       const values = await card.locator('.ds-ov-node-card__stats .ds-value').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }))
       info.annotations.push({ type: 'P045S3-e1e2', description: JSON.stringify({ head, stats, values }) })
       const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs)
@@ -179,6 +179,18 @@ for (const theme of THEMES) {
       expect(m.scrolls, 'the list scrolls').toBe(true)
       expect(m.visible, 'at most five whole rows on screen').toBeLessThanOrEqual(5)
       expect(m.visible, 'counter-check: rows are on screen at all').toBeGreaterThanOrEqual(4)
+    })
+
+    test('(к) 045 S4: with nine lines the totals (snapshot) and the rows (list) describe the same lines; the stats line is Out and In', async ({ page }) => {
+      await open(page, theme, { aliceLines: 8 })
+      const card = await openCard(page)
+      await expect(card.locator('.nco-trustline-row')).toHaveCount(9)
+      const stats = card.locator('[data-testid="node-card-stats"]')
+      await expect(stats.locator('.ds-label'), 'the statistics say Out and In, and nothing else').toHaveText(['Out', 'In'])
+      // Alice is the creditor of eight lines of 50.00 (Out) and the debtor of one line of 100.00 (In).
+      await expect(stats.locator('.ds-value')).toHaveText(['400.00', '100.00'])
+      await expect(card.getByText('OUT → 8', { exact: true })).toBeVisible()
+      await expect(card.getByText('IN ← 1', { exact: true })).toBeVisible()
     })
 
     test('(е5) 043-4: while the payment is open, Pay and New line are disabled and the card says why', async ({ page }) => {

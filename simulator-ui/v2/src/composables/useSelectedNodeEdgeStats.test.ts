@@ -33,7 +33,7 @@ function makeSnapshot(equivalent = 'UAH'): GraphSnapshot {
 }
 
 describe('useSelectedNodeEdgeStats', () => {
-  it('computes in/out limits and degree for selected node', () => {
+  it('computes in/out limits for selected node', () => {
     const snapshot = makeSnapshot()
     const { selectedNodeEdgeStats } = useSelectedNodeEdgeStats({
       getSnapshot: () => snapshot,
@@ -43,7 +43,6 @@ describe('useSelectedNodeEdgeStats', () => {
     expect(selectedNodeEdgeStats.value).toEqual({
       inLimitText: '5.00',
       outLimitText: '13.00',
-      degree: 3,
     })
   })
 
@@ -86,7 +85,7 @@ describe('useSelectedNodeEdgeStats', () => {
     expect(computeNodeEdgeStats(snapshot, 'A').outLimitText).toBe('10000000000.12345679')
   })
 
-  it('counts a link with an unusable trust limit as zero, and still counts its degree', () => {
+  it('counts a link with an unusable trust limit as zero', () => {
     const snapshot: GraphSnapshot = {
       equivalent: 'UAH',
       generated_at: '2026-08-24T00:00:00Z',
@@ -101,7 +100,6 @@ describe('useSelectedNodeEdgeStats', () => {
     expect(computeNodeEdgeStats(snapshot, 'A')).toEqual({
       inLimitText: '0.00',
       outLimitText: '2.50',
-      degree: 3,
     })
   })
 

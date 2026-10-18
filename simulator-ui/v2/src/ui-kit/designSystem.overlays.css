@@ -623,7 +623,7 @@ details[open].ds-ov-details > summary::after {
   box-shadow: var(--ds-focus-ring-btn);
 }
 
-/* ---- Statistics: one line "Out X · In Y · Degree N" (045 S3) ---------------- */
+/* ---- Statistics: one line "Out X · In Y" (045 S3; Degree dropped in S4) ---------------- */
 
 .ds-ov-node-card__stats {
   font-size: var(--ds-typo-label-font-size);

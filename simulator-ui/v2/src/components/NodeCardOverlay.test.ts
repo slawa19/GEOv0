@@ -11,7 +11,7 @@ function mountNodeCard(overrides: Record<string, unknown> = {}) {
 
   const defaultProps: Record<string, unknown> = {
     node: { id: 'alice', name: 'Alice', status: 'active', type: 'person' },
-    edgeStats: { outLimitText: '0', inLimitText: '0', degree: 0 },
+    edgeStats: { outLimitText: '0', inLimitText: '0' },
     equivalentText: 'UAH',
     palette: DATA_PALETTE_DEFAULT,
 
