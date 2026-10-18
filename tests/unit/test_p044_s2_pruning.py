@@ -35,6 +35,8 @@ def registry(monkeypatch):
     monkeypatch.setattr(simulator_storage, "sync_artifacts", no_io)
     monkeypatch.setattr(runtime._real_runner, "flush_pending_storage", no_io)
     monkeypatch.setattr(runtime, "_max_run_records", 3)
+    monkeypatch.setattr(runtime, "_max_active_runs", 0)  # the limits of entry are not under test here
+    monkeypatch.setattr(runtime, "_max_active_runs_per_owner", 0)
     with runtime._lock:
         saved_runs, saved_map = dict(runtime._runs), dict(runtime._active_run_id_by_owner)
         runtime._runs.clear()
@@ -134,3 +136,91 @@ async def test_restart_409_does_not_cite_a_pruned_error_run(registry) -> None:
     await runtime.restart("s2")
     assert runtime.get_run("s2").state == "running"
     await runtime.stop("s2")
+
+
+def _with_held_writer(run: RunRecord, gate: asyncio.Event, draining: asyncio.Event) -> None:
+    """A writer that, told to end, signals that it drains and then waits on `gate`: the pruning pass is held exactly
+    inside `stop_events_writer`'s await, after the detach (Codex §15, 044 stage 2)."""
+
+    q: asyncio.Queue = asyncio.Queue()
+
+    async def writer() -> None:
+        while await q.get() is not None:
+            pass
+        draining.set()
+        await gate.wait()
+
+    run._artifact_events_queue = q
+    run._artifact_events_task = asyncio.create_task(writer())
+
+
+@pytest.mark.asyncio
+async def test_a_record_resumed_while_its_writer_drains_keeps_writing_events(registry, tmp_path) -> None:
+    e1 = _add("e1", "error", minute=1)
+    e1.artifacts_dir = tmp_path / "e1"
+    gate, draining = asyncio.Event(), asyncio.Event()
+    _with_held_writer(e1, gate, draining)
+    _add("s2", "stopped", minute=2)
+    _add("s3", "stopped", minute=3)
+    _add("r4", "running", minute=4)
+
+    pruning = asyncio.create_task(runtime.stop("r4"))
+    await draining.wait()  # the pass is inside the await on e1's writer
+    await runtime.resume("e1")  # the owner brings the record back meanwhile
+    gate.set()
+    await pruning
+
+    try:
+        assert "e1" in runtime._runs and runtime.get_run("e1").state == "running"
+        assert e1._artifact_events_queue is not None and not e1._artifact_events_task.done(), "the resumed run writes"
+        runtime.publish_run_status("e1")  # run_status is not an artifact; a tx event is
+        runtime._artifacts.enqueue_event_artifact("e1", {"type": "tx.updated", "event_id": "evt_e1_000999"})
+        await runtime._artifacts.stop_events_writer("e1")
+        assert "evt_e1_000999" in (tmp_path / "e1" / "events.ndjson").read_text(encoding="utf-8")
+    finally:
+        await runtime.stop("e1")
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_restarted_while_another_drains_keeps_its_writer(registry, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_max_run_records", 2)
+    e1 = _add("e1", "error", minute=1)
+    gate, draining = asyncio.Event(), asyncio.Event()
+    _with_held_writer(e1, gate, draining)
+    e2 = _add("e2", "error", minute=2)
+    e2.artifacts_dir = tmp_path / "e2"
+    _with_writer(e2)
+    e2_writer = e2._artifact_events_task
+    _add("r3", "running", minute=3)
+    _add("r4", "running", minute=4)  # 4 records, limit 2: e1 and e2 are both candidates
+
+    pruning = asyncio.create_task(runtime.stop("r4"))
+    await draining.wait()
+    await runtime.restart("e2")
+    gate.set()
+    await pruning
+
+    try:
+        assert "e1" not in runtime._runs, "the held candidate is dropped once its writer ended"
+        assert runtime.get_run("e2").state == "running"
+        assert e2._artifact_events_task is e2_writer and not e2_writer.done(), "the restarted run's writer was not ended"
+    finally:
+        await runtime.stop("e2")
+
+
+@pytest.mark.asyncio
+async def test_a_second_pass_does_not_drop_a_record_whose_writer_is_draining(registry) -> None:
+    e1 = _add("e1", "error", minute=1)
+    gate, draining = asyncio.Event(), asyncio.Event()
+    _with_held_writer(e1, gate, draining)
+    _add("s2", "stopped", minute=2)
+    _add("s3", "stopped", minute=3)
+    _add("s4", "stopped", minute=4)
+
+    first = asyncio.create_task(runtime._run_lifecycle.prune_ended_runs())
+    await draining.wait()
+    await runtime._run_lifecycle.prune_ended_runs()  # a concurrent pass sees e1 writer-less (detached)
+    assert "e1" in runtime._runs, "not dropped while its writer drains"
+    gate.set()
+    await first
+    assert "e1" not in runtime._runs

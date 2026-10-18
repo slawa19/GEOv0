@@ -71,6 +71,9 @@ class RunLifecycle:
         self._get_active_run_id_for_owner = get_active_run_id_for_owner
         self._get_max_active_runs_per_owner = get_max_active_runs_per_owner
         self._idle_now = idle_now
+        # 044 stage 2 (Codex §15): records whose events writer a pruning pass is ending right now. Such a record looks
+        # writer-less (`stop_events_writer` detaches before it awaits the drain) and must not be dropped meanwhile.
+        self._draining_writers: set[str] = set()
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
@@ -168,8 +171,8 @@ class RunLifecycle:
         record that no longer exists would answer for a run nobody can reach."""
 
         for r in self._ended_overflow_locked():
-            if self._has_live_task(getattr(r, "_artifact_events_task", None)):
-                continue  # `prune_ended_runs` ends it first; never dropped with a writer still running
+            if self._has_live_task(getattr(r, "_artifact_events_task", None)) or r.run_id in self._draining_writers:
+                continue  # `prune_ended_runs` ends it first; never dropped with a writer still running or draining
             if self._runs.get(r.run_id) is not r:
                 continue
             del self._runs[r.run_id]
@@ -182,18 +185,35 @@ class RunLifecycle:
         ended first, outside the lock; then the records are dropped under it."""
 
         with self._lock:
-            writers = [
-                r.run_id
+            candidates = [
+                (r, int(r._launch_epoch))
                 for r in self._ended_overflow_locked()
-                if self._has_live_task(getattr(r, "_artifact_events_task", None))
+                if self._has_live_task(getattr(r, "_artifact_events_task", None)) and r.run_id not in self._draining_writers
             ]
-        for run_id in writers:
+        for r, epoch in candidates:
+            # 044 stage 2 (Codex §15): the list was taken before earlier awaits; a candidate the owner resumed or
+            # restarted meanwhile (it left the ended state, or a new launch began) keeps its writer. Re-checked under
+            # the lock right before the detach, which `stop_events_writer` does before its first await.
+            with self._lock:
+                still_ended = (
+                    self._runs.get(r.run_id) is r
+                    and str(r.state) in ("stopped", "error")
+                    and int(r._launch_epoch) == epoch
+                    and r.run_id not in self._draining_writers
+                )
+                if still_ended:
+                    self._draining_writers.add(r.run_id)
+            if not still_ended:
+                continue
             try:
-                await self._artifacts.stop_events_writer(run_id)
+                await self._artifacts.stop_events_writer(r.run_id)
             except NotFoundException:
                 continue
             except Exception:
-                self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", run_id)
+                self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", r.run_id)
+            finally:
+                with self._lock:
+                    self._draining_writers.discard(r.run_id)
         with self._lock:
             self._prune_run_records_locked()
 
@@ -413,6 +433,10 @@ class RunLifecycle:
                 note_subscribers_locked(run, self._idle_now())
                 if run.owner_id:
                     self._set_active_run_id(run_id, run.owner_id)
+            if run.state == "running":
+                # 044 stage 2 (Codex §15): a run resumed while a pruning pass ended its writer gets one again
+                # (idempotent: a live writer is kept), so its events are not dropped with a `None` queue.
+                self._artifacts.start_events_writer(run_id)
 
         await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
