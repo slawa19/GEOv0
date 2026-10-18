@@ -85,6 +85,28 @@ describe('cyclesOf - the cycles of the set of lines a clearing touched', () => {
   })
 })
 
+describe('two cycles sharing a line: the SSE set and the Interact flattening are drawn the same (Codex §15, 2026-10-18)', () => {
+  // Cycles A>B>C>A (5) and A>B>D>A (7) share A>B. SSE sends the set (tick.py); Interact flattens res.cycles (A>B twice).
+  const SSE = [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'B', to: 'D' }, { from: 'C', to: 'A' }, { from: 'D', to: 'A' }]
+  const HTTP = [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }, { from: 'A', to: 'B' }, { from: 'B', to: 'D' }, { from: 'D', to: 'A' }]
+  const layout = { A: { __x: 0, __y: 0 }, B: { __x: 10, __y: 0 }, C: { __x: 5, __y: 9 }, D: { __x: 5, __y: -9 } }
+  const draw = (edges: typeof SSE, how: 'sse' | 'http') => {
+    const h = harness({ layout })
+    if (how === 'sse') h.fx.runRealClearingDoneFx({ event_id: 'e', ts: 't', type: 'clearing.done', equivalent: 'UAH', plan_id: 'p', cleared_amount: '12.00', cycle_edges: edges } as never)
+    else h.fx.runClearingFx({ edges, totalAmount: '12.00', equivalent: 'UAH' })
+    h.advance(5000)
+    return { sparks: h.fxState.sparks.map((s) => `${s.source}>${s.target}`).sort(), pulses: h.fxState.edgePulses.map((p) => `${p.from}>${p.to}`).sort() }
+  }
+  it('the same sparks and the same pulses whichever path the clearing came by', () => {
+    expect(draw(HTTP, 'http')).toEqual(draw(SSE, 'sse'))
+  })
+  it('what is drawn: one spark round the one cycle the union rebuilds; every line of both cycles pulses, the shared one once', () => {
+    const d = draw(SSE, 'sse')
+    expect(d.sparks).toHaveLength(3)
+    expect(d.pulses).toEqual(['A>B', 'B>C', 'B>D', 'C>A', 'D>A'])
+  })
+})
+
 describe('useRealClearingFx (039 slice C: one spark round the cycle in 1.2 s, then the labels)', () => {
   it('the loop: one spark goes round the cycle at one speed in 1200 ms, each node lights up as the spark leaves it', () => {
     const h = harness({ lengths: { 'A>B': 100, 'B>C': 200, 'C>A': 300 } })

@@ -132,8 +132,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   believed present (two). Each of the first four was red on the base `a1b6640c` (Changelog of spec 039). About 33 s
  *   in all locally; the flights of `motion.qa.ts` and `chord.qa.ts` are watched until the beam is gone instead of a
  *   fixed 76 frames, since a route now lasts as long as its legs (P-4 of spec 039) - the step time is in the Changelog.
+ * - 2026-10-18 (039 slice C, Codex §15 round): gate 138 -> 139, full 229 -> 230. One test of `motion-c.qa.ts`: a
+ *   clearing of two cycles, each traversed by its own spark, seen on the FX canvas in order and forward (the clearing
+ *   test of one cycle now observes pixels along the cycle too). About 6 s.
  */
-export const EXPECTED = { gate: 138, full: 229 }
+export const EXPECTED = { gate: 139, full: 230 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

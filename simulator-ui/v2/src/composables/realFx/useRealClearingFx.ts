@@ -66,12 +66,27 @@ function nodesFromEdges(edges: Edge[]): string[] {
   return out
 }
 
+/** The edge union: each line `from>to` once, in first-seen order. */
+export function uniqueEdges(edges: Edge[]): Edge[] {
+  const seen = new Set<string>()
+  const out: Edge[] = []
+  for (const e of edges) {
+    const k = `${e.from}>${e.to}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ from: e.from, to: e.to })
+  }
+  return out
+}
+
 /**
  * The cycles of a set of lines, each in walking order (`clearing.done.cycle_edges` is the SET of lines a pass touched,
  * sorted, of possibly several cycles - `app/core/simulator/tick.py`, `_done_cycle_edges`). Each line is used once:
  * from the first unused line, the shortest way back to its start over unused lines closes a cycle. A line that closes
- * no cycle (the set was cut at the backend's limit, a line flipped to the topology) is returned in `rest`: it pulses
- * with the others, no spark goes over it.
+ * no cycle (the set was cut at the backend's limit, a line flipped to the topology, or the second of two cycles that
+ * SHARE a line - the set holds the shared line once) is returned in `rest`: it pulses with the others after the loop,
+ * no spark goes over it. The visual contract is therefore "one spark per cycle that can be rebuilt from the edge
+ * union", not "one spark per cleared cycle" (spec 039, dated narrowing of 2026-10-18; BACKLOG 039-10).
  */
 export function cyclesOf(edges: Edge[]): { cycles: Edge[][]; rest: Edge[] } {
   const unused = edges.map((e, i) => ({ ...e, i }))
@@ -288,7 +303,12 @@ export function useRealClearingFx(deps: {
   }
 
   function runClearingFx(params: ClearingFxParams, opts: ClearingFxOptions = {}) {
-    const { edges: edgesAll, totalAmount, equivalent, planId } = params
+    const { totalAmount, equivalent, planId } = params
+    // ONE reconstruction for both paths (Codex §15, 2026-10-18): the SSE event carries the SET of lines a pass touched
+    // (`app/core/simulator/tick.py`, `_done_cycle_edges`: no multiplicity, no cycle identity), the Interact result its
+    // cycles flattened (a line shared by two cycles twice). Both are reduced to the same edge union first, so one
+    // clearing is drawn the same on both paths, and the HTTP/SSE double-fire signature below matches.
+    const edgesAll = uniqueEdges(params.edges)
 
     // 028 F-028-47 (B5): the same edges cleared in another equivalent are another clearing.
     const edgeSig = `${canonicalEquivalent(equivalent)}#${edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')}`
