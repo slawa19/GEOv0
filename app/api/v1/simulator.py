@@ -19,6 +19,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.trustlines.service import (
+    CONCURRENT_TRUSTLINE_CREATE,
     TrustLineService,
     _is_live_trustline_uniqueness_violation,
 )
@@ -1361,6 +1362,10 @@ async def action_trustline_create(
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
     concurrent_create = False
+    refused: ConflictException | None = None
+    # 044 stage 2: read before the write - the rollback below expires every loaded row, and reading `from_p.pid` after
+    # it lazy-loads outside the async context (MissingGreenlet -> 500 instead of the declared 409).
+    from_pid, to_pid, eq_code = from_p.pid, to_p.pid, eq.code
     try:
         tl = await trust_lines.execute_create(
             batch,
@@ -1377,13 +1382,25 @@ async def action_trustline_create(
         await batch.finish()
         await db.refresh(tl)
         await db.commit()
-    except ConflictException:
+    except ConflictException as exc:
         # This handler owns the transaction: roll back BEFORE translating (spec, "Решения" item 7).
-        # The service's only conflict on create is a live line of the triple. The check above already
-        # found none, so whatever the service found - committed after that check, or clashing at its
-        # flush - is a concurrent create.
+        # 044 stage 2 (advisor F1, 2026-10-18): mapped by the conflict's `details.reason`, never by its class. The
+        # service's create raises a ConflictException from four places (`TrustLineService.execute_create`):
+        #   - a live line of the triple found by its own check - NO reason; the check above found none, so the line
+        #     was committed after it: a concurrent create;
+        #   - the unique index at its flush - `CONCURRENT_TRUSTLINE_CREATE`;
+        #   - an end out of circulation - `participant_suspended` (`MoneyBoundary.refuse_suspended_participants`);
+        #   - the equivalent stopped or held - `equivalent_inactive` / `equivalent_integrity_hold`
+        #     (`_hold_equivalent` -> `MoneyBoundary.refuse_inactive_equivalents`).
+        # Until 044 every one of them answered "Active trustline already exists".
         await db.rollback()
-        concurrent_create = True
+        reason = (exc.details or {}).get("reason")
+        if reason in (None, CONCURRENT_TRUSTLINE_CREATE):
+            concurrent_create = True
+        elif reason in MoneyBoundary.MONEY_STOP_REASONS or reason == MoneyBoundary.PARTICIPANT_SUSPENDED_REASON:
+            refused = exc
+        else:
+            raise
     except IntegrityError as exc:
         await db.rollback()
         # Identity check, not a blanket rename: a CHECK or foreign-key violation must not
@@ -1395,15 +1412,24 @@ async def action_trustline_create(
     except Exception:
         await db.rollback()
         raise
+    if refused is not None:
+        # The same flat answer the clearing action gives a stopped or held equivalent (`code` CONFLICT, the core's
+        # `details` - `reason` and `equivalents`/`participants` - unchanged).
+        return _action_error(
+            status_code=409,
+            code="CONFLICT",
+            message=refused.message,
+            details=dict(refused.details or {}),
+        )
     if concurrent_create:
         return _action_error(
             status_code=409,
             code="TRUSTLINE_EXISTS",
             message="Active trustline already exists",
             details={
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
-                "equivalent": eq.code,
+                "from_pid": from_pid,
+                "to_pid": to_pid,
+                "equivalent": eq_code,
                 "reason": "CONCURRENT_TRUSTLINE_CREATE",
             },
         )
