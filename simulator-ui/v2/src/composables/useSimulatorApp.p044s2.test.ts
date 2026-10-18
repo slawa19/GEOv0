@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/http'
 import { connectSse } from '../api/sse'
 import {
-  createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, setIntensity, stopRun,
+  createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, setIntensity, stopRun, adminStopAllRuns,
 } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
@@ -27,6 +27,8 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
     resumeRun: vi.fn(),
     stopRun: vi.fn(),
     setIntensity: vi.fn(),
+    adminStopAllRuns: vi.fn(async () => ({ stopped: 1 })),
+    adminGetAllRuns: vi.fn(async () => ({ items: [] })),
     ensureSession: vi.fn(async () => ({ actor_kind: 'anonymous', owner_id: 'o1' })),
   }
 })
@@ -292,5 +294,75 @@ describe('044 stage 2: the opening edge paths of BACKLOG 043-23 and 043-24', () 
       await settle()
       expect(pauseRun, state).not.toHaveBeenCalled()
     }
+  })
+})
+
+describe('044 stage 2 (Codex §15): every stop the person triggers during the opening spends its pending start', () => {
+  /** The opening is held on the scenario catalogue; the stored run R1 is running until the person stops it. */
+  async function holdOpening() {
+    storedRun('R1', 'running')
+    let releaseCatalogue: () => void = () => undefined
+    vi.mocked(listScenarios).mockImplementationOnce(
+      (async () => {
+        await new Promise<void>((resolve) => { releaseCatalogue = resolve })
+        return { api_version: 'simulator-api/1', items: [{ scenario_id: 'sc1', label: 'Scenario 1' }] }
+      }) as never,
+    )
+    vi.mocked(adminStopAllRuns).mockImplementation((async () => { runs.set('R1', 'stopped'); return { stopped: 1 } }) as never)
+    const app = boot()
+    await settle()
+    expect(app.state.loading, 'the opening is held').toBe(true)
+    return { app, release: () => releaseCatalogue() }
+  }
+
+  for (const [name, act] of [
+    ['admin stop-one', (app: ReturnType<typeof boot>) => app.admin.stopRun('R1')],
+    ['admin stop-all', (app: ReturnType<typeof boot>) => app.admin.stopRuns()],
+  ] as const) {
+    it(`${name} during the opening: the run the person stopped is not replaced`, async () => {
+      const { app, release } = await holdOpening()
+      await act(app)
+      expect(runs.get('R1'), 'the stop reached the server').toBe('stopped')
+      release()
+      await settle()
+      expect(app.state.loading, 'the opening is over (non-vacuity)').toBe(false)
+      expect(createRun, 'no replacement behind the person').not.toHaveBeenCalled()
+    })
+  }
+
+  it('counter-check: a run stopped by someone else (not on this page) is replaced at the opening, as before', async () => {
+    const { app, release } = await holdOpening()
+    runs.set('R1', 'stopped') // e.g. the server's idle stop
+    release()
+    await settle()
+    expect(app.state.loading).toBe(false)
+    expect(createRun).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('044 stage 2 (Codex §15 P3): the deferred manual pause is deduplicated like the immediate one', () => {
+  it('unknown status -> manual action -> running -> deferred pause in flight -> another manual action: ONE pause', async () => {
+    storedRun('R1', 'running')
+    vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 500 for /simulator/runs/R1', { status: 500 }))
+    let answerPause: () => void = () => undefined
+    vi.mocked(pauseRun).mockImplementation(
+      (async (_c: unknown, id: string) => {
+        await new Promise<void>((resolve) => { answerPause = resolve })
+        runs.set(id, 'paused')
+        return status(id)
+      }) as never,
+    )
+    const app = boot()
+    await settle()
+    await app.realActions.pauseForManualAction()
+    app.real.runStatus = status('R1') as never // the state becomes known: running -> the deferred pause starts
+    await settle()
+    expect(pauseRun).toHaveBeenCalledTimes(1)
+    void app.realActions.pauseForManualAction() // a second manual action before the first pause answered
+    await settle()
+    expect(pauseRun, 'the second action joins the pause in flight').toHaveBeenCalledTimes(1)
+    answerPause()
+    await settle()
+    expect(app.real.runStatus?.state).toBe('paused')
   })
 })

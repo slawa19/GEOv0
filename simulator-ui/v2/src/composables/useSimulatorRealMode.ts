@@ -1246,16 +1246,20 @@ export function useSimulatorRealMode(opts: {
   let manualPausePending = false
   /** One pause request at a time: two acts in one tick (a flow started with both ends chosen) ask once. */
   let manualPauseInFlight: Promise<void> | null = null
+  /** The one way a manual action's pause is asked - now or deferred (044 stage 2, Codex §15 P3: the deferred one too). */
+  function pauseOnce(): Promise<void> {
+    if (manualPauseInFlight) return manualPauseInFlight
+    const p = pause().finally(() => {
+      if (manualPauseInFlight === p) manualPauseInFlight = null
+    })
+    manualPauseInFlight = p
+    return p
+  }
   async function pauseForManualAction() {
     const st = toLower(real.runStatus?.state)
     if (st === 'running') {
       manualPausePending = false
-      if (manualPauseInFlight) return manualPauseInFlight
-      const p = pause().finally(() => {
-        if (manualPauseInFlight === p) manualPauseInFlight = null
-      })
-      manualPauseInFlight = p
-      return p
+      return pauseOnce()
     }
     // 044 stage 2 (BACKLOG 043-24): a run is held but its state is not known yet (a failed or pending status read of a
     // found run) - the pause waits for that state too, instead of being dropped.
@@ -1267,7 +1271,7 @@ export function useSimulatorRealMode(opts: {
       if (!manualPausePending) return
       if (st === 'running') {
         manualPausePending = false
-        void pause()
+        void pauseOnce()
       } else if (st && st !== 'created') {
         manualPausePending = false
       }

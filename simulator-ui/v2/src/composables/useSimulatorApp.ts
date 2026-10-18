@@ -1842,11 +1842,17 @@ export function useSimulatorApp(opts?: {
       loading: adminRunsPanel.loading,
       lastError: adminRunsPanel.lastError,
       getRuns: adminRunsPanel.getRuns,
-      stopRuns: adminRunsPanel.stopRuns,
+      // 044 stage 2 (Codex §15): every stop the person triggers on this page - Stop, admin stop-one, admin stop-all -
+      // spends the opening's pending start (decision 2).
+      stopRuns: () => {
+        liveAutostart.cancel()
+        return adminRunsPanel.stopRuns()
+      },
       attachRun: async (runId: string) => {
         await realMode.attachToRun(runId)
       },
       stopRun: async (runId: string) => {
+        liveAutostart.cancel()
         adminRunsPanel.lastError.value = ''
         try {
           await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
