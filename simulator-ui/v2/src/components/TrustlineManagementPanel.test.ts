@@ -125,7 +125,7 @@ describe('TrustlineManagementPanel', () => {
 
     expect(host.querySelector('[data-testid="tl-limit-too-low"]')).toBeNull()
     // 046 round 1 (advisor, 2026-10-18): the figures line is one sentence with the unit after each figure (was "over limit by 10 EQ").
-    expect(host.textContent ?? '').toContain('Over limit by 10 EQ')
+    expect((host.textContent ?? '').replace(/\s+/g, ' ')).toContain('Over limit by 10 EQ') // a no-break space before the unit
     expect(host.textContent ?? '').not.toContain('-10')
 
     const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Update') as HTMLButtonElement | undefined

@@ -155,9 +155,10 @@ export const en = {
     limitLabel: 'Limit',
     newLimitLabel: 'New limit',
     statsAria: 'Trustline stats',
-    // Advisor, round 1 (2026-10-18): one sentence, the unit after EACH figure (was "Used 12 / Limit 100 UAH · avail 88 UAH").
-    stats: 'Used {used} {unit} · Limit {limit} {unit} · Available {available} {unit}',
-    statsOverLimit: 'Used {used} {unit} · Limit {limit} {unit} · Over limit by {over} {unit}',
+    // Advisor, round 1 (2026-10-18): one sentence, the unit after EACH figure (was "Used 12 / Limit 100 UAH · avail 88 UAH");
+    // a no-break space keeps a figure with its unit when the line wraps (hud).
+    stats: 'Used {used}\u00a0{unit} · Limit {limit}\u00a0{unit} · Available {available}\u00a0{unit}',
+    statsOverLimit: 'Used {used}\u00a0{unit} · Limit {limit}\u00a0{unit} · Over limit by {over}\u00a0{unit}',
     needsParties: 'Choose From and To first.',
     needsLimit: 'Enter a limit.',
     needsNewLimit: 'Enter a new limit.',
