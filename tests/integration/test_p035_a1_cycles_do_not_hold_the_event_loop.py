@@ -244,7 +244,7 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 #: * `c` = 0.75 s: above both CI points by 0.27 s. It, not the control, is what absorbs them: nothing shows that a
 #:   control would have seen that hold.
 #: * `k` = 3: locally the hold of the measured request was at most 2.1x its control (0.0099 / 0.0047 s), 1.3x under
-#:   the load above (0.030 / 0.023 s; controls up to 0.12 s with a cold worker). The term matters only where the route
+#:   the load above (0.030 / 0.023 s; controls up to 0.20 s with a cold worker). The term matters only where the route
 #:   itself holds the loop for tens of milliseconds.
 #: * ceiling = 1.0 s: half the defect's hold (2.0 s), 1.0 s of margin. A control stalled on purpose (2.0 s), or held
 #:   1.15 s by a cold worker under load with the defect in place, gives exactly the ceiling and the defect still fails.
