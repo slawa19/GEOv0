@@ -40,6 +40,7 @@ export async function mockApp(
     /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
     /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean;
     /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean;
+    /** N more lines alice -> `x01`.. (needs `extraTargets` >= N): a participant card with a long list of lines (045 S3). */ aliceLines?: number;
     /** What `clearing-real` answers. `many` needs `extraTargets` >= 5. */ clearing?: 'cycles' | 'many' | 'none' | 'refused'; clearingRequests?: { n: number } },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
@@ -82,7 +83,9 @@ export async function mockApp(
         limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' },
       // Bob can pay Alice too: both are senders (a correction of the sender has someone to correct to).
       ...(o.bobCanPay ? [{ from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH',
-        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }] : [])],
+        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }] : []),
+      ...extras().slice(0, o.aliceLines ?? 0).map((x, i) => ({ from_pid: 'alice', from_name: 'Alice', to_pid: x.pid, to_name: x.name,
+        equivalent: 'UAH', limit: '50.00', used: `${i}.00`, reverse_used: '0.00', available: `${50 - i}.00`, status: 'active' }))],
     }))
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/payment-targets`, 'i'), (r) => {
     const from = new URL(r.request().url()).searchParams.get('from_pid')
