@@ -171,40 +171,6 @@
   --ds-ws-close-size: 24px;
   --ds-ws-close-radius: var(--ds-radius-sm);
 
-  /* NodeCardOverlay (Interact) */
-  --ds-nco-tl-group-font-size: 10px;
-  --ds-nco-tl-group-letter-spacing: 0.08em;
-  --ds-nco-tl-group-opacity: 0.55;
-
-  --ds-nco-actions-gap: 4px;
-  --ds-nco-actions-margin-bottom: 6px;
-  --ds-nco-actions-min-btn-width: 140px;
-
-  --ds-nco-trustlines-margin-top: 1px;
-  --ds-nco-trustlines-min-h: 140px;
-  --ds-nco-trustlines-vh-offset: 120px;
-
-  --ds-nco-tl-group-margin-bottom: 2px;
-  --ds-nco-tl-group-gap-margin-top: 5px;
-
-  --ds-nco-row-gap: 4px;
-  --ds-nco-row-padding-y: 1px;
-  --ds-nco-row-saturated-border-w: 2px;
-  --ds-nco-row-saturated-pad-left: 2px;
-  --ds-nco-row-edit-padding-y: 1px;
-  --ds-nco-row-edit-padding-x: 3px;
-
-  --ds-nco-row-font-size: 0.8rem;
-  --ds-nco-row-amounts-font-size: 0.75rem;
-  --ds-nco-row-amounts-opacity: 0.8;
-  --ds-nco-row-avail-font-size: 0.7rem;
-  --ds-nco-row-avail-opacity: 0.6;
-  --ds-nco-row-edit-font-size: 0.75rem;
-  --ds-nco-row-edit-opacity: 0.6;
-  --ds-nco-row-edit-dur: 150ms;
-  --ds-nco-empty-font-size: 0.75rem;
-  --ds-nco-empty-opacity: 0.5;
-
   /* SystemBalanceBar (HUD) */
   --ds-sbb-track-width: 110px;
   --ds-sbb-track-height: 6px;
@@ -277,7 +243,6 @@
 
   --ds-ov-node-card-w: auto;
   --ds-ov-node-card-maxw: 400px;
-  --ds-ov-node-card-avatar-size: 36px;
   --ds-ov-node-card-body-gap: 8px;
   --ds-ov-node-card-action-muted-opacity: 0.45;
   --ds-ov-node-card-action-opacity-dur: 150ms;
@@ -351,10 +316,6 @@
   --ds-cp-spinner-size: 12px;
   --ds-cp-spinner-spin-dur: 0.9s;
   --ds-cp-cycles-max-h: 140px;
-
-  --ds-edp-minw: 260px;
-  --ds-edp-warn-pad-y: 4px;
-  --ds-edp-warn-pad-x: 6px;
 
   --ds-toast-minw: 240px;
   --ds-toast-maxw: 480px;

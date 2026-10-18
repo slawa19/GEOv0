@@ -69,6 +69,12 @@ export const interactStrings = {
   trustlineNeedsNewLimit: 'Enter a new limit.',
   trustlineCloseRequested: 'Close already requested.',
 
+  // 045 S3 (BACKLOG 043-4): why the participant card cannot start a payment or a new line now - the same words as the action bar.
+  cardFlowOpenReason: 'Cancel current action first (press ESC).',
+  cardBusyReason: 'Operation in progress… please wait.',
+  // 045 S3 round (Codex P2): what is available on a line of the card - the description of its Edit button.
+  cardLineAvailable: 'available {amount} {unit}',
+
   // A success-shaped answer that is not a committed payment.
   notCommitted: 'The server did not confirm the payment (status {status}).',
 

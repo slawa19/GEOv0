@@ -1286,6 +1286,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :interact-trustlines="isLiveUi ? interact.mode.trustlines.value : undefined"
           :trustlines-loading="isLiveUi ? interact.mode.trustlinesLoading.value : undefined"
           :interact-busy="isLiveUi ? interact.mode.busy.value : undefined"
+          :interact-phase="isLiveUi ? interactPhase : undefined"
           :on-interact-send-payment="isLiveUi ? onInteractSendPayment : undefined"
           :on-interact-new-trustline="isLiveUi ? onInteractNewTrustline : undefined"
           :on-interact-edit-trustline="isLiveUi ? onInteractEditTrustline : undefined"

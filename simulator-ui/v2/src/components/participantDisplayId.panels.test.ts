@@ -177,7 +177,7 @@ describe('edge detail popup: title and Pay button', () => {
     await nextTick()
     expect(host.querySelector('.popup__subtitle')?.textContent?.trim()).toBe('PID_U0046_6df7ddce → PID_U0047_aa11bb22')
     const pay = host.querySelector('[data-testid="edge-send-payment"]') ?? Array.from(host.querySelectorAll('button')).find((b) => /Pay/.test(b.textContent ?? ''))
-    expect(pay?.textContent?.trim()).toBe('💸 Pay PID_U0046_6df7ddce')
+    expect(pay?.textContent?.trim()).toBe('Pay PID_U0046_6df7ddce')
     app.unmount()
   })
 
@@ -191,7 +191,7 @@ describe('edge detail popup: title and Pay button', () => {
     await nextTick()
     expect(host.querySelector('.popup__subtitle')?.textContent?.trim()).toBe('Алиса → Магазин')
     const pay = host.querySelector('[data-testid="edge-send-payment"]') ?? Array.from(host.querySelectorAll('button')).find((b) => /Pay/.test(b.textContent ?? ''))
-    expect(pay?.textContent?.trim()).toBe('💸 Pay Алиса')
+    expect(pay?.textContent?.trim()).toBe('Pay Алиса')
     expect(host.textContent).not.toContain('run_')
     app.unmount()
   })
