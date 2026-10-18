@@ -1,4 +1,5 @@
 import { equivalentPrecision } from '../config/equivalentPrecision'
+import { documentUiLocale, type UiLocale } from '../i18n/locale'
 import { extractErrorMessage, withRequestRef } from './errorMessage'
 import { formatMoney, moneyText } from './money'
 
@@ -8,7 +9,7 @@ import { formatMoney, moneyText } from './money'
  * the answer names neither a known reason nor a known code. The set mirrors
  * `app/core/payments/service.py` `PAYMENT_REFUSAL_REASONS` (openapi `PaymentRefusalDetails.reason`).
  */
-export type UiLocale = 'en' | 'ru'
+export type { UiLocale }
 type Vars = { eq: string; max: string | null; precision: string; keyed: boolean }
 type Text = (v: Vars) => string
 
@@ -74,9 +75,9 @@ export function actionOutcomeUnknownText(timeoutMs: number | undefined, locale: 
     : `No answer${seconds ? ` within ${seconds} s` : ''}; the result is unknown - the action may have been carried out. Check the current state before repeating it.`
 }
 
+/** 046 wave 0: the reader of `<html lang>`, which only `i18n/locale.ts` writes (it chooses the language). */
 export function uiLocale(): UiLocale {
-  const lang = typeof document === 'undefined' ? '' : document.documentElement.lang
-  return lang.toLowerCase().startsWith('ru') ? 'ru' : 'en'
+  return documentUiLocale()
 }
 
 export function paymentRefusalText(
