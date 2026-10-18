@@ -124,7 +124,8 @@ describe('TrustlineManagementPanel', () => {
     await nextTick()
 
     expect(host.querySelector('[data-testid="tl-limit-too-low"]')).toBeNull()
-    expect(host.textContent ?? '').toContain('over limit by 10 EQ')
+    // 046 round 1 (advisor, 2026-10-18): the figures line is one sentence with the unit after each figure (was "over limit by 10 EQ").
+    expect(host.textContent ?? '').toContain('Over limit by 10 EQ')
     expect(host.textContent ?? '').not.toContain('-10')
 
     const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Update') as HTMLButtonElement | undefined
@@ -182,7 +183,9 @@ describe('TrustlineManagementPanel', () => {
     done()
   })
 
-  it("TL-1/TL-1a: normalizes amount before sending ('1,5' -> '1.5')", async () => {
+  // TL-1/TL-1a, rewritten 2026-10-18 (046, advisor's decision, round 1): a comma is REFUSED on create and on update ("Use a
+  // dot: 1.5", nothing sent); until that date it was read as 1.5. The dot form is sent as typed.
+  it("TL-1/TL-1a: refuses a comma ('1,5' -> \"Use a dot: 1.5\"), sends '1.5' as typed", async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -234,6 +237,15 @@ describe('TrustlineManagementPanel', () => {
       await nextTick()
 
       const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Create') as HTMLButtonElement
+      expect(btn.disabled).toBe(true)
+      expect(btn.getAttribute('title')).toBe('Use a dot: 1.5')
+      expect(host.querySelector('[data-testid="tl-input-hint"]')?.textContent?.trim()).toBe('Use a dot: 1.5')
+      btn.click()
+      expect(confirmTrustlineCreate).not.toHaveBeenCalled()
+
+      input.value = '1.5'
+      input.dispatchEvent(new Event('input'))
+      await nextTick()
       expect(btn.disabled).toBe(false)
       btn.click()
       expect(confirmTrustlineCreate).toHaveBeenCalledTimes(1)
@@ -254,6 +266,15 @@ describe('TrustlineManagementPanel', () => {
       await nextTick()
 
       const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Update') as HTMLButtonElement
+      expect(btn.disabled).toBe(true)
+      expect(btn.getAttribute('title')).toBe('Use a dot: 1.5')
+      expect(host.querySelector('[data-testid="tl-input-hint"]')?.textContent?.trim()).toBe('Use a dot: 1.5')
+      btn.click()
+      expect(confirmTrustlineUpdate).not.toHaveBeenCalled()
+
+      input.value = '1.5'
+      input.dispatchEvent(new Event('input'))
+      await nextTick()
       expect(btn.disabled).toBe(false)
       btn.click()
       expect(confirmTrustlineUpdate).toHaveBeenCalledTimes(1)
@@ -610,8 +631,9 @@ describe('TrustlineManagementPanel', () => {
     const q = (id: string) => (host.querySelector(`[data-testid="${id}"]`)?.textContent ?? '').replace(/\s+/g, ' ').trim()
     expect(q('tl-stats-used')).toBe('12')
     expect(q('tl-stats-limit')).toBe('100')
-    expect(q('tl-stats-available')).toBe('avail 88 UAH')
-    expect(q('tl-stats')).toBe('Used 12 / Limit 100 UAH · avail 88 UAH')
+    // 046 round 1 (advisor, 2026-10-18): the unit after EACH figure (was "Used 12 / Limit 100 UAH · avail 88 UAH").
+    expect(q('tl-stats-available')).toBe('88')
+    expect(q('tl-stats')).toBe('Used 12 UAH · Limit 100 UAH · Available 88 UAH')
     app.unmount()
     host.remove()
   })

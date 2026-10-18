@@ -17,7 +17,7 @@ const eslint = new FlatESLint({ cwd: process.cwd() })
 
 async function ruleHits(code: string, filePath: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath })
-  return (result?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-syntax').map((m) => m.message)
+  return (result?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-syntax' || m.ruleId === 'vue/no-restricted-syntax').map((m) => m.message)
 }
 
 const VIOLATIONS = [
@@ -36,6 +36,17 @@ describe('046 policy guard - no locale formatting of money in product sources', 
     const vue = '<script setup lang="ts">\nconst x = (1234.5).toLocaleString()\n</script>\n<template><div>{{ x }}</div></template>\n'
     expect(await ruleHits(vue, 'src/components/__MoneyProbe__.vue')).toHaveLength(1)
     expect(await ruleHits(VIOLATIONS[0], 'src/composables/useWindowController.ts')).toHaveLength(1)
+  })
+
+  // Codex §15 round 1: the <template> of a .vue - an interpolation and a bound attribute - was not covered.
+  it('a .vue <template> fails it: in an interpolation and in a bound attribute', async () => {
+    const script = '<script setup lang="ts">\nconst amount = "1.5"\n</script>\n'
+    const vue = (template: string) => ruleHits(`${script}<template>${template}</template>\n`, 'src/components/__MoneyProbe__.vue')
+    expect(await vue(`<div>{{ Number(amount).toLocaleString('ru-RU') }}</div>`)).toHaveLength(1)
+    expect(await vue(`<div :title="Number(amount).toLocaleString('ru-RU')" />`)).toHaveLength(1)
+    expect(await vue(`<div>{{ new Intl.NumberFormat('ru').format(Number(amount)) }}</div>`)).toHaveLength(1)
+    // Counter-check: the same template printing the string as it came passes.
+    expect(await vue(`<div :title="amount">{{ amount }}</div>`)).toEqual([])
   })
 
   it('counter-check: the same file without them passes; the plural rules stay allowed', async () => {

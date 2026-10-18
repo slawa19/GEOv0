@@ -7,12 +7,13 @@ import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { amountStepHint } from '../config/equivalentPrecision'
-import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
+import { parseAmountNumber } from '../utils/numberFormat'
 import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { uiLocaleRef } from '../i18n/locale'
 import { t } from '../i18n/t'
-import { isOverLimit, renderOrDash } from '../utils/valueFormat'
+import { templateParts } from '../i18n/t'
+import { amountInputHint, isOverLimit, parseTypedAmount, renderOrDash } from '../utils/valueFormat'
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
@@ -145,10 +146,10 @@ watch(
   },
 )
 
-const createLimitNormalized = computed(() => parseAmountStringOrNull(limit.value))
+const createLimitNormalized = computed(() => parseTypedAmount(limit.value))
 const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.value))
 
-const updateLimitNormalized = computed(() => parseAmountStringOrNull(newLimit.value))
+const updateLimitNormalized = computed(() => parseTypedAmount(newLimit.value))
 const newLimitNum = computed(() => parseAmountNumber(updateLimitNormalized.value))
 // 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
 const limitStepHint = computed(() =>
@@ -341,43 +342,42 @@ const rootClass = computed(() => {
 
 const newLimitInput = ref<HTMLInputElement | null>(null)
 
-/** 045 S2: the one line of the edit step - "Used 12 / Limit 100 UAH · avail 88 UAH" (an excess over the limit reads as such). */
-const availableText = computed(() => {
-  const s = renderOrDash(effectiveAvailable.value)
-  return isOverLimit(s)
-    ? t('trustline.overLimit', { amount: s.slice(1), unit: props.unit })
-    : t('trustline.available', { amount: s, unit: props.unit })
+/**
+ * 045 S2: the one line of the edit step. 046 (advisor, round 1): one sentence with the unit after each figure -
+ * "Used 12.00 UAH · Limit 100.00 UAH · Available 88.00 UAH" (an excess over the limit reads as such). The template is
+ * rendered by its parts so that each figure keeps its own element (`tl-stats-used`, `-limit`, `-available`).
+ */
+const statsParts = computed(() => {
+  const available = renderOrDash(effectiveAvailable.value)
+  const over = isOverLimit(available)
+  const values: Record<string, string> = {
+    used: renderOrDash(effectiveUsed.value),
+    limit: renderOrDash(effectiveLimit.value),
+    available,
+    over: over ? available.slice(1) : '',
+    unit: props.unit,
+  }
+  return templateParts(over ? 'trustline.statsOverLimit' : 'trustline.stats').map((part) =>
+    'text' in part ? { text: part.text } : { name: part.name, value: values[part.name] ?? '' })
 })
 
-const invalidAmountText = computed(() => t('common.invalidAmount'))
-
-/** 046 decision 4: a comma typed for the decimal point is read as one - and said, with the limit as it will be sent. */
-const limitCommaNote = computed<string | null>(() => {
-  const raw = isEdit.value ? newLimit.value : limit.value
-  const normalized = isEdit.value ? updateLimitNormalized.value : createLimitNormalized.value
-  if (!raw.includes(',') || normalized == null) return null
-  return t('common.commaRead', { amount: normalized, unit: props.unit })
-})
-
-/** The hint under the limit: the comma note and the step hint, as whole sentences. */
-const limitHint = computed<string | null>(() => {
-  const parts = [limitCommaNote.value, limitStepHint.value].filter((x): x is string => !!x)
-  return parts.length ? parts.join(' ') : null
-})
+/** The hint under a limit the form cannot read: a comma is refused with the limit as it should be typed. */
+const createInputHint = computed(() => amountInputHint(limit.value))
+const updateInputHint = computed(() => amountInputHint(newLimit.value))
 
 // 045 S2: a disabled primary button says why in its `title` (no dead button). Nothing while busy: the label says it.
 const createTitle = computed<string | undefined>(() => {
   if (props.busy || (isCreate.value && createValid.value)) return undefined
   if (!(props.state.fromPid ?? '').trim() || !(props.state.toPid ?? '').trim()) return t('trustline.needsParties')
   if (!limit.value.trim()) return t('trustline.needsLimit')
-  return invalidAmountText.value
+  return createInputHint.value
 })
 const lineGroundText = computed(() => sourceUnavailableText.value ?? noTrustlineText.value ?? undefined)
 const updateTitle = computed<string | undefined>(() => {
   if (props.busy || updateValid.value) return undefined
   if (noExistingLineFigures.value) return lineGroundText.value
   if (!newLimit.value.trim()) return t('trustline.needsNewLimit')
-  return invalidAmountText.value
+  return updateInputHint.value
 })
 const closeTitle = computed<string | undefined>(() => {
   if (props.busy) return undefined
@@ -440,7 +440,9 @@ defineExpose({
           />
       </div>
 
-      <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row ds-controls__row--compact">
+      <!-- 046 round 1 (advisor C): choosing an existing line belongs to EDITING one; on the create step this row was an
+           empty "Existing —" that explained nothing. -->
+      <div v-if="isEdit && trustlinesSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label id="tl-pick-label" class="ds-label" for="tl-pick__trigger">{{ t('trustline.existingLabel') }}</label>
           <OverlaySelect
           id="tl-pick"
@@ -458,11 +460,11 @@ defineExpose({
 
       <!-- 045 S2: the figures of the line as one line; values through " · ". -->
       <div v-if="isEdit" class="ds-help tl-stats" :aria-label="t('trustline.statsAria')" data-testid="tl-stats">
-        {{ t('trustline.statsUsed') }} <span class="ds-mono" data-testid="tl-stats-used">{{ renderOrDash(effectiveUsed) }}</span>
-        / {{ t('trustline.statsLimit') }} <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}{{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span
+        <template v-for="(part, i) in statsParts" :key="i"><template v-if="'text' in part">{{ part.text }}</template><template v-else-if="part.name === 'unit'">{{ part.value }}</template><span
+          v-else
           class="ds-mono"
-          data-testid="tl-stats-available"
-        >{{ availableText }}</span>
+          :data-testid="`tl-stats-${part.name === 'over' ? 'available' : part.name}`"
+        >{{ part.value }}</span></template>
       </div>
 
       <div v-if="isCreate" class="ds-controls__row ds-controls__row--compact">
@@ -485,8 +487,8 @@ defineExpose({
         </div>
       </div>
 
-      <div v-if="isCreate && limit.trim() && createLimitNormalized === null" class="ds-help tl-pick-help">
-        {{ invalidAmountText }}
+      <div v-if="isCreate && limit.trim() && createLimitNormalized === null" class="ds-help tl-pick-help" data-testid="tl-input-hint">
+        {{ createInputHint }}
       </div>
 
       <div v-if="isEdit" class="ds-controls__row ds-controls__row--compact">
@@ -510,10 +512,10 @@ defineExpose({
         </div>
       </div>
 
-      <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help">
-        {{ invalidAmountText }}
+      <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help" data-testid="tl-input-hint">
+        {{ updateInputHint }}
       </div>
-      <div v-else-if="limitHint" class="ds-help tl-pick-help" data-testid="tl-step-hint">{{ limitHint }}</div>
+      <div v-else-if="limitStepHint" class="ds-help tl-pick-help" data-testid="tl-step-hint">{{ limitStepHint }}</div>
 
       <div
         v-if="sourceUnavailableText"
@@ -574,7 +576,7 @@ defineExpose({
             data-testid="trustline-close-btn"
             @click="onClose"
           >
-            {{ closeArmed ? t('trustline.confirmClose') : t('trustline.close') }}
+            {{ closeArmed ? t('trustline.confirmClose') : closeIsRequest ? t('trustline.requestClose') : t('trustline.close') }}
           </button>
 
           <button

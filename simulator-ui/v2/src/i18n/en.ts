@@ -24,8 +24,8 @@ export const en = {
     escHint: 'Esc: one step back, then close',
     pickPlaceholder: 'Pick on the canvas or choose',
     invalidAmount: "Invalid amount format. Use digits and '.' for decimals.",
-    /** 046 decision 4: a comma is read as the decimal point - said, not done silently. */
-    commaRead: 'The comma was read as a decimal point: {amount} {unit}.',
+    /** 046 decision 4 (advisor, round 1, 2026-10-18): a comma in an amount is refused, with the amount as it should be typed. */
+    commaRefused: 'Use a dot: {example}',
     /** 028 F-028-48: the client's hint of the equivalent's step; the server decides. */
     stepHint: '{eq} allows at most {precision} decimal places; the server will refuse this amount.',
     /** 026 `T2602`: a negative `available` is the debt's excess over a lowered limit. */
@@ -155,10 +155,9 @@ export const en = {
     limitLabel: 'Limit',
     newLimitLabel: 'New limit',
     statsAria: 'Trustline stats',
-    statsUsed: 'Used',
-    statsLimit: 'Limit',
-    available: 'avail {amount} {unit}',
-    overLimit: 'over limit by {amount} {unit}',
+    // Advisor, round 1 (2026-10-18): one sentence, the unit after EACH figure (was "Used 12 / Limit 100 UAH · avail 88 UAH").
+    stats: 'Used {used} {unit} · Limit {limit} {unit} · Available {available} {unit}',
+    statsOverLimit: 'Used {used} {unit} · Limit {limit} {unit} · Over limit by {over} {unit}',
     needsParties: 'Choose From and To first.',
     needsLimit: 'Enter a limit.',
     needsNewLimit: 'Enter a new limit.',
@@ -167,7 +166,9 @@ export const en = {
     closeRequestNote: 'Closing with debt (used: {used} {unit}) is a request: limit becomes 0, the line closes when the debt is repaid.',
     cancelClose: 'Cancel close',
     confirmClose: 'Confirm close',
-    close: 'Close TL',
+    // Advisor, round 1: a line without debt closes; a line with debt only gets a close request (026, `closeIsRequest`).
+    close: 'Close line',
+    requestClose: 'Request close',
     update: 'Update',
     updating: 'Updating…',
     create: 'Create',
@@ -205,7 +206,11 @@ export const en = {
     total: 'Total over cycles',
     totalNote: 'Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.',
     cycle: 'Cycle {n} of {total}: {amount} {unit}',
-    edgeLine: '{debtor}’s debt to {creditor} reduced by {amount} {unit}',
+    // Advisor, round 1 (2026-10-18): the arrow form, names undeclined (was "{debtor}’s debt to {creditor} reduced by ...").
+    edgeLine: '{debtor} → {creditor}: debt reduced by {amount} {unit}',
+    // Codex §15 round 1: a clearing refused because of the equivalent's state (`CONFLICT` + `details.reason`).
+    equivalentInactive: 'The equivalent is stopped — clearing is unavailable.',
+    equivalentIntegrityHold: 'The equivalent is under an integrity check — operations are on hold.',
     nothing: 'Nothing was cleared: no cycle of debts was found.',
   },
 
@@ -257,6 +262,13 @@ export const en = {
     USED_EXCEEDS_NEW_LIMIT: 'Limit is below current used amount',
     TRUSTLINE_EXISTS: 'Active trustline already exists',
     TRUSTLINE_NOT_FOUND: 'Trustline not found',
+    TRUSTLINE_CLOSE_REQUESTED: 'Trustline close is requested; its limit stays 0 until it closes',
+    TRUSTLINE_CLOSED: 'Trustline is already closed',
+    SEEDING_FAILED: 'Failed to seed scenario into database. Please retry.',
+    SIMULATOR_PID_TAKEN: 'The scenario names a participant that exists and was not created by the simulator.',
+    SCENARIO_TRUSTLINE_REFUSED: 'A trust line of the scenario breaks the trust line rules.',
+    NO_ROUTE: 'No payment route between these participants.',
+    INSUFFICIENT_CAPACITY: 'Not enough capacity on the route.',
     CONFLICT: 'The system is busy; try again.',
     CLEARING_FAILED: 'Clearing failed',
     CLEARING_INTERRUPTED: 'Clearing pass interrupted before the plan was exhausted',
@@ -267,6 +279,15 @@ export const en = {
     INVALID_JSON: 'The server answer could not be read.',
     noRun: 'No active run_id',
     unknown: 'The action failed ({code}).',
+  },
+
+  /**
+   * Codex §15 round 1: the equivalent's state named by `details.reason` of a coded answer - told before the code's own
+   * text (a `CONFLICT` with these reasons is not "the system is busy").
+   */
+  actionReason: {
+    equivalent_inactive: 'The equivalent is stopped — operations are unavailable.',
+    equivalent_integrity_hold: 'The equivalent is under an integrity check — operations are on hold.',
   },
 
   /** Toasts and history lines of the actions (`useInteractMode.ts`). Amounts arrive as decimal strings. */
@@ -300,6 +321,8 @@ export const en = {
     malformed: 'Series value outside the wire contract',
     gaps: plural({ one: '{gaps} of {count} points have no measurement', other: '{gaps} of {count} points have no measurement' }),
     errorDetail: 'The analytics request did not complete.',
+    /** Codex §15 round 1: the failure is shown as its status or code and request id (`errorReference`), apart from the prose. */
+    errorReference: 'Reference: {ref}',
     series: {
       success_rate: 'Success rate',
       avg_route_length: 'Avg route length',

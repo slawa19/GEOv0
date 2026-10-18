@@ -1,8 +1,7 @@
 /**
- * 046 wave 2 (decision 4): an amount is a decimal string with a dot in both languages, and a comma typed for the
- * decimal point is not taken silently. The form keeps reading it as the point (MP-4 / TL-1: '1,5' is sent as '1.5') and
- * SAYS so with the amount as it will be sent - so "1,000" meant as a thousand is seen as 1.000 before Confirm.
- * Red before the wave: '1,5' was sent as 1.5 with nothing on screen.
+ * 046 decision 4: an amount is a decimal string with a dot in both languages. A comma is REFUSED (advisor's decision,
+ * round 1, 2026-10-18; it was read as the point and said, wave 2 `400c537f`; before the wave it was read silently): the
+ * form says "Use a dot: 1.5" / «Введите сумму с точкой: 1.5» and sends nothing.
  *
  * Also held here: the two windows of wave 3 that read texts of this wave (the participant card, the line window) stay
  * English as a whole until wave 3 moves them - the shared helpers default to English, the action windows pass the
@@ -64,46 +63,71 @@ function trustline(confirmTrustlineCreate = vi.fn()) {
 
 const text = (host: HTMLElement, id: string) => (host.querySelector(`[data-testid="${id}"]`)?.textContent ?? '').replace(/\s+/g, ' ').trim()
 
-describe('046 decision 4 - a comma is read as the decimal point, and said', () => {
-  it('payment: "1,5" is sent as 1.5 and the window says how it read it (en and ru)', async () => {
+describe('046 decision 4 (advisor, round 1, 2026-10-18) - a comma in an amount is refused, with the amount as it should be typed', () => {
+  // Was (wave 2, 400c537f): "1,5" read as 1.5 and said. The advisor's decision: refuse - "1,000" meant as a thousand must
+  // never become 1.000. One rule for both languages and every equivalent.
+  it('payment: "1,5" sends nothing; Confirm is disabled and the reason is "Use a dot: 1.5" (en and ru)', async () => {
     const confirmPayment = vi.fn()
     const host = payment(confirmPayment)
     await settle()
     await type(host, '#mp-amount', '1,5')
-    expect(text(host, 'mp-confirm-warning')).toBe('The comma was read as a decimal point: 1.5 UAH.')
+    expect(text(host, 'mp-confirm-reason')).toBe('Use a dot: 1.5')
+    const confirm = host.querySelector('[data-testid="manual-payment-confirm"]') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    expect(confirm.getAttribute('title')).toBe('Use a dot: 1.5')
     setUiLocale('ru')
     await settle()
-    expect(text(host, 'mp-confirm-warning')).toBe(t('common.commaRead', { amount: '1.5', unit: 'UAH' }, 'ru'))
+    expect(text(host, 'mp-confirm-reason')).toBe(t('common.commaRefused', { example: '1.5' }, 'ru'))
+    expect(text(host, 'mp-confirm-reason')).toBe('Введите сумму с точкой: 1.5')
+    confirm.click()
+    await settle()
+    expect(confirmPayment).not.toHaveBeenCalled()
+    expect(host.querySelector('[data-testid="mp-confirm-warning"]'), 'no "read as" notice any more').toBeNull()
+  })
+
+  it('payment: "1,000" is refused as well - the form never decides whether it was a thousand or one', async () => {
+    const confirmPayment = vi.fn()
+    const host = payment(confirmPayment)
+    await settle()
+    await type(host, '#mp-amount', '1,000')
+    expect(text(host, 'mp-confirm-reason')).toBe('Use a dot: 1.000')
+    ;(host.querySelector('#mp-amount') as HTMLInputElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+    await settle()
+    expect(confirmPayment).not.toHaveBeenCalled()
+  })
+
+  it('counter-check: the same amount with a dot is sent; a text that is not a number keeps the general hint', async () => {
+    const confirmPayment = vi.fn()
+    const host = payment(confirmPayment)
+    await settle()
+    await type(host, '#mp-amount', '1.5')
+    expect(host.querySelector('[data-testid="mp-confirm-reason"]')).toBeNull()
     ;(host.querySelector('[data-testid="manual-payment-confirm"]') as HTMLButtonElement).click()
     await settle()
     expect(confirmPayment).toHaveBeenCalledWith('1.5')
+    await type(host, '#mp-amount', '1,5,5')
+    expect(text(host, 'mp-confirm-reason')).toBe("Invalid amount format. Use digits and '.' for decimals.")
   })
 
-  it('payment: "1,000" is shown as 1.000 - the reading a person meaning a thousand has to see', async () => {
-    const host = payment()
-    await settle()
-    await type(host, '#mp-amount', '1,000')
-    expect(text(host, 'mp-confirm-warning')).toContain('1.000 UAH')
-  })
-
-  it('counter-check: an amount with a dot gets no comma note', async () => {
-    const host = payment()
-    await settle()
-    await type(host, '#mp-amount', '1.5')
-    expect(host.querySelector('[data-testid="mp-confirm-warning"]')).toBeNull()
-  })
-
-  it('trust line: "1,5" is created as 1.5 and the window says how it read it; a dot gets no note', async () => {
+  it('trust line: "1,5" creates nothing and says "Use a dot: 1.5" (en and ru); a dot creates', async () => {
     const confirmTrustlineCreate = vi.fn()
     const host = trustline(confirmTrustlineCreate)
     await settle()
     await type(host, '#tl-limit', '1,5')
-    expect(text(host, 'tl-step-hint')).toBe('The comma was read as a decimal point: 1.5 UAH.')
-    ;(host.querySelector('[data-testid="trustline-create"]') as HTMLButtonElement).click()
+    expect(text(host, 'tl-input-hint')).toBe('Use a dot: 1.5')
+    setUiLocale('ru')
+    await settle()
+    expect(text(host, 'tl-input-hint')).toBe('Введите сумму с точкой: 1.5')
+    const create = host.querySelector('[data-testid="trustline-create"]') as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    create.click()
+    await settle()
+    expect(confirmTrustlineCreate).not.toHaveBeenCalled()
+    await type(host, '#tl-limit', '1.5')
+    expect(host.querySelector('[data-testid="tl-input-hint"]')).toBeNull()
+    create.click()
     await settle()
     expect(confirmTrustlineCreate).toHaveBeenCalledWith('1.5')
-    await type(host, '#tl-limit', '1.5')
-    expect(host.querySelector('[data-testid="tl-step-hint"]')).toBeNull()
   })
 })
 

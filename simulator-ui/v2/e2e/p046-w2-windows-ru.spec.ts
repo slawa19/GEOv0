@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test, type Page } from '@playwright/test'
 
+import { t } from '../src/i18n/t'
 import { mockApp, ready, RUN_ID, settleShell } from './helpers/p037Mock.js'
 
 const THEMES = ['saas', 'hud'] as const
@@ -34,11 +35,18 @@ type Lang = (typeof LANGS)[number]
 
 // Compared without case: the hud theme sets labels and names in capitals (`innerText` reads them as shown).
 const DATA_WORDS = new Set(['alice', 'bob', 'carol', 'uah', 'esc'])
+/**
+ * Labels allowed to take two lines of the 72 px rail, each by a decision: «Кто доверяет» - the advisor's binding wording
+ * of 2026-10-18 (round 1) for the trust line's "From"; on one line it needs about 85 px, the rail is 72 (045 token). Its
+ * row is as tall as the control beside it, so the window does not grow (measured below: Russian not taller than English).
+ */
+const TWO_LINE_LABELS: ReadonlySet<string> = new Set(['Кто доверяет'])
 const FRAMES = process.env.P046_FRAMES === '1'
 const FRAMES_DIR = fileURLToPath(new URL('../../../.local-run/owner-review/2026-10-18-046-w2/', import.meta.url))
 
 async function open(page: Page, theme: Theme, lang: Lang, opts: { running?: boolean } = {}): Promise<void> {
-  await mockApp(page, { paymentRealBodies: [] })
+  // Two more lines alice -> x01 (no debt), alice -> x02 (debt 1.00): the edit row of a line WITH debt is measured too.
+  await mockApp(page, { paymentRealBodies: [], extraTargets: 2, aliceLines: 2 })
   if (opts.running) await mockAnalytics(page)
   await page.setViewportSize({ width: 1366, height: 768 })
   await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}&lang=${lang}`)
@@ -120,7 +128,7 @@ function expectFits(f: Figures, where: string): void {
   for (const l of f.labels) {
     expect(l.w, `${where}: label "${l.text}" fits the 72 px rail`).toBeLessThanOrEqual(72.5)
     expect(l.cut, `${where}: label "${l.text}" is not cut`).toBe(false)
-    expect(l.lines, `${where}: label "${l.text}" is one line`).toBe(1)
+    expect(l.lines, `${where}: label "${l.text}" is one line`).toBe(TWO_LINE_LABELS.has(l.text) ? l.lines <= 2 ? l.lines : 1 : 1)
   }
   expect(f.buttons.length, `${where}: a row of buttons`).toBeGreaterThan(0)
   const top = f.buttons[0]!.top
@@ -153,12 +161,18 @@ async function paymentWindow(page: Page, theme: Theme, lang: Lang) {
   await page.locator('#mp-from__trigger').click()
   await page.locator('#mp-from__surface [role="option"][data-option-value="alice"]').click()
   await page.locator('#mp-to__surface [role="option"][data-option-value="bob"]').click()
+  // 046 round 1 (advisor A): a comma is refused - the reason line says how to type it, Confirm stays disabled.
   await page.locator('#mp-amount').fill('1,5')
+  await expect(page.locator('[data-testid="manual-payment-confirm"]')).toBeDisabled()
+  await expect(page.locator('[data-testid="mp-confirm-reason"]')).toHaveText(t('common.commaRefused', { example: '1.5' }, lang))
+  await settleShell(page)
+  const confirm = await measure(page, 'manual-payment-panel', ['mp-info', 'mp-confirm-reason'])
+  const confirmLatin = lang === 'ru' ? await latinWords(page, 'manual-payment-panel') : []
+  await frame(page, `${theme}-${lang}-2-payment-comma-refused`)
+  await page.locator('#mp-amount').fill('1.5')
   await expect(page.locator('[data-testid="manual-payment-confirm"]')).toBeEnabled()
   await settleShell(page)
-  const confirm = await measure(page, 'manual-payment-panel', ['mp-info', 'mp-confirm-warning'])
-  const confirmLatin = lang === 'ru' ? await latinWords(page, 'manual-payment-panel') : []
-  await frame(page, `${theme}-${lang}-2-payment-confirm`)
+  await frame(page, `${theme}-${lang}-2b-payment-confirm`)
   await page.locator('[data-testid="manual-payment-cancel"]').click()
   await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeHidden()
   return { choice, confirm, latin: [...choiceLatin, ...confirmLatin] }
@@ -191,7 +205,17 @@ async function trustlineWindows(page: Page, theme: Theme, lang: Lang) {
   await frame(page, `${theme}-${lang}-4-trustline-edit`)
   await page.locator('[data-testid="trustline-cancel"]').click()
   await expect(page.locator('[data-testid="trustline-panel"]')).toBeHidden()
-  return { create, edit, latin: [...createLatin, ...editLatin] }
+
+  // A line with debt: the close button asks for a close ("Request close" / «Запросить закрытие»).
+  await pick('alice', 'x02')
+  await expect(page.locator('[data-testid="tl-close-request-note"]')).toBeVisible()
+  await settleShell(page, 'trustline-panel')
+  const editDebt = await measure(page, 'trustline-panel', ['tl-stats'])
+  const editDebtLatin = lang === 'ru' ? (await latinWords(page, 'trustline-panel')).filter((w) => !/^(x0\d|Extra)$/i.test(w)) : []
+  await frame(page, `${theme}-${lang}-4b-trustline-edit-debt`)
+  await page.locator('[data-testid="trustline-cancel"]').click()
+  await expect(page.locator('[data-testid="trustline-panel"]')).toBeHidden()
+  return { create, edit, editDebt, latin: [...createLatin, ...editLatin, ...editDebtLatin] }
 }
 
 async function clearingWindow(page: Page, theme: Theme, lang: Lang) {
@@ -216,7 +240,8 @@ for (const theme of THEMES) {
       const pay = await paymentWindow(page, theme, lang)
       const tl = await trustlineWindows(page, theme, lang)
       const cl = await clearingWindow(page, theme, lang)
-      rec[lang] = { paymentChoice: pay.choice, paymentConfirm: pay.confirm, trustlineCreate: tl.create, trustlineEdit: tl.edit, clearing: cl.confirm }
+      rec[lang] = { paymentChoice: pay.choice, paymentConfirm: pay.confirm, trustlineCreate: tl.create, trustlineEdit: tl.edit,
+        trustlineEditDebt: tl.editDebt, clearing: cl.confirm }
       console.log(`P046W2 ${theme} ${lang} ${JSON.stringify(rec[lang])}`)
       info.annotations.push({ type: `P046W2-${lang}`, description: JSON.stringify(rec[lang]) })
 
@@ -229,10 +254,38 @@ for (const theme of THEMES) {
     }
     for (const where of Object.keys(shells.en)) {
       expect(shells.ru[where]!.w, `${theme} ${where}: the Russian window is not wider than the English one`).toBeLessThanOrEqual(shells.en[where]!.w + 0.5)
-      expect(shells.ru[where]!.h, `${theme} ${where}: the Russian window is not taller than the English one`).toBeLessThanOrEqual(shells.en[where]!.h + 0.5)
+      // 1 px: the two-line label «Кто доверяет» (TWO_LINE_LABELS) adds 0.7 px to the create step at 1366x768 (2026-10-18).
+      expect(shells.ru[where]!.h, `${theme} ${where}: the Russian window is not taller than the English one`).toBeLessThanOrEqual(shells.en[where]!.h + 1)
     }
   })
 }
+
+// Codex §15 round 1 (P3): the Russian refusal of a payment was asserted in a browser only by the phase 5 matrix, which
+// runs in English since wave 2. Here: ?lang=ru, the server refuses with its English message, the window says it in Russian.
+test('046 W2 [saas] a payment refused by the server reads in Russian under ?lang=ru, with the figure of the answer', async ({ page }) => {
+  await mockApp(page, { paymentRealBodies: [] })
+  // Registered after `mockApp`: Playwright asks the newest route first.
+  await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, (r) => r.fulfill({
+    status: 409, contentType: 'application/json', headers: { 'X-Request-ID': 'req-ru-1' },
+    body: JSON.stringify({ code: 'NO_ROUTE', message: 'No route found between the participants',
+      details: { reason: 'no_route', max_available: '0', equivalent: 'UAH', idempotency_key_spent: true } }),
+  }))
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('/?mode=real&ui=interact&e2eReal=1&theme=saas&lang=ru')
+  await ready(page, true)
+  await page.locator('[data-testid="actionbar-payment"]').click()
+  await page.locator('#mp-from__trigger').click()
+  await page.locator('#mp-from__surface [role="option"][data-option-value="alice"]').click()
+  await page.locator('#mp-to__surface [role="option"][data-option-value="bob"]').click()
+  await page.locator('#mp-amount').fill('1.00')
+  await page.locator('[data-testid="manual-payment-confirm"]').click()
+  const expected = t('refusal.noRouteMax', { max: '0.00', eq: 'UAH' }, 'ru')
+  expect(expected, 'the dictionary text is Russian').toMatch(/[Ѐ-ӿ]/)
+  await expect(page.locator('[data-testid="manual-payment-error"]')).toContainText(expected)
+  await expect(page.locator('[data-testid="manual-payment-error"]')).toContainText(t('common.requestRefOnly', { id: 'req-ru-1' }, 'ru'))
+  await expect(page.locator('[data-testid="manual-payment-error"]')).not.toContainText('No route found')
+  await frame(page, 'saas-ru-8-payment-refused')
+})
 
 test('046 W2 counter-check: the scanner and the rail check see an English word and a cut label', async ({ page }) => {
   await open(page, 'saas', 'en')
@@ -259,5 +312,27 @@ test('046 W2 frames: the analytics panel and its bottlenecks, both themes and la
       await page.locator('.rmp__body').evaluate((el) => { el.scrollTop = el.scrollHeight })
       await frame(page, `${theme}-${lang}-7-bottlenecks`)
     }
+  }
+})
+
+test('046 W2 frames: a failed analytics request and a clearing refused on a stopped equivalent (P046_FRAMES=1 only)', async ({ page }) => {
+  test.skip(!FRAMES, 'frames are written on request only (P046_FRAMES=1)')
+  for (const lang of LANGS) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+    await open(page, 'saas', lang, { running: true })
+    await page.route(new RegExp(`/simulator/runs/${RUN_ID}/(metrics|bottlenecks)`, 'i'), (r) => r.fulfill({
+      status: 500, contentType: 'text/plain', headers: { 'X-Request-ID': 'req-500-a' }, body: 'Internal Server Error' }))
+    await page.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, (r) => r.fulfill({
+      status: 409, contentType: 'application/json', headers: { 'X-Request-ID': 'req-409-c' },
+      body: JSON.stringify({ code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }) }))
+    await page.locator('[data-testid="details-toggle"]').click()
+    await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+    await expect(page.locator('.rmp [data-state="error"]').first()).toBeVisible({ timeout: 10_000 })
+    await frame(page, `saas-${lang}-9-analytics-error`)
+    await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+    await page.locator('[data-testid="actionbar-clearing"]').click()
+    await page.locator('[data-testid="clearing-confirm"]').click()
+    await expect(page.locator('[data-testid="clearing-error"]')).toContainText(t('clearing.equivalentInactive', {}, lang))
+    await frame(page, `saas-${lang}-10-clearing-stopped-equivalent`)
   }
 })

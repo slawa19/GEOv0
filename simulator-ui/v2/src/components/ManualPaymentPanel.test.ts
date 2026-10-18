@@ -536,7 +536,9 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it("MP-4: normalizes amount before sending ('1,5' -> '1.5')", async () => {
+  // MP-4, rewritten 2026-10-18 (046, advisor's decision, round 1): a comma is REFUSED - "1,5" sends nothing and Confirm says
+  // "Use a dot: 1.5"; until that date it was read as 1.5. The dot form is sent as typed.
+  it("MP-4: refuses a comma ('1,5' -> \"Use a dot: 1.5\", nothing sent); sends '1.5' as typed", async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -599,6 +601,14 @@ describe('ManualPaymentPanel', () => {
     await nextTick()
 
     const btn = host.querySelector('[data-testid="manual-payment-confirm"]') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.getAttribute('title')).toBe('Use a dot: 1.5')
+    btn.click()
+    expect(confirmPayment).not.toHaveBeenCalled()
+
+    input.value = '1.5'
+    input.dispatchEvent(new Event('input'))
+    await nextTick()
     expect(btn.disabled).toBe(false)
     btn.click()
 

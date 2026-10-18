@@ -127,14 +127,14 @@ function sectionState(
   if (phase === 'ready') return null
 
   if (phase === 'error') {
-    // 046 wave 2: the failure's own text (a transport or server message, not this panel's language) is shown as the
-    // correlation handle, in the token's element; the prose is the panel's.
+    // 046 wave 2 (Codex §15 round 1): the prose is the panel's; the failure's reference (its status or code and request
+    // id, `useMetricsPolling` -> `errorReference`) is shown apart, labelled, in the token's element.
     const text = String(error ?? '').trim()
     return {
       kind: 'error',
       title: t(copy.errorTitle),
       detail: t('metrics.errorDetail'),
-      token: text,
+      token: text ? t('metrics.errorReference', { ref: text }) : '',
     }
   }
 

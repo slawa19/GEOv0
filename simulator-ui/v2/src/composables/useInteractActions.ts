@@ -123,11 +123,14 @@ function mapToInteractActionError(e: unknown): InteractActionError {
     }
   }
 
+  // Not an HTTP answer: a value the client threw (a missing run id, a failure inside the client). Marked as the client's
+  // own message (Codex §15 round 1): a SERVER answer with the code `UNKNOWN` is not this and is told by its code.
   return {
     status: 0,
     code: 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
     details: null,
+    clientMessage: true,
   }
 }
 

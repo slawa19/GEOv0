@@ -18,7 +18,11 @@ import RealMetricsPanel from './RealMetricsPanel.vue'
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 import type { BottlenecksResponse, MetricsResponse, SimulatorActionClearingRealResponse } from '../api/simulatorTypes'
 import type { ManualPaymentOutcome } from '../composables/useInteractMode'
+import { ApiError } from '../api/http'
 import { setUiLocale, type UiLocale } from '../i18n/locale'
+import { t, type MessageKey } from '../i18n/t'
+import { errorReference } from '../utils/errorMessage'
+import { clearingRefusalText } from '../utils/paymentRefusalText'
 
 /** Data: the same in both languages. Names are Cyrillic so that a Latin word on screen can only be interface text. */
 const PEOPLE = [
@@ -146,13 +150,22 @@ const BOTTLENECKS = {
   })),
 } as unknown as BottlenecksResponse
 
-type Case = { name: string; render: () => Promise<void>; en: string[] }
+/**
+ * A state of a window: what each language must show. `en` - the English texts (as before the wave, except the dated
+ * round-1 wording); `ru` - the Russian texts this state must show (Codex §15 round 1: the scan for Latin words alone would
+ * pass a nearly empty window with a long title, so every state also names its required buttons, fields and results).
+ */
+type Case = { name: string; render: () => Promise<void>; en: string[]; ru: string[] }
+
+const r = (key: MessageKey, vars?: Record<string, string | number>) => t(key, vars, 'ru')
 
 const CASES: Case[] = [
   {
     name: 'payment: the sender step',
     render: async () => { mountWith(ManualPaymentPanel, paymentProps('picking-payment-from', null, null)); await settle() },
     en: ['Manual payment', 'From', 'To', 'Cancel', 'Confirm'],
+    ru: [r('payment.title'), r('payment.fromLabel'), r('payment.toLabel'), r('common.cancel'), r('payment.confirm'), r('common.pickPlaceholder'),
+      r('payment.panelAria'), r('payment.needsParties')],
   },
   {
     name: 'payment: no routes from a sender that is not active',
@@ -161,18 +174,31 @@ const CASES: Case[] = [
       await settle()
     },
     en: ['Backend reports no payment routes from selected sender (max hops: 6). Selected sender is not active (status: frozen); a participant that is not active takes no part in payments.'],
+    ru: [`${r('payment.noRoutesFromSender', { hops: 6 })} ${r('payment.senderNotActive', { status: r('participantStatus.frozen') })}`],
   },
   {
-    name: 'payment: the confirm step, a comma and an amount above the estimate',
+    name: 'payment: the confirm step, an amount above the estimate',
     render: async () => {
       mountWith(ManualPaymentPanel, paymentProps('confirm-payment', 'alice', 'bob', {
         targetEstimate: { state: 'received', hops: 3, maxAvailable: '1.00' },
       }))
       await settle()
-      await typeInto('#mp-amount', '1,5')
+      await typeInto('#mp-amount', '1.5')
     },
     en: ['Manual payment: Алиса → Борис', 'Amount', 'Direct', '(server)', 'Max', 'server estimate', '3 steps',
       "The amount is above the server's estimate of the maximum (1.00 UAH); the server decides."],
+    ru: [r('payment.titlePair', { from: 'Алиса', to: 'Борис' }), r('payment.amountLabel'), r('payment.directTitle'), `(${r('payment.sourceServer')})`,
+      r('payment.estimateShort'), r('payment.estimateSource'), '3 шага', r('payment.estimateExceeded', { max: '1.00', unit: 'UAH' }), r('payment.confirm')],
+  },
+  {
+    name: 'payment: a comma is refused',
+    render: async () => {
+      mountWith(ManualPaymentPanel, paymentProps('confirm-payment', 'alice', 'bob'))
+      await settle()
+      await typeInto('#mp-amount', '1,5')
+    },
+    en: ['Use a dot: 1.5'],
+    ru: ['Введите сумму с точкой: 1.5'],
   },
   {
     name: 'payment: an amount the form cannot read',
@@ -182,11 +208,14 @@ const CASES: Case[] = [
       await typeInto('#mp-amount', '1.2.3')
     },
     en: ["Invalid amount format. Use digits and '.' for decimals."],
+    ru: [r('common.invalidAmount')],
   },
   {
     name: 'payment: the result screen with two routes',
     render: async () => { mountWith(ManualPaymentPanel, paymentProps('confirm-payment', 'alice', 'bob', { paymentOutcome: SUCCESS })); await settle() },
     en: ['Payment sent', 'Payment ID', 'Status', 'COMMITTED', 'Route 1 of 2', 'Another payment', 'Close'],
+    ru: [r('payment.resultTitle'), r('payment.resultPaymentId'), r('payment.resultStatus'), r('paymentStatus.COMMITTED'),
+      r('payment.resultRoutes', { n: 1, total: 2 }), r('payment.resultAnother'), r('payment.resultClose'), 'Алиса → Вера: 6.00 UAH'],
   },
   {
     name: 'payment: an unknown result, discard asked',
@@ -197,21 +226,38 @@ const CASES: Case[] = [
       await settle()
     },
     en: ['Result unknown', 'Unresolved payment: 5.00 UAH, Алиса → Борис.', 'Discard it', 'Keep checking'],
+    ru: [r('payment.unknownTitle'), r('payment.unknownFrozen', { amount: '5.00', unit: 'UAH', from: 'Алиса', to: 'Борис' }),
+      r('payment.unknownDiscardWarning'), r('payment.unknownDiscardConfirm'), r('payment.unknownDiscardKeep')],
   },
   {
-    name: 'trust line: the create step with a comma',
+    name: 'trust line: the create step, a comma refused',
     render: async () => {
       mountWith(TrustlineManagementPanel, trustlineProps('confirm-trustline-create', 'alice', 'carol', { figuresSource: { kind: 'no-row' } }))
       await settle()
       await typeInto('#tl-limit', '1,5')
     },
-    en: ['Trustline: alice → carol', 'From', 'To', 'Existing', 'Limit', 'Create'],
+    en: ['Trustline: alice → carol', 'From', 'To', 'Limit', 'Create', 'Use a dot: 1.5'],
+    ru: [r('trustline.titlePair', { from: 'alice', to: 'carol' }), 'Кто доверяет', r('trustline.toLabel'), r('trustline.limitLabel'),
+      r('trustline.create'), 'Введите сумму с точкой: 1.5'],
   },
   {
     name: 'trust line: editing a line with debt',
     render: async () => { mountWith(TrustlineManagementPanel, trustlineProps('editing-trustline', 'alice', 'bob')); await settle() },
-    en: ['Used', '/ Limit', 'avail 88.00 UAH', 'New limit', 'Close TL', 'Update',
+    en: ['Used 12.00 UAH · Limit 100.00 UAH · Available 88.00 UAH', 'Existing', 'New limit', 'Request close', 'Update',
       'Closing with debt (used: 12.00 UAH) is a request: limit becomes 0, the line closes when the debt is repaid.'],
+    ru: ['Долг 12.00 UAH · Лимит 100.00 UAH · Доступно 88.00 UAH', r('trustline.existingLabel'), r('trustline.newLimitLabel'),
+      'Запросить закрытие', 'Сохранить', r('trustline.closeRequestNote', { used: '12.00', unit: 'UAH' }), r('trustline.statsAria')],
+  },
+  {
+    name: 'trust line: editing a line without debt',
+    render: async () => {
+      mountWith(TrustlineManagementPanel, trustlineProps('editing-trustline', 'alice', 'bob', {
+        used: '0.00', available: '100.00', trustlines: [{ ...TL_ROW, used: '0.00', available: '100.00' }],
+      }))
+      await settle()
+    },
+    en: ['Close line', 'Update'],
+    ru: ['Закрыть линию', 'Сохранить'],
   },
   {
     name: 'trust line: the source failed, close already requested',
@@ -223,11 +269,13 @@ const CASES: Case[] = [
       await settle()
     },
     en: ['Trustline data could not be loaded: Сервер не ответил вовремя.. The figures for this pair are not available, and what the graph shows may be out of date.'],
+    ru: [r('trustlineSource.failed', { message: 'Сервер не ответил вовремя.' })],
   },
   {
     name: 'trust line: the backend answered there is no line',
     render: async () => { mountWith(TrustlineManagementPanel, trustlineProps('editing-trustline', 'alice', 'bob', { figuresSource: { kind: 'no-row' } })); await settle() },
     en: ['The backend answered for this pair: there is no trustline.'],
+    ru: [r('trustlineSource.noRow')],
   },
   {
     name: 'clearing: the confirm step',
@@ -236,6 +284,17 @@ const CASES: Case[] = [
       await settle()
     },
     en: ['Run clearing', 'This will run a clearing cycle in backend.', 'Cancel', 'Confirm'],
+    ru: [r('clearing.runTitle'), r('clearing.confirmHelp'), r('common.cancel'), r('clearing.confirm'), r('clearing.panelAria')],
+  },
+  {
+    name: 'clearing: refused on a stopped equivalent',
+    render: async () => {
+      const refusal = { status: 409, code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }
+      mountWith(ClearingPanel, { phase: 'clearing-preview', state: state('clearing-preview', null, null, clearingRefusalText(refusal, 'UAH')), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
+      await settle()
+    },
+    en: ['The equivalent is stopped — clearing is unavailable.'],
+    ru: ['Эквивалент остановлен — клиринг недоступен.', r('common.close')],
   },
   {
     name: 'clearing: the result of two cycles',
@@ -243,7 +302,9 @@ const CASES: Case[] = [
       mountWith(ClearingPanel, { phase: 'clearing-preview', state: state('clearing-preview', null, null, null, CLEARING), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
       await settle()
     },
-    en: ['Clearing result', 'Cycles cleared: 2', 'Total over cycles', 'Cycle 1 of 2: 7.00 UAH', 'Борис’s debt to Алиса reduced by 7.00 UAH', 'Close'],
+    en: ['Clearing result', 'Cycles cleared: 2', 'Total over cycles', 'Cycle 1 of 2: 7.00 UAH', 'Борис → Алиса: debt reduced by 7.00 UAH', 'Close'],
+    ru: [r('clearing.resultTitle'), `${r('clearing.cycles')}: 2`, r('clearing.total'), r('clearing.cycle', { n: 1, total: 2, amount: '7.00', unit: 'UAH' }),
+      'Борис → Алиса: долг уменьшен на 7.00 UAH', r('common.close')],
   },
   {
     name: 'clearing: nothing to clear',
@@ -252,30 +313,43 @@ const CASES: Case[] = [
       await settle()
     },
     en: ['Nothing was cleared: no cycle of debts was found.'],
+    ru: [r('clearing.nothing'), r('common.close')],
   },
   {
     name: 'analytics: measurements and the six bottleneck reasons',
     render: async () => { mountWith(RealMetricsPanel, { metricsPhase: 'ready', bottlenecksPhase: 'ready', metrics: METRICS, bottlenecks: BOTTLENECKS }); await settle() },
     en: ['Analytics', 'Measurements', 'Success rate', 'Total debt', '1 of 3 points have no measurement', 'Bottlenecks',
       'Frequent failures', 'Increase trust limits, add alternative routes, or clear', 'Focus'],
+    ru: [r('metrics.title'), r('metrics.measurements'), r('metrics.series.success_rate'), r('metrics.series.total_debt'),
+      'Без измерения: 1 из 3 точек', r('bottlenecks.title'), 'Часто истекает время ожидания', 'Накопились долги для взаимозачёта',
+      r('bottlenecks.action.FREQUENT_ABORTS'), r('bottlenecks.focus')],
   },
   {
-    name: 'analytics: not recorded, and a failed request',
+    name: 'analytics: not recorded, and a failed request as the transport gives it',
     render: async () => {
-      mountWith(RealMetricsPanel, { metricsPhase: 'unavailable', bottlenecksPhase: 'error', metrics: null, bottlenecks: null, metricsUnavailableReason: 'storage_disabled', bottlenecksError: 'HTTP 500' })
+      // Codex §15 round 1: the failure as `useMetricsPolling` now stores it - from a real `ApiError` of `api/http.ts`
+      // ("HTTP 500 Internal Server Error for /simulator/...") - not a hand-shortened "HTTP 500".
+      const failure = new ApiError('HTTP 500 Internal Server Error for /simulator/runs/run-1/bottlenecks', { status: 500, requestId: '4711' })
+      mountWith(RealMetricsPanel, { metricsPhase: 'unavailable', bottlenecksPhase: 'error', metrics: null, bottlenecks: null, metricsUnavailableReason: 'storage_disabled', bottlenecksError: errorReference(failure) })
       await settle()
     },
-    en: ['No measurements recorded', 'Metric storage is off for this run, so no measurements were recorded.', 'Bottlenecks request failed'],
+    en: ['No measurements recorded', 'Metric storage is off for this run, so no measurements were recorded.', 'Bottlenecks request failed',
+      'The analytics request did not complete.', 'Reference: HTTP 500 · 4711'],
+    ru: [r('metrics.measurementsUnavailableTitle'), r('metrics.measurementsStorageOff'), r('metrics.bottlenecksErrorTitle'), r('metrics.errorDetail'),
+      'Для обращения: HTTP 500 · 4711'],
   },
 ]
 
-describe('046 wave 2 - the action windows in Russian carry no English word', () => {
+describe('046 wave 2 - the action windows in Russian carry no English word, and say what each state needs', () => {
   it.each(CASES.map((c) => [c.name, c] as const))('%s', async (_name, c) => {
     setUiLocale('ru')
     await c.render()
     const text = said()
     expect(text.length, 'anti-vacuum: the window rendered').toBeGreaterThan(20)
     expect(latinWords(text), text).toEqual([])
+    // Codex §15 round 1: and the window SAYS what this state must say in Russian (an almost empty window with a long
+    // title would pass the scan above).
+    for (const s of c.ru) expect(text, s).toContain(s)
   })
 
   it('anti-vacuum: the scanner sees an English word, in the text and in an attribute', () => {

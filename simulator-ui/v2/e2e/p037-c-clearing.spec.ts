@@ -33,12 +33,13 @@ test.describe('037 C - the clearing result in a real browser', () => {
     await runClearing(page)
 
     await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(2)
+    // 046 round 1 (advisor, 2026-10-18): the arrow form, debtor first (was "Bob’s debt to Alice reduced by 7.00 UAH").
     expect(await lines(page)).toEqual([
-      'Bob’s debt to Alice reduced by 7.00 UAH',
-      'Carol’s debt to Bob reduced by 7.00 UAH',
-      'Alice’s debt to Carol reduced by 7.00 UAH',
-      'Carol’s debt to Alice reduced by 3.00 UAH',
-      'Alice’s debt to Carol reduced by 3.00 UAH',
+      'Bob → Alice: debt reduced by 7.00 UAH',
+      'Carol → Bob: debt reduced by 7.00 UAH',
+      'Alice → Carol: debt reduced by 7.00 UAH',
+      'Carol → Alice: debt reduced by 3.00 UAH',
+      'Alice → Carol: debt reduced by 3.00 UAH',
     ])
     await expect(page.locator('[data-testid="clearing-total"]')).toContainText('10.00 UAH')
 

@@ -108,6 +108,14 @@ export default [
       'no-restricted-syntax': ['error', ...MONEY_LOCALE_RESTRICTIONS],
     },
   },
+  // Codex §15 round 1: `no-restricted-syntax` sees the <script> of a .vue only; the <template> expressions (an
+  // interpolation, a bound attribute) are seen by eslint-plugin-vue's own rule with the same selectors.
+  {
+    files: ['src/**/*.vue'],
+    rules: {
+      'vue/no-restricted-syntax': ['error', ...MONEY_LOCALE_RESTRICTIONS],
+    },
+  },
   {
     files: [
       'src/components/SimulatorAppRoot.vue',

@@ -209,3 +209,21 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     expect(paymentRefusalText(error, 'UAH', 'en')).toBe('No payment route between these participants (available now: 3.00 UAH).')
   })
 })
+
+// Codex §15 round 1 (P2): a value the client threw (not an HTTP answer) is marked as the client's own message, so a SERVER
+// answer that happens to carry the code `UNKNOWN` is no longer taken for one.
+describe('046 round 1: the client marks its own failures', () => {
+  it('a missing run id is the client\'s own message (clientMessage), in the language of the interface', async () => {
+    const a = useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('') })
+    const e = await rejection(a.createTrustline('a', 'b', '10', 'UAH'))
+    expect(e.code).toBe('UNKNOWN')
+    expect(e.clientMessage).toBe(true)
+    expect(e.message).toBe('No active run_id')
+  })
+  it('counter-check: a server answer with the code UNKNOWN is not marked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'UNKNOWN', message: '' }), { status: 500, headers: { 'Content-Type': 'application/json' } })))
+    const e = await rejection(actions().createTrustline('a', 'b', '10', 'UAH'))
+    expect(e.code).toBe('UNKNOWN')
+    expect(e.clientMessage).toBeUndefined()
+  })
+})

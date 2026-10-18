@@ -1,6 +1,28 @@
 import type { UiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
 
+/** The message an error carries, as it is - no request reference added (`extractErrorMessage` adds one). */
+export function plainErrorMessage(e: unknown): string {
+  return baseMessage(e)
+}
+
+/**
+ * Codex §15 round 1: what identifies a failure, with no words of any language - the HTTP status (or the transport code
+ * of an answer that did not come) and the server's request id, e.g. "HTTP 500 · req-1f2e". For a surface that tells the
+ * failure in its own words and shows this beside them (the analytics panel); a value that is not an HTTP failure has
+ * only its class name, never its message.
+ */
+export function errorReference(e: unknown): string {
+  const o = (e !== null && typeof e === 'object' ? e : {}) as { status?: unknown; code?: unknown; name?: unknown }
+  const parts: string[] = []
+  if (typeof o.code === 'string' && o.code.trim()) parts.push(o.code.trim())
+  else if (typeof o.status === 'number' && o.status > 0) parts.push(`HTTP ${o.status}`)
+  else parts.push(typeof o.name === 'string' && o.name.trim() ? o.name.trim() : 'Error')
+  const id = requestIdOf(e)
+  if (id) parts.push(id)
+  return parts.join(' · ')
+}
+
 function baseMessage(e: unknown): string {
   if (e instanceof Error) return e.message
   if (typeof e === 'string') return e

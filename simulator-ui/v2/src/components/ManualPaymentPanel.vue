@@ -14,6 +14,7 @@ import { participantStatusText, paymentStatusText } from '../i18n/statusText'
 import { t, tn } from '../i18n/t'
 import { compareMoney, formatMoney } from '../utils/money'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
+import { amountInputHint, parseTypedAmount } from '../utils/valueFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
@@ -106,7 +107,7 @@ const rootClass = computed(() => {
 const amount = ref('')
 const amountEl = ref<HTMLInputElement | null>(null)
 
-const amountNormalized = computed(() => parseAmountStringOrNull(amount.value))
+const amountNormalized = computed(() => parseTypedAmount(amount.value))
 
 watch(
   () => props.phase,
@@ -186,6 +187,12 @@ const estimateText = computed(() => {
   return `${formatMoney(e.maxAvailable, equivalentPrecision(props.unit))} ${props.unit}`
 })
 
+/** 046 round 1 (advisor D): the estimate is set in the monospace face only when it is an amount, not a state word. */
+const estimateIsAmount = computed(() => {
+  const e = estimate.value
+  return !!e && e.state === 'received' && e.maxAvailable != null
+})
+
 const outcome = computed(() => props.paymentOutcome ?? null)
 const success = computed(() => (outcome.value && outcome.value.kind === 'success' ? outcome.value : null))
 
@@ -217,16 +224,8 @@ function routeChain(hops: Array<{ fromName: string; toName: string }>): string {
   return [hops[0].fromName, ...hops.map((h) => h.toName)].join(' → ')
 }
 
-/**
- * 046 decision 4: a comma typed for the decimal point is read as one (`parseAmountStringOrNull`, MP-4) - and SAID, with the
- * amount as it will be sent, so that "1,000" meant as a thousand is seen as 1.000 before Confirm. Never silent.
- */
-const commaNote = computed<string | null>(() => {
-  if (!amount.value.includes(',') || amountNormalized.value == null) return null
-  return t('common.commaRead', { amount: amountNormalized.value, unit: props.unit })
-})
-
-const otherInlineWarning = computed<string | null>(() => {
+const confirmInlineWarning = computed<string | null>(() => {
+  if (props.busy) return null
   // 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
   const stepHint = amountStepHint(amountNormalized.value, props.unit)
   if (stepHint) return stepHint
@@ -242,12 +241,6 @@ const otherInlineWarning = computed<string | null>(() => {
   return t('payment.exceedsDirect', { capacity: props.availableCapacity ?? '—', unit: props.unit })
 })
 
-/** The warning line under the amount: the comma note (when there is one) and the other warning, as whole sentences. */
-const confirmInlineWarning = computed<string | null>(() => {
-  if (props.busy) return null
-  const parts = [commaNote.value, otherInlineWarning.value].filter((x): x is string => !!x)
-  return parts.length ? parts.join(' ') : null
-})
 
 /**
  * BACKLOG 037-5 (b): what the participants list says about a party that is not active (a scenario's `frozen`, the stored
@@ -278,7 +271,8 @@ const confirmDisabledReason = computed<string | null>(() => {
   const rawTrimmed = amount.value.trim()
   if (!rawTrimmed) return t('payment.enterPositive')
 
-  if (amountNormalized.value == null) return t('common.invalidAmount')
+  // 046 (advisor, round 1): a comma is refused - "Use a dot: 1.5" (`amountInputHint`); nothing is read for the person.
+  if (amountNormalized.value == null) return amountInputHint(rawTrimmed)
 
   if (!amountPositive.value) return t('payment.enterPositive')
 
@@ -847,8 +841,8 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           <span data-testid="mp-direct-capacity-help" :title="t('payment.directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ t('payment.directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
           {{ ' ' }}<span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
           <template v-if="estimate">
-            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-estimate">{{ t('payment.estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><template v-if="estimate.state === 'received' && estimate.maxAvailable != null">{{ ' ' }}<span class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ t('payment.estimateSource') }}</span>)</span></template></span>
-            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-shortest" :title="t('payment.shortestNote', { title: t('payment.shortestTitle'), note: t('payment.routeNote') })"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-estimate">{{ t('payment.estimateShort') }} <span :class="{ 'ds-mono': estimateIsAmount }" data-testid="mp-estimate-max">{{ estimateText }}</span><template v-if="estimate.state === 'received' && estimate.maxAvailable != null">{{ ' ' }}<span class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ t('payment.estimateSource') }}</span>)</span></template></span>
+            {{ ' ' }}<span class="ds-muted">·</span>{{ ' ' }}<span data-testid="mp-shortest" :title="t('payment.shortestNote', { title: t('payment.shortestTitle'), note: t('payment.routeNote') })"><span data-testid="mp-shortest-value">{{ shortestText }}</span></span>
           </template>
         </div>
       </template>

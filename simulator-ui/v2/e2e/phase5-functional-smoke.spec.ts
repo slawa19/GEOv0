@@ -631,14 +631,16 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
     // INTENTIONAL, 026 `T2603.2` (owner В1): a close with debt is a request - announced, not blocked.
     await expect(page.locator('[data-testid="tl-close-request-note"]')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Close TL' })).toBeEnabled()
+    // 046 round 1 (advisor, 2026-10-18): the button of a line with debt says what it does - "Request close" (was "Close TL").
+    await expect(page.getByRole('button', { name: 'Request close' })).toBeEnabled()
     await activateButton(page, 'Cancel')
 
     await activateButton(page, 'Run Clearing')
     await activateButton(page, 'Confirm')
     // 037 C: the result stays until the user closes it (it used to be a "preview" that left on a timer).
     await expect(page.getByTestId('clearing-panel')).toContainText('Clearing result')
-    await expect(page.getByTestId('clearing-panel')).toContainText('debt to')
+    // 046 round 1 (advisor, 2026-10-18): "{debtor} → {creditor}: debt reduced by ..." (was "{debtor}’s debt to {creditor} ...").
+    await expect(page.getByTestId('clearing-panel')).toContainText('debt reduced by')
     await expect(page.getByLabel('Success notification')).toContainText('Clearing done: 1/1 cycles')
     expect(mock.clearingRequests).toHaveLength(1)
     await activateButton(page, 'Close')

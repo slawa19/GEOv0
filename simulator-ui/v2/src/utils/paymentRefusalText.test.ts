@@ -59,9 +59,10 @@ describe('F-028-51: the human text of a payment refusal', () => {
 describe('046 wave 2 (decision 3): an action error is told by its code, by a closed set', () => {
   it('every code of the set has its own text in both languages, none of them the general one or a Latin word in ru', () => {
     expect([...ACTION_ERROR_CODES].sort()).toEqual(['ACCESS_DENIED', 'ACTIONS_DISABLED', 'CLEARING_FAILED',
-      'CLEARING_INTERRUPTED', 'CLEARING_REFUSED', 'CONFLICT', 'ENGINE_TIMEOUT', 'EQUIVALENT_NOT_FOUND', 'INVALID_AMOUNT',
-      'INVALID_JSON', 'INVALID_REQUEST', 'PARTICIPANT_NOT_FOUND', 'PAYMENT_REJECTED', 'RUN_NOT_FOUND',
-      'RUN_PERIMETER_UNAVAILABLE', 'RUN_TERMINAL', 'TIMEOUT', 'TRUSTLINE_EXISTS', 'TRUSTLINE_NOT_FOUND',
+      'CLEARING_INTERRUPTED', 'CLEARING_REFUSED', 'CONFLICT', 'ENGINE_TIMEOUT', 'EQUIVALENT_NOT_FOUND', 'INSUFFICIENT_CAPACITY',
+      'INVALID_AMOUNT', 'INVALID_JSON', 'INVALID_REQUEST', 'NO_ROUTE', 'PARTICIPANT_NOT_FOUND', 'PAYMENT_REJECTED',
+      'RUN_NOT_FOUND', 'RUN_PERIMETER_UNAVAILABLE', 'RUN_TERMINAL', 'SCENARIO_TRUSTLINE_REFUSED', 'SEEDING_FAILED',
+      'SIMULATOR_PID_TAKEN', 'TIMEOUT', 'TRUSTLINE_CLOSED', 'TRUSTLINE_CLOSE_REQUESTED', 'TRUSTLINE_EXISTS', 'TRUSTLINE_NOT_FOUND',
       'TRUSTLINE_USED_UNAVAILABLE', 'USED_EXCEEDS_NEW_LIMIT'])
     for (const locale of ['en', 'ru'] as const) {
       const general = actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, locale)
@@ -79,13 +80,46 @@ describe('046 wave 2 (decision 3): an action error is told by its code, by a clo
     expect(actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' }, 'ru'))
       .toBe(t('actionError.unknown', { code: 'HTTP_500' }, 'ru'))
   })
-  it('kept as they are: no code, the UNKNOWN of the mapper, and a coded error whose message the client wrote', () => {
+  it('kept as they are: no code, and an error the client marked as its own (clientMessage)', () => {
     expect(actionErrorText(new Error('boom'), 'ru')).toBe('boom')
     expect(actionErrorText({ status: 500, message: 'Trustlines are down' }, 'ru')).toBe('Trustlines are down')
-    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: 'client words' }, 'ru')).toBe('client words')
+    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: 'client words', clientMessage: true }, 'ru')).toBe('client words')
     expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Ответ не получен', clientMessage: true }, 'ru')).toBe('Ответ не получен')
     // Counter-check: the same TIMEOUT without the mark is told by its code.
     expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Request timed out' }, 'ru')).toBe(t('actionError.TIMEOUT', {}, 'ru'))
+  })
+  // Codex §15 round 1 (P2): a SERVER answer with the code UNKNOWN was taken for the client's own message - its English
+  // prose was shown, and an empty message showed nothing at all (`v-if="state.error"` hid the window's error).
+  it('a server code UNKNOWN is told by the general text with the code - with prose, and with an empty message', () => {
+    expect(actionErrorText({ status: 500, code: 'UNKNOWN', message: 'Something broke on the server' }, 'ru'))
+      .toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
+    expect(actionErrorText({ status: 500, code: 'UNKNOWN', message: '' }, 'en')).toBe('The action failed (UNKNOWN).')
+    // A kept text that is empty is never an empty error either.
+    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: '', clientMessage: true }, 'en')).toBe('The action failed (UNKNOWN).')
+    expect(actionErrorText(new Error(''), 'en')).toBe('The action failed (UNKNOWN).')
+  })
+  // Codex §15 round 1 (P3): the reference after the client's own text follows its language too.
+  it('the own text of the client carries the request reference in its language', () => {
+    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Ответ не получен', clientMessage: true, requestId: 'req-123' }, 'ru'))
+      .toBe('Ответ не получен (код запроса: req-123)')
+    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'No answer', clientMessage: true, requestId: 'req-123' }, 'en'))
+      .toBe('No answer (ref: req-123)')
+  })
+  // Codex §15 round 1 (P2): the operator's stop and the integrity hold answer CONFLICT with `details.reason`; before the
+  // fix a clearing refused that way read "the system is busy; try again".
+  it('a CONFLICT naming the state of the equivalent is told by that state - on the clearing path and on any other', () => {
+    const stopped = { status: 409, code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }
+    const held = { status: 409, code: 'CONFLICT', message: 'hold', details: { reason: 'equivalent_integrity_hold' } }
+    expect(clearingRefusalText(stopped, 'UAH', 'ru')).toBe('Эквивалент остановлен — клиринг недоступен.')
+    expect(clearingRefusalText(held, 'UAH', 'ru')).toBe('Эквивалент на проверке целостности — операции приостановлены.')
+    expect(clearingRefusalText(stopped, 'UAH', 'en')).toBe('The equivalent is stopped — clearing is unavailable.')
+    expect(actionErrorText(stopped, 'ru')).toBe(t('actionReason.equivalent_inactive', {}, 'ru'))
+    expect(actionErrorText(held, 'en')).toBe('The equivalent is under an integrity check — operations are on hold.')
+    // The payment path already told these reasons by its own set (`refusal.*`).
+    expect(paymentRefusalText(stopped, 'UAH', 'en')).toBe('UAH is not active.')
+    // Counter-check: a CONFLICT without such a reason is still "busy".
+    expect(clearingRefusalText({ status: 409, code: 'CONFLICT', message: 'x', details: { reason: 'retryable' } }, 'UAH', 'en'))
+      .toBe('The system is busy; try again.')
   })
 })
 
