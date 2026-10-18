@@ -97,17 +97,21 @@ class _Session:
 
 
 def _stand(monkeypatch, *, redis_expires: bool = True, use_redis: bool = True, horizon: int = 3 * DAY,
-           stop_at_wait: int | None = None, checkpoint_errors: int = 0, reconcile=None, during_run=None):
+           stop_at_wait: int | None = None, checkpoint_errors: int = 0, reconcile=None, during_run=None,
+           checkpoint_hangs: int = 0):
     clock = _Clock()
     redis = _ExpiringRedis(clock, expires=redis_expires) if use_redis else None
     app = SimpleNamespace(state=SimpleNamespace(redis=redis, _bg_stop_event=asyncio.Event(), background_jobs={}))
     seen = SimpleNamespace(clock=clock, redis=redis, app=app, work=[], waits=[], degraded=[], events=[])
-    failures = {"checkpoints": checkpoint_errors}
+    failures = {"checkpoints": checkpoint_errors, "hangs": checkpoint_hangs}
 
     async def checkpoints(_session):
         seen.work.append((clock.now, "checkpoints"))
         if during_run is not None and len(seen.work) == 1:
             during_run(seen)
+        if failures["hangs"] > 0:  # a blocked attempt: only the attempt deadline ends it
+            failures["hangs"] -= 1
+            await asyncio.Event().wait()
         if failures["checkpoints"] > 0:
             failures["checkpoints"] -= 1
             raise RuntimeError("p047: the checkpoints fail on this attempt")
@@ -334,4 +338,23 @@ async def test_the_stop_is_heard_by_a_wait_of_zero_or_less(seconds) -> None:
     assert await maintenance_jobs._stopped_within(stop, seconds) is False
     stop.set()
     assert await maintenance_jobs._stopped_within(stop, seconds) is True
+
+
+@pytest.mark.asyncio
+async def test_an_attempt_that_times_out_is_retried_fast_then_every_ttl_and_degrades_health(monkeypatch) -> None:
+    """The combination of the attempt deadline (`INTEGRITY_ATTEMPT_TIMEOUT_SECONDS`, PR #309) and the cadence rule:
+    the checkpoints block 14 times, each attempt ends at the (real, shortened) deadline as `startup_timed_out` - a
+    failure, never a completed check - and is retried 30 s later in the fast phase, then every TTL, the job `failed`
+    (degraded) throughout; the 15th attempt completes and only then does the loop wait a day.
+    MUTATION: the deadline's handler returns True - the loop waits a day after the first timed-out attempt, red."""
+
+    seen = _stand(monkeypatch, checkpoint_hangs=14, horizon=DAY)
+    monkeypatch.setattr(settings, "INTEGRITY_ATTEMPT_TIMEOUT_SECONDS", 0.01)
+
+    async with asyncio.timeout(30):
+        await maintenance_jobs._integrity_loop(seen.app)
+
+    assert seen.waits[:15] == FAST + [TTL] * 2 + [DAY], seen.waits
+    assert all(d for _at, d in seen.degraded[:14]) and not seen.degraded[14][1], seen.degraded[:15]
+    assert seen.app.state.background_jobs["integrity"]["event"] == "startup_success"
 
