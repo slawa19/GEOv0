@@ -60,6 +60,15 @@ export function isGlobalLimitRefusal(e: unknown): boolean {
 }
 
 /**
+ * 046 wave 1: does the error line offer "Try again"? Only while the line still IS the text of the refused start
+ * (`retryableStartError`, recorded by `startRun`): any later error that replaces the line - a stream error, a pause
+ * that failed - withdraws the offer with it, so "Try again" never stands beside an error it would not fix.
+ */
+export function startRetryOffered(lastError: string | null | undefined, retryableStartError: string | null | undefined): boolean {
+  return !!retryableStartError && retryableStartError === lastError
+}
+
+/**
  * 043 S2 (advisor's follow-up), 046 wave 1: the error line of a run start that failed. One case gets a human text in the
  * interface language: the server refused the create because its global limit of active runs is reached
  * (`isGlobalLimitRefusal`). On a shared server that is another visitor's live run, not this visitor's to watch. The

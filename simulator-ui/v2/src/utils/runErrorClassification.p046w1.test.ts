@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '../api/http'
-import { isGlobalLimitRefusal, noScenarioText, startRunErrorText } from './runErrorClassification'
+import { isGlobalLimitRefusal, noScenarioText, startRetryOffered, startRunErrorText } from './runErrorClassification'
 
 const answer = (status: number, body: unknown) =>
   new ApiError(`HTTP ${status} for /simulator/runs`, { status, bodyText: typeof body === 'string' ? body : JSON.stringify(body) })
@@ -58,5 +58,17 @@ describe('046 wave 1 - the text of the refusal names the server\'s number of pla
 
   it('counter-check: another error keeps the fallback text', () => {
     expect(startRunErrorText(answer(409, { error: { details: { conflict_kind: 'owner_active_exists' } } }), raw, 'ru')).toBe('HTTP 409 for /simulator/runs')
+  })
+})
+
+describe('046 wave 1 - "Try again" stands only beside the refusal it would fix', () => {
+  it('offered while the line is the refused text; withdrawn when another error replaces it, or nothing was refused', () => {
+    const refused = 'All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.'
+    expect(startRetryOffered(refused, refused)).toBe(true)
+    expect(startRetryOffered('SSE: connection lost', refused), 'a later error replaced the line').toBe(false)
+    expect(startRetryOffered('', refused), 'the line was cleared').toBe(false)
+    expect(startRetryOffered(refused, ''), 'nothing refusable recorded').toBe(false)
+    expect(startRetryOffered('', ''), 'no line, nothing recorded: no offer').toBe(false)
+    expect(startRetryOffered(null, undefined)).toBe(false)
   })
 })
