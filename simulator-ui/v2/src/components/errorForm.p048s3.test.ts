@@ -22,7 +22,7 @@ import { useInteractMode } from '../composables/useInteractMode'
 import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 import { setUiLocale, type UiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
-import { failureRunErrorLine, renderRunErrorLine, runErrorLineRef, runErrorLineTitle } from '../utils/runErrorClassification'
+import { failureRunErrorLine, renderRunErrorLine, runErrorLineRef, runErrorLineTitle, startRunErrorLine } from '../utils/runErrorClassification'
 
 const PEOPLE = [
   { pid: 'alice', name: 'Алиса', type: 'person', status: 'active' },
@@ -219,5 +219,21 @@ describe('048 S3: a failed request is told by its kind - the sentence of the dic
     expect(failureRunErrorLine(new Error('SSE replay recovery buffer exceeded 512 messages'), { client: 'stream' })).toMatchObject({ key: 'failure.streamFailed' })
     const line = failureRunErrorLine(new ApiError('HTTP 403 Forbidden for /simulator/runs/r1', { status: 403, requestId: 'req-403' }))
     expect([runErrorLineRef(line), runErrorLineTitle(line)]).toEqual(['req-403', 'HTTP 403'])
+  })
+})
+
+describe('048 S3 (adversarial pass F3, F5): the start refusal carries its id; no class name in a title', () => {
+  it('a start refused by the limit of runs (409 global_active_limit): the line keeps the request id of its answer', () => {
+    const body = (max?: number) => JSON.stringify({ error: { code: 'E008', message: 'x', details: { conflict_kind: 'global_active_limit', ...(max ? { max_active_runs: max } : {}) } } })
+    for (const max of [undefined, 1, 10]) {
+      const line = startRunErrorLine(new ApiError('HTTP 409 Conflict for /simulator/runs', { status: 409, bodyText: body(max), requestId: 'req-409' }))
+      expect(runErrorLineRef(line), `max ${max}`).toBe('req-409')
+    }
+    expect(runErrorLineRef(startRunErrorLine(new ApiError('HTTP 409', { status: 409, bodyText: body(10) }))), 'counter-check: no id, none').toBeNull()
+  })
+  it('a failure that is not an answer has no title (its class name is the console line only)', () => {
+    const line = failureRunErrorLine(new TypeError('Failed to fetch'))
+    expect(runErrorLineTitle(line)).toBeNull()
+    expect(line).toMatchObject({ key: 'failure.noConnection', log: 'TypeError: Failed to fetch' })
   })
 })

@@ -7,6 +7,7 @@ import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import WindowShell from './WindowShell.vue'
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
+import WindowErrorBlock from './WindowErrorBlock.vue'
 import ClearingPanel from './ClearingPanel.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
@@ -471,6 +472,15 @@ const paymentToTargetIds = computed<Set<string> | undefined>(() =>
   routesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
 )
 const trustlines = computed(() => interact.mode.trustlines.value)
+/**
+ * 048 S3 (adversarial pass F1): the failure of the edge popup's own action ("Close line" -> `confirmTrustlineClose`) - the
+ * phase stays `editing-trustline` with the quick popup, and no other window of that phase draws `state.error`.
+ */
+const edgeDetailFailure = computed<ShownError | null>(() => {
+  const st = interact.mode.state
+  if (interactPhase.value !== 'editing-trustline' || useFullTrustlineEditor.value || !st.error) return null
+  return { text: st.error, ref: st.errorRef ?? null, detail: st.errorDetail ?? null }
+})
 /**
  * 048 S3 (decision 3): the scene-load failure over the canvas - its one place, in both sources (the run's error line no
  * longer carries a copy). Rendered from the value (`state.errorLine`) in the language of now.
@@ -1285,8 +1295,8 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           wm.reclamp(win.id)
         }"
       >
+        <template v-if="win.type === 'edge-detail'">
         <EdgeDetailPopup
-          v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="wmEdgeDetailEffectiveState(win)"
           :unit="wmEdgeDetailEffectiveUnit"
@@ -1303,6 +1313,17 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           @close-line="onEdgeDetailCloseLine"
           @send-payment="onEdgeDetailSendPayment"
         />
+        <!-- 048 S3 (internal adversarial pass, F1): "Close line" from the popup fails in the popup's window - its one place
+             (until S3 only the error toast showed it; the popup does not draw `state.error`, 046 W3 owns it). -->
+        <WindowErrorBlock
+          v-if="edgeDetailFailure"
+          testid="edge-detail-error"
+          class="sar-edge-detail-error"
+          :text="edgeDetailFailure.text"
+          :request-id="edgeDetailFailure.ref"
+          :detail="edgeDetailFailure.detail"
+        />
+        </template>
 
         <NodeCardOverlay
           v-else-if="isNodeCardWindow(win) && getNodeById(String(win.data.nodeId))"

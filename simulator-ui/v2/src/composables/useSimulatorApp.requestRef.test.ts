@@ -30,12 +30,13 @@ afterEach(() => {
 
 describe('item 2: message functions outside useSimulatorRealMode', () => {
   it('useSimulatorApp: the auto-start failure carries the id - apart from the sentence', () => {
-    const state: { error: string; errorLine?: RunErrorLine | null } = { error: '' }
-    __autoBootstrapMaybeFillUiError({ state, real: { lastError: '' }, err: failure() })
+    // 048 S3 (adversarial pass F4): the run's error line, not the scene state.
+    const real: { lastError: string; lastErrorLine?: RunErrorLine | null } = { lastError: '' }
+    __autoBootstrapMaybeFillUiError({ state: { error: '' }, real, err: failure() })
 
-    expect(state.error).toBe(t('failure.serverFailed'))
-    expect(runErrorLineRef(state.errorLine)).toBe('req-ui')
-    expect(runErrorLineLog(state.errorLine)).toBe('Auto-start failed: HTTP 500  for /simulator/x')
+    expect(real.lastError).toBe(t('failure.serverFailed'))
+    expect(runErrorLineRef(real.lastErrorLine)).toBe('req-ui')
+    expect(runErrorLineLog(real.lastErrorLine)).toBe('Auto-start failed: HTTP 500  for /simulator/x')
   })
 
   it('useSceneState: a failed scene load puts the id into state.error', async () => {

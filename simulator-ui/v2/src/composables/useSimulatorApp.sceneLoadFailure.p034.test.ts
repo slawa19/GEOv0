@@ -176,6 +176,8 @@ describe('F-034-D2: a failed scenario preview', () => {
     expect(runErrorLineLog(app.state.errorLine), 'the preview error was wiped as if it were a stale run').toContain('HTTP 404')
     // 048 S3: the scene failure's one place is the overlay (`state.error`); the run's line carries no copy of it.
     expect(runErrorLineLog(app.real.lastErrorLine) ?? '').not.toContain('/graph/preview')
+    // Adversarial pass F7: a copy written back as plain text nulls the line's value (the sync watcher) - so the text too.
+    expect(app.real.lastError, 'the scene error is not copied as text either').not.toBe(app.state.error)
   })
 })
 

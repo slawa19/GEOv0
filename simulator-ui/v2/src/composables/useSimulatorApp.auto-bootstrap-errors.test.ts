@@ -15,9 +15,11 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
 })
 
 describe('__autoBootstrapMaybeFillUiError()', () => {
-  it('fills state.error when best-effort fails and both real.lastError/state.error are empty', () => {
+  // 048 S3 (adversarial pass F4): rewritten, not removed - a failed opening is a failure of the RUN: it fills the run's error
+  // line (was: the scene's `state.error`, the overlay over the canvas), as a sentence; "Auto-start failed: boom" is the console line.
+  it('fills the run error line when best-effort fails and both real.lastError/state.error are empty', () => {
     const state = { error: '' }
-    const real = { lastError: '' }
+    const real: { lastError: string; lastErrorLine?: RunErrorLine | null } = { lastError: '' }
 
     __autoBootstrapMaybeFillUiError({
       state,
@@ -25,9 +27,9 @@ describe('__autoBootstrapMaybeFillUiError()', () => {
       err: new Error('boom'),
     })
 
-    // 048 S3: a sentence of the interface by the kind of the failure; "Auto-start failed: boom" is the detail (title, console).
-    expect(state.error).toBe(t('failure.viewFailed'))
-    expect(runErrorLineLog((state as { errorLine?: RunErrorLine | null }).errorLine)).toBe('Auto-start failed: boom')
+    expect(real.lastError).toBe(t('failure.viewFailed'))
+    expect(runErrorLineLog(real.lastErrorLine)).toBe('Auto-start failed: boom')
+    expect(state.error, 'not the scene overlay').toBe('')
   })
 
   it('does not overwrite when real.lastError is already set (lower level already populated error)', () => {

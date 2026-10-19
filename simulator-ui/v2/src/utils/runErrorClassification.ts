@@ -43,7 +43,7 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  */
 export type RunErrorLine =
   | { readonly kind: 'dict'; readonly key: MessageKey; readonly ref?: string | null; readonly detail?: string; readonly log?: string }
-  | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number }
+  | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number; readonly ref?: string | null }
   | { readonly kind: 'raw'; readonly text: string }
   | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string; readonly ref?: string | null }
 
@@ -75,7 +75,7 @@ export function runErrorLineLog(line: RunErrorLine | null | undefined): string |
 
 /** 048 S3: the server's correlation id behind a line (its own second line and `data-request-id`), else null. */
 export function runErrorLineRef(line: RunErrorLine | null | undefined): string | null {
-  return (line?.kind === 'code' || line?.kind === 'dict') && line.ref ? line.ref : null
+  return line && line.kind !== 'raw' && line.ref ? line.ref : null
 }
 
 /**
@@ -258,9 +258,12 @@ export function startRunErrorLine(e: unknown): RunErrorLine | null {
   if (!isGlobalLimitRefusal(e)) return null
   const raw = detailsOf409(e)?.max_active_runs
   const n = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null
-  if (n === null) return { kind: 'dict', key: 'runStart.limitBusy' }
-  if (n === 1) return { kind: 'dict', key: 'runStart.limitOne' }
-  return { kind: 'count', key: 'runStart.limitAll', count: n }
+  // 048 S3 (adversarial pass F3, AGENTS.md section 12): the refusal carries the request id of its answer, as every line.
+  const id = requestIdOf(e)
+  const ref = id ? { ref: id } : {}
+  if (n === null) return { kind: 'dict', key: 'runStart.limitBusy', ...ref }
+  if (n === 1) return { kind: 'dict', key: 'runStart.limitOne', ...ref }
+  return { kind: 'count', key: 'runStart.limitAll', count: n, ...ref }
 }
 
 /** The text of a failed start: the limit refusal in the interface language; every other error keeps `fallback`. */

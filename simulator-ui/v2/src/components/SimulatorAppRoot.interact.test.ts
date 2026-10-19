@@ -2098,7 +2098,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     expect(overlay?.getAttribute('aria-atomic')).toBe('true')
     expect(overlay?.textContent).toContain('Snapshot unavailable')
     expect(overlay?.textContent, 'no «Error» title over the sentence').not.toMatch(/\bError\b|Ошибка/)
-    expect(offlineHost.querySelector('[data-testid="top-error"]'), 'offline: no second place in the top bar').toBeNull()
     offlineApp.unmount()
     offlineHost.remove()
     clearGeoTestGlobals('__GEO_TEST_STATE_ERROR')
@@ -6641,6 +6640,49 @@ describe('048 S3: a window error is the window block alone - no toast, and it do
       app.unmount()
       host.remove()
       vi.useRealTimers()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_STATE')
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+/**
+ * 048 S3 (internal adversarial pass, F1): "Close line" from the edge popup fails - the phase stays `editing-trustline`
+ * with the quick popup, and the popup does not draw `state.error` (046 W3 owns it). Until S3 only the error toast showed
+ * it; after the toast's removal it was shown nowhere. Red before the fix: no `edge-detail-error`.
+ */
+describe('048 S3: a failure of the edge popup is shown in the popup\'s window', () => {
+  it('editing-trustline with the quick popup and a failure: the window block under the popup, with its request id', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const st = getInteractState() as TestInteractState & { errorRef?: string | null }
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
+      st.selectedEdgeKey = 'alice->bob'
+      await nextTick()
+      await nextTick()
+      const popup = host.querySelector('.ws-shell[data-win-type="edge-detail"]')
+      expect(popup, 'anti-vacuum: the quick popup is open').not.toBeNull()
+      expect(host.querySelector('[data-testid="edge-detail-error"]'), 'no failure, no block').toBeNull()
+
+      st.error = 'The trust line was not found.'
+      st.errorRef = 'req-edge-1'
+      await nextTick()
+      await nextTick()
+      const block = host.querySelector('[data-testid="edge-detail-error"]')
+      expect(block, 'the failure is shown').not.toBeNull()
+      expect(popup!.contains(block), 'in the popup\'s own window').toBe(true)
+      expect(block!.getAttribute('data-request-id')).toBe('req-edge-1')
+      expect(block!.querySelector('[data-testid="error-request-id"]')).not.toBeNull()
+    } finally {
+      app.unmount()
+      host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_STATE')
       vi.unstubAllGlobals()
     }

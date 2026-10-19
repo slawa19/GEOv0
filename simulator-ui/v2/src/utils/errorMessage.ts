@@ -42,7 +42,7 @@ export function requestIdOf(e: unknown): string | null {
  * 048 S3 (decision 3, «одна форма ошибки»): a failure as the viewer is shown it - the sentence of the interface (`text`)
  * and, APART from it, the server's correlation id (`ref`, AGENTS.md section 12): the id is a muted second line
  * («код запроса: <id>» / «request id: <id>») and `data-request-id`, never glued into the sentence. `detail` is the
- * failure's identifiers - the HTTP status and the code («HTTP 409 CONFLICT»), or a class name - for the block's `title`
+ * failure's identifiers - the HTTP status and the code («HTTP 409 CONFLICT») - for the block's `title`
  * (data, not prose: no language of its own). `log` is the full technical text (with the server's or the runtime's own
  * English message) for one console line only. Neither is drawn.
  */
@@ -73,16 +73,15 @@ function identifiersOf(e: unknown): { status: number | null; code: string | null
 
 /**
  * 048 S3: the identifiers of a failure, for the `title` of the block - the HTTP status and the code of an answer
- * («HTTP 409 CONFLICT»), the class name of a value that is not one («TypeError»). No message: a title is said by the
- * screen too, and the server's or the runtime's English prose has no place on a screen of another language. Null when
- * there is nothing to name.
+ * («HTTP 409 CONFLICT»). No message and no class name (decision 3; adversarial pass F5: «TypeError» stood in the title of
+ * "no connection"): a title is said by the screen too. A value that is not an answer has no title - its class name and
+ * message are the console line (`errorLog`). Null when there is nothing to name.
  */
 export function errorDetail(e: unknown): string | null {
-  const { status, code, name } = identifiersOf(e)
+  const { status, code } = identifiersOf(e)
   const parts: string[] = []
   if (status !== null) parts.push(`HTTP ${status}`)
   if (code) parts.push(code)
-  if (status === null && !code && name) parts.push(name)
   return parts.length ? parts.join(' ') : null
 }
 
@@ -95,8 +94,8 @@ export function errorLog(e: unknown): string | null {
   if (e === null || e === undefined) return null
   if (typeof e === 'string') return e.trim() || null
   const message = baseMessage(e).trim()
-  const { status, code } = identifiersOf(e)
-  const lead = errorDetail(e) ?? ''
+  const { status, code, name } = identifiersOf(e)
+  const lead = errorDetail(e) ?? (name ?? '')
   if (!message || message === lead) return lead || null
   if (status !== null && !code && message.startsWith(`HTTP ${status}`)) return message
   return lead ? `${lead}: ${message}` : message

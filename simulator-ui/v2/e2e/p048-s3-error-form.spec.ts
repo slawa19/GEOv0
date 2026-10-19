@@ -87,6 +87,29 @@ for (const lang of ['en', 'ru'] as Lang[]) {
     })
   })
 
+  // Internal adversarial pass F1 (2026-10-19): "Close line" from the edge popup - before the fix shown nowhere once the toast was gone.
+  test(`048 S3 [${lang}]: "Close line" from the edge popup refused - the block in the popup's window, with its id`, async ({ page }) => {
+    await openWith(page, lang, async (p) => {
+      await p.route(`**/simulator/runs/${RUN_ID}/actions/trustline-close`, (r) =>
+        json(r, { code: 'TRUSTLINE_NOT_FOUND', message: 'Trustline not found' }, 404, { 'X-Request-ID': 'req-s3-edge' }))
+    })
+    await ready(page, true)
+    await page.locator('[data-testid="details-toggle"]').click()
+    const nav = page.getByTestId('graph-navigator')
+    await nav.getByTestId('graph-navigator-summary').click()
+    await nav.getByTestId('graph-navigator-open-edge').click()
+    const edge = page.locator('.ws-shell[data-win-type="edge-detail"]')
+    await expect(edge.locator('[data-testid="edge-detail-popup"]')).toBeVisible()
+    await page.locator('[data-testid="details-toggle"]').click()
+    const close = edge.getByTestId('edge-close-line-btn')
+    await close.click() // arm
+    await close.click() // confirm
+    await expectShown(page, 'edge-detail-error', lang, 'req-s3-edge', /^HTTP 404 TRUSTLINE_NOT_FOUND$/)
+    await expect(edge.getByTestId('edge-detail-error'), 'in the window of the popup').toBeVisible()
+    await expect(page.getByTestId('edge-detail-error').getByTestId('error-text')).toHaveText(t('actionError.TRUSTLINE_NOT_FOUND', {}, lang))
+    await neverShown(page, 'error-toast')
+  })
+
   test.describe(`048 S3 [${lang}]: the run's error line and the scene's failure`, () => {
     test('a failed status read: one sentence, no «Error» before it, the id on its own line, the status in the title', async ({ page }) => {
       await openWith(page, lang, async (p) => {
