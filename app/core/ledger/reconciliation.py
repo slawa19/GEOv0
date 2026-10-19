@@ -55,10 +55,14 @@ THE HISTORY IS STREAMED, NOT HELD (047 `T4703`, 2026-10-19). Every journal entry
 only how they are read: through server-side cursors (`_streamed`), `_STREAM_BATCH_ROWS` at a time, inside the
 caller's one snapshot. Until then the journal and the envelopes with their decoded intents were materialised
 whole, ≈6.5 KB of peak memory per operation (044 stage 2), so one run's peak grew with the history without
-bound. What stays in memory now is O(edges): the per-edge sums, the debts, the offsets, and the findings
-themselves; criterion (b) holds one envelope and its entries at a time (`_streamed_criterion_b`, a merge of the envelopes
-ordered by id with the entries ordered by operation id). Rows READ still grow with the history - detection
-reads every entry - rows HELD do not.
+bound. The whole history is no longer materialised; what IS retained depends on the number of edges (the per-edge
+sums, the debts, the offsets), on the findings - ALL of them stay in memory, `MAX_STORED_FINDINGS` limits only what is
+serialised, so a history in which every operation is corrupted still grows with it -, on the batch payloads
+(`_STREAM_BATCH_ROWS` rows of a read) and on the largest single operation (criterion (b) holds one envelope and its
+entries at a time: `_streamed_criterion_b`, a merge of the envelopes ordered by id with the entries ordered by
+operation id). Rows READ still grow with the history - detection reads every entry. The server's work does too: the
+ordered reads sort every row of the equivalent before the first batch is returned, bounded per fetch by
+`statement_timeout` (spec 047 Changelog, 2026-10-19 fix-delta).
 
 THE THREAT MODEL IS NARROW, AND THE WHOLE OF IT IS STATED. `docs/ru/02-protocol-spec.md` §11.2.1 names
 the comparison of `debts` with the history that produced them as the real detector, and §11.6 asks for
@@ -366,7 +370,8 @@ class _Entry:
 
 #: 047 `T4703`: rows per round trip of the verifier's streamed reads, and so the most rows of one read held at once.
 #: An envelope row carries its decoded intent (≈6.5 KB per operation measured in 044 stage 2, the journal and
-#: transaction rows far less), so a batch costs ≈1.7 MB at most; the round trips it adds are ≈1 per 256 rows.
+#: transaction rows far less), so a batch of envelopes of that size is ≈1.7 MB - more if one intent is larger; the round
+#: trips it adds are ≈1 per 256 rows.
 _STREAM_BATCH_ROWS = 256
 
 
@@ -961,6 +966,24 @@ def _criterion_b(
     return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
 
 
+async def _in_operation_order(journal: AsyncIterator[Any]) -> AsyncIterator[Any]:
+    """The journal rows as they come, refusing any row whose operation id is below the previous row's."""
+
+    previous: uuid.UUID | None = None
+    async for row in journal:
+        if previous is not None and row.operation_id < previous:
+            raise ReconciliationReadError(
+                f"journal rows read out of operation order: {row.operation_id} after {previous}"
+            )
+        previous = row.operation_id
+        yield row
+
+
+async def _drain(rows: AsyncIterator[Any]) -> None:
+    async for _row in rows:
+        pass
+
+
 async def _streamed_criterion_b(
     session: Any, equivalent_id: uuid.UUID
 ) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
@@ -972,17 +995,24 @@ async def _streamed_criterion_b(
     without rows here receives none. A row whose operation is not among the envelopes (possible only with the
     foreign key off) is passed over here, as the grouping left it unread; criterion (a) has counted and summed it
     (`_journal_sums`). The envelopes are examined in id order, as the sort by `id.bytes` examined them.
+
+    THE ORDER GUARD (047 `T4703`, fix-delta after §15): the merge is sound only over the order it assumes, so a stream
+    out of it is an error (`ReconciliationReadError`), never a verdict. Detected exactly: two envelopes whose ids do not
+    strictly increase, and ANY two consecutive journal rows whose operation id decreases - every row of the journal
+    stream passes `_in_operation_order`, and the rows left after the last envelope are read to the end
+    (`_drain`), so a disorder hidden behind a row ahead of every envelope is still reached. Findings computed before
+    the disorder is reached are discarded with the error. Not detected: a stream that is ordered but incomplete or
+    altered (that is the query's, and the snapshot's, to get right).
     """
 
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
     async with aclosing(_streamed(session, _operations(equivalent_id))) as operations, aclosing(
         _streamed(session, _entries_by_operation(equivalent_id))
-    ) as journal:
+    ) as journal, aclosing(_in_operation_order(journal)) as rows:
         previous_op: uuid.UUID | None = None
-        pending = await anext(journal, None)
+        pending = await anext(rows, None)
         async for op in operations:
-            # The merge is sound only over the order it assumes; a stream out of it is an error, never a verdict.
             if previous_op is not None and not previous_op < op.id:
                 raise ReconciliationReadError(f"envelopes read out of id order: {op.id} after {previous_op}")
             previous_op = op.id
@@ -990,14 +1020,12 @@ async def _streamed_criterion_b(
             while pending is not None and pending.operation_id <= op.id:
                 if pending.operation_id == op.id:
                     entries.append(_entry(pending))
-                following = await anext(journal, None)
-                if following is not None and following.operation_id < pending.operation_id:
-                    raise ReconciliationReadError(
-                        f"journal rows read out of operation order: {following.operation_id} after "
-                        f"{pending.operation_id}"
-                    )
-                pending = following
+                pending = await anext(rows, None)
             findings.extend(_examine_operation(op, entries, equivalent_id, coverage))
+        # The rows after the last envelope belong to no envelope here (criterion (b) reads none of them, as before), but
+        # their ORDER is still checked: a row ahead of every envelope stops the merge from advancing, and the disorder
+        # it hides lies in this suffix. Ordered as the query asks, the suffix is empty or orphans only.
+        await _drain(rows)
     return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
 
 

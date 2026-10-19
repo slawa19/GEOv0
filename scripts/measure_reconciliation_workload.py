@@ -19,7 +19,8 @@ acceptance checks are not run: the reconciliation the command then runs is the c
 `--measure CODE` (047 `T4703`) seeds nothing: over the database `DATABASE_URL` names, it runs the verifier
 (`verify_journal_equals_change`) of that equivalent in one verification snapshot `--repeat` times and prints, per
 run, the verdict, `entries_read`, the wall time, and the PEAK of Python allocations (`tracemalloc`, started after a
-warm-up run, so compiled statements and lazy imports are not counted). The timed runs are without `tracemalloc`;
+warm-up run and a `gc.collect()`, so compiled statements, lazy imports and the previous run are not counted; stopped
+in `finally`). The timed runs are without `tracemalloc`;
 the peak runs are separate, because tracing slows the run. It reads only; it never publishes a result or holds:
 
     python scripts/measure_reconciliation_workload.py --measure UAH --repeat 3
@@ -94,6 +95,7 @@ async def _run(args) -> int:
 
 
 async def _measure(code: str, repeat: int) -> int:
+    import gc
     import json
     import time
     import tracemalloc
@@ -120,15 +122,21 @@ async def _measure(code: str, repeat: int) -> int:
         await _once(equivalent_id)  # warm-up: statement compilation and lazy imports are not the history
         for index in range(repeat):
             outcome, elapsed = await _once(equivalent_id)
+            outcome_text = (outcome.status, outcome.entries_read, outcome.transactions_read)
+            examined = outcome.detail()["criterion_b"]["operations_examined"]
+            del outcome
+            gc.collect()  # the previous run's garbage is not this run's peak
             tracemalloc.start()
-            tracemalloc.reset_peak()
-            _traced, traced_elapsed = await _once(equivalent_id)
-            _current, peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+            try:
+                live_before = tracemalloc.get_traced_memory()[0]
+                _traced, traced_elapsed = await _once(equivalent_id)
+                peak = tracemalloc.get_traced_memory()[1] - live_before
+            finally:
+                tracemalloc.stop()
+            del _traced
             print(json.dumps({
-                "run": index + 1, "equivalent": code, "status": outcome.status, "entries_read": outcome.entries_read,
-                "operations_examined": outcome.detail()["criterion_b"]["operations_examined"],
-                "transactions_read": outcome.transactions_read, "wall_s": round(elapsed, 3),
+                "run": index + 1, "equivalent": code, "status": outcome_text[0], "entries_read": outcome_text[1],
+                "operations_examined": examined, "transactions_read": outcome_text[2], "wall_s": round(elapsed, 3),
                 "peak_mib": round(peak / 2**20, 2), "wall_s_under_tracemalloc": round(traced_elapsed, 3),
             }))
     finally:
