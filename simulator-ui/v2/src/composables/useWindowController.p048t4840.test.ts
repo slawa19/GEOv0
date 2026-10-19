@@ -287,6 +287,32 @@ describe('048 T4840 (sibling): a closed participant card stays closed while its 
     })
   }
 
+  it('switched to another participant with a follow pending: the card stays on the new participant', async () => {
+    // Internal adversarial pass on the fix-delta, 2026-10-19 (P3): the guard compares the participant, not "any card" - a
+    // pending follow for the old participant reverted a switch to the new one (also before T4840).
+    vi.useFakeTimers()
+    const h = mountHarness()
+    try {
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'alice', anchor: { x: 100, y: 100 } })
+      await nextTick()
+      h.center.value = { x: 140, y: 120 }
+      await nextTick()
+      await nextTick()
+
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'bob', anchor: { x: 300, y: 300 } })
+      vi.advanceTimersByTime(500)
+      await nextTick()
+      await nextTick()
+
+      const cards = h.wm.windows.value.filter((w) => w.type === 'node-card')
+      expect(cards).toHaveLength(1)
+      expect((cards[0]!.data as { nodeId: string }).nodeId).toBe('bob')
+    } finally {
+      h.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('replaced by a line window with a follow pending: the follow does not bring the card back over the line', async () => {
     // Internal adversarial pass, 2026-10-19 (finding 2): the pending follow re-opened the card after a line window had
     // replaced it, and the card in turn pushed the line window out - the T4840 dead end with no participant click at all.
