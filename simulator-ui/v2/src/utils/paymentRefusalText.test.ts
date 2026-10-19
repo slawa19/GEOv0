@@ -154,7 +154,7 @@ describe('F-028-48: display and input at the equivalent precision', () => {
   it('the system balance bar shows fractions, in the equivalent of its numbers', () => {
     const host = document.createElement('div')
     createApp({ render: () => h(SystemBalanceBar, { balance: { totalUsed: '0.30', totalAvailable: '1234.5',
-      equivalent: 'HOUR', activeTrustlines: 2, activeParticipants: 2, utilization: 0.1 } }) }).mount(host)
+      equivalent: 'HOUR', activeTrustlines: 2, activeParticipants: 2, utilization: 0.1, clearingChange: null } }) }).mount(host)
     expect(host.textContent).toContain('0.30 HOUR')
     expect(host.textContent).toContain('1234.50 HOUR')
   })

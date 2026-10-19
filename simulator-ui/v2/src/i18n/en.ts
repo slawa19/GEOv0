@@ -522,6 +522,8 @@ export const en = {
     trustlines: 'Trust lines',
     participants: 'Participants',
     utilization: 'Limits in use',
+    // 039 slice D: the total debt just before and just after the last clearing, shown above the current total.
+    clearingChange: 'clearing: was {before} → became {after} {unit}',
   },
 
   /**

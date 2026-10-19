@@ -201,8 +201,24 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   (its resize and its frame-and-axe test in each theme). Cost from CI numbers only: the removed
  *   `toast-error`, the same gesture (a clearing the backend refuses) with the same checks, took 4.99 and 5.08 s in CI run
  *   39256014175; forecast of the step: about 536 + 10.1 = about 546 s, as on `main` (546 s in that run).
+ * - 2026-10-19 (039 slice D, "was -> now" of the total debt): gate 134 -> 136, full 226 -> 228. One new file,
+ *   `debt-before-after.qa.ts`, two tests in the gate (`[ru]`, `[en]`): a payment and a clearing written in one call
+ *   state "was 55.00 -> now 25.00", a status frame keeps the pair, a clearing that changes nothing drops it, the next
+ *   payment states its own pair. Red on the base `57505f12` in both (no pair at all). It replaces the debug-only
+ *   reproducer R7 (`p039-repro/`, not counted). Without the fake clock: 3.4-3.8 s each locally; no CI number for it
+ *   yet - forecast of the step from CI figures only: about 545 s (the line above) or 501-505 s (later CI runs named in
+ *   the brief of T3940), plus about 2 x 5 s - about 511-555 s, under 600 s.
+ * - 2026-10-19 (039 slice D, internal adversarial pass, P3 measured): gate 136 -> 137, full 228 -> 229. One test of
+ *   `debt-before-after.qa.ts`: the 100-node scene, Russian, 1366x768 - a "was" leaves the bottom bar's box unchanged
+ *   and is whole on screen. The first build wrote the pair inside the row and wrapped it (42 -> 80 px, red here); the
+ *   "was" now sits above the bar out of its flow. 3.6 s locally; forecast as above plus about 5 s.
+ * - 2026-10-19 (039 slice D, advisor's decision (a) and §15 Codex): count unchanged. `debt-before-after.qa.ts` now holds
+ *   that only a clearing states "was -> now" (a payment before it states nothing, a payment after it leaves the pair),
+ *   and that "now" is seen as well as "was" (R7 held both; the first form of the file only "was").
+ * - 2026-10-19 (merge of 039 D into 048 S3, orchestrator): gate 137, full 229 - 039 D +3 gate / +3 full on 134 / 226,
+ *   048 S3 net 0 (toast-error -2/-6, clearing-refused +2/+6); last CI with 137 tests: 569 s (run 39269368139).
  */
-export const EXPECTED = { gate: 134, full: 226 }
+export const EXPECTED = { gate: 137, full: 229 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

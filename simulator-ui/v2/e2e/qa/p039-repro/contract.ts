@@ -7,7 +7,7 @@
  *
  * 039 slice B, PR 1 (2026-10-12): the legend, its entries and the data tokens EXIST now, under exactly these names
  * (`src/components/Legend.vue`, `src/vizMapping.ts` `DATA_TOKEN`). Nothing was renamed. Added: the entries the design
- * decisions of slice B brought (`LEGEND_ENTRIES_ALL`) and the fifth token, the neutral. `DEBT` is still slice D's.
+ * decisions of slice B brought (`LEGEND_ENTRIES_ALL`) and the fifth token, the neutral. `DEBT` - slice D, below.
  */
 
 /** Net roles a legend explains (spec 039, owner's decision R3 and amendment P-1). A hub is a shape or a ring, not a colour. */
@@ -50,7 +50,12 @@ export const ALL_THEME_IDS = ['hud', 'saas', 'library', 'shadcn'] as const
 // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
 export const THEME = { switcher: { testId: 'theme-select' }, root: '.root', attribute: 'data-theme' } as const
 
-/** The total debt "was -> now" after a clearing (spec 039, P-5): the bar it is shown in, and the two values, in this order. */
+/**
+ * The total debt "was -> now" (spec 039, P-5): the bar it is shown in, and the two values, in this order. 039 slice D
+ * (2026-10-19): they EXIST now under exactly these names (`src/components/SystemBalanceBar.vue`) - the two figures of
+ * the last clearing's sentence above the bar ("after" is the clearing's own after-total, not the bar's current figure:
+ * advisor's decision 2026-10-19, option (a)). Read by the counted `e2e/qa/debt-before-after.qa.ts` (R7 is gone).
+ */
 export const DEBT = {
   bar: '[data-testid="system-balance"]',
   before: '[data-testid="total-debt-before"]',

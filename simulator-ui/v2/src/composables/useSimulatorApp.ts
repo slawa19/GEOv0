@@ -593,6 +593,7 @@ export function useSimulatorApp(opts?: {
     sourcePath: '',
     snapshot: null,
     selectedNodeId: null,
+    debtChange: null,
   })
 
   const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
@@ -937,7 +938,7 @@ export function useSimulatorApp(opts?: {
       }
     }
   }
-  const systemBalance = useSystemBalance(snapshotRef).balance
+  const systemBalance = useSystemBalance(snapshotRef, () => state.debtChange).balance
 
   // `fxAndRender` is initialized later (it needs layout + camera), but layout/resize
   // code may want to wake the render loop. IMPORTANT: this must be a stable wrapper.
