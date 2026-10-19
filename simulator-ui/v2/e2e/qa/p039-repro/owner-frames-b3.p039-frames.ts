@@ -49,14 +49,14 @@ async function bootQuery(page: Page, snapshot: QaSnapshot, query: string): Promi
 /** The switcher, and beside it the list of what it offers with the chosen one marked: a native popup is not in a screenshot. */
 async function switcherSheet(page: Page, path: string): Promise<void> {
   await openDetails(page) // 043 S1: the switcher is behind "Подробнее"
-  const select = page.getByRole('combobox', { name: 'UI theme' })
+  const select = page.getByTestId('theme-select') // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
   await expect(select, 'the theme switcher is on screen').toBeVisible()
   const options = await select.evaluate((el) => {
     const s = el as HTMLSelectElement
     return [...s.options].map((o) => ({ value: o.value, text: o.text, selected: o.selected }))
   })
   await page.evaluate((options) => {
-    const s = document.querySelector('select[aria-label="UI theme"]') as HTMLSelectElement
+    const s = document.querySelector('select[data-testid="theme-select"]') as HTMLSelectElement
     const r = s.getBoundingClientRect()
     const list = document.createElement('div')
     list.id = 'p039-b3-switcher-list'

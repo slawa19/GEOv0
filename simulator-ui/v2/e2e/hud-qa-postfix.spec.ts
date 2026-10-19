@@ -31,8 +31,9 @@ function getHomeUrl(testInfo: TestInfo) {
 
 async function measureBottomBar(page: Page) {
   return page.evaluate(() => {
-    // Try aria-label first, then fall back to last .hud-bar
-    const byAria = document.querySelector('[aria-label="Bottom bar"]') as HTMLElement | null
+    // Try the bottom bar's service row first (046 wave 1: by test id - its accessible name is the dictionary's), then
+    // fall back to last .hud-bar
+    const byAria = document.querySelector('[data-testid="bottom-details-row"]') as HTMLElement | null
     const allBars = Array.from(document.querySelectorAll('.hud-bar')) as HTMLElement[]
     const el = byAria || allBars[allBars.length - 1] || null
     if (!el) return null
@@ -41,7 +42,7 @@ async function measureBottomBar(page: Page) {
       clientWidth: el.clientWidth,
       offsetWidth: el.offsetWidth,
       hasOverflow: el.scrollWidth > el.clientWidth,
-      selector: byAria ? '[aria-label="Bottom bar"]' : 'last .hud-bar',
+      selector: byAria ? '[data-testid="bottom-details-row"]' : 'last .hud-bar',
       className: el.className
     }
   })

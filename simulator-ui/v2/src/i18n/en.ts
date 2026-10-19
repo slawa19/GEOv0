@@ -9,7 +9,10 @@ import { plural } from './messages'
  * Wave 0 (T4601) brought the language switcher; wave 2 (T4603) the windows of the actions - payment, trust line,
  * clearing - with the texts they compose (`interactStrings.ts`, the refusal maps of `utils/paymentRefusalText.ts`, the
  * notices of `trustlinesSourceState.ts`, the toasts and history lines of `useInteractMode.ts`) and the analytics panel.
- * Wave 2 keeps every English text that existed byte for byte; a new key is new text. See spec 046.
+ * Wave 2 keeps every English text that existed byte for byte; a new key is new text. Wave 1 (T4602; narrowed, then
+ * full after 048 S2) the first screen: the top bar and its "Details" rows, the action bar, the onboarding hint, the
+ * bottom bar, the legend, "Find on graph", the line tooltip, the recent actions and the notifications - with the words
+ * of spec 048 §G where §G names them (those English texts changed with it). See spec 046.
  */
 export const en = {
   locale: {
@@ -385,12 +388,12 @@ export const en = {
     },
   },
   // ------------------------------------------------------------------------------------------------------------------
-  // 046 wave 1 (T4602), narrowed by the owner's word 2026-10-18 (the first screen is under review; its strings are NOT
-  // moved yet): the run's stop reason, the start the limit of runs refused and its retry, the scenario lock under a
-  // live run (BACKLOG 043-3) and the accessible names of the window shell (wave 2 finding 9).
+  // 046 wave 1 (T4602): narrowed by the owner's word 2026-10-18 - the run's stop reason, the start the limit of runs
+  // refused and its retry, the scenario lock under a live run (BACKLOG 043-3), the accessible names of the window shell
+  // (wave 2 finding 9); full after 048 S2 (2026-10-19) - the rest of the first screen, below.
   // ------------------------------------------------------------------------------------------------------------------
 
-  /** The few top bar texts of the narrowed wave 1 (`TopBar.vue`); the rest of the bar keeps its literals until its review. */
+  /** The top bar (`TopBar.vue`): its first row, the rows behind "Details", the error line and the stall alert. */
   topBar: {
     /** BACKLOG 043-3: the scenario cannot be changed under a live run; the select is disabled and says why. */
     scenarioLocked: 'Stop the run to choose another scenario.',
@@ -405,6 +408,179 @@ export const en = {
      * reconnecting or closed) - the visitor's form of the SSE badge, which is `?debug=1`'s.
      */
     noConnection: 'no connection to the server',
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // 046 wave 1, full (after 048 S2): the rest of the top bar. The words are 048 §G where §G names them; elsewhere the
+    // English text is the one that was there.
+    // ----------------------------------------------------------------------------------------------------------------
+    /** The network on screen when the source is the offline snapshot (no scenario of a server). */
+    offlineDemo: 'offline demo',
+    /** The state of the network, as words (043 decision 1); a run state outside the set shows `pending` or `noRun`. */
+    state: {
+      offline: 'snapshot without a server',
+      running: 'live',
+      paused: 'paused',
+      created: 'starting',
+      stopping: 'stopping',
+      stopped: 'stopped',
+      error: 'error',
+      pending: '…',
+      noRun: 'no run',
+    },
+    /** "Поток" (the owner's word, 043): pause and resume the automatic payments. */
+    flow: 'Flow',
+    flowPause: 'Pause automatic payments',
+    flowResume: 'Resume automatic payments',
+    details: 'Details',
+    /** §G "Network <name>": the label of the full name behind "Details". */
+    network: 'Network',
+    detailsRowAria: 'Top bar',
+    modeAria: 'Mode',
+    themeGroupAria: 'Theme',
+    themeLabel: 'Theme',
+    themeAria: 'UI theme',
+    themeSaas: 'Calm',
+    themeHud: 'Contrast (HUD)',
+    runControlsAria: 'Run controls',
+    scenarioLabel: 'Scenario',
+    scenarioAria: 'Scenario',
+    scenarioPlaceholder: '— select —',
+    start: 'Start',
+    stop: 'Stop',
+    tempoGroupAria: 'Auto-payment tempo',
+    tempoLabel: 'Auto-payment tempo, %',
+    tempoAria: 'Auto-payment tempo, percent',
+    apply: 'Apply',
+    noScenarios: 'No scenarios could be loaded — try again later',
+    statusAria: 'Status',
+    paymentsAria: 'Payments',
+    payments: 'Payments: {ok} of {total} went through',
+    paymentsNone: 'No payments yet',
+    stallAria: 'Payments stalled',
+    /** 048 decision 2: the one diagnosis a visitor gets; it claims no more than the mechanism (`consec_all_rejected_ticks`). */
+    stall: 'Payments are not going through: limits are exhausted — run clearing or raise a limit',
+  },
+
+  /**
+   * 046 wave 1, full: the three actions of the protocol in the first row (`ActionBar.vue`). The idle hint of a button says
+   * what the action RESULTS in, not its name again (048 item 13 (a)). Why a button is disabled: `card.busyReason` and
+   * `card.flowOpenReason` are the same sentences and are read from there.
+   */
+  actions: {
+    aria: 'Interact actions',
+    payment: 'Send Payment',
+    trustline: 'Manage Trustline',
+    clearing: 'Run Clearing',
+    paymentHint: 'The amount reaches the recipient along a chain of trust.',
+    trustlineHint: 'Sets how much one participant may owe another.',
+    clearingHint: 'Debts that run around a cycle cancel out — each participant in the cycle owes less.',
+    cancellingTitle: 'Cancelling… please wait for the operation to finish.',
+    cancellingHint: 'Cancelling… please wait.',
+    disabled: 'Actions are disabled by backend feature flags.',
+    /**
+     * 048 S2 hand-over (P2-2): a visitor has no Start since S2, so the reason no longer sends them to one. A reload makes
+     * the opening's one attempt again (`useInteractAutoBootstrapRun.ts`: an ended run is replaced by a new one).
+     */
+    noRun: 'The actions need a live run. If the run has ended, reload the page to start a new one.',
+    busyHintAria: 'Action Bar busy hint',
+    lockedHintAria: 'Action Bar locked hint',
+  },
+
+  /** 043 S1 / 048 item 13 (a): the one onboarding hint - the three actions in the words of the protocol. */
+  onboarding: {
+    protocol: 'A payment travels along a chain of trust; a trust line is the limit up to which one trusts another; clearing cancels debts around a cycle.',
+    explore: 'Choose a participant and hover over one of its lines: who trusts whom and who owes whom.',
+    close: 'Close hint',
+  },
+
+  /** The bottom bar (`BottomBar.vue`): the view settings behind "Details" and "Fit network" of the main row. */
+  bottomBar: {
+    rowAria: 'Bottom bar',
+    viewAria: 'View settings',
+    equivalent: 'Equivalent',
+    layout: 'Layout',
+    layoutOption: {
+      'admin-force': 'cloud',
+      'community-clusters': 'groups',
+      'balance-split': 'by balance',
+      'type-split': 'by type',
+      'status-split': 'by status',
+    },
+    toolsAria: 'Tools',
+    fitNetwork: 'Fit network',
+  },
+
+  /** The total debt of the bottom row and the network figures behind "Details" (`SystemBalanceBar.vue`). */
+  systemBalance: {
+    balanceAria: 'System balance',
+    metricsAria: 'System metrics',
+    totalDebt: 'Total debt',
+    available: 'Available for payments',
+    trustlines: 'Trust lines',
+    participants: 'Participants',
+    utilization: 'Limits in use',
+  },
+
+  /**
+   * The legend of the graph (`Legend.vue`). The node card says the same roles in its own words until wave 3
+   * (`vizMapping.ts` ROLE_TEXT, English): the card is English as a whole until then.
+   */
+  legend: {
+    title: 'Node colour — balance',
+    titleWithEquivalent: 'Node colour — balance · {eq}',
+    help: 'Net position: what others owe minus what this participant owes.',
+    entry: {
+      debtor: 'owes more',
+      creditor: 'is owed more',
+      neutral: 'even',
+      unknown: 'unknown',
+      frozen: 'frozen',
+      hub: 'hub',
+      person: 'person',
+      organisation: 'organisation',
+    },
+  },
+
+  /** "Find on graph" behind "Details" (`GraphNavigator.vue`): the keyboard path to participants and lines. */
+  navigator: {
+    aria: 'Graph navigator',
+    summary: 'Find on graph',
+    participant: 'Participant',
+    line: 'Line',
+    openParticipant: 'Open participant',
+    openLine: 'Open line',
+    participantOpened: 'Participant opened: {name}',
+    lineOpened: 'Line opened: {name}',
+    lineDisabled: 'A line opens on the live network (server source) when no action is in progress.',
+  },
+
+  /** The tooltip of a hovered line (`EdgeTooltip.vue`): a trust line runs creditor -> debtor (`from -> to`). */
+  edgeTooltip: {
+    aria: 'Edge tooltip',
+    trust: '{from} trusts {to} up to {limit}',
+    debt: '{to} owes {from} {used} · {available}',
+    available: 'available {amount}',
+    availableUnknown: 'available —',
+    overLimit: 'over limit by {amount}',
+  },
+
+  /** The short history of the person's actions on the first view (`InteractHistoryLog.vue`). */
+  recentActions: {
+    aria: 'Action history',
+    title: 'Recent actions',
+  },
+
+  /** The notifications of the actions (`SuccessToast.vue`, `ErrorToast.vue`); their texts are the actions'. */
+  toast: {
+    successAria: 'Success notification',
+    errorAria: 'Error notification',
+    dismiss: 'Dismiss',
+  },
+
+  /** The scene's loading and error overlay of the root. */
+  scene: {
+    loading: 'Loading…',
+    error: 'Error',
   },
 
   /**
@@ -439,6 +615,13 @@ export const en = {
   runLine: {
     idleStopped: 'The server stopped the run: nobody watched it for a long time. To start again, reload the page.',
     zeroIntensity: 'A tempo of 0 makes no payments: enter a tempo from 1 to 100. To stop the payments, pause.',
+    /**
+     * 046 wave 1, full (048 S2 hand-over P2-2): a run the operator stopped (`admin_stop`, `admin_stop_all`) and a run the
+     * server ended with an error. A visitor has no Start since 048 S2: the way back is the reload, as for the idle stop.
+     * The error is named by its code only (046 decision 3: the server's English prose is not shown; the code correlates).
+     */
+    operatorStopped: 'The operator stopped the run. To start again, reload the page.',
+    errorStopped: 'The run stopped with an error ({code}). To start again, reload the page.',
   },
 
   /**
@@ -449,5 +632,7 @@ export const en = {
     window: 'Window',
     closeWindow: 'Close window',
     clearingTitle: 'Clearing',
+    /** 046 wave 1, full: the name of the layer the windows live in (the root's `TransitionGroup`). */
+    layer: 'Window layer',
   },
 } as const

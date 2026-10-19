@@ -123,3 +123,42 @@ describe('046 wave 1 (§15 Codex) - every line of the run error line is a value 
     expect(holder).toEqual({ lastError: '', lastErrorLine: null })
   })
 })
+
+/**
+ * 046 wave 1, full (048 S2 hand-over P2-2, 2026-10-19): since 048 S2 a visitor has no Start, and a run that ENDED left them
+ * stuck without a word of what to do - only the idle stop said "reload the page". The line of the run now says it for a
+ * stop by the operator and for a run ended by an error (with its code, in the interface language; 046 decision 3). The
+ * administrator's own Stop (`user_stop`) and any other reason write no line, as before (no new state, no new control).
+ * Red before on `main` `efc12f62`: an operator stop had no line (`null`), a run in `error` showed `CODE: message`.
+ */
+describe('046 wave 1, full - a run that ended says what to do (the reload), in the interface language', () => {
+  const status = (state: string, stop_reason: string | null = null, last_error: { code: string; message: string; at: string } | null = null) =>
+    ({ state, stop_reason, last_error })
+  const always = () => true
+
+  it('a stop by the operator (one run, or all runs): the reload', () => {
+    for (const reason of ['admin_stop', 'admin_stop_all']) {
+      const line = runStatusErrorLine(status('stopped', reason), always)
+      expect(line, reason).toEqual({ kind: 'dict', key: 'runLine.operatorStopped' })
+      expect(renderRunErrorLine(line!, 'en')).toBe('The operator stopped the run. To start again, reload the page.')
+      expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановил оператор. Чтобы запустить снова, перезагрузите страницу.')
+    }
+  })
+
+  it('a run ended by an error: the code and the reload, not the server\'s English prose; the step refusal keeps its text', () => {
+    const line = runStatusErrorLine(status('error', null, { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }), always)
+    expect(line).toEqual({ kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED' })
+    expect(renderRunErrorLine(line!, 'en')).toBe('The run stopped with an error (REAL_MODE_TICK_FAILED). To start again, reload the page.')
+    expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановился с ошибкой (REAL_MODE_TICK_FAILED). Чтобы запустить снова, перезагрузите страницу.')
+    expect(renderRunErrorLine(line!, 'ru')).not.toContain('tick failed')
+    const step = runStatusErrorLine(status('error', null, { code: 'CLEARING_REFUSED', message: 'x', at: 't' }), always)
+    expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })
+  })
+
+  it('counter-checks: the idle stop keeps its line; the administrator\'s Stop, another reason and no reason write none; a live run keeps CODE: message', () => {
+    expect(runStatusErrorLine(status('stopped', 'idle_no_subscribers'), always)).toEqual({ kind: 'dict', key: 'runLine.idleStopped' })
+    for (const reason of ['user_stop', 'something_else', null]) expect(runStatusErrorLine(status('stopped', reason), always), String(reason)).toBeNull()
+    expect(runStatusErrorLine(status('running', 'admin_stop'), always), 'the reason of a run that is not stopped says nothing').toBeNull()
+    expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always)).toEqual(rawRunErrorLine('INTERNAL_ERROR: boom'))
+  })
+})

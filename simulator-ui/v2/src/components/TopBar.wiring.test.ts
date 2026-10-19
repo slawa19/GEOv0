@@ -70,19 +70,20 @@ describe('TopBar wiring - what each control emits', () => {
     // No run: the scenario select is enabled only then (BACKLOG 043-3, 046 wave 1 - `TopBar.p046w1.test.ts`).
     const { host, spies, done } = mountTopBar(context({ runId: ref(null) }), true)
     await nextTick()
-    const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
+    // 046 wave 1, full (2026-10-19): found by test id - the accessible names are the dictionary's, in the interface language.
+    const scenario = host.querySelector<HTMLSelectElement>('select[data-testid="scenario-select"]')!
     scenario.value = 'sc-2'
     scenario.dispatchEvent(new Event('change'))
     expect(spies['update:selected-scenario-id']).toHaveBeenCalledWith('sc-2')
 
-    const intensity = host.querySelector<HTMLInputElement>('input[aria-label="Intensity percent"]')!
+    const intensity = host.querySelector<HTMLInputElement>('input[data-testid="intensity-input"]')!
     intensity.value = '-5'
     intensity.dispatchEvent(new Event('input'))
     intensity.value = '42.4'
     intensity.dispatchEvent(new Event('input'))
     expect(spies['update:intensity-percent'].mock.calls).toEqual([[0], [42]])
 
-    const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+    const theme = host.querySelector<HTMLSelectElement>('select[data-testid="theme-select"]')!
     theme.value = 'hud'
     theme.dispatchEvent(new Event('change'))
     expect(spies['set-ui-theme']).toHaveBeenCalledWith('hud')
@@ -132,7 +133,7 @@ describe('TopBar wiring - what each control emits', () => {
   it('Start emits start-run when no run is active', async () => {
     const { host, spies, done } = mountTopBar(context({ runId: ref(null) }), true)
     await nextTick()
-    button(host, 'Start')!.click()
+    host.querySelector<HTMLButtonElement>('[data-testid="run-start"]')!.click()
     expect(spies['start-run']).toHaveBeenCalledTimes(1)
     done()
   })
@@ -144,9 +145,10 @@ describe('TopBar wiring - what each control emits', () => {
     const { host, spies, done } = mountTopBar(context({ runStatus: ref({ run_id: 'run-1', state: 'running' } as RunStatus) }), false)
     await nextTick()
     expect(host.querySelectorAll('select, input').length, 'no select or input in the first row').toBe(0)
-    const texts = [...host.querySelectorAll('button')].map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim())
+    // 046 wave 1, full (2026-10-19): by test id - the words are the dictionary's ("Поток"/"Flow", "Подробнее"/"Details").
+    const ids = [...host.querySelectorAll('button')].map((b) => b.getAttribute('data-testid'))
     // 043 S2: the flow button of a living run, and the toggle (the actions come from the root, slot "actions").
-    expect(texts, 'the first row: the flow button and the toggle').toEqual(['⏸ Поток', 'Подробнее ▾'])
+    expect(ids, 'the first row: the flow button and the toggle').toEqual(['flow-toggle', 'details-toggle'])
     expect(host.querySelector('summary'), 'no menu').toBeNull()
     for (const s of Object.values(spies)) expect(s).not.toHaveBeenCalled()
     done()
@@ -189,7 +191,7 @@ describe('TopBar wiring - what each control emits', () => {
     const { host, done } = mountTopBar(context({ scenarios, selectedScenarioId, runStatus: ref(null) } as Partial<TopBarContext>), true)
     await nextTick()
     expect(host.querySelector('[data-testid="network-name"]')!.textContent, 'the name, not the slug').toContain('Riverside town')
-    const options = [...host.querySelectorAll<HTMLOptionElement>('select[aria-label="Scenario"] option')].map((o) => o.textContent!.trim())
+    const options = [...host.querySelectorAll<HTMLOptionElement>('select[data-testid="scenario-select"] option')].map((o) => o.textContent!.trim())
     expect(options, 'the selector names the scenario too; a blank name falls back to the id').toEqual(['— select —', 'Riverside town (riverside-town-50)', 'other'])
     selectedScenarioId.value = 'other'
     await nextTick()

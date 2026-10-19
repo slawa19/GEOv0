@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import type { GraphLink, GraphNode } from '../types'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
+import { useUiLocale } from '../composables/useUiLocale'
 import { keyEdge } from '../utils/edgeKey'
 import { participantLabelsOf } from '../utils/participants'
 
@@ -20,6 +21,7 @@ const emit = defineEmits<{
   inspectNode: [nodeId: string]
   inspectEdge: [link: GraphLink]
 }>()
+const { t } = useUiLocale()
 
 // Ids are PRINTED in the option labels, so they go through the display rule; option values keep the full id.
 const showPid = useParticipantDisplayId()
@@ -74,24 +76,24 @@ function inspectNode(): void {
   const node = sortedNodes.value.find((candidate) => candidate.id === selectedNodeId.value)
   if (!node) return
   emit('inspectNode', node.id)
-  announcement.value = `Node details opened: ${nodeLabel(node)}`
+  announcement.value = t('navigator.participantOpened', { name: nodeLabel(node) })
 }
 
 function inspectEdge(): void {
   const link = sortedLinks.value.find((candidate) => keyEdge(candidate.source, candidate.target) === selectedEdgeKey.value)
   if (!link || props.edgeInspectDisabled) return
   emit('inspectEdge', link)
-  announcement.value = `Trustline details opened: ${edgeLabel(link)}`
+  announcement.value = t('navigator.lineOpened', { name: edgeLabel(link) })
 }
 </script>
 
 <template>
-  <div class="graph-navigator ds-panel" role="region" aria-label="Graph navigator">
+  <div class="graph-navigator ds-panel" role="region" :aria-label="t('navigator.aria')" data-testid="graph-navigator">
     <details>
-      <summary>Inspect graph</summary>
+      <summary data-testid="graph-navigator-summary">{{ t('navigator.summary') }}</summary>
 
       <div class="graph-navigator__controls">
-      <label class="ds-label" for="graph-navigator-node">Node</label>
+      <label class="ds-label" for="graph-navigator-node">{{ t('navigator.participant') }}</label>
       <select
         id="graph-navigator-node"
         v-model="selectedNodeId"
@@ -100,11 +102,11 @@ function inspectEdge(): void {
       >
         <option v-for="node in sortedNodes" :key="node.id" :value="node.id">{{ nodeLabel(node) }}</option>
       </select>
-      <button class="ds-btn ds-btn--secondary" type="button" :disabled="!selectedNodeId" @click="inspectNode">
-        Inspect node
+      <button class="ds-btn ds-btn--secondary" type="button" data-testid="graph-navigator-open-node" :disabled="!selectedNodeId" @click="inspectNode">
+        {{ t('navigator.openParticipant') }}
       </button>
 
-      <label class="ds-label" for="graph-navigator-edge">Edge</label>
+      <label class="ds-label" for="graph-navigator-edge">{{ t('navigator.line') }}</label>
       <select
         id="graph-navigator-edge"
         v-model="selectedEdgeKey"
@@ -118,11 +120,12 @@ function inspectEdge(): void {
       <button
         class="ds-btn ds-btn--secondary"
         type="button"
+        data-testid="graph-navigator-open-edge"
         :disabled="selectedEdgeKey === '' || edgeInspectDisabled"
-        :title="edgeInspectDisabled ? 'Edge details need the live network (server source) and no action in progress.' : ''"
+        :title="edgeInspectDisabled ? t('navigator.lineDisabled') : ''"
         @click="inspectEdge"
       >
-        Inspect edge
+        {{ t('navigator.openLine') }}
       </button>
       </div>
 

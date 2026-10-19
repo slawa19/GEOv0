@@ -56,7 +56,9 @@ function rowContents(host: HTMLElement): string[] {
 }
 
 const VISITOR = ['theme-select', 'language-select']
-const OWN_RUN_ROW_RUNNING = ['scenario-select', 'Stop', 'Intensity percent', 'Apply']
+// 046 wave 1, full (2026-10-19): Start, Stop, the tempo and Apply carry test ids now (`rowContents` reads the test id
+// first) - their words and accessible names are the dictionary's, in the language of the interface.
+const OWN_RUN_ROW_RUNNING = ['scenario-select', 'run-stop', 'intensity-input', 'intensity-apply']
 
 describe('048 S2 - the service row of the top bar, by addressee (amendment 12)', () => {
   it('a visitor - no token, or a participant JWT: the theme and the language; nothing of the run but its stop reason', async () => {
@@ -81,7 +83,7 @@ describe('048 S2 - the service row of the top bar, by addressee (amendment 12)',
     // A stopped run: Start instead of Stop, Apply disabled, the stop reason (passive, as for everyone) and the badge.
     const ended = mountTopBar(context({ accessToken: ref('admin-token'), runStatus: ref(stopped) }))
     await nextTick()
-    expect(rowContents(ended.host)).toEqual([...VISITOR, 'scenario-select', 'Start', 'Intensity percent', 'Apply', 'stop-reason', 'run-payments'])
+    expect(rowContents(ended.host)).toEqual([...VISITOR, 'scenario-select', 'run-start', 'intensity-input', 'intensity-apply', 'stop-reason', 'run-payments'])
     ended.done()
   })
 
@@ -89,7 +91,7 @@ describe('048 S2 - the service row of the top bar, by addressee (amendment 12)',
     for (const [token, expected] of [[null, 0], ['admin-token', 1]] as const) {
       const { host, done } = mountTopBar(context({ accessToken: ref(token), scenarios: ref([]), runId: ref(null), runStatus: ref(null) }))
       await nextTick()
-      expect(host.querySelectorAll('[aria-label="No scenarios"]').length, `token ${token}`).toBe(expected)
+      expect(host.querySelectorAll('[data-testid="no-scenarios"]').length, `token ${token}`).toBe(expected)
       done()
     }
   })

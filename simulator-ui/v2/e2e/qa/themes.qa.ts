@@ -20,7 +20,8 @@ const KEY = 'geo.uiTheme'
 const root = (page: Page) => page.locator('.root')
 const themeParam = (page: Page) => page.evaluate(() => new URLSearchParams(window.location.search).get('theme'))
 const stored = (page: Page, key = KEY) => page.evaluate((k) => localStorage.getItem(k), key)
-const switcher = (page: Page) => page.getByRole('combobox', { name: 'UI theme' })
+// 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
+const switcher = (page: Page) => page.getByTestId('theme-select')
 
 /** A stored value for the next navigation only (the stand's own init script has cleared storage just before). */
 const seedStored = (value: string) => async (page: Page) => {

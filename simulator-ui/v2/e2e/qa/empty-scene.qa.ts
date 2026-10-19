@@ -102,7 +102,7 @@ async function runReportsStopped(page: Page): Promise<void> {
 }
 
 async function chooseUnloadableScenario(page: Page): Promise<number> {
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   for (let f = 1; f <= 240; f += 1) {
     if (!(await hasSnapshot(page)) && (await errorShown(page)) > 0) return f
     await frames(page, 1)
@@ -152,7 +152,7 @@ test('empty snapshot, loop in deep sleep: the canvases are blanked although not 
 
   // The clock is NOT stepped from here on: no animation frame and no timer can run, whoever asks for one. The failed
   // load itself needs neither (a fetch and promises). Whatever blanks the canvases now is not a frame of the loop.
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   await expect.poll(async () => !(await hasSnapshot(page)) && (await errorShown(page)) > 0, { message: 'the failed load clears the scene model while the clock stands', timeout: 15_000 }).toBe(true)
   const c1 = await loopCounters(page)
   const after = { px: await canvasPixels(page), onPage: await nodesOnPage(page, before.nodes, before.empty) }
@@ -200,7 +200,7 @@ test('empty snapshot with a beam in flight, not one frame after the failure: the
   const fxBefore = await beamInFlight(page)
   const c0 = await loopCounters(page)
   // The clock stands from here on (see the deep-sleep test above): no frame of the loop can clear anything.
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   await expect.poll(async () => !(await hasSnapshot(page)) && (await errorShown(page)) > 0, { message: 'the failed load clears the scene model while the clock stands', timeout: 15_000 }).toBe(true)
   const c1 = await loopCounters(page)
   const at = await canvasPixels(page)
@@ -291,7 +291,7 @@ test('counter-check: a full reload that SUCCEEDS never leaves the base canvas bl
   const before = await canvasPixels(page)
   expect(before.base.graph).toBeGreaterThan(500)
   await runReportsStopped(page)
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   // While the clock stands the new scene is in the model but no frame has drawn it: the old picture must still be there.
   await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim: { layoutNodes: Array<{ id: string }> } }).__geoSim.layoutNodes.some((n) => n.id.startsWith('x'))), { message: 'the other scenario is loaded', timeout: 15_000 }).toBe(true)
   const standing = await canvasPixels(page)

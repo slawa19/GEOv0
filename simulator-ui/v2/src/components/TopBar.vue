@@ -105,7 +105,7 @@ const selectedScenarioText = computed(() => {
 
 /** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
 const networkName = computed(() => {
-  if (ctx.apiMode.value !== 'real') return 'офлайн-демо'
+  if (ctx.apiMode.value !== 'real') return t('topBar.offlineDemo')
   const id = String(ctx.runStatus.value?.scenario_id ?? '').trim() || String(ctx.selectedScenarioId.value ?? '').trim()
   if (!id) return '—'
   const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
@@ -147,18 +147,25 @@ const streamLost = computed(() => {
   return sse === 'reconnecting' || sse === 'closed'
 })
 
-/** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
-const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
-  if (ctx.apiMode.value !== 'real') return { text: 'снимок без сервера', tone: 'info' }
+/**
+ * The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. 046 wave 1:
+ * the words are the dictionary's (`topBar.state.*`); which words are shown is `key` - on the element as
+ * `data-network-state`, so a machine reads what the person reads without reading a language (the run's own state is
+ * `data-run-state`).
+ */
+type NetworkStateKey = 'offline' | 'noConnection' | 'running' | 'paused' | 'created' | 'stopping' | 'stopped' | 'error' | 'pending' | 'noRun'
+const networkState = computed<{ key: NetworkStateKey; text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
+  const at = (key: Exclude<NetworkStateKey, 'noConnection'>, tone: 'ok' | 'warn' | 'err' | 'info') => ({ key, text: t(`topBar.state.${key}`), tone })
+  if (ctx.apiMode.value !== 'real') return at('offline', 'info')
   const s = toLower(ctx.runStatus.value?.state)
-  if ((s === 'running' || s === 'paused') && streamLost.value) return { text: t('topBar.noConnection'), tone: 'err' }
-  if (s === 'running') return { text: 'живёт', tone: 'ok' }
-  if (s === 'paused') return { text: 'на паузе', tone: 'warn' }
-  if (s === 'created') return { text: 'запускается', tone: 'info' }
-  if (s === 'stopping') return { text: 'останавливается', tone: 'warn' }
-  if (s === 'stopped') return { text: 'остановлена', tone: 'info' }
-  if (s === 'error') return { text: 'ошибка', tone: 'err' }
-  return { text: ctx.runId.value ? '…' : 'нет прогона', tone: 'info' }
+  if ((s === 'running' || s === 'paused') && streamLost.value) return { key: 'noConnection', text: t('topBar.noConnection'), tone: 'err' }
+  if (s === 'running') return at('running', 'ok')
+  if (s === 'paused') return at('paused', 'warn')
+  if (s === 'created') return at('created', 'info')
+  if (s === 'stopping') return at('stopping', 'warn')
+  if (s === 'stopped') return at('stopped', 'info')
+  if (s === 'error') return at('error', 'err')
+  return ctx.runId.value ? at('pending', 'info') : at('noRun', 'info')
 })
 
 function onToggleDetails() {
@@ -192,17 +199,14 @@ const isRunActive = computed(() => {
   return s === 'running' || s === 'paused' || s === 'created' || s === 'stopping'
 })
 
-const successRatePct = computed(() => {
-  const a = Number(ctx.runStats.value?.attempts ?? 0)
-  const ok = Number(ctx.runStats.value?.committed ?? 0)
-  if (a <= 0) return 0
-  return Math.round((ok / a) * 100)
-})
-
-const txCompact = computed(() => {
+/**
+ * 048 §G (046 wave 1): the payments of the run as a sentence - "Payments: a of b went through"; no percent, and with no
+ * attempt yet "No payments yet" (not "0 %").
+ */
+const runPaymentsText = computed(() => {
   const ok = Number(ctx.runStats.value?.committed ?? 0)
   const a = Number(ctx.runStats.value?.attempts ?? 0)
-  return `ok ${ok}/${a} · ${successRatePct.value}%`
+  return a > 0 ? t('topBar.payments', { ok, total: a }) : t('topBar.paymentsNone')
 })
 
 function setSelectedScenarioId(v: string) {
@@ -313,6 +317,7 @@ function onApplyIntensity() {
             class="ds-panel ds-ov-metric tb-network-state"
             data-testid="network-state"
             :data-run-state="flowRunState || undefined"
+            :data-network-state="networkState.key"
             role="status"
             aria-live="polite"
             aria-atomic="true"
@@ -326,10 +331,10 @@ function onApplyIntensity() {
             class="ds-btn ds-btn--secondary ds-btn--sm tb-flow-toggle"
             data-testid="flow-toggle"
             :aria-pressed="flowState === 'running' ? 'true' : 'false'"
-            :title="flowState === 'running' ? 'Поставить автоматические платежи на паузу' : 'Возобновить автоматические платежи'"
+            :title="flowState === 'running' ? t('topBar.flowPause') : t('topBar.flowResume')"
             @click="onFlowToggle"
           >
-            <span aria-hidden="true">{{ flowState === 'running' ? '⏸' : '▶' }}</span> Поток
+            <span aria-hidden="true">{{ flowState === 'running' ? '⏸' : '▶' }}</span> {{ t('topBar.flow') }}
           </button>
         </div>
 
@@ -345,7 +350,7 @@ function onApplyIntensity() {
             :aria-expanded="props.detailsOpen ? 'true' : 'false'"
             @click="onToggleDetails"
           >
-            Подробнее <span aria-hidden="true">{{ props.detailsOpen ? '▴' : '▾' }}</span>
+            {{ t('topBar.details') }} <span aria-hidden="true">{{ props.detailsOpen ? '▴' : '▾' }}</span>
           </button>
         </div>
       </HudBar>
@@ -358,26 +363,26 @@ function onApplyIntensity() {
       -->
       <HudBar v-if="props.detailsOpen && networkNameCut" variant="ghost" layout="start" class="tb-network-full-row">
         <span class="ds-panel ds-ov-metric tb-network-full" data-testid="details-network-name">
-          <span class="ds-label">Network</span>
+          <span class="ds-label">{{ t('topBar.network') }}</span>
           <span class="ds-value">{{ networkName }}</span>
         </span>
       </HudBar>
 
-      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" aria-label="Top bar" data-testid="top-details-row">
-        <div class="hud-bar__left" aria-label="Mode">
+      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" :aria-label="t('topBar.detailsRowAria')" data-testid="top-details-row">
+        <div class="hud-bar__left" :aria-label="t('topBar.modeAria')">
           <div class="ds-row tb-mode-row">
-            <div class="ds-row tb-theme-row" aria-label="Theme">
-              <span class="ds-label">Theme</span>
+            <div class="ds-row tb-theme-row" :aria-label="t('topBar.themeGroupAria')">
+              <span class="ds-label">{{ t('topBar.themeLabel') }}</span>
               <select
                 class="ds-select tb-select-28"
                 :value="ctx.uiTheme.value"
-                aria-label="UI theme"
+                :aria-label="t('topBar.themeAria')"
                 data-testid="theme-select"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
               >
                 <!-- 039 B3 (owner's decision R1): two themes; shadcn and library are frozen (tokens kept, not offered). -->
-                <option value="saas">SaaS (subtle)</option>
-                <option value="hud">HUD (sci-fi)</option>
+                <option value="saas">{{ t('topBar.themeSaas') }}</option>
+                <option value="hud">{{ t('topBar.themeHud') }}</option>
               </select>
             </div>
             <!-- 046 (decision 2): the language, beside the theme - behind "Подробнее", not on the first view (043: <= 7 stops). -->
@@ -388,9 +393,9 @@ function onApplyIntensity() {
 
         <!-- 043 S1: named only when it holds the run controls (Auto-Run); an empty div with a name is an axe violation (aria-prohibited-attr).
              048 S2 (amendment 8): the row of the own run - only with an admin token. -->
-        <div class="hud-bar__center" :aria-label="showOwnRunRow ? 'Run controls' : undefined">
+        <div class="hud-bar__center" :aria-label="showOwnRunRow ? t('topBar.runControlsAria') : undefined">
           <div v-if="showOwnRunRow" class="ds-row tb-run-controls" data-testid="own-run-row">
-            <span class="ds-label">Scenario</span>
+            <span class="ds-label">{{ t('topBar.scenarioLabel') }}</span>
             <select
               class="ds-select tb-scenario-select"
               :value="ctx.selectedScenarioId.value"
@@ -398,10 +403,10 @@ function onApplyIntensity() {
               :disabled="scenarioLocked"
               :aria-describedby="scenarioLocked ? 'tb-scenario-locked' : undefined"
               data-testid="scenario-select"
-              aria-label="Scenario"
+              :aria-label="t('topBar.scenarioAria')"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
             >
-              <option value="">— select —</option>
+              <option value="">{{ t('topBar.scenarioPlaceholder') }}</option>
               <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
                 {{ scenarioOptionText(s) }}
               </option>
@@ -413,23 +418,25 @@ function onApplyIntensity() {
               v-if="!isRunActive"
               class="ds-btn ds-btn--primary ds-btn--sm"
               type="button"
+              data-testid="run-start"
               :disabled="!ctx.selectedScenarioId.value"
               @click="onStartRun"
             >
-              Start
+              {{ t('topBar.start') }}
             </button>
             <button
               v-if="canStop"
               class="ds-btn ds-btn--danger ds-btn--sm"
               type="button"
+              data-testid="run-stop"
               @click="onStop"
             >
-              Stop
+              {{ t('topBar.stop') }}
             </button>
 
             <!-- 043 S3 (decision 5): the tempo sits in the row itself; the "Advanced ⚙" menu that held only it is gone. -->
-            <div class="ds-row tb-adv-row" aria-label="Intensity">
-              <span class="ds-label">Intensity</span>
+            <div class="ds-row tb-adv-row" :aria-label="t('topBar.tempoGroupAria')">
+              <span class="ds-label">{{ t('topBar.tempoLabel') }}</span>
               <input
                 class="ds-input tb-intensity-input"
                 type="number"
@@ -437,27 +444,33 @@ function onApplyIntensity() {
                 max="100"
                 step="1"
                 :value="ctx.intensityPercent.value"
-                aria-label="Intensity percent"
+                :aria-label="t('topBar.tempoAria')"
+                data-testid="intensity-input"
                 @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
               />
               <button
                 class="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
+                data-testid="intensity-apply"
                 :disabled="!isRunActive"
                 @click="onApplyIntensity"
               >
-                Apply
+                {{ t('topBar.apply') }}
               </button>
             </div>
 
-            <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar tb-fade-92" aria-label="No scenarios">
-              <span class="ds-badge ds-badge--warn">No scenarios</span>
-              <span class="ds-label">Backend must return GET /simulator/scenarios</span>
+            <!-- 048 §G: one sentence instead of the badge and the endpoint the server had to answer. -->
+            <div
+              v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0"
+              class="ds-panel ds-ov-bar tb-fade-92"
+              data-testid="no-scenarios"
+            >
+              <span class="ds-badge ds-badge--warn">{{ t('topBar.noScenarios') }}</span>
             </div>
           </div>
         </div>
 
-        <div class="hud-bar__right" :aria-label="statusHasContent ? 'Status' : undefined">
+        <div class="hud-bar__right" :aria-label="statusHasContent ? t('topBar.statusAria') : undefined">
           <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
             <!-- 048 S1 (decision 5): the raw SSE badge is the developer's (`?debug=1`). -->
             <span v-if="props.debug" :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE" data-testid="sse-badge">
@@ -476,8 +489,8 @@ function onApplyIntensity() {
             </div>
 
             <!-- 048 S2 (amendments 8 and 12): the payments of the run ("Платежи: a из b") are the administrator's, with the run row. -->
-            <span v-if="showRunPayments" class="ds-badge ds-badge--info" aria-label="TX" data-testid="run-payments">
-              TX {{ txCompact }}
+            <span v-if="showRunPayments" class="ds-badge ds-badge--info" :aria-label="t('topBar.paymentsAria')" data-testid="run-payments">
+              {{ runPaymentsText }}
             </span>
 
             <!-- 048 S2 (amendment 10): the analytics dock (spec 007) is the developer's tool - its toggle with `?debug=1` only,
@@ -519,12 +532,11 @@ function onApplyIntensity() {
         </button>
       </div>
 
-      <!-- 048 S1 (decision 2): the one diagnosis a visitor gets - on the first view, not behind "Подробнее" (its words come
-           from the dictionary with 046 wave 1). Shown only while payments stall: `consec_all_rejected_ticks` >= threshold. -->
-      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall" data-testid="capacity-stall">
+      <!-- 048 S1 (decision 2): the one diagnosis a visitor gets - on the first view, not behind "Подробнее"; 046 wave 1: the
+           words of §G, one sentence with its action. Shown only while payments stall: `consec_all_rejected_ticks` >= threshold. -->
+      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" :aria-label="t('topBar.stallAria')" data-testid="capacity-stall">
         <span class="ds-alert__icon">!</span>
-        <span class="ds-label">Stall</span>
-        <span class="ds-value ds-mono tb-fade-92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
+        <span class="ds-value tb-fade-92">{{ t('topBar.stall') }}</span>
       </div>
 
       <!-- Slot for HUD elements that stack below the TopBar rows (043 S1: the full metrics, while Details is on). -->

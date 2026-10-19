@@ -89,7 +89,7 @@ for (const vp of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
       await boot(page, { snapshot: ringSnapshot(), clock: false, sseShim: false, awaitLayout: false, query: `&theme=${theme}&lang=${lang}`, beforeLoad: longInputs })
       await expect(page.locator('html')).toHaveAttribute('lang', lang)
       await page.locator(DETAILS_TOGGLE).click()
-      const scenario = page.locator('select[aria-label="Scenario"]')
+      const scenario = page.locator('select[data-testid="scenario-select"]')
       // Anti-vacuum: the long inputs are on screen - the option and the cut stop summary - and the payments badge is there.
       await expect(scenario.locator('option:checked')).toHaveText(`${LONG_SCENARIO} (${SCENARIO_ID})`)
       const generalText = t('runStop.unknown', { code: LONG_REASON }, lang)

@@ -5,6 +5,7 @@
  */
 import { computed } from 'vue'
 import type { InteractHistoryEntry } from '../composables/interact/useInteractHistory'
+import { useUiLocale } from '../composables/useUiLocale'
 
 const props = withDefaults(
   defineProps<{
@@ -14,6 +15,7 @@ const props = withDefaults(
   }>(),
   { maxVisible: 8 },
 )
+const { t } = useUiLocale()
 
 const visible = computed(() => {
   // Show most recent entries at the top
@@ -23,8 +25,8 @@ const visible = computed(() => {
 </script>
 
 <template>
-  <div v-if="entries.length > 0" class="interact-history" aria-label="Action history">
-    <div class="interact-history__header ds-label">Recent actions</div>
+  <div v-if="entries.length > 0" class="interact-history" :aria-label="t('recentActions.aria')" data-testid="recent-actions">
+    <div class="interact-history__header ds-label">{{ t('recentActions.title') }}</div>
     <ul class="interact-history__list">
       <li
         v-for="(entry, i) in visible"

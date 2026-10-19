@@ -59,7 +59,8 @@ export function useEdgeTooltip(deps: UseEdgeTooltipDeps): UseEdgeTooltipReturn {
 
     // Measure overlay size once on show (null→key transition), not on every pointermove.
     if (prevKey === null) {
-      const tooltipEl = host.querySelector('[aria-label="Edge tooltip"]') as HTMLElement | null
+      // 046 wave 1: found by its test id, not by its accessible name (which is in the language of the interface).
+      const tooltipEl = host.querySelector('[data-testid="edge-tooltip"]') as HTMLElement | null
       const tooltipRect = tooltipEl?.getBoundingClientRect()
       if (tooltipRect && tooltipRect.width > 0) {
         cachedOverlaySize.w = tooltipRect.width
