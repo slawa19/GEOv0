@@ -4,7 +4,7 @@ import type { GraphLink } from '../types'
 import { keyEdge } from '../utils/edgeKey'
 import type { TrustlineFiguresSource } from './interact/trustlinesSourceState'
 
-import type { WindowAnchor } from './windowManager/types'
+import type { WindowAnchor, WindowCloseReason } from './windowManager/types'
 
 export type EdgeDetailState = 'closed' | 'live' | 'suppressed' | 'keepAlive'
 
@@ -27,6 +27,8 @@ export type EdgeDetailWmOpenArgs = {
     toPid: string
     edgeKey: string
     title: string
+    /** The window manager calls it on EVERY close of this window, whoever closed it (048 `T4840`). */
+    onClose: (reason: WindowCloseReason) => void
   }
   focus: EdgeDetailFocusPolicy
 }
@@ -98,6 +100,12 @@ export function useWmEdgeDetail(): {
 
   /** Apply the desired open/close to WindowManager (idempotent). */
   applyToWindowManager: (wm: EdgeDetailWmPort, o?: { closeReason?: EdgeDetailCloseReason }) => void
+
+  /**
+   * 048 `T4840`: who is told when a person closed the line window - Escape, its x, a click outside it (never a
+   * programmatic close). One listener; the window controller owns what such a close means for the action.
+   */
+  setUserCloseListener: (listener: ((reason: WindowCloseReason) => void) | null) => void
 } {
   const state = ref<EdgeDetailState>('closed')
 
@@ -124,6 +132,23 @@ export function useWmEdgeDetail(): {
   const winId = ref<number | null>(null)
   const appliedOpenKey = ref<string>('')
 
+  // 048 `T4840`: set while THIS machine closes its window, so a close the window manager made on its own (Escape:
+  // `wm.handleEsc` closes the topmost window directly) is told apart and learnt in `onWindowClosed`.
+  let closingFromMachine = false
+  let userCloseListener: ((reason: WindowCloseReason) => void) | null = null
+
+  function onWindowClosed(reason: WindowCloseReason): void {
+    if (!closingFromMachine) {
+      // The window manager closed the window without this machine (Escape). Until `T4840` the machine kept the closed
+      // window's id and its "applied" key, so opening the SAME line again returned early in `applyToWindowManager` -
+      // the phase went to `editing-trustline` with no window at all. The close is learnt as a UI-close, as the x's is.
+      winId.value = null
+      appliedOpenKey.value = ''
+      close({ suppress: true })
+    }
+    if (reason !== 'programmatic') userCloseListener?.(reason)
+  }
+
   function buildOpenArgs(req: EdgeDetailOpenRequest): EdgeDetailWmOpenArgs {
     const fromPid = String(req.fromPid)
     const toPid = String(req.toPid)
@@ -135,6 +160,7 @@ export function useWmEdgeDetail(): {
         toPid,
         edgeKey: keyEdge(fromPid, toPid),
         title: `${fromPid} → ${toPid}`,
+        onClose: onWindowClosed,
       },
       focus: req.focus ?? (req.source === 'manual' ? 'always' : 'never'),
     }
@@ -270,9 +296,15 @@ export function useWmEdgeDetail(): {
 
     if (!req || state.value === 'closed' || state.value === 'suppressed') {
       if (winId.value != null) {
-        wm.close(winId.value, o?.closeReason ?? 'programmatic')
+        const id = winId.value
         winId.value = null
         appliedOpenKey.value = ''
+        closingFromMachine = true
+        try {
+          wm.close(id, o?.closeReason ?? 'programmatic')
+        } finally {
+          closingFromMachine = false
+        }
       }
       return
     }
@@ -298,6 +330,9 @@ export function useWmEdgeDetail(): {
     allowKeepAlive,
     releaseKeepAlive,
     applyToWindowManager,
+    setUserCloseListener: (listener) => {
+      userCloseListener = listener
+    },
   }
 }
 

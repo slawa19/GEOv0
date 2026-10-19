@@ -446,7 +446,31 @@ export function useWindowController(opts: {
 		},
 	)
 
+	/**
+	 * 048 `T4840` (advisor's decision 2026-10-19): in `editing-trustline` without the full editor the line window IS the
+	 * window of the action (`interactWindowOfPhase`). Closing it must end the action: until `T4840` the phase stayed with no
+	 * window of it on screen - the action bar locked ("cancel the current action first (Esc)") and Escape had no window to
+	 * close; from the navigator (the only keyboard route into the graph) nothing released it but a reload.
+	 */
+	function lineWindowIsTheAction(): boolean {
+		return String(opts.interactPhase.value) === 'editing-trustline' && !opts.isFullEditor.value
+	}
+
+	// Every route a person closes the line window by - Escape (the window manager), the x (`uiCloseEdgeDetailWindow`), a
+	// click outside it (`uiCloseTopmostInspectorWindow`; step 0 has already cancelled, so the phase is idle here) - ends
+	// the action. Not a programmatic close: "Change Limit" hands the action to the full editor, "Send Payment" keeps the
+	// window as the payment's context (the phase is the payment's then - it is not ended). A request in flight is never
+	// cancelled here: Escape and an outside click are ignored while busy (046 W3), and so is the x below.
+	opts.wmEdgeDetail.setUserCloseListener(() => {
+		if (!lineWindowIsTheAction() || opts.interactMode.busy.value) return
+		opts.interactMode.cancel()
+	})
+
 	function uiCloseEdgeDetailWindow(reason: EdgeDetailCloseReason) {
+		// 048 `T4840`: as Escape and an outside click (046 W3) - while the line's own request is in flight its x does nothing;
+		// the operation finishes on its own and the window shows its result (a close here would leave a failure with no
+		// window and the action locked - the dead end of `T4840`).
+		if (lineWindowIsTheAction() && opts.interactMode.busy.value) return
 		opts.wmEdgeDetail.close({ reason, suppress: true })
 		opts.wmEdgeDetail.applyToWindowManager(opts.wm, { closeReason: reason })
 	}

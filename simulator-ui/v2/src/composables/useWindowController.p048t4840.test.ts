@@ -1,0 +1,236 @@
+/**
+ * 048 `T4840` - the navigator's dead end (advisor's decision 2026-10-19): closing the line window by ANY route ends the
+ * "trust line" action, so the action bar returns to idle.
+ *
+ * Found on a live seeded backend at `7864e090`: "Подробнее" -> "Найти на графе" -> open a line -> close the line window
+ * (Escape or x). The phase stayed `editing-trustline` with no window of it on screen: "Линия доверия" active, "Платёж" and
+ * "Клиринг" disabled with "Сначала отмените текущее действие (Esc)", and no route back (Escape had no window to close; the
+ * keyboard has no canvas to click). The canvas click on an edge enters the same phase - an empty canvas click was its
+ * only way out.
+ *
+ * Measured at the composable level: the real window controller, the real window manager and the real line-window state
+ * machine; the interact mode is a stand-in whose `cancel` returns the phase to idle (as `useInteractMode.cancel` does via
+ * `fsm.resetToIdle`). What this does NOT see: the DOM of the action bar (the e2e `p048-t4840-navigator-dead-end` walks the
+ * real page), the step-0 outside click of the root (it cancels before the window closes - `useSimulatorApp.ts`).
+ */
+import { describe, expect, it, vi } from 'vitest'
+import { computed, createApp, nextTick, reactive, ref, type Ref } from 'vue'
+
+import type { InteractPhase, InteractState } from './useInteractMode'
+import { useWindowController } from './useWindowController'
+import { useWmEdgeDetail } from './useWmEdgeDetail'
+import { useWindowManager } from './windowManager/useWindowManager'
+
+type Harness = {
+  ctl: ReturnType<typeof useWindowController>
+  wm: ReturnType<typeof useWindowManager>
+  edge: ReturnType<typeof useWmEdgeDetail>
+  phase: Ref<InteractPhase>
+  busy: Ref<boolean>
+  fullEditor: Ref<boolean>
+  state: InteractState
+  cancel: ReturnType<typeof vi.fn>
+  unmount: () => void
+}
+
+function mountHarness(): Harness {
+  const phase = ref<InteractPhase>('idle')
+  const busy = ref(false)
+  const fullEditor = ref(false)
+  const state = reactive({
+    phase: 'idle',
+    fromPid: null,
+    toPid: null,
+    selectedEdgeKey: null,
+    edgeAnchor: null,
+    initiatedWithPrefilledFrom: false,
+  }) as unknown as InteractState
+  const cancel = vi.fn(() => {
+    // `useInteractMode.cancel` -> `fsm.resetToIdle()`: the phase and the selection go back to idle.
+    phase.value = 'idle'
+    state.fromPid = null
+    state.toPid = null
+    state.selectedEdgeKey = null
+    state.edgeAnchor = null
+  })
+  const wm = useWindowManager()
+  const edge = useWmEdgeDetail()
+  let ctl!: ReturnType<typeof useWindowController>
+  const app = createApp({
+    setup() {
+      ctl = useWindowController({
+        apiMode: ref('real'),
+        isLiveUi: ref(true),
+        interactPhase: computed(() => phase.value),
+        isFullEditor: fullEditor,
+        interactState: state,
+        interactMode: {
+          state,
+          busy,
+          cancel,
+          setPaymentToPid: () => {},
+          setPaymentFromPid: () => {},
+          setTrustlineToPid: () => {},
+          setTrustlineFromPid: () => {},
+        },
+        wm,
+        wmEdgeDetail: edge,
+        getNodeScreenCenter: () => ({ x: 100, y: 100 }),
+      })
+      return () => null
+    },
+  })
+  const host = document.createElement('div')
+  app.mount(host)
+  return { ctl, wm, edge, phase, busy, fullEditor, state, cancel, unmount: () => app.unmount() }
+}
+
+const ANCHOR = { x: 300, y: 200 }
+
+/** What `inspectEdgeFromNavigator` does (`SimulatorAppRoot.vue`): `interact.mode.selectEdge`, then the line window. */
+async function openLineAsTheNavigatorDoes(h: Harness): Promise<void> {
+  // `fsm.selectEdge` (useInteractFSM.ts): the pair, the anchor, the phase.
+  h.state.fromPid = 'alice'
+  h.state.toPid = 'bob'
+  h.state.selectedEdgeKey = 'alice→bob'
+  h.state.edgeAnchor = { ...ANCHOR }
+  h.phase.value = 'editing-trustline'
+  h.ctl.uiOpenOrUpdateEdgeDetail({ fromPid: 'alice', toPid: 'bob', anchor: { ...ANCHOR } })
+  await nextTick()
+  await nextTick()
+}
+
+const openLineWindows = (h: Harness) => h.wm.windows.value.filter((w) => w.type === 'edge-detail')
+
+function escape(h: Harness): void {
+  h.ctl.onGlobalKeydown(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+}
+
+describe('048 T4840: closing the line window ends the "trust line" action', () => {
+  it('Escape on the line window opened from the navigator: the window closes AND the phase returns to idle', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      expect(openLineWindows(h), 'counter-check: the line window is open').toHaveLength(1)
+      expect(h.phase.value).toBe('editing-trustline')
+
+      escape(h)
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h)).toHaveLength(0)
+      expect(h.cancel).toHaveBeenCalledTimes(1)
+      expect(h.phase.value).toBe('idle')
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('the x of the line window (`uiCloseEdgeDetailWindow("action")`): the window closes AND the phase returns to idle', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      expect(openLineWindows(h), 'counter-check: the line window is open').toHaveLength(1)
+
+      h.ctl.uiCloseEdgeDetailWindow('action')
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h)).toHaveLength(0)
+      expect(h.cancel).toHaveBeenCalledTimes(1)
+      expect(h.phase.value).toBe('idle')
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('after Escape the same line opens again from the navigator (the state machine learnt the window is gone)', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      escape(h)
+      await nextTick()
+      await nextTick()
+      expect(openLineWindows(h)).toHaveLength(0)
+
+      // The same line again: until T4840 the state machine still held the closed window's id and the same "applied" key,
+      // so `applyToWindowManager` returned early - the phase went to `editing-trustline` with no window at all.
+      await openLineAsTheNavigatorDoes(h)
+      expect(openLineWindows(h)).toHaveLength(1)
+      expect(h.edge.state.value).toBe('live')
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('a line window kept alive as the context of a payment: closing it does NOT end the payment', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      // `onEdgeDetailSendPayment`: the line window is frozen as context, the payment flow takes the phase.
+      h.edge.allowKeepAlive({ frozenLink: null })
+      h.phase.value = 'confirm-payment'
+      h.state.fromPid = 'bob'
+      h.state.toPid = 'alice'
+      await nextTick()
+      await nextTick()
+      expect(openLineWindows(h), 'counter-check: the line window is still open as context').toHaveLength(1)
+
+      h.ctl.uiCloseEdgeDetailWindow('action')
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h)).toHaveLength(0)
+      expect(h.cancel).not.toHaveBeenCalled()
+      expect(h.phase.value).toBe('confirm-payment')
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('"Change Limit" closes the line window programmatically into the full editor: the action goes on', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      // `onEdgeDetailChangeLimit` (SimulatorAppRoot.vue): close ONLY the line window, then the full editor.
+      h.edge.close({ suppress: false })
+      h.edge.applyToWindowManager(h.wm, { closeReason: 'programmatic' })
+      h.fullEditor.value = true
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h)).toHaveLength(0)
+      expect(h.cancel).not.toHaveBeenCalled()
+      expect(h.phase.value).toBe('editing-trustline')
+      expect(h.wm.windows.value.some((w) => w.type === 'interact-panel'), 'the full editor took over').toBe(true)
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('046 W3 kept: while a request is in flight Escape and the x are ignored - the window stays and nothing is cancelled', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      h.busy.value = true
+
+      escape(h)
+      h.ctl.uiCloseEdgeDetailWindow('action')
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h)).toHaveLength(1)
+      expect(h.cancel).not.toHaveBeenCalled()
+
+      // The operation settles; the close works again.
+      h.busy.value = false
+      escape(h)
+      await nextTick()
+      await nextTick()
+      expect(openLineWindows(h)).toHaveLength(0)
+      expect(h.cancel).toHaveBeenCalledTimes(1)
+    } finally {
+      h.unmount()
+    }
+  })
+})
