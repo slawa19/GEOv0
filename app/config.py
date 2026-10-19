@@ -339,9 +339,21 @@ class Settings(BaseSettings):
     # 1.6 ms (this machine, 2026-10-18, spec 047 Changelog); 044 stage 2 - 4.0 -> 11.1 s at 1 522 -> 7 436 simulator
     # operations (≈1.5 s per 1 000, under `tracemalloc`), peak memory ≈6.5 KB per operation; 015 step 5b - 19.4 s at
     # 100 000 journal rows. The rate taken is the WORST measured, 1.5 s per 1 000 operations.
-    # The deadline of one attempt (checkpoints + reconciliation + reactions; `app/core/maintenance_jobs.py`): at the
-    # worst rate 1 800 s is ≈1.2 M operations, whose peak memory (≈7.8 GB) fails before the deadline does; ≈90x the
-    # largest run measured. A run cut by it is `<reason>_timed_out`, visible - raise it with a new measurement.
+    # The deadline of one attempt (checkpoints + reconciliation + reactions; `app/core/maintenance_jobs.py`).
+    # PREMISE REWRITTEN 2026-10-19 (047 `T4704`). It read "peak memory fails before the deadline does"; since 047
+    # `T4703` the history is streamed and the peak of a clean history no longer grows with it, so NOTHING ends a long
+    # attempt before this deadline. What bounds an attempt now is PASSES x HISTORY: one full pass over every equivalent
+    # (PASSED, FAILED-and-held, and - since `T4704` - a stored FAILED not yet held, which its reaction's re-run alone
+    # confirms), plus a second pass only in the attempt that FIRST finds a divergence (the fresh verification publishes
+    # FAILED, then the reaction re-runs). That attempt may be cut in its confirmation; the next one needs a single pass.
+    # So the limit is ONE PASS over the history of all equivalents within this value.
+    # MEASURED (spec 047 Changelog, `T4703`, this machine, streaming): 80 033 journal entries of one equivalent - the
+    # verifier 5.23-5.42 s, ≈0.066 ms per entry; 1 800 s is then ≈27 M entries in one pass. At the 044 public-demo
+    # load (≈2 909 entries/min in one equivalent, a 29-min window: `docs/ru/simulator/backend/real-mode-runbook.md`
+    # §6.6) that is ≈270 s of pass per day of history - ≈6.5 days of continuous demo history (extrapolation, not a
+    # measured week). A run cut by it is `<reason>_timed_out`, visible, and the job reads `failed`; on a repeated
+    # `_timed_out` the operator measures one pass (`scripts/reconcile_debts.py`) and raises this value above it
+    # (`docs/ru/runbook-integrity-hold.md` §1) - never disables the loop. The value is not changed by `T4704`.
     INTEGRITY_ATTEMPT_TIMEOUT_SECONDS: float = 1800.0
     # `lock_timeout` / `statement_timeout` of each transaction the scheduled reconciliation and the checkpoints open
     # (`SET LOCAL`, `app/core/ledger/reconciliation.py` `bound_the_waits`); the money writers keep their own.

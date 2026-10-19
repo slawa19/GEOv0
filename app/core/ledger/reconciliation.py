@@ -1433,6 +1433,9 @@ class HoldDecision:
     decision: str
     result_id: uuid.UUID | None = None
     outcome: ReconciliationOutcome | None = None
+    #: What the hold's `record_outcome` did (`inserted`/`unchanged`) - set only with `HOLD_SET`; 047 `T4704` counts it
+    #: when the reaction is the run's only verification of the equivalent.
+    stored: str | None = None
 
 
 async def _open_reaction_transaction(session: Any) -> None:
@@ -1480,7 +1483,7 @@ async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecis
     if outcome.status != FAILED:
         return HoldDecision(HOLD_NOT_CONFIRMED, outcome=outcome)
 
-    await record_outcome(session, outcome)
+    stored = await record_outcome(session, outcome)
     results = debt_reconciliation_results.c
     result_id = (
         await session.execute(
@@ -1490,7 +1493,7 @@ async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecis
         )
     ).scalar_one()
     await _set_integrity_hold(session, equivalent_id, result_id)
-    return HoldDecision(HOLD_SET, result_id=result_id, outcome=outcome)
+    return HoldDecision(HOLD_SET, result_id=result_id, outcome=outcome, stored=stored)
 
 
 def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
@@ -1557,6 +1560,34 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     return decision
 
 
+async def _stored_failed_unheld(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> bool:
+    """047 `T4704`: is the latest stored result of this equivalent `FAILED` while the equivalent is not held?
+
+    The same two reads the code already makes - the hold column as `_confirm_and_hold` reads it, the latest row as
+    `record_outcome` reads it - in one short transaction of their own, bounded like every other. It only ROUTES:
+    `react_to_failed` re-reads the hold in its own snapshot and decides on its own full re-run, so a stale answer here
+    never causes a hold or a publication that the reaction's own full re-run does not decide: a stale `True` (the
+    equivalent held, or a newer verdict published, meanwhile) ends in the ordinary path or in publishing that re-run's
+    verdict; a stale `False` is the ordinary path. A missing equivalent row is `False` (ordinary path).
+    """
+
+    results = debt_reconciliation_results.c
+    async with session_factory() as session:
+        await bound_the_waits(session)
+        hold = (
+            await session.execute(
+                select(Equivalent.integrity_hold_result_id).where(Equivalent.id == equivalent_id)
+            )
+        ).first()
+        latest = (
+            await session.execute(
+                select(results.status).where(results.equivalent_id == equivalent_id, results.is_latest.is_(True))
+            )
+        ).first()
+        await session.rollback()
+    return hold is not None and hold[0] is None and latest is not None and latest.status == FAILED
+
+
 async def run_scheduled_reconciliation(
     session_factory: Callable[[], Any],
     *,
@@ -1578,6 +1609,15 @@ async def run_scheduled_reconciliation(
     `react_to_failed` for that equivalent, before the next equivalent is verified. A reaction that fails
     is counted in `hold_errors` and logged; it does not change the recorded verdict and does not stop
     the loop. The next scheduled run reacts again.
+
+    047 `T4704` (2026-10-19): when the latest STORED result is already `FAILED` and the equivalent is not held, the
+    fresh verification is skipped and `react_to_failed` runs directly - its full re-run is the confirmation and this
+    run's verdict: `FAILED` is published and held in its one transaction (as ever); a verdict that is not `FAILED` is
+    published here by `record_outcome`, so a stale `FAILED` does not stay latest. One full pass per equivalent, as
+    for a `PASSED` one; before, a persisting unheld `FAILED` cost two passes in every attempt, and an attempt deadline
+    shorter than two passes cut the confirmation every time - the hold was never set. Counters as on the ordinary path
+    (`hold_not_confirmed` is counted, since the reaction ran); a reaction error is `hold_errors` with no verdict. A
+    reaction that re-ran nothing (held meanwhile, or the equivalent gone) is not counted: the ordinary path follows.
     """
 
     if equivalent_ids is None:
@@ -1601,7 +1641,60 @@ async def run_scheduled_reconciliation(
         "hold_errors": 0,
         "errored_equivalents": [],
     }
+
+    def _erred(equivalent_id: uuid.UUID, error: Exception) -> None:
+        # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
+        # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
+        counts["error"] += 1
+        counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
+        logger.exception("debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error))
+
+    def _hold_erred(equivalent_id: uuid.UUID, error: Exception) -> None:
+        counts["hold_errors"] += 1
+        counts["errored_equivalents"].append(str(equivalent_id))
+        logger.exception(
+            "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
+        )
+
     for equivalent_id in list(equivalent_ids):
+        # 047 `T4704`: a STORED FAILED that holds nothing yet is confirmed by the reaction's own full re-run, and that
+        # re-run is this run's only verification of the equivalent - one pass, not a fresh verification followed by
+        # the re-run (two passes inside one attempt deadline, which a long history could cut every attempt, leaving
+        # the FAILED unheld while money moved). See `_stored_failed_unheld`.
+        try:
+            awaiting_confirmation = await _stored_failed_unheld(session_factory, equivalent_id)
+        except Exception as error:  # noqa: BLE001 - classified: an error of this equivalent, as below
+            _erred(equivalent_id, error)
+            continue
+        if awaiting_confirmation:
+            try:
+                decision = await react_to_failed(session_factory, equivalent_id)
+            except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
+                _hold_erred(equivalent_id, error)
+                continue
+            if decision.outcome is not None:
+                # The re-run happened (SET: FAILED, published and held in the reaction's transaction; NOT_CONFIRMED:
+                # PASSED or UNVERIFIABLE, rolled back with it). Either way it is this run's verdict once published.
+                outcome = decision.outcome
+                if decision.decision == HOLD_SET:
+                    stored = decision.stored
+                else:
+                    # Not confirmed: the reaction wrote nothing, so the fresh verdict is published here - otherwise the
+                    # stale FAILED would stay the latest result. Same publication as below, in its own transaction.
+                    try:
+                        async with session_factory() as session:
+                            await bound_the_waits(session)
+                            stored = await record_outcome(session, outcome)
+                            await session.commit()
+                    except Exception as error:  # noqa: BLE001 - classified: an error, no result substituted
+                        _erred(equivalent_id, error)
+                        continue
+                counts[f"hold_{decision.decision}"] += 1
+                counts[outcome.status] += 1
+                counts[f"rows_{stored}"] += 1
+                continue
+            # No re-run happened (held meanwhile by another run, or the equivalent is gone): nothing was verified, so
+            # the equivalent takes the ordinary path below, exactly as before `T4704`.
         try:
             # ONE snapshot for every verification read, ended before anything is written.
             async with session_factory() as session:
@@ -1615,13 +1708,7 @@ async def run_scheduled_reconciliation(
                 stored = await record_outcome(session, outcome)
                 await session.commit()
         except Exception as error:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
-            # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
-            # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
-            counts["error"] += 1
-            counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
-            logger.exception(
-                "debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
-            )
+            _erred(equivalent_id, error)
             continue
         counts[outcome.status] += 1
         counts[f"rows_{stored}"] += 1
@@ -1631,11 +1718,7 @@ async def run_scheduled_reconciliation(
         try:
             decision = await react_to_failed(session_factory, equivalent_id)
         except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
-            counts["hold_errors"] += 1
-            counts["errored_equivalents"].append(str(equivalent_id))
-            logger.exception(
-                "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
-            )
+            _hold_erred(equivalent_id, error)
             continue
         counts[f"hold_{decision.decision}"] += 1
 

@@ -15,7 +15,8 @@ The database is the one `DATABASE_URL` names, as for the application. Exit codes
     1  a discrepancy: some equivalent is FAILED or UNVERIFIABLE (named on stdout, with its findings)
     2  the check did not happen, wholly or for some equivalent: usage, an empty or unknown code, no equivalent at all,
        the configuration or the database unusable, or the verifier erred - such an equivalent is printed as
-       NOT CHECKED. A discrepancy found elsewhere in the same run still exits 1.
+       NOT CHECKED. A discrepancy found elsewhere in the same run still exits 1. (047 `T4704`: an equivalent whose
+       stored FAILED this run tried and failed to re-confirm and hold is printed FAILED, marked so - exit 1.)
 
 The verdict and the exit code are this run's. The details printed (`entries_read`, findings, `missing_evidence`) are
 those of the latest STORED result row, named with its id, `checked_at` and `last_checked_at`: an unchanged verdict only
@@ -109,6 +110,12 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
             print(f"{code}: NOT CHECKED - the reconciliation did not run for it: {_report_error(error)}")
             continue
         verdict = next((status for status in (rec.PASSED, rec.FAILED, rec.UNVERIFIABLE) if counts[status]), None)
+        restated = verdict is None and bool(counts["hold_errors"])
+        if restated:
+            # 047 `T4704`: a hold error with no verdict happens only when the latest STORED result was FAILED and unheld,
+            # so the run went straight to the reaction, and the reaction (its re-run or its hold) failed. That FAILED
+            # stands - it is reported as FAILED, never as "did not run" - and is marked as not re-confirmed by this run.
+            verdict = rec.FAILED
         if verdict is None:
             not_checked = True
             print(f"{code}: NOT CHECKED - the verifier erred (see the log); no result was recorded")
@@ -117,6 +124,8 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
         line = f"{code}: {verdict}"
         if verdict == rec.FAILED:
             line += f" hold={_hold_text(rec, counts)}"
+        if restated:
+            line += " (the stored FAILED; this run's re-confirmation and hold did not complete)"
         try:
             stored = await _stored_result(session_factory, equivalent_id)
         except Exception as error:  # noqa: BLE001 - reporting only: the verdict above is this run's and stands
