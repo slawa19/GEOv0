@@ -440,7 +440,7 @@ export function useSimulatorRealMode(opts: {
 
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
 
-  async function refreshRunStatusForCurrentContext(): Promise<RunStatusRefreshOutcome> {
+  async function refreshRunStatusForCurrentContext(o: { opening?: boolean } = {}): Promise<RunStatusRefreshOutcome> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     const runId = real.runId
     if (!runId) return 'superseded'
@@ -454,11 +454,14 @@ export function useSimulatorRealMode(opts: {
       return 'current'
     } catch (e: unknown) {
       if (!isCurrent()) return 'superseded'
-      // 048 S3 (044 closing review, advisor 2026-10-19): a 403 is a run of another session - the anonymous cookie was lost
-      // or expired - and is as gone for this page as a 404: the saved id is cleared the same way, so the opening goes on
-      // as without one (the scenario preview, then the autostart starts a run). A kept id with no status answered
-      // `unknown` and started nothing: the visitor was stuck until the browser's storage was cleared.
-      if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
+      // 048 S3 (044 closing review, advisor 2026-10-19; §15 Codex P2, orchestrator 2026-10-19): during the OPENING, a 403 on
+      // the restored `geo.sim.v2.runId` is cleared like a 404 - the anonymous cookie was lost or expired, the saved run is
+      // another session's - so the opening goes on as without one (the preview, then the autostart starts a run); a kept
+      // id with no status answered `unknown` and the visitor was stuck until the storage was cleared. ONLY then: mid-session
+      // a 403 is not proof that the run is gone - the backend answers every 403 with one code (E006, no details: not the
+      // run's owner, an inactive participant, a wrong admin token), and matching its English message is not a rule (§9) -
+      // so it stays a failure on the run's line and the run is kept. A 404 is cleared everywhere, as before.
+      if (e instanceof ApiError && (e.status === 404 || (e.status === 403 && o.opening === true))) {
         resetStaleRun({ clearError: true })
         return 'stale'
       }
@@ -467,8 +470,8 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function refreshRunStatus(): Promise<void> {
-    await refreshRunStatusForCurrentContext()
+  async function refreshRunStatus(o: { opening?: boolean } = {}): Promise<void> {
+    await refreshRunStatusForCurrentContext(o)
   }
 
   function startSnapshotRefresh(opts?: {
@@ -1516,7 +1519,8 @@ export function useSimulatorRealMode(opts: {
           // we must fall through to the scenario preview flow below.
           // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
           if (real.runId) {
-            await refreshRunStatus()
+            // 048 S3: the opening's read of the restored run - the one read where a 403 clears the saved id.
+            await refreshRunStatus({ opening: true })
             if (real.runId) {
               await refreshSnapshot()
               // 043 S2 (review C6): an ENDED run (`stopped`, `error`) gets no event stream - there is nothing live to

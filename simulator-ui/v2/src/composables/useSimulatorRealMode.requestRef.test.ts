@@ -115,3 +115,33 @@ describe('item 2: the error line carries the request id of a failed lifecycle ca
     expect(runErrorLineLog(real.lastErrorLine)).toBe('HTTP 500  for /simulator/runs/r1')
   })
 })
+
+/**
+ * 048 S3, §15 Codex P2 (orchestrator 2026-10-19): a 403 clears the saved run ONLY during the page opening. Mid-session (a
+ * status read after the stream ended, an Attach) the backend's 403 has one code for three causes (E006: not the run's
+ * owner, an inactive participant, a wrong admin token - `app/utils/exceptions.py:64-66`), so it is not proof that the run
+ * is gone: the run is kept and the failure is shown on the run's line. Red before (839eac9b cleared on any 403).
+ */
+describe('048 S3: a 403 on a status read mid-session keeps the run', () => {
+  it('mid-session 403: the run id and its state stay, the failure is on the run line with its request id', async () => {
+    vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 403 Forbidden for /simulator/runs/r1', { status: 403, requestId: 'req-403-mid' }))
+    const real = realState()
+    real.runStatus = { run_id: 'r1', scenario_id: 'sc', state: 'running' } as RealModeState['runStatus']
+
+    await lifecycle(real).refreshRunStatus()
+
+    expect(real.runId, 'not cleared').toBe('r1')
+    expect(real.runStatus?.state, 'its state stays').toBe('running')
+    expect(real.lastError).toBe(t('failure.forbidden'))
+    expect(runErrorLineRef(real.lastErrorLine)).toBe('req-403-mid')
+  })
+
+  it('counter-check: a 404 mid-session still clears the run (unchanged)', async () => {
+    vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /simulator/runs/r1', { status: 404 }))
+    const real = realState()
+
+    await lifecycle(real).refreshRunStatus()
+
+    expect(real.runId).toBeNull()
+  })
+})

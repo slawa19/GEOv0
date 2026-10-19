@@ -197,7 +197,24 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     expect(app.real.lastError, 'the 403 of the foreign run is not left on the line').toBe('')
   })
 
-  it('counter-check: a 500 on the same read still starts nothing (only "gone" clears the id: 404 and 403)', async () => {
+  // 048 S3 (orchestrator 2026-10-19): the opening cannot tell the backend's 403s apart (one code E006, no details), so an
+  // inactive participant's 403 on the restored run clears it too. ACCEPTED: the start that follows answers with its own
+  // refusal, shown on the run line - here the mock's create succeeds; what is held is that the opening goes on.
+  it('opening + a 403 of an inactive participant (same code E006): cleared too - accepted, the next start answers for itself', async () => {
+    storedRun('R_MINE', 'running')
+    vi.mocked(getRun).mockImplementation(async (_cfg, runId) => {
+      if (runId === 'R_MINE') throw new ApiError('HTTP 403 Forbidden for /simulator/runs/R_MINE', {
+        status: 403, bodyText: JSON.stringify({ error: { code: 'E006', message: 'Participant account is not active' } }),
+      })
+      return status(runId) as never
+    })
+    boot()
+    await settle()
+    expect(createRun).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem('geo.sim.v2.runId')).toBe('R_NEW')
+  })
+
+  it('counter-check: a 500 on the same read still starts nothing (only "gone" clears the id: 404, and 403 at the opening)', async () => {
     storedRun('R_MAYBE_LIVE', 'running')
     vi.mocked(getRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs/R_MAYBE_LIVE', { status: 500 }))
     const app = boot()
