@@ -130,6 +130,7 @@ test.describe('048 S2 (amendment 10): the analytics dock is the developer\'s (?d
   test('counter-check: the administrator without ?debug=1 has no toggle and no dock', async ({ page }) => {
     await open(page, { visitor: false })
     await page.locator(DETAILS).click()
+    await expect(page.locator(DETAILS), '"Подробнее" is on').toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByTestId('own-run-row'), 'the administrator\'s row is there (the token is read)').toBeVisible()
     await expect(page.getByTestId('analytics-toggle')).toHaveCount(0)
     await expect(page.locator('[data-surface="real-metrics-panel"]')).toHaveCount(0)
