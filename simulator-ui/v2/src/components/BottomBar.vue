@@ -44,9 +44,10 @@ type Props = {
 
   /**
    * 043 S1: the one "Подробнее" toggle (owned by the root). Off: the bottom row is the legend, the total debt (slot
-   * `summary`) and "Reset view". On: the row of service controls above it - EQ, Layout, Labels and "Inspect graph"
-   * (slot `navigator`). Hidden means not rendered. 048 S1 (decisions 4 and 5): the Scene select, Refresh of the
-   * snapshot, Analytics and Artifacts are gone from here (Analytics and Artifacts to "Admin ▾" of the top bar).
+   * `summary`) and "Reset view". On: the row of service controls above it - EQ, Layout and "Inspect graph" (slot
+   * `navigator`). Hidden means not rendered. 048 S1 (decisions 4 and 5): the Scene select, Refresh of the snapshot,
+   * Analytics and Artifacts are gone from here. 048 S2 (amendment 11): the Labels select too - the app keeps its default
+   * (`selection`, `useSimulatorApp.ts`; a stored choice is still read, `usePersistedSimulatorPrefs.ts`, BACKLOG 043-26).
    */
   detailsOpen?: boolean
 
@@ -62,7 +63,6 @@ const props = withDefaults(defineProps<Props>(), { detailsOpen: false, debug: fa
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
 const quality = defineModel<string>('quality', { required: true })
-const labelsLod = defineModel<string>('labelsLod', { required: true })
 
 // 042 T4205: the playlist the workbench acts on is the workbench's (a change of choice stops the current playback).
 const offeredPlaylists = computed(() => (props.debug && props.apiMode !== 'real' ? props.playlists?.offered ?? [] : []))
@@ -121,15 +121,6 @@ const playlistPosition = computed(() => {
           <option value="low">Low</option>
           <option value="med">Med</option>
           <option value="high">High</option>
-        </select>
-      </div>
-
-      <div class="ds-row bb-row" aria-label="Labels">
-        <span class="ds-label">Labels</span>
-        <select v-model="labelsLod" class="ds-select" aria-label="Labels" data-testid="labels-select">
-          <option value="off">Off</option>
-          <option value="selection">Selection</option>
-          <option value="neighbors">Neighbors</option>
         </select>
       </div>
     </div>

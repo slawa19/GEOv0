@@ -9,7 +9,7 @@ import { ApiError } from '../api/http'
 import { setUiLocale } from '../i18n/locale'
 import { connectSse } from '../api/sse'
 import {
-  createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, setIntensity, stopRun, adminStopAllRuns,
+  createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, setIntensity, stopRun,
 } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
@@ -28,8 +28,6 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
     resumeRun: vi.fn(),
     stopRun: vi.fn(),
     setIntensity: vi.fn(),
-    adminStopAllRuns: vi.fn(async () => ({ stopped: 1 })),
-    adminGetAllRuns: vi.fn(async () => ({ items: [] })),
     ensureSession: vi.fn(async () => ({ actor_kind: 'anonymous', owner_id: 'o1' })),
   }
 })
@@ -341,6 +339,8 @@ describe('044 stage 2: the opening edge paths of BACKLOG 043-23 and 043-24', () 
   })
 })
 
+// 048 S2 (amendment 9): "admin stop-one" and "admin stop-all" during the opening are gone with "Admin ▾" (no control of
+// the page triggers them; a removed contract). The Stop of the run row is `043-23` above; the counter-check stays.
 describe('044 stage 2 (Codex §15): every stop the person triggers during the opening spends its pending start', () => {
   /** The opening is held on the scenario catalogue; the stored run R1 is running until the person stops it. */
   async function holdOpening() {
@@ -352,26 +352,10 @@ describe('044 stage 2 (Codex §15): every stop the person triggers during the op
         return { api_version: 'simulator-api/1', items: [{ scenario_id: 'sc1', label: 'Scenario 1' }] }
       }) as never,
     )
-    vi.mocked(adminStopAllRuns).mockImplementation((async () => { runs.set('R1', 'stopped'); return { stopped: 1 } }) as never)
     const app = boot()
     await settle()
     expect(app.state.loading, 'the opening is held').toBe(true)
     return { app, release: () => releaseCatalogue() }
-  }
-
-  for (const [name, act] of [
-    ['admin stop-one', (app: ReturnType<typeof boot>) => app.admin.stopRun('R1')],
-    ['admin stop-all', (app: ReturnType<typeof boot>) => app.admin.stopRuns()],
-  ] as const) {
-    it(`${name} during the opening: the run the person stopped is not replaced`, async () => {
-      const { app, release } = await holdOpening()
-      await act(app)
-      expect(runs.get('R1'), 'the stop reached the server').toBe('stopped')
-      release()
-      await settle()
-      expect(app.state.loading, 'the opening is over (non-vacuity)').toBe(false)
-      expect(createRun, 'no replacement behind the person').not.toHaveBeenCalled()
-    })
   }
 
   it('counter-check: a run stopped by someone else (not on this page) is replaced at the opening, as before', async () => {

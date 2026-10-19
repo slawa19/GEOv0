@@ -21,7 +21,7 @@ import RealMetricsPanel from './RealMetricsPanel.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
- import { isAdminViewer, provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+ import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
 import { canActOnTrustlineFigures } from '../composables/interact/trustlinesSourceState'
@@ -180,11 +180,13 @@ function toggleAnalyticsPanel(): void {
 }
 
 /**
- * 048 S1 (decision 1): the analytics dock is the administrator's - its toggle is in "Admin ▾", and without an admin token
- * the dock is neither mounted nor polled, whatever a browser remembers (`analyticsPanelOpen`). Written from the app's
- * token below (`isAdminViewer`, the rule of the top bar); a ref here because the app is created after this line.
+ * 048 S2 (amendment 10): the analytics dock is the developer's tool - its toggle is in the top bar's service row with
+ * `?debug=1` only, and without `?debug=1` the dock is neither mounted nor polled, whatever a browser remembers
+ * (`analyticsPanelOpen`). No token is asked for: the metrics and bottlenecks of a run are its owner's to read
+ * (`app/api/v1/simulator.py`, `_check_run_access`). Written from the app's `isDebugUi` below; a ref here because the app
+ * is created after this line, and its gate is computed from what it reads at the moment.
  */
-const analyticsViewerIsAdmin = ref(false)
+const analyticsDebugUi = ref(false)
 
 /**
  * 043 S1: the one "Подробнее" toggle. Off by default (a first visit, or a browser that never chose); remembered in
@@ -212,7 +214,7 @@ const app = useSimulatorApp({
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
   optionalFxEnabled: () => !reducedMotion.value,
-  isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value && analyticsViewerIsAdmin.value,
+  isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value && analyticsDebugUi.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -364,14 +366,12 @@ const {
   // real mode
   real,
   realActions,
-  admin,
 
   // state + prefs
   state,
   eq,
   layoutMode,
   quality,
-  labelsLod,
 
   sceneEq,
   equivalentOptions,
@@ -440,6 +440,7 @@ const {
 } = app
 
 getHostEl = () => hostEl.value
+analyticsDebugUi.value = isDebugUi
 
 /** 039 slice B: the equivalent of the snapshot ON SCREEN - the legend's title. Never the selector's pending choice. */
 const shownSnapshotEquivalent = computed(() => canonicalEquivalent(state.snapshot?.equivalent))
@@ -604,25 +605,9 @@ watch(
    runStats: computed(() => real.runStats),
 
    accessToken: computed(() => real.accessToken),
-   adminRuns: computed(() => admin.runs.value),
-   adminRunsLoading: computed(() => admin.loading.value),
-   adminLastError: computed(() => admin.lastError.value),
-
-   adminCanGetRuns: computed(() => typeof admin.getRuns === 'function'),
-   adminCanStopRuns: computed(() => typeof admin.stopRuns === 'function'),
-   adminCanAttachRun: computed(() => typeof admin.attachRun === 'function'),
-   adminCanStopRun: computed(() => typeof admin.stopRun === 'function'),
  }
 
  provideTopBarContext(topBarCtx)
-
-watch(
-  () => isAdminViewer(real.accessToken, apiMode.value),
-  (admin) => {
-    analyticsViewerIsAdmin.value = admin
-  },
-  { immediate: true, flush: 'sync' },
-)
 
 /**
  * 048 S1 (decision 4): the equivalents of the bottom bar's EQ. The offline demo snapshots are shipped for one equivalent
@@ -1204,13 +1189,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :details-open="detailsOpen"
       :debug="isDebugUi"
       :analytics-open="analyticsPanelOpen"
-      :run-files="{
-        runId: real.runId,
-        items: real.artifacts,
-        loading: real.artifactsLoading,
-        refresh: realActions.refreshArtifacts,
-        download: realActions.downloadArtifact,
-      }"
       @toggle-details="toggleDetails"
       @toggle-analytics="toggleAnalyticsPanel"
       @set-ui-theme="setUiTheme"
@@ -1219,10 +1197,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @resume="realActions.resume"
       @stop="realActions.stop"
       @apply-intensity="realActions.applyIntensity"
-      @admin-get-runs="admin.getRuns"
-      @admin-stop-runs="admin.stopRuns"
-      @admin-attach-run="admin.attachRun"
-      @admin-stop-run="admin.stopRun"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:intensity-percent="realActions.setIntensityPercent"
     >
@@ -1409,7 +1383,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-model:eq="eq"
       v-model:layoutMode="layoutMode"
       v-model:quality="quality"
-      v-model:labelsLod="labelsLod"
       :api-mode="apiMode"
       :set-source="setSource"
       :playlists="playlistWorkbench"

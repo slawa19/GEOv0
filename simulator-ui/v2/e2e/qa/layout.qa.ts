@@ -8,7 +8,7 @@
  *  R9   the share of the 1366x768 viewport left to the canvas, from the DOM: the rectangles of the two bars against
  *       the viewport (and, beside it, the hit-tested share of 039 R9), with Details off and on, in both themes.
  *
- * LIMITS: the stand's ring of six and its backend mock (an admin token is set, so `Admin` exists); a reload is not
+ * LIMITS: the stand's ring of six and its backend mock (an admin token is set, so the run row exists); a reload is not
  * exercised here (`boot()` clears storage on every navigation; the remembered choice is the unit tier's,
  * `SimulatorAppRoot.interact.test.ts`); Chromium without a GPU; the onboarding hint is dismissed by "Подробнее" and is
  * measured, with the bars, only while Details is off.
@@ -20,14 +20,15 @@ import { THEMES, VIEWPORT_MAIN, VIEWPORT_RESIZED } from './surfaceMatrix.js'
 
 // 048 S1 (decisions 1, 4 and 5; Verification plan, forbidden item 4 - by test id, not by the words 046 translates):
 // what "Подробнее" shows the stand's viewer (an admin token is set). Gone from this list: the "Run <state>" badge
-// (removed), the source select and the quality (`?debug=1` only - DEVELOPER below), the analytics toggle (inside the
-// "Admin ▾" menu: in the DOM, not on screen until the menu is opened - `surfaceMatrix.ts`, entry `analytics-panel`).
+// (removed), the source select and the quality (`?debug=1` only - DEVELOPER below). 048 S2 (amendments 8-11,
+// 2026-10-19): "Admin ▾" and the Labels select are removed (their rows left this list with them); the row of the own
+// run is the administrator's (the stand's viewer has the token - a visitor's "Подробнее" is
+// `e2e/p048-s2-edge-cases-out.spec.ts`); the analytics toggle is `?debug=1`'s (DEVELOPER below).
 const SERVICE: Array<[string, string]> = [
   ['theme switcher', '[data-testid="theme-select"]'],
-  ['Admin menu', '[data-testid="admin-summary"]'],
+  ['own run row (admin token)', '[data-testid="own-run-row"]'],
   ['equivalent', '[data-testid="equivalent-select"], [data-testid="equivalent-text"]'], // a select, or the code as text
   ['layout', '[data-testid="layout-select"]'],
-  ['labels', '[data-testid="labels-select"]'],
   ['Inspect graph', '.graph-navigator'],
   ['full metrics', '[data-testid="system-metrics"]'],
 ]
@@ -37,6 +38,7 @@ const DEVELOPER: Array<[string, string]> = [
   ['quality', '[data-testid="quality-select"]'],
   ['SSE badge', '[data-testid="sse-badge"]'],
   ['playlist workbench', '[data-testid="playlist-workbench"]'],
+  ['analytics toggle', '[data-testid="analytics-toggle"]'], // 048 S2 (amendment 10)
 ]
 const ACTIONS = ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']
 

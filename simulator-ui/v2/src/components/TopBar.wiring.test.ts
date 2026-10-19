@@ -20,7 +20,7 @@ import TopBar from './TopBar.vue'
 const EVENTS = [
   'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent',
   'set-ui-theme', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
-  'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run', 'toggle-analytics',
+  'toggle-analytics',
 ] as const
 
 function context(over: Partial<TopBarContext> = {}): TopBarContext {
@@ -30,9 +30,8 @@ function context(over: Partial<TopBarContext> = {}): TopBarContext {
     selectedScenarioId: ref('sc-1'), intensityPercent: ref(30), runId: ref('run-1'), runStatus: ref(null), sseState: ref('open'),
     lastError: ref(null),
     runStats: ref({ startedAtMs: 0, attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} }),
-    accessToken: ref('admin-token'), adminRuns: ref([{ run_id: 'run-9', state: 'running', scenario_id: 'sc-1', owner_id: 'o' }]),
-    adminRunsLoading: ref(false), adminLastError: ref(undefined),
-    adminCanGetRuns: ref(true), adminCanStopRuns: ref(true), adminCanAttachRun: ref(true), adminCanStopRun: ref(true),
+    // 048 S2 (amendment 8): the run controls these tests use are the administrator's - an admin token.
+    accessToken: ref('admin-token'),
     ...over,
   } as TopBarContext
 }
@@ -95,7 +94,7 @@ describe('TopBar wiring - what each control emits', () => {
    * gone; "Поток" pauses a living run and resumes a paused one (rewritten here from "Pause"/"Resume", not deleted).
    * Observed by behaviour, not by a button's words: EVERY button of the service row is clicked, in both states of the
    * run, and none of them emits `pause` or `resume` - red before S1 (the row's Pause emitted `pause`, its Resume
-   * `resume`). The refresh of the scenario catalogue is in "Admin ▾" (decision 5) and still emits its event.
+   * `resume`).
    */
   it('buttons emit their events: run lifecycle and intensity; "Поток" alone pauses and resumes (043 S2: no mode segment)', async () => {
     const runStatus = ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
@@ -138,19 +137,8 @@ describe('TopBar wiring - what each control emits', () => {
     done()
   })
 
-  it('the Admin menu emits the admin events, with the run id for the per-run ones', async () => {
-    const { host, spies, done } = mountTopBar(context(), true)
-    await nextTick()
-    host.querySelector<HTMLButtonElement>('button[aria-label="Refresh runs list"]')!.click()
-    expect(spies['admin-get-runs']).toHaveBeenCalledTimes(1)
-    host.querySelector<HTMLButtonElement>('button[aria-label="Stop all runs"]')!.click()
-    expect(spies['admin-stop-runs']).toHaveBeenCalledTimes(1)
-    host.querySelector<HTMLButtonElement>('button[aria-label="Attach to selected run"]')!.click()
-    expect(spies['admin-attach-run']).toHaveBeenCalledWith('run-9')
-    host.querySelector<HTMLButtonElement>('button[aria-label="Stop selected run"]')!.click()
-    expect(spies['admin-stop-run']).toHaveBeenCalledWith('run-9')
-    done()
-  })
+  // 048 S2 (amendment 9): the test "the Admin menu emits the admin events, with the run id for the per-run ones" is gone
+  // with "Admin ▾" and its four events (a removed contract; the run list, Stop and Stop all are the API's).
 
   it('with Details off none of those controls is rendered, so none can emit (043 S1)', async () => {
     const { host, spies, done } = mountTopBar(context({ runStatus: ref({ run_id: 'run-1', state: 'running' } as RunStatus) }), false)

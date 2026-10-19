@@ -10,7 +10,6 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
   const eq = ref('UAH')
   const layoutMode = ref('admin-force')
   const quality = ref('med')
-  const labelsLod = ref('off')
 
   const defaultProps = {
     apiMode: 'real' as const,
@@ -31,11 +30,9 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
         'onUpdate:eq': (v: string) => (eq.value = v),
         'onUpdate:layoutMode': (v: string) => (layoutMode.value = v),
         'onUpdate:quality': (v: string) => (quality.value = v),
-        'onUpdate:labelsLod': (v: string) => (labelsLod.value = v),
         eq: eq.value,
         layoutMode: layoutMode.value,
         quality: quality.value,
-        labelsLod: labelsLod.value,
       }),
   })
 
@@ -72,17 +69,21 @@ describe('BottomBar — the visitor, the developer (048 S1)', () => {
     }
   })
 
-  it('a visitor: EQ, Layout, Labels - no source, no quality, no Refresh, Analytics or Artifacts; ?debug=1 adds the source and the quality', async () => {
+  // 048 S2 (amendment 11): the Labels select is gone (the app keeps its default) - rewritten from "EQ, Layout, Labels";
+  // red before S2: the list ended with 'Labels'.
+  it('a visitor: EQ, Layout - no Labels, no source, no quality, no Refresh, Analytics or Artifacts; ?debug=1 adds the source and the quality', async () => {
     const visitor = await mountBottomBar({ propOverrides: { setSource: vi.fn() } })
     await nextTick()
-    expect(controls(visitor.host)).toEqual(['Equivalent', 'Layout', 'Labels'])
+    expect(controls(visitor.host)).toEqual(['Equivalent', 'Layout'])
+    expect(visitor.host.querySelector('[data-testid="labels-select"], [aria-label="Labels"]'), 'no Labels select').toBeNull()
     expect(visitor.host.querySelector('details'), 'no menu in the bar').toBeNull()
     visitor.app.unmount()
     visitor.host.remove()
 
     const developer = await mountBottomBar({ propOverrides: { setSource: vi.fn(), debug: true } })
     await nextTick()
-    expect(controls(developer.host)).toEqual(['Equivalent', 'Layout', 'Источник', 'Quality', 'Labels'])
+    expect(controls(developer.host)).toEqual(['Equivalent', 'Layout', 'Источник', 'Quality'])
+    expect(developer.host.querySelector('[data-testid="labels-select"], [aria-label="Labels"]'), 'no Labels select with ?debug=1 either').toBeNull()
     expect(developer.host.querySelector('[data-testid="source-select"]')).not.toBeNull()
     expect(developer.host.querySelector('[data-testid="quality-select"]')).not.toBeNull()
     developer.app.unmount()

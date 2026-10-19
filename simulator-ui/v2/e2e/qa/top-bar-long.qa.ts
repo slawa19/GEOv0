@@ -2,8 +2,10 @@
  * 043 S3 (external review Codex §15, P2 on `46094c4d`): the service row of the top bar with the longest inputs the
  * product shows there - the scenario `greenfield-village-100-realistic-v2` (its name equals its id, so the option reads
  * "<name> (<id>)", ~69 characters) and a stopped run whose stop summary is cut at 64 characters - stays readable: no
- * control of the row overlaps another, none leaves the viewport. At 1280x720 and 1366x768, in both themes, with the
- * Admin menu present (`menu-admin` holds where its menu opens).
+ * control of the row overlaps another, none leaves the viewport. At 1280x720 and 1366x768, in both themes. Measured
+ * with the administrator's controls (the stand's viewer has the dev build's admin token): the run row and the payments
+ * badge are the longest the row gets. 048 S2 (2026-10-19): "Admin ▾" is gone; its summary left the measured controls
+ * and the anti-vacuum below, the payments badge took its place there.
  *
  * 046 wave 1 (2026-10-18): the row holds the language switch right after the theme, and runs in both languages
  * (`?lang=en`, `?lang=ru`). By the owner's narrowing of that day only the SWITCH (its label "Язык") and the stop reason
@@ -11,8 +13,8 @@
  * now the stop reason in words (`runStop.*`): the free-text reason below is outside the closed set, so it reads as the
  * general text with the value, cut at 64 characters as before.
  *
- * LIMITS: the controls compared are the leaves of the row (selects, buttons, inputs, badges, labels, the stop summary,
- * the Admin summary), not their containers; a control clipped by `overflow` inside its own box (an ellipsis) is not an
+ * LIMITS: the controls compared are the leaves of the row (selects, buttons, inputs, badges, labels, the stop summary),
+ * not their containers; a control clipped by `overflow` inside its own box (an ellipsis) is not an
  * overlap. Chromium without a GPU, the stand's mock backend.
  */
 import { expect, test, type Page, type Route } from '@playwright/test'
@@ -39,8 +41,6 @@ async function longInputs(page: Page): Promise<void> {
   }))
   await page.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, stopped))
   await page.route(/\/simulator\/runs$/i, (r) => (r.request().method() === 'POST' ? json(r, { run_id: RUN_ID }) : r.fallback()))
-  await page.route(`**/simulator/runs/${RUN_ID}/artifacts`, (r) => json(r, { items: [] }))
-  await page.route('**/simulator/admin/runs', (r) => json(r, { items: [] }))
 }
 
 type Box = { name: string; x: number; y: number; w: number; h: number }
@@ -90,11 +90,11 @@ for (const vp of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
       await expect(page.locator('html')).toHaveAttribute('lang', lang)
       await page.locator(DETAILS_TOGGLE).click()
       const scenario = page.locator('select[aria-label="Scenario"]')
-      // Anti-vacuum: the long inputs are on screen - the option and the cut stop summary - and the Admin summary is there.
+      // Anti-vacuum: the long inputs are on screen - the option and the cut stop summary - and the payments badge is there.
       await expect(scenario.locator('option:checked')).toHaveText(`${LONG_SCENARIO} (${SCENARIO_ID})`)
       const generalText = t('runStop.unknown', { code: LONG_REASON }, lang)
       await expect(page.locator('[data-testid="stop-reason"] .ds-value')).toHaveText(new RegExp(`^${escapeRe(generalText.slice(0, 40))}.{10,}`))
-      await expect(page.locator('summary[aria-label="Admin"]')).toBeVisible()
+      await expect(page.locator('[data-testid="run-payments"]')).toBeVisible()
       // 046 wave 1: the language switch is a control of this row, measured with the rest.
       await expect(page.locator('[data-testid="language-switch"] .ds-label')).toHaveText(t('locale.switcherLabel', undefined, lang))
       const boxes = await leaves(page)

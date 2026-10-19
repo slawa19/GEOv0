@@ -2,8 +2,9 @@
  * Programme 048, slice S1 (T4810) - the three addressees of the demo screen, in the browser, at 1366x768, on the mocked
  * backend of the 037 specs (`helpers/p037Mock.ts`). Spec 048, Verification plan, reproducers (в), (г) and (д):
  *
- *  (в) a visitor (no admin token) with "Подробнее" on has no Analytics toggle and no run files ("Artifacts"); the
- *      administrator (the dev build's admin token) has both, inside "Admin ▾";
+ *  (в) a visitor (no admin token) with "Подробнее" on has no Analytics toggle and no run files ("Artifacts"). 048 S2
+ *      removed "Admin ▾" altogether: the administrator's half of (в) - "Admin ▾ holds the Analytics toggle and the run
+ *      files" - is gone with it (a removed contract); what each addressee has now is `p048-s2-edge-cases-out.spec.ts`;
  *  (г) the capacity-stall alert is on the first view ("Подробнее" off) once `consec_all_rejected_ticks` reaches the
  *      threshold - and, first, the anti-vacuum: no alert without a stall;
  *  (д) the source switch carries `?debug=1` into the new address, and the offline source with it shows the playlist
@@ -36,14 +37,12 @@ async function open(page: Page, o: { visitor?: boolean; run?: Record<string, unk
   // Registered after `mockApp`: its init script clears the storage first, then this one writes the token.
   if (o.visitor) await page.addInitScript(() => { try { localStorage.setItem('geo.sim.v2.accessToken', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl') } catch { /* ignore */ } })
   if (o.run) await page.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, runBody(o.run)))
-  await page.route('**/simulator/admin/runs', (r) => json(r, { items: [] }))
-  await page.route(`**/simulator/runs/${RUN_ID}/artifacts`, (r) => json(r, { items: [{ name: 'events.ndjson' }] }))
   await page.setViewportSize({ width: 1366, height: 768 })
   await page.goto(`/?mode=real&e2eReal=1${o.query ?? ''}`)
   await ready(page, true)
 }
 
-test.describe('048 S1 (в): the administrator\'s tools are in "Admin ▾", a visitor has none', () => {
+test.describe('048 S1 (в): a visitor has none of the administrator\'s tools', () => {
   test('a visitor with "Подробнее" on: no Admin, no Analytics toggle, no run files', async ({ page }) => {
     await open(page, { visitor: true })
     await page.locator(DETAILS).click()
@@ -54,28 +53,6 @@ test.describe('048 S1 (в): the administrator\'s tools are in "Admin ▾", a vis
       await expect(page.getByTestId(id), `${id}: not rendered for a visitor`).toHaveCount(0)
     }
     await expect(page.locator('[data-surface="real-metrics-panel"]'), 'no analytics dock').toHaveCount(0)
-  })
-
-  test('the administrator: "Admin ▾" holds the Analytics toggle (it opens the dock) and the run files (they load)', async ({ page }) => {
-    await open(page)
-    await page.locator(DETAILS).click()
-    const menu = page.locator('[data-testid="admin-menu"] > .ds-ov-dropdown')
-    await expect(menu, 'closed until asked').toBeHidden()
-    await page.getByTestId('admin-summary').click()
-    await expect(menu).toBeVisible()
-    await expect(menu.getByTestId('analytics-toggle')).toBeVisible()
-    // The owner's word (2026-10-19): no refresh of the scenario catalogue in the UI - the tools row is the toggle alone.
-    await expect(menu.locator('[data-testid="admin-tools"] button')).toHaveCount(1)
-    const files = menu.getByTestId('admin-run-files')
-    await expect(files).toBeVisible()
-    await expect(files.getByTestId('admin-run-files-count'), 'no number before the index is read').toHaveCount(0)
-    await files.getByRole('button', { name: 'Refresh artifacts' }).click()
-    await expect(files.getByTestId('admin-run-files-count')).toHaveText('1')
-    await expect(files.locator('button', { hasText: 'events.ndjson' })).toBeVisible()
-
-    await menu.getByTestId('analytics-toggle').click()
-    await expect(page.locator('[data-surface="real-metrics-panel"]'), 'the toggle opens the dock').toBeVisible()
-    await expect(menu.getByTestId('analytics-toggle')).toHaveAttribute('aria-pressed', 'true')
   })
 })
 

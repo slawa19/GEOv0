@@ -230,10 +230,10 @@ $idx = Invoke-RestMethod -Method Get -Uri "$BaseUrl/simulator/runs/$runId/artifa
 $idx
 ```
 
-Если в индексе есть имя артефакта (например `graph.json`), можно скачать:
+Индекс перечисляет файлы каталога прогона: `status.json`, `last_tick.json`, `events.ndjson`, после остановки — ещё `summary.json` и `bundle.zip` (что в каждом — `real-mode-runbook.md`, раздел 6.7). Скачать один из них:
 
 ```powershell
-$artifactName = "graph.json"
+$artifactName = "events.ndjson"
 $artifactOutputDir = ".\\.local-run\\api-artifacts"
 New-Item -ItemType Directory -Path $artifactOutputDir -Force | Out-Null
 Invoke-WebRequest -Method Get -Uri "$BaseUrl/simulator/runs/$runId/artifacts/$artifactName" -Headers $Headers -OutFile (Join-Path $artifactOutputDir $artifactName)

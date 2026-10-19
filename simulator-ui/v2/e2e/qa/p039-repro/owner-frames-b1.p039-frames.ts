@@ -28,7 +28,7 @@ import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, fixtureSnapshot100, openDetails, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
+import { boot, fixtureSnapshot100, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
 
 const DIR = process.env.P039_FRAMES_DIR ?? ''
 const PHASE = process.env.P039_FRAMES_PHASE ?? ''
@@ -105,8 +105,8 @@ async function magnify(page: Page, from: string, to: string, k: number): Promise
   await zoom.close()
 }
 
-async function bootThemed(page: Page, snapshot: QaSnapshot, theme: string): Promise<void> {
-  await boot(page, { snapshot, clock: false, query: `&theme=${theme}` })
+async function bootThemed(page: Page, snapshot: QaSnapshot, theme: string, beforeLoad?: (p: Page) => Promise<void>): Promise<void> {
+  await boot(page, { snapshot, clock: false, query: `&theme=${theme}`, beforeLoad })
   await expect(page.locator('.root'), 'the theme of the frame is the theme on screen').toHaveAttribute('data-theme', theme)
   await waitLoopAsleep(page)
 }
@@ -141,9 +141,8 @@ for (const theme of THEMES) {
 
   test(`039 B1 frames [${theme}] - name labels (Labels: Neighbors, the hub selected)`, async ({ page }) => {
     const dir = outDir()
-    await bootThemed(page, rolesSnapshot(), theme)
-    await openDetails(page) // 043 S1: Labels is behind "Подробнее"
-    await page.getByRole('combobox', { name: 'Labels' }).selectOption('neighbors')
+    // 048 S2: no Labels select any more - the stored choice is the way to `neighbors` (as `no-gpu-effects.qa.ts` does).
+    await bootThemed(page, rolesSnapshot(), theme, (p) => p.addInitScript(() => { try { localStorage.setItem('geo.sim.labelsLod', 'neighbors') } catch { /* ignore */ } }))
     const hub = (await screenNodes(page)).get('hub')!
     await page.mouse.click(hub.x, hub.y)
     await expect(page.locator('.node-label-inner').first(), 'name labels are on screen').toBeVisible()

@@ -34,8 +34,7 @@ function context(over: Partial<TopBarContext> = {}): TopBarContext {
     selectedScenarioId: ref('sc-1'), intensityPercent: ref(30), runId: ref('run-1'), runStatus: ref(null), sseState: ref('open'),
     lastError: ref(null),
     runStats: ref({ startedAtMs: 0, attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} }),
-    accessToken: ref(''), adminRuns: ref(null), adminRunsLoading: ref(false), adminLastError: ref(undefined),
-    adminCanGetRuns: ref(true), adminCanStopRuns: ref(true), adminCanAttachRun: ref(true), adminCanStopRun: ref(true),
+    accessToken: ref(''),
     ...over,
   } as TopBarContext
 }
@@ -101,9 +100,11 @@ function sw0(host: HTMLElement) {
 }
 
 describe('046 wave 1 (2) - BACKLOG 043-3: the scenario cannot be changed under a live run', () => {
+  // 048 S2 (amendment 8): the scenario select is in the row of the own run, the administrator's - an admin token here.
+  const admin = { accessToken: ref('admin-token') } as Partial<TopBarContext>
   for (const state of ['running', 'paused', 'created', 'stopping']) {
     it(`a ${state} run: the select is disabled and the line says why (en and ru)`, async () => {
-      const { host, done } = await mount(context({ runStatus: ref(status(state)) }))
+      const { host, done } = await mount(context({ ...admin, runStatus: ref(status(state)) }))
       const select = host.querySelector<HTMLSelectElement>('[data-testid="scenario-select"]')!
       expect(select.disabled).toBe(true)
       const line = host.querySelector('[data-testid="scenario-locked"]')
@@ -120,14 +121,14 @@ describe('046 wave 1 (2) - BACKLOG 043-3: the scenario cannot be changed under a
   }
 
   it('a run whose status is not read yet counts as live (the select is locked, as Start is hidden)', async () => {
-    const { host, done } = await mount(context({ runStatus: ref(null) }))
+    const { host, done } = await mount(context({ ...admin, runStatus: ref(null) }))
     expect(host.querySelector<HTMLSelectElement>('[data-testid="scenario-select"]')!.disabled).toBe(true)
     done()
   })
 
   it('counter-check: no run, a stopped and an errored run - the select is enabled, no line', async () => {
     for (const over of [{ runId: ref(null) }, { runStatus: ref(status('stopped')) }, { runStatus: ref(status('error')) }] as Partial<TopBarContext>[]) {
-      const { host, done } = await mount(context(over))
+      const { host, done } = await mount(context({ ...admin, ...over }))
       const select = host.querySelector<HTMLSelectElement>('[data-testid="scenario-select"]')!
       expect(select.disabled).toBe(false)
       expect(select.hasAttribute('aria-describedby')).toBe(false)

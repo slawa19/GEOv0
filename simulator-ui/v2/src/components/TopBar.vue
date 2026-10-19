@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
-import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { toLower } from '../utils/stringHelpers'
 
-import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { isAdminViewer, useTopBarContext } from '../composables/useTopBarContext'
 import { useUiLocale } from '../composables/useUiLocale'
 import { runStopText } from '../i18n/statusText'
@@ -17,36 +15,29 @@ const { t } = useUiLocale()
 /**
  * 043 S1: `detailsOpen` is the one "Подробнее" toggle (owned and remembered by the root). Off: the first row only -
  * the network's name and state as text, the protocol actions (slot `actions`) and the toggle itself. On: the row of
- * service controls below it (theme, language, scenario and run controls, statuses, Admin). The capacity-stall alert
+ * service controls below it (theme, language, statuses; 048 S2: the run controls with an admin token). The capacity-stall alert
  * is not behind it since 048 S1 (below).
  * Hidden means NOT RENDERED (`v-if`), never hidden by CSS: a hidden control must not stay in the tab order.
  *
- * 048 S1 (decisions 1, 2, 4, 5): three addressees, three existing entries. The visitor: the first view and
- * "Подробнее". The administrator (an admin token): "Admin ▾" holds the runs, the run files (`runFiles`, moved from the
- * bottom bar), the refresh of the scenario catalogue and the analytics dock's toggle. The developer (`debug`, the
- * `?debug=1` of the root): the SSE badge. The capacity-stall alert is on the first view.
+ * 048 S1 (decisions 1, 2, 4, 5): three addressees, three existing entries. The capacity-stall alert is on the first view.
+ *
+ * 048 S2 (amendments 8-12, the owner's rule of 2026-10-19 "крайние случаи в интерфейсе не обрабатывать"): the visitor's
+ * "Подробнее" is the theme, the language, the stop reason (when there is one) and the network figures (slot). The run
+ * row - scenario, Start/Stop, the tempo with Apply, "No scenarios…" - and the payments badge ("TX", "Платежи: a из b")
+ * are shown only with an admin token (`showOwnRunRow`, `showAdminControls`): the opening's autostart picks the scenario,
+ * "Поток" pauses. The "Admin ▾" menu is gone - the run list, Attach, Stop, Stop all and the run files are the API's
+ * (`docs/ru/simulator/backend/real-mode-runbook.md`, "где и что смотреть"). The developer (`debug`, the `?debug=1` of the
+ * root): the SSE badge and the analytics dock's toggle.
  */
-type RunFiles = {
-  runId: string | null
-  /** The run's file index as last read (`real.artifacts`); a read replaces the array, a failed read leaves it. */
-  items: readonly ArtifactIndexItem[]
-  loading: boolean
-  /** Resolves with the index array a successful read of the current attachment installed, or `null`. */
-  refresh: () => Promise<readonly ArtifactIndexItem[] | null>
-  download: (name: string) => void
-}
-
 const props = withDefaults(
   defineProps<{
     detailsOpen?: boolean
-    /** 048 S1: `?debug=1` (read by `useSimulatorApp`). Off: no SSE badge. */
+    /** 048 S1: `?debug=1` (read by `useSimulatorApp`). Off: no SSE badge; 048 S2: and no analytics toggle. */
     debug?: boolean
-    /** 048 S1: the analytics dock (spec 007) is the administrator's: its toggle is in "Admin ▾". */
+    /** 048 S2 (amendment 10): the analytics dock (spec 007) is the developer's: its toggle is shown with `debug` only. */
     analyticsOpen?: boolean
-    /** 048 S1: the run files ("Artifacts") in "Admin ▾". Absent: no such section. */
-    runFiles?: RunFiles
   }>(),
-  { detailsOpen: false, debug: false, analyticsOpen: false, runFiles: undefined },
+  { detailsOpen: false, debug: false, analyticsOpen: false },
 )
 
 const emit = defineEmits<{
@@ -63,11 +54,6 @@ const emit = defineEmits<{
   (e: 'resume'): void
   (e: 'stop'): void
   (e: 'apply-intensity'): void
-
-  (e: 'admin-get-runs'): void
-  (e: 'admin-stop-runs'): void
-  (e: 'admin-attach-run', runId: string): void
-  (e: 'admin-stop-run', runId: string): void
 }>()
 
 const STALL_THRESHOLD_TICKS = 3
@@ -274,107 +260,30 @@ const startRetryable = computed(() => !!ctx.startRetryable?.value)
 // ============================
 
 /**
- * Admin controls are only visible when the token is an admin token (non-JWT).
- * Participant JWTs should not show admin panel.
+ * Who shows the demo: an admin token (not a participant JWT) on the server source (`isAdminViewer`). On localhost the
+ * dev build fills in its admin token (`useSimulatorApp.ts`); a public visitor has none and no way to enter one in the UI.
  */
 const showAdminControls = computed(() => isAdminViewer(ctx.accessToken.value, ctx.apiMode.value))
 
 /**
- * 048 S1 (decision 5): the run files under "Admin ▾". Their number is shown only once the index ON SCREEN has been
- * read: "not read yet" is not "no files". The marker is the index array a SUCCESSFUL read of the current attachment
- * installed - the owner says which (`useSimulatorRealMode.ts` `refreshArtifacts` resolves with it, or with `null` for a
- * failed read, no run, or a read whose attachment was reset while it was in flight). Every reset of the index (a start,
- * an attach - also of the same run again -, a stale run) puts a new empty array, which is not the remembered one.
- * §15 Codex (2026-10-18): the marker was the run id (attaching A again showed "0 / No artifacts"), then "the same run,
- * a different array after the await" - which a failed read across an Attach of the same run also satisfied. Nothing is
- * inferred across the await now.
+ * 048 S2 (amendment 8): the row of the own run - scenario, Start/Stop, the tempo with Apply and "No scenarios…" - is the
+ * administrator's. A visitor's run is started by the opening (autostart picks the scenario), paused and resumed by
+ * "Поток"; a run the server stopped is started again by a reload (the idle-stop line says so). Not rendered (`v-if`)
+ * without the token: not hidden by CSS, not in the tab order.
  */
-const runFilesReadIndex = shallowRef<readonly ArtifactIndexItem[] | null>(null)
-const runFilesRead = computed(() => {
-  const f = props.runFiles
-  return !!f?.runId && ((runFilesReadIndex.value !== null && toRaw(f.items) === runFilesReadIndex.value) || f.items.length > 0)
-})
-async function onRefreshRunFiles() {
-  const f = props.runFiles
-  if (!f?.runId || f.loading) return
-  const installed = await f.refresh()
-  if (installed) runFilesReadIndex.value = toRaw(installed)
-}
+const showOwnRunRow = computed(() => showRunControls.value && showAdminControls.value)
 
-const adminRunsCountLabel = computed(() => {
-  if (ctx.adminRunsLoading.value) return '…'
-  if (!Array.isArray(ctx.adminRuns.value)) return '—'
-  return String(ctx.adminRuns.value.length)
-})
-
-const adminHasLoadedRuns = computed(() => Array.isArray(ctx.adminRuns.value))
-
-const adminHasActiveRuns = computed(() => {
-  if (!Array.isArray(ctx.adminRuns.value)) return false
-  const active = new Set(['running', 'paused', 'created', 'stopping'])
-  return ctx.adminRuns.value.some((r) => active.has(toLower(r.state)))
-})
-
-const adminStopAllDisabled = computed(() => {
-  if (ctx.adminRunsLoading.value) return true
-  if (!adminHasLoadedRuns.value) return false
-  return !adminHasActiveRuns.value
-})
-
-const adminStopAllBtnClass = computed(() => {
-  return adminStopAllDisabled.value ? 'ds-btn ds-btn--secondary ds-btn--sm' : 'ds-btn ds-btn--danger ds-btn--sm'
-})
-
-/** Toggle state for the admin panel (details element). */
-const adminPanelOpen = ref(false)
-
-const {
-  detailsRef: adminDetailsRef,
-  summaryRef: adminSummaryRef,
-  surfaceRef: adminSurfaceRef,
-  onToggle: onAdminToggle,
-  onDetailsKeydown: onAdminDetailsKeydown,
-} = useHudDropdownFocus(adminPanelOpen)
-
-/** Preserve previous UX: open admin panel after a successful runs fetch. */
-const shouldOpenAdminPanelAfterLoad = ref(false)
-
-watch(
-  () => ctx.adminRuns.value,
-  (runs) => {
-    if (!shouldOpenAdminPanelAfterLoad.value) return
-    if (!Array.isArray(runs)) return
-    adminPanelOpen.value = true
-    shouldOpenAdminPanelAfterLoad.value = false
-  }
+/**
+ * 048 S2 (internal adversarial pass, 2026-10-19): the status cluster is named "Status" only while it holds something -
+ * the SSE badge or the analytics toggle (`debug`), the stop reason, the payments badge (admin token). An empty div with
+ * a name is an axe violation (aria-prohibited-attr), the rule the middle already follows; since S2 a visitor's running
+ * run without `?debug=1` leaves the cluster empty (the payments badge was its one constant item).
+ */
+const showStopReason = computed(() => ctx.runStatus.value?.state === 'stopped' && !!stopSummary.value)
+const showRunPayments = computed(() => !!ctx.runId.value && showAdminControls.value)
+const statusHasContent = computed(
+  () => ctx.apiMode.value === 'real' && (props.debug || showStopReason.value || showRunPayments.value),
 )
-
-async function onAdminGetRuns() {
-  if (!ctx.adminCanGetRuns.value) return
-  if (adminHasLoadedRuns.value) {
-    adminPanelOpen.value = true
-  } else {
-    shouldOpenAdminPanelAfterLoad.value = true
-  }
-  emit('admin-get-runs')
-}
-
-async function onAdminStopRuns() {
-  if (!ctx.adminCanStopRuns.value) return
-  emit('admin-stop-runs')
-}
-
-async function onAdminAttachRun(runId: string) {
-  if (!ctx.adminCanAttachRun.value) return
-  if (!runId) return
-  emit('admin-attach-run', runId)
-}
-
-async function onAdminStopRun(runId: string) {
-  if (!ctx.adminCanStopRun.value) return
-  if (!runId) return
-  emit('admin-stop-run', runId)
-}
 
 function onStartRun() {
   emit('start-run')
@@ -477,9 +386,10 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <!-- 043 S1: named only when it holds the run controls (Auto-Run); an empty div with a name is an axe violation (aria-prohibited-attr). -->
-        <div class="hud-bar__center" :aria-label="showRunControls ? 'Run controls' : undefined">
-          <div v-if="showRunControls" class="ds-row tb-run-controls">
+        <!-- 043 S1: named only when it holds the run controls (Auto-Run); an empty div with a name is an axe violation (aria-prohibited-attr).
+             048 S2 (amendment 8): the row of the own run - only with an admin token. -->
+        <div class="hud-bar__center" :aria-label="showOwnRunRow ? 'Run controls' : undefined">
+          <div v-if="showOwnRunRow" class="ds-row tb-run-controls" data-testid="own-run-row">
             <span class="ds-label">Scenario</span>
             <select
               class="ds-select tb-scenario-select"
@@ -496,7 +406,7 @@ function onApplyIntensity() {
                 {{ scenarioOptionText(s) }}
               </option>
             </select>
-            <!-- 048 S1 (decision 5): the refresh of the scenario catalogue (↻) is in "Admin ▾". -->
+            <!-- No refresh of the scenario catalogue (↻): the owner's word of 2026-10-19 - the catalogue is read when the page loads. -->
             <span v-if="scenarioLocked" id="tb-scenario-locked" class="tb-visually-hidden" data-testid="scenario-locked">{{ t('topBar.scenarioLocked') }}</span>
 
             <button
@@ -547,7 +457,7 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="hud-bar__right" aria-label="Status">
+        <div class="hud-bar__right" :aria-label="statusHasContent ? 'Status' : undefined">
           <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
             <!-- 048 S1 (decision 5): the raw SSE badge is the developer's (`?debug=1`). -->
             <span v-if="props.debug" :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE" data-testid="sse-badge">
@@ -555,7 +465,7 @@ function onApplyIntensity() {
             </span>
 
             <div
-              v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary"
+              v-if="showStopReason"
               class="ds-panel ds-ov-metric tb-fade-92"
               :aria-label="t('topBar.stopReasonAria')"
               data-testid="stop-reason"
@@ -565,165 +475,23 @@ function onApplyIntensity() {
               <span class="ds-value ds-mono tb-fade-90">{{ short(stopSummary, 64) }}</span>
             </div>
 
-            <span v-if="ctx.runId.value" class="ds-badge ds-badge--info" aria-label="TX">
+            <!-- 048 S2 (amendments 8 and 12): the payments of the run ("Платежи: a из b") are the administrator's, with the run row. -->
+            <span v-if="showRunPayments" class="ds-badge ds-badge--info" aria-label="TX" data-testid="run-payments">
               TX {{ txCompact }}
             </span>
 
-            <!-- §10: Admin controls — admin-only (requires admin token) -->
-            <details
-              v-if="showAdminControls"
-              ref="adminDetailsRef"
-              class="ds-ov-details"
-              data-testid="admin-menu"
-              aria-label="Admin controls"
-              :open="adminPanelOpen"
-              @keydown.capture="onAdminDetailsKeydown"
-              @toggle="onAdminToggle"
+            <!-- 048 S2 (amendment 10): the analytics dock (spec 007) is the developer's tool - its toggle with `?debug=1` only,
+                 as it is (no "Admin ▾" any more: the run list, Attach, Stop, Stop all and the run files are the API's). -->
+            <button
+              v-if="props.debug"
+              class="ds-btn ds-btn--ghost ds-btn--sm"
+              type="button"
+              data-testid="analytics-toggle"
+              :aria-pressed="props.analyticsOpen ? 'true' : 'false'"
+              @click="emit('toggle-analytics')"
             >
-              <summary
-                ref="adminSummaryRef"
-                class="ds-panel ds-ov-metric tb-admin-summary"
-                data-testid="admin-summary"
-                aria-label="Admin"
-              >
-                <span class="ds-badge ds-badge--warn">Admin</span>
-                <span class="ds-label tb-fade-75">Runs: {{ adminRunsCountLabel }}</span>
-              </summary>
-
-              <div
-                ref="adminSurfaceRef"
-                class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right tb-admin-dropdown"
-                aria-label="Admin dropdown"
-                tabindex="-1"
-              >
-                <div class="ds-stack tb-admin-stack">
-                  <div class="ds-row tb-admin-actions">
-                    <button
-                      class="ds-btn ds-btn--secondary ds-btn--sm"
-                      type="button"
-                      :disabled="ctx.adminRunsLoading.value || !ctx.adminCanGetRuns.value"
-                      aria-label="Refresh runs list"
-                      @click="onAdminGetRuns"
-                    >
-                      {{ ctx.adminRunsLoading.value ? '…' : 'Refresh' }}
-                    </button>
-                    <button
-                      :class="adminStopAllBtnClass"
-                      type="button"
-                      aria-label="Stop all runs"
-                      :disabled="adminStopAllDisabled || !ctx.adminCanStopRuns.value"
-                      :title="adminStopAllDisabled && adminHasLoadedRuns ? 'No running runs' : ''"
-                      @click="onAdminStopRuns"
-                    >
-                      Stop all
-                    </button>
-                    <span
-                      v-if="ctx.adminLastError.value"
-                      class="ds-badge ds-badge--err tb-admin-last-error"
-                      :title="ctx.adminLastError.value"
-                    >
-                      {{ short(ctx.adminLastError.value, 40) }}
-                    </span>
-                  </div>
-
-                  <!-- 048 S1 (decision 1): the analytics dock's toggle (from the bottom bar). No refresh of the scenario
-                       catalogue anywhere in the UI (the owner's word, 2026-10-19: an edge case the interface ignores): the
-                       catalogue is read when the page loads; after an admin uploads a scenario, a reload picks it up. -->
-                  <div class="ds-row tb-admin-actions" data-testid="admin-tools">
-                    <button
-                      class="ds-btn ds-btn--ghost ds-btn--sm"
-                      type="button"
-                      data-testid="analytics-toggle"
-                      :aria-pressed="props.analyticsOpen ? 'true' : 'false'"
-                      @click="emit('toggle-analytics')"
-                    >
-                      Analytics
-                    </button>
-                  </div>
-
-                  <!-- 048 S1 (decision 5): the run files ("Artifacts", from the bottom bar). -->
-                  <div v-if="props.runFiles" class="ds-stack tb-admin-files" role="group" aria-label="Artifacts" data-testid="admin-run-files">
-                    <div class="ds-row tb-admin-actions">
-                      <span class="ds-badge ds-badge--info">Artifacts</span>
-                      <span v-if="runFilesRead" class="ds-value tb-fade-75" data-testid="admin-run-files-count">{{ props.runFiles.items.length }}</span>
-                      <button
-                        class="ds-btn ds-btn--secondary ds-btn--sm"
-                        type="button"
-                        aria-label="Refresh artifacts"
-                        :disabled="!props.runFiles.runId || props.runFiles.loading"
-                        :title="!props.runFiles.runId ? 'Start a run first' : 'Refresh artifacts'"
-                        @click="onRefreshRunFiles"
-                      >
-                        {{ props.runFiles.loading ? 'Loading…' : 'Refresh' }}
-                      </button>
-                      <span v-if="!props.runFiles.runId" class="ds-label tb-fade-75">Start a run first</span>
-                      <span v-else-if="runFilesRead && !props.runFiles.items.length" class="ds-label tb-fade-75">No artifacts</span>
-                    </div>
-                    <div v-if="props.runFiles.items.length" class="ds-row tb-admin-actions">
-                      <button
-                        v-for="a in props.runFiles.items"
-                        :key="a.name"
-                        class="ds-btn ds-btn--secondary ds-btn--sm"
-                        type="button"
-                        @click="props.runFiles.download(a.name)"
-                      >
-                        {{ a.name }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="ctx.adminRunsLoading.value" class="ds-label tb-fade-75" aria-label="Runs loading">
-                    Loading…
-                  </div>
-
-                  <div
-                    v-else-if="ctx.adminRuns.value && ctx.adminRuns.value.length > 0"
-                    class="ds-stack tb-runs-list"
-                    aria-label="Runs list"
-                  >
-                    <div
-                      v-for="run in ctx.adminRuns.value"
-                      :key="run.run_id"
-                      class="tb-run-item"
-                    >
-                        <span class="ds-label ds-mono tb-run-id" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
-                        <span :class="['ds-badge', 'tb-run-state', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-                        <span class="ds-label tb-run-scenario" :title="String(run.scenario_id ?? '')">{{ short(String(run.scenario_id ?? ''), 22) }}</span>
-                        <span class="ds-label ds-mono tb-run-owner" :title="String(run.owner_id ?? '')">{{ short(String(run.owner_id ?? ''), 12) }}</span>
-
-                        <div class="ds-row tb-run-actions">
-                          <button
-                            v-if="ctx.adminCanAttachRun.value"
-                            class="ds-btn ds-btn--secondary tb-run-btn"
-                            type="button"
-                            aria-label="Attach to selected run"
-                            @click="onAdminAttachRun(run.run_id)"
-                          >
-                            Attach
-                          </button>
-                          <button
-                            v-if="ctx.adminCanStopRun.value"
-                            class="ds-btn ds-btn--danger tb-run-btn"
-                            type="button"
-                            aria-label="Stop selected run"
-                            @click="onAdminStopRun(run.run_id)"
-                          >
-                            Stop
-                          </button>
-                        </div>
-                    </div>
-                  </div>
-
-                  <div v-else-if="adminHasLoadedRuns" class="ds-label tb-fade-75" aria-label="Runs empty">
-                    No active runs
-                  </div>
-
-                  <div v-else class="ds-label tb-fade-75" aria-label="Runs not loaded">
-                    Press Refresh to load runs
-                  </div>
-                </div>
-              </div>
-            </details>
+              Analytics
+            </button>
           </div>
         </div>
       </HudBar>
@@ -794,7 +562,8 @@ function onApplyIntensity() {
   controls in the middle (scenario, Start/Stop, the tempo that left the "Advanced" menu) take the rest of the line and
   wrap inside themselves, instead of pushing the cluster onto a line of its own: there the Admin summary landed on the
   left, and its right-anchored menu, opened while the summary was still on the right, ended past the left edge (stand,
-  `menu-admin` in `saas` at 1366x768: x 8.5 against a pad of 14).
+  `menu-admin` in `saas` at 1366x768: x 8.5 against a pad of 14). 048 S2: "Admin ▾" is gone; the rule stays for the
+  cluster that is left (SSE, the stop reason, TX, Analytics) and for the run controls the administrator still has.
 */
 .tb-details-row > .hud-bar__center {
   flex: 1 1 0;
@@ -951,99 +720,6 @@ function onApplyIntensity() {
   gap: var(--ds-space-2, 8px);
   justify-content: flex-end;
   flex-wrap: wrap;
-}
-
-.tb-admin-summary {
-  display: flex;
-  gap: var(--ds-space-2, 8px);
-  align-items: center;
-}
-
-.tb-admin-stack {
-  gap: var(--ds-space-2, 8px);
-}
-
-.tb-admin-actions {
-  gap: var(--ds-space-2, 8px);
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
-.tb-admin-last-error {
-  max-width: var(--ds-tb-admin-last-error-maxw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tb-admin-dropdown {
-  --ds-ov-dropdown-minw: var(--ds-tb-admin-dropdown-minw);
-  --ds-ov-dropdown-maxw: var(--ds-tb-admin-dropdown-maxw);
-  --ds-ov-dropdown-vw-inset: var(--ds-tb-admin-dropdown-vw-inset);
-}
-
-.tb-runs-list {
-  gap: var(--ds-space-1, 4px);
-  max-height: var(--ds-tb-runs-maxh);
-  overflow-y: auto;
-}
-
-.tb-run-item {
-  display: grid;
-  grid-template-columns: var(--ds-tb-run-id-col-w) var(--ds-tb-run-state-col-w) 1fr auto auto;
-  align-items: center;
-  gap: var(--ds-space-2, 8px);
-  padding: var(--ds-tb-run-item-pad-y) var(--ds-tb-run-item-pad-x);
-  background: var(--ds-surface-1);
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-lg);
-  min-width: 0;
-}
-
-.tb-run-id {
-  font-size: var(--ds-tb-run-id-font-size);
-  white-space: nowrap;
-}
-
-.tb-run-state {
-  font-size: var(--ds-tb-run-state-font-size);
-  text-align: center;
-  white-space: nowrap;
-}
-
-.tb-run-scenario {
-  opacity: var(--ds-tb-run-scenario-opacity);
-  font-size: var(--ds-tb-run-meta-font-size);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.tb-run-owner {
-  opacity: var(--ds-tb-run-owner-opacity);
-  font-size: var(--ds-tb-run-meta-font-size);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tb-run-actions {
-  gap: var(--ds-space-1, 4px);
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.tb-run-btn {
-  height: var(--ds-tb-run-btn-h);
-  padding: 0 var(--ds-tb-run-btn-pad-x);
-  font-size: var(--ds-tb-run-meta-font-size);
-  white-space: nowrap;
-}
-
-.tb-fade-75 {
-  opacity: var(--ds-tb-fade-75-opacity);
 }
 
 .tb-fade-90 {
