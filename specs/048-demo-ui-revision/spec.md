@@ -410,7 +410,7 @@
       - `overlaySurfaceCatalog.test` (−проверка `error-toast`).
     - **E2E по умолчанию:** 191 → 202 (+11 `p048-s3-error-form.spec.ts`).
       - Переписаны: `manual-operations-interact` (E-5 — блок окна), `p037-c-clearing` («a refusal outlives the error toast…» → «…stays on the panel: no toast beside it…»), `phase5-functional-smoke` (строка прогона — фраза, отказ платежа — блок окна), `p046-w1-first-screen` (ярлыка нет), `p046-w2-windows-ru` (строка id), `p037-b1-panel-container`, `p037-manual-payment-path-and-layout`.
-    - **Стенд:** гейт 134 → 132, полный 226 → 222 — ушёл `matrix [saas|hud] toast-error` (датированная строка `EXPECTED`).
+    - **Стенд:** гейт 134 → 132, полный 226 → ~~222~~ 220 — ушёл `matrix [saas|hud] toast-error` (датированная строка `EXPECTED`). *Исправлено 2026-10-19: полный набор не запускался; `playwright test --list` показал у записи четыре теста `@extended`, а не два.*
     - `readFileSync` в новых тестах нет. Скрытия через `opacity`/`visibility` нет: всё снятое удалено из DOM.
   - **Внутренний adversarial-проход:** отдельный агент, только чтение, по `551cb7e4`. P1 — 1, исправлено; остальное — ниже.
     - **F1 (P1, исправлено в `f4cc573c`).** «Закрыть линию» из окошка линии (`EdgeDetailPopup`) падала в `state.error`, а показывал её только снятый тост: на экране не оставалось ничего, id был только в консоли. Теперь блок окна стоит в окне `edge-detail` (корень). Тесты: unit корня и e2e — оба красные без блока.
@@ -437,3 +437,36 @@
     Все — на `f4cc573c`. Запись после них код не меняет. Первый прогон стенда был остановлен вручную: исходники правились по ходу adversarial-прохода, и дерево dev-сервера поменялось во время прогона. Он не засчитан.
   - **Кадры владельцу:** `.local-run/owner-review/2026-10-19-048-s3/` — README по-русски «было → стало» со ссылкой на «Экран после ревизии»; обе темы, оба языка, 1366×768; `before/` — `57505f12`, `after/` — `f4cc573c`; окно платежа (в том числе через 9 с), отказ клиринга, строка прогона, ошибка сцены. Эталоны `scenes` не регенерировались.
   - **Не проверено:** CI (не запушено); §15 Codex (обязателен: §12, текст 409 044, рецепты стенда); axe на блоках ошибок в браузере вне стенда (в матрице стенда окно клиринга с отказом не открывается — открывал только `toast-error`); F2 — решение оркестратора; живой бэкенд с отказом действия (live-набор проходит только автостарт).
+  - **2026-10-19 — круг по §15 Codex** (статика `57505f12..d35e5717`: CLASS-1 0, READY-TO-MERGE NO, STAND-RECIPES WEAK; текст — `.local-run/codex-review/2026-10-19-048-s3/final.md`). Решения среза (ошибка сцены только в оверлее; строка id в блоке неизвестного исхода; F2 «одно место на один упавший запрос», класс 2 → BACKLOG) оркестратор и советник приняли. Коммит `839eac9b`; PR #321.
+    1. **P2, регрессия §12 — исправлено.** `useInteractDataCache.ts` брал только `actionErrorText(error).text`, и id упавшего чтения линий доверия терялся по пути `trustlinesFetchState` → `trustlineFiguresNotice` → `tl-source-unavailable` / `edge-source-unavailable`.
+       - Теперь id едет в состоянии источника: `failed.ref` (`trustlinesSourceState.ts`), заморозка `keepAlive` его сохраняет.
+       - Оба уведомления показывают id отдельной строкой и в `data-request-id`: `TrustlineManagementPanel.vue` и `EdgeDetailPopup.vue`. Попап (046 W3) правился только в этой строке, по поручению оркестратора; строка id — английская, как весь попап до W3.
+       - **Перепись мест, где из формы ошибки берётся `.text`** (`git grep` по `src`, без тестов):
+         - `useInteractDataCache.ts:17` (`getErrorMessage`). Читатель — чтение линий: id потерян и показан не был; исправлено. Читатель — цели платежа (`paymentTargetsLastErrorByKey`): текст как флаг, на экране не был ни до, ни после S3. Подсказка окна `payment.routesFailedUnreachable` — фраза словаря, id она не несла и до S3; не менялось, записано.
+         - `useInteractFSM.ts:138` (`state.error = shown.text`): id рядом, в `errorRef`.
+         - `useInteractMode.ts:66` (`super(shown.text)`): форма целиком в `ShownFailure.shown`.
+         - `useInteractMode.ts:76`: консоль, id добавляется.
+         - `ClearingPanel.vue:122`, `SimulatorAppRoot.vue` (окно линии, оверлей сцены): `ref` передаётся рядом с `.text`.
+         - Других мест нет.
+       - Красное до (форма `d35e5717` — id не хранится): `expected undefined to be 'req-tl-list'`; e2e «a failed trust-lines read» красен на `data-request-id`. Мутация «уведомление без строки id»: `tl-source-unavailable: expected null to be 'req-tl-list'`.
+    2. **P2 — исправлено.** `WindowErrorBlock.vue` получил `role="alert"` и `aria-atomic="true"`: отказ объявляется при появлении, как его объявлял снятый тост. Двойного объявления нет: тест обходит предков блока во всех четырёх окнах, live-регионов (`aria-live`, роли `alert`/`status`/`log`) среди них нет. Красное до: `expected null to be 'alert'`.
+    3. **P2 — не исправлено, остановлено по условию оркестратора.** Backend отдаёт все 403 одним кодом без `details`:
+       - «not run owner» — `_check_run_access`, `app/api/v1/simulator.py:574`;
+       - «Participant account is not active» — `app/api/deps.py:157`;
+       - «Admin token required» — `app/api/deps.py:283`.
+       Все три — `ForbiddenException` → `ErrorCode.E006`, без `details` (`app/utils/exceptions.py:64-66`); различаются только английским текстом. Сравнение по тексту запрещено (§9), новый код — изменение контракта backend. Очистка по любому 403 (`useSimulatorRealMode.ts:461`) оставлена как есть; решение за оркестратором. Вариант без контракта для решения: очищать сохранённый id по 403 только при открытии страницы, а посреди сеанса — нет. Тогда «застрявший посетитель» исправлен, а молчаливого сброса посреди сеанса нет.
+    4. **P3 — исправлено.** Упавшая загрузка сцены пишет одну строку консоли на каждую неудачу: `[scene] load failed: <технический текст> (request id: <id>)` (`useSceneState.ts`). Тест проверяет вызов консоли, а не поле объекта. Красное до: `expected [] to deeply equal [ [ '[scene] load failed:', …(2) ] ]`.
+    5. **P3, WEAK — исправлено.** В матрицу стенда вернулась одна запись: `clearing-refused` — окно клиринга со своим блоком ошибки.
+       - Отказ 409 с `X-Request-ID`; ответ `refused` у `routeClearing` возвращён.
+       - Над блоком идут геометрия, цели, кадр и axe. Объявлен только `inside`: Escape и щелчок мимо на удерживаемом результате — правила самого окна клиринга (037 C), их судит `p037-c-clearing.spec.ts`.
+       - `EXPECTED`: гейт 132 → 134, полный 220 → 226 (сверено `playwright test --list`: 134 / 226), датированная строка в `run-stand.mjs`.
+       - Цена — по числам CI: тот же жест с теми же проверками (`toast-error`) занимал 4.99 + 5.08 с в прогоне 39256014175. Прогноз шага ≈ 546 с — как на `main`.
+       - Мутация «окно клиринга без блока»: запись стенда красная (`clearing-error`: element(s) not found).
+    - **Тесты:** unit 191 файлов, 2196 → 2202 (+6 в `errorForm.p048s3.test.ts`); e2e по умолчанию 202 → 204 (+2 «a failed trust-lines read», en/ru); стенд — выше.
+    - **Гейты** на `839eac9b` (Windows, локально, по одному):
+      - unit 0 (191 / 2202), `typecheck` 0, `lint` 0;
+      - полный `test:e2e` 0 — 204 собрано, 201 passed, 3 skipped (кадры 046 W2 только с `P046_FRAMES=1`), в нём `scenes` 5/5 против текущих эталонов;
+      - `test:e2e:smoke` 0;
+      - гейт стенда 0 — «ran 134 (as expected 134, failed 0, flaky 0), skipped 0, recorded 134», 469 с локально (не прогноз; прогноз CI ≈ 546 с — выше);
+      - `test:e2e:live` 0, 1 passed, посетителем, одноразовая база удалена. Пункт 3 автостарт не менял, прогнан для полноты;
+      - `git diff --check` чист.
