@@ -122,7 +122,14 @@ async function navigatorPlace(page: Page) {
 async function expectNavigatorPlaced(page: Page, what: string) {
   for (const vp of [VIEWPORT_MAIN, VIEWPORT_RESIZED]) {
     await page.setViewportSize(vp)
-    await page.waitForTimeout(50)
+    // The row re-flows after a resize: read it until two reads agree (a condition, not a sleep).
+    let prev = ''
+    await expect.poll(async () => {
+      const cur = JSON.stringify(await navigatorPlace(page))
+      const same = cur === prev
+      prev = cur
+      return same
+    }, { timeout: 5_000, intervals: [16] }).toBe(true)
     const p = await navigatorPlace(page)
     console.log('[048 S1 navigator]', what, `${vp.width}x${vp.height}`, JSON.stringify(p))
     expect(p.controls, `${what} ${vp.width}x${vp.height}: anti-vacuum - the row has other controls to compare with`).toBeGreaterThanOrEqual(4)
