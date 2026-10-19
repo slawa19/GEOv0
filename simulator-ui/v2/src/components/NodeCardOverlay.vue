@@ -6,7 +6,7 @@ import { classifyNode, fillOf, type DataPalette } from '../vizMapping'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
-import { renderAvailable } from '../utils/valueFormat'
+import { isOverLimit, renderOrDash } from '../utils/valueFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { useUiLocale } from '../composables/useUiLocale'
 import { participantStatusText, participantTypeText } from '../i18n/statusText'
@@ -145,10 +145,12 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
  * and visible while the row holds the keyboard focus (the `title` of the row reaches a pointer only).
  */
 function rowAvailableText(tl: TrustlineInfo): string {
-  return t('card.lineAvailable', {
-    amount: renderAvailable(rowMoney(tl, tl.available), locale.value),
-    unit: String(tl.equivalent || props.equivalentText || '').trim(),
-  }).trim()
+  const unit = String(tl.equivalent || props.equivalentText || '').trim()
+  const shown = renderOrDash(rowMoney(tl, tl.available))
+  // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit - its own sentence, not "available over
+  // limit by" (046 wave 3, internal adversarial pass: the row title made that contradiction visible).
+  if (isOverLimit(shown)) return t('card.lineOverLimit', { amount: shown.slice(1), unit }).trim()
+  return t('card.lineAvailable', { amount: shown, unit }).trim()
 }
 const rowAvailableId = (tl: TrustlineInfo) => `nco-avail-${tl.from_pid}-${tl.to_pid}`.replace(/[^A-Za-z0-9_-]/g, '_')
 
@@ -253,9 +255,9 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
           </div>
         </div>
 
-        <!-- Statistics, one line: Out, In (the sums of the limits). 045 S4: no Degree - the group counters "OUT -> N" /
-             "IN <- N" below already say how many lines there are, from the same source as the rows; a second number of
-             the same fact from the snapshot was duplicate state. -->
+        <!-- Statistics, one line: «Trusts others», «Trusted by» (the sums of the limits; were Out, In until 046 wave 3). 045 S4:
+             no Degree - the group counters «Trusts (N)» / «Trusted by (N)» below already say how many lines there are, from
+             the same source as the rows; a second number of the same fact from the snapshot was duplicate state. -->
         <div class="ds-ov-node-card__stats" data-testid="node-card-stats">
           <span class="ds-label" :title="t('card.trustsOthersHint')">{{ t('card.trustsOthers') }}</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>{{ ' · ' }}<span
             class="ds-label" :title="t('card.trustedByHint')">{{ t('card.trustedBy') }}</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>

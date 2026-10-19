@@ -423,6 +423,11 @@ function onCloseLine() {
   color: color-mix(in srgb, var(--ds-warn) 55%, var(--ds-text-1));
 }
 
+/* 048 item 13 (б): the explaining line. Not `--ds-text-3` of `.ds-help`: it fails contrast in hud (stand, axe, 2026-10-19). */
+.popup__explain {
+  color: var(--ds-text-2);
+}
+
 .popup__direction {
   color: var(--ds-text-2);
 }

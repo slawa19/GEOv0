@@ -36,6 +36,8 @@ import Legend from './Legend.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import SuccessToast from './SuccessToast.vue'
 import ClearingPanel from './ClearingPanel.vue'
+import ManualPaymentPanel from './ManualPaymentPanel.vue'
+import { useInteractFSM } from '../composables/interact/useInteractFSM'
 
 /** Names are data: Cyrillic in both runs, excluded from the `en` check by value. */
 const NAMES = new Set(['Алиса', 'Борис', 'Вера', 'Узел'])
@@ -410,6 +412,28 @@ describe('046 wave 3 - BACKLOG 046-3: the failures the windows keep from the dat
     setUiLocale('ru')
     await settle()
     expect(im.state.error).toBe(t('actionError.noRun', {}, 'ru'))
+  })
+})
+
+describe('046 wave 3 - BACKLOG 046-3: the warning the payment window keeps follows the switch (internal adversarial pass)', () => {
+  it('"you cannot send a payment to yourself" re-renders on a switch', async () => {
+    setUiLocale('en')
+    const fsm = useInteractFSM({ snapshot: ref(null), findActiveTrustline: () => null })
+    fsm.startPaymentFlowWithFrom('alice')
+    const people = [{ pid: 'alice', name: 'Алиса' }, { pid: 'bob', name: 'Борис' }]
+    const { host } = mount(ManualPaymentPanel, {
+      phase: fsm.state.phase, state: fsm.state, unit: 'UAH', availableCapacity: '10.00', trustlinesLoading: false, paymentTargetsLoading: false,
+      paymentTargetsLastError: null, paymentToTargetIds: new Set(['alice', 'bob']), trustlines: [], participants: people, busy: false,
+      canSendPayment: true, confirmPayment: vi.fn(), cancel: vi.fn(), setFromPid: fsm.setPaymentFromPid, setToPid: fsm.setPaymentToPid,
+    })
+    await settle()
+    fsm.setPaymentToPid('alice')
+    await settle()
+    const warn = () => host.querySelector('[data-testid="manual-payment-to-invalid-warn"]')?.textContent?.trim()
+    expect(warn(), 'counter-check: the warning is shown').toBe(t('payment.selfPaymentReselect', {}, 'en'))
+    setUiLocale('ru')
+    await settle()
+    expect(warn()).toBe(t('payment.selfPaymentReselect', {}, 'ru'))
   })
 })
 

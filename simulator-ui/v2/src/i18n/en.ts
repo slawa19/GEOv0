@@ -7,12 +7,14 @@ import { plural } from './messages'
  * of equivalents and amounts are data and never live here.
  *
  * Wave 0 (T4601) brought the language switcher; wave 2 (T4603) the windows of the actions - payment, trust line,
- * clearing - with the texts they compose (`interactStrings.ts`, the refusal maps of `utils/paymentRefusalText.ts`, the
+ * clearing - with the texts they compose (the 037 A2 list, the refusal maps of `utils/paymentRefusalText.ts`, the
  * notices of `trustlinesSourceState.ts`, the toasts and history lines of `useInteractMode.ts`) and the analytics panel.
  * Wave 2 keeps every English text that existed byte for byte; a new key is new text. Wave 1 (T4602; narrowed, then
  * full after 048 S2) the first screen: the top bar and its "Details" rows, the action bar, the onboarding hint, the
  * bottom bar, the legend, "Find on graph", the line tooltip, the recent actions and the notifications - with the words
- * of spec 048 §G where §G names them (those English texts changed with it). See spec 046.
+ * of spec 048 §G where §G names them (those English texts changed with it). Wave 3 (T4604) the participant card, the
+ * line window and their shells (`card.*`, `edgeWindow.*`, `windowShell.*`), the trust line statuses and the busy-cancel
+ * question; `interactStrings.ts` is gone. See spec 046.
  */
 export const en = {
   locale: {
@@ -341,6 +343,8 @@ export const en = {
     flowOpenReason: 'Cancel current action first (press ESC).',
     busyReason: 'Operation in progress… please wait.',
     lineAvailable: 'available {amount} {unit}',
+    /** 046 wave 3: a negative `available` of a row - the debt's excess over a lowered limit (026 `T2602`). */
+    lineOverLimit: 'over limit by {amount} {unit}',
     pin: 'Pin',
     unpin: 'Unpin',
     // The sums of the limits of the participant's lines: as the creditor (`from`) and as the debtor (`to`).

@@ -297,6 +297,7 @@ export const ru = {
     flowOpenReason: 'Сначала отмените текущее действие (Esc).',
     busyReason: 'Идёт операция… подождите.',
     lineAvailable: 'доступно {amount} {unit}',
+    lineOverLimit: 'сверх лимита на {amount} {unit}',
     pin: 'Закрепить',
     unpin: 'Открепить',
     trustsOthers: 'Доверяет:',

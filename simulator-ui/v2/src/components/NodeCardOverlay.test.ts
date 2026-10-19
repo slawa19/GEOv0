@@ -193,7 +193,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
 
   // 026 `T2602`: a limit lowered below the debt makes `available` negative - the excess over trust, not an amount.
   it('NC-2: a negative available reads as the excess over trust', async () => {
-    expect(await availableTextFor('UAH', '-2.00')).toBe('available over limit by 2.00 UAH')
+    expect(await availableTextFor('UAH', '-2.00')).toBe('over limit by 2.00 UAH')
   })
 
   it('NC-2: the same available amount must not render identically under UAH and HOUR', async () => {
