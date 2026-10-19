@@ -99,6 +99,7 @@ async function navigatorPlace(page: Page) {
     const nav = row.querySelector('.graph-navigator')!.getBoundingClientRect()
     const rr = row.getBoundingClientRect()
     const name = (el: Element) => `${el.tagName.toLowerCase()} "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 24)}"`
+    const CLEAR = 4
     const overlaps: string[] = []
     let controls = 0
     // Controls, and the texts that read them (the playlist's position "0 / 20" is what the owner saw covered).
@@ -107,9 +108,11 @@ async function navigatorPlace(page: Page) {
       const r = el.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) continue
       controls += 1
-      const ix = Math.min(r.right, nav.right) - Math.max(r.left, nav.left)
+      // A clearance of CLEAR px around the button counts: the row's own gap is 8 px, and a frame decoration (the `hud`
+      // corners) touching the next item read as "on top of it" on the owner's frame although the boxes met at 1 px.
+      const ix = Math.min(r.right, nav.right + CLEAR) - Math.max(r.left, nav.left - CLEAR)
       const iy = Math.min(r.bottom, nav.bottom) - Math.max(r.top, nav.top)
-      if (ix > 0.5 && iy > 0.5) overlaps.push(`${name(el)} ${Math.round(ix)}x${Math.round(iy)}`)
+      if (ix > 0.5 && iy > 0.5) overlaps.push(`${name(el)} ${Math.round(ix - CLEAR)}x${Math.round(iy)}`)
     }
     const pad = parseFloat(getComputedStyle(row).paddingRight) || 0
     return { overlaps, controls, rightGap: Math.round(rr.right - pad - nav.right), nav: [Math.round(nav.left), Math.round(nav.top), Math.round(nav.width)] }
@@ -123,7 +126,7 @@ async function expectNavigatorPlaced(page: Page, what: string) {
     const p = await navigatorPlace(page)
     console.log('[048 S1 navigator]', what, `${vp.width}x${vp.height}`, JSON.stringify(p))
     expect(p.controls, `${what} ${vp.width}x${vp.height}: anti-vacuum - the row has other controls to compare with`).toBeGreaterThanOrEqual(4)
-    expect.soft(p.overlaps, `${what} ${vp.width}x${vp.height}: "Inspect graph" lies over no other control or text of the row`).toEqual([])
+    expect.soft(p.overlaps, `${what} ${vp.width}x${vp.height}: "Inspect graph" lies over no other control or text of the row, nor within 4 px of one`).toEqual([])
     expect.soft(Math.abs(p.rightGap), `${what} ${vp.width}x${vp.height}: "Inspect graph" stays at the right edge of its row (gap ${p.rightGap} px)`).toBeLessThanOrEqual(2)
   }
   await page.setViewportSize(VIEWPORT_MAIN)

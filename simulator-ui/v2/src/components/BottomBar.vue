@@ -220,23 +220,35 @@ const playlistPosition = computed(() => {
   margin-left: auto;
 }
 
-/* "Inspect graph" is a button of the row; its panel opens upwards over the scene and does not grow the measured bar. */
+/*
+  "Inspect graph" is a button of the row; its panel opens upwards over the scene and does not grow the measured bar.
+  048 S1 (the owner's frame, 2026-10-19): closed, the button is IN the horizontal flow of the row, so its place is as
+  wide as the button itself - it was a fixed 8.5rem with the button absolutely positioned over it, and in `hud` the
+  button is wider (145 px against 136): it reached over the item to its left (the playlist's "0 / 20"). The place has no
+  height and sits at the bottom of its line, the button rising from it: the line - and the measured bar - is no taller
+  than before. Open, the navigator floats above the row, anchored at the right edge of its place.
+*/
 .bb-navigator {
   position: relative;
   min-width: 8.5rem;
-  align-self: stretch;
+  align-self: flex-end;
+  height: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
 }
 
 .bb-navigator :deep(.graph-navigator) {
-  position: absolute;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: 0 0 auto;
   width: max-content;
   max-width: min(520px, calc(100vw - 2 * var(--ds-ov-inset, 12px)));
 }
 
 /* Open: the panel floats above the row, so it never covers the row's other controls. */
 .bb-navigator :deep(.graph-navigator:has(> details[open])) {
+  position: absolute;
+  right: 0;
   bottom: calc(100% + var(--ds-space-2, 8px));
 }
 
