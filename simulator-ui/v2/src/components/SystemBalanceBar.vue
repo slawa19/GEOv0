@@ -43,11 +43,16 @@ const unit = computed(() => b.value?.equivalent || props.equivalent || '')
 const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
 
 /**
- * 039 slice D: "was -> now" of the total debt, as ONE dictionary sentence whose two figures keep elements of their own
- * (`total-debt-before`, `total-debt-after`). `null` - the total alone. When the pair is shown and what it means is
- * `useSystemBalance` / `debtChange.ts`; here only the words and the two fields.
+ * 039 slice D: the total debt just before the last debt-changing event ("was"), as ONE dictionary sentence whose figure
+ * keeps an element of its own (`total-debt-before`); the current total ("now") is the bar's figure (`total-debt-after`
+ * while a "was" is shown). `null` - the total alone. When it is shown and what it means is `useSystemBalance` /
+ * `debtChange.ts`; here only the words and the fields.
+ *
+ * The "was" sits ABOVE the bar, out of its flow: written inline it widened the row by 95-115 px and the main row of the
+ * bottom bar wrapped to a second line in Russian at 1366x768 (42 -> 80 px, measured 2026-10-19) - the canvas would
+ * have jumped with every payment. Out of the flow the bar keeps its size with and without a "was".
  */
-const debtChangeParts = computed(() => (b.value?.debtBefore == null ? null : templateParts('systemBalance.debtChange')))
+const debtBeforeParts = computed(() => (b.value?.debtBefore == null ? null : templateParts('systemBalance.debtBefore')))
 </script>
 
 <template>
@@ -57,17 +62,17 @@ const debtChangeParts = computed(() => (b.value?.debtBefore == null ? null : tem
     :aria-label="shown === 'metrics' ? t('systemBalance.metricsAria') : t('systemBalance.balanceAria')"
     :data-testid="shown === 'metrics' ? 'system-metrics' : 'system-balance'"
   >
+    <div v-if="showDebt && debtBeforeParts" class="ds-panel sbb-was" data-testid="total-debt-change">
+      <template v-for="(part, i) in debtBeforeParts" :key="i">
+        <span v-if="'text' in part" class="sbb-was__word">{{ part.text }}</span>
+        <span v-else-if="part.name === 'before'" class="ds-mono" data-testid="total-debt-before">{{ money(b.debtBefore!) }}</span>
+        <span v-else-if="part.name === 'unit'" class="ds-mono">{{ unit }}</span>
+      </template>
+    </div>
     <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
       <div v-if="showDebt" class="ds-panel ds-ov-metric" data-testid="sbb-total-debt">
         <span class="ds-label">{{ t('systemBalance.totalDebt') }}</span>
-        <span v-if="debtChangeParts" class="sbb-change" data-testid="total-debt-change">
-          <template v-for="(part, i) in debtChangeParts" :key="i">
-            <span v-if="'text' in part" class="sbb-change__word">{{ part.text }}</span>
-            <span v-else-if="part.name === 'before'" class="sbb-change__before ds-mono" data-testid="total-debt-before">{{ money(b.debtBefore!) }}</span>
-            <span v-else-if="part.name === 'after'" class="ds-value ds-mono" data-testid="total-debt-after">{{ money(b.totalUsed) }} {{ unit }}</span>
-          </template>
-        </span>
-        <span v-else class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
+        <span class="ds-value ds-mono" :data-testid="debtBeforeParts ? 'total-debt-after' : undefined">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available">
@@ -97,18 +102,24 @@ const debtChangeParts = computed(() => (b.value?.debtBefore == null ? null : tem
 </template>
 
 <style scoped>
-/* 039 slice D: the words of "was -> now" are quieter than the figures; the pair stays on one line. */
-.sbb-change {
+/* 039 slice D: the "was" of the total debt, right-aligned just above the bar and out of its flow (see the script). */
+.system-balance-bar {
+  position: relative;
+}
+
+.sbb-was {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 2px);
+  padding: 1px 8px;
   white-space: nowrap;
-}
-
-.sbb-change__word {
-  opacity: 0.7;
-  white-space: pre;
-}
-
-.sbb-change__before {
+  font-size: 0.85em;
   opacity: 0.85;
+  pointer-events: none;
+}
+
+.sbb-was__word {
+  white-space: pre;
 }
 
 .sbb-util {

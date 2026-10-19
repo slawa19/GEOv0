@@ -194,8 +194,12 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   reproducer R7 (`p039-repro/`, not counted). Without the fake clock: 3.4-3.8 s each locally; no CI number for it
  *   yet - forecast of the step from CI figures only: about 545 s (the line above) or 501-505 s (later CI runs named in
  *   the brief of T3940), plus about 2 x 5 s - about 511-555 s, under 600 s.
+ * - 2026-10-19 (039 slice D, internal adversarial pass, P3 measured): gate 136 -> 137, full 228 -> 229. One test of
+ *   `debt-before-after.qa.ts`: the 100-node scene, Russian, 1366x768 - a "was" leaves the bottom bar's box unchanged
+ *   and is whole on screen. The first build wrote the pair inside the row and wrapped it (42 -> 80 px, red here); the
+ *   "was" now sits above the bar out of its flow. 3.6 s locally; forecast as above plus about 5 s.
  */
-export const EXPECTED = { gate: 136, full: 228 }
+export const EXPECTED = { gate: 137, full: 229 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

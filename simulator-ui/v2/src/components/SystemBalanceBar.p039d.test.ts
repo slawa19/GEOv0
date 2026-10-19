@@ -2,8 +2,9 @@
  * 039 slice D (T3940) - the bottom row's total debt states "was -> now" as two fields of its own, in both languages.
  *
  * The bar renders what `useSystemBalance` gives it (`debtBefore`, `totalUsed`, `equivalent`); WHEN a "was" exists is
- * judged in `composables/debtChange.p039d.test.ts`. Here: the two fields, their order, the one equivalent, the
- * precision (no digit dropped, none invented), the dictionary's words in ru and en, and no pair without a "was".
+ * judged in `composables/debtChange.p039d.test.ts`. Here: the two fields ("was" above the bar, "now" the bar's figure),
+ * their order, the one equivalent, the precision (no digit dropped, none invented), the dictionary's words in ru and
+ * en, and no pair without a "was". That the bar keeps its size with a "was" is the stand's (`debt-before-after.qa.ts`).
  */
 import { createApp, h, nextTick, type Component } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -28,13 +29,13 @@ function mount(balance: SystemBalance, variant: 'debt' | 'full' = 'debt') {
 afterEach(() => setUiLocale('en'))
 
 describe('039 D - the total debt "was -> now"', () => {
-  const WORDS: Record<UiLocale, { label: string; was: string; now: string }> = {
-    ru: { label: 'Общий долг', was: 'было', now: 'стало' },
-    en: { label: 'Total debt', was: 'was', now: 'now' },
+  const WORDS: Record<UiLocale, { label: string; was: string }> = {
+    ru: { label: 'Общий долг', was: 'было' },
+    en: { label: 'Total debt', was: 'was' },
   }
 
   for (const lang of ['ru', 'en'] as const) {
-    it(`${lang}: "was" and "now" are two fields, in that order, with the one equivalent and the words of the dictionary`, async () => {
+    it(`${lang}: "was" and "now" are two fields, in that order, with the equivalent and the words of the dictionary`, async () => {
       setUiLocale(lang)
       const m = mount(BALANCE)
       await nextTick()
@@ -48,7 +49,7 @@ describe('039 D - the total debt "was -> now"', () => {
       expect(m.text('[data-testid="sbb-total-debt"] .ds-value')).toBe('25.00 UAH')
       const w = WORDS[lang]
       expect(m.text('[data-testid="sbb-total-debt"] .ds-label')).toBe(w.label)
-      expect(m.text('[data-testid="total-debt-change"]')).toBe(`${w.was} 55.00 → ${w.now} 25.00 UAH`)
+      expect(m.text('[data-testid="total-debt-change"]'), '"was" with its unit, above the bar').toBe(`${w.was} 55.00 UAH`)
       m.done()
     })
   }
@@ -57,10 +58,10 @@ describe('039 D - the total debt "was -> now"', () => {
     setUiLocale('en')
     const m = mount(BALANCE)
     await nextTick()
-    expect(m.text('[data-testid="total-debt-change"]')).toBe('was 55.00 → now 25.00 UAH')
+    expect(m.text('[data-testid="total-debt-change"]')).toBe('was 55.00 UAH')
     setUiLocale('ru')
     await nextTick()
-    expect(m.text('[data-testid="total-debt-change"]')).toBe('было 55.00 → стало 25.00 UAH')
+    expect(m.text('[data-testid="total-debt-change"]')).toBe('было 55.00 UAH')
     m.done()
   })
 

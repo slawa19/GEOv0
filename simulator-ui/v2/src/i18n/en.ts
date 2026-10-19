@@ -519,9 +519,8 @@ export const en = {
     trustlines: 'Trust lines',
     participants: 'Participants',
     utilization: 'Limits in use',
-    // 039 slice D: the total debt before and after the last debt-changing event. `{after}` is the current total WITH
-    // its unit (one figure the rest of the screen reads); `{before}` is the same equivalent, so its unit is not repeated.
-    debtChange: 'was {before} → now {after}',
+    // 039 slice D: the total debt just before the last debt-changing event, shown above the current total ("was").
+    debtBefore: 'was {before} {unit}',
   },
 
   /**

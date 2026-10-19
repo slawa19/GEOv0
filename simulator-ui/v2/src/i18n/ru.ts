@@ -454,7 +454,7 @@ export const ru = {
     trustlines: 'Линии доверия',
     participants: 'Участники',
     utilization: 'Занято лимитов',
-    debtChange: 'было {before} → стало {after}',
+    debtBefore: 'было {before} {unit}',
   },
 
   // 048 §G (советник): «ему должны больше» согласуется с существительным «участник», как статусы (запись 046 2026-10-18).
