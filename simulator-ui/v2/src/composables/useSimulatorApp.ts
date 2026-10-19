@@ -198,7 +198,6 @@ export type SimulatorAppApi = {
     setIntensityPercent: (v: number) => void
   } & Pick<
     RealModeApi,
-    | 'refreshScenarios'
     | 'startRun'
     | 'pause'
     | 'pauseForManualAction'
@@ -1908,7 +1907,8 @@ export function useSimulatorApp(opts?: {
       setIntensityPercent: (v: number) => {
         real.intensityPercent = Math.max(0, Math.min(100, Math.round(v)))
       },
-      refreshScenarios: realMode.refreshScenarios,
+      // 048 S1 (the owner's word, 2026-10-19): no UI refresh of the scenario catalogue - it is read at page load
+      // (`useSimulatorRealMode.ts`, the boot's `refreshScenarios`); a reload picks up an uploaded scenario.
       startRun: realMode.startRun,
       pause: realMode.pause,
       // 043 S2: the entry the root makes without a flow transition (the full line editor of a line's popup).

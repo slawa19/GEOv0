@@ -1214,7 +1214,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @toggle-details="toggleDetails"
       @toggle-analytics="toggleAnalyticsPanel"
       @set-ui-theme="setUiTheme"
-      @refresh-scenarios="realActions.refreshScenarios"
       @start-run="realActions.startRun"
       @pause="realActions.pause"
       @resume="realActions.resume"

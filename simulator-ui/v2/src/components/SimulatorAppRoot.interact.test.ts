@@ -555,7 +555,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           setAccessToken: vi.fn(),
           setSelectedScenarioId: vi.fn(),
           setIntensityPercent: vi.fn(),
-          refreshScenarios: vi.fn(),
           startRun: vi.fn(),
           pause: vi.fn(),
           pauseForManualAction: vi.fn(),
@@ -6368,9 +6367,6 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(admin.attachRun, 'admin-attach-run reaches admin.attachRun with the run id').toHaveBeenCalledWith('run-9')
       host.querySelector<HTMLButtonElement>('button[aria-label="Stop selected run"]')!.click()
       expect(admin.stopRun, 'admin-stop-run reaches admin.stopRun with the run id').toHaveBeenCalledWith('run-9')
-      // 048 S1 (decision 5): the refresh of the scenario catalogue is in Admin.
-      host.querySelector<HTMLButtonElement>('[data-testid="scenarios-refresh"]')!.click()
-      expect(actions.refreshScenarios).toHaveBeenCalledTimes(1)
 
       const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
       theme.value = 'hud'

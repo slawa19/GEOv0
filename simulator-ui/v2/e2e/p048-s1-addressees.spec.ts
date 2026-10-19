@@ -50,7 +50,7 @@ test.describe('048 S1 (в): the administrator\'s tools are in "Admin ▾", a vis
     // Counter-check: the service rows are open and their controls are found by the same kind of query.
     await expect(page.locator('[data-testid="top-details-row"]')).toBeVisible()
     await expect(page.locator('[data-testid="layout-select"]')).toBeVisible()
-    for (const id of ['admin-summary', 'analytics-toggle', 'admin-run-files', 'scenarios-refresh']) {
+    for (const id of ['admin-summary', 'analytics-toggle', 'admin-run-files']) {
       await expect(page.getByTestId(id), `${id}: not rendered for a visitor`).toHaveCount(0)
     }
     await expect(page.locator('[data-surface="real-metrics-panel"]'), 'no analytics dock').toHaveCount(0)
@@ -64,6 +64,8 @@ test.describe('048 S1 (в): the administrator\'s tools are in "Admin ▾", a vis
     await page.getByTestId('admin-summary').click()
     await expect(menu).toBeVisible()
     await expect(menu.getByTestId('analytics-toggle')).toBeVisible()
+    // The owner's word (2026-10-19): no refresh of the scenario catalogue in the UI - the tools row is the toggle alone.
+    await expect(menu.locator('[data-testid="admin-tools"] button')).toHaveCount(1)
     const files = menu.getByTestId('admin-run-files')
     await expect(files).toBeVisible()
     await expect(files.getByTestId('admin-run-files-count'), 'no number before the index is read').toHaveCount(0)

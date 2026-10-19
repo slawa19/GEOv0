@@ -45,24 +45,23 @@ function mountTopBar(ctx: TopBarContext, props: Record<string, unknown> = {}) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const onToggleAnalytics = vi.fn()
-  const onRefreshScenarios = vi.fn()
   const app = createApp({
     setup() {
       provideTopBarContext(ctx)
-      return () => h(TopBar, { detailsOpen: true, onToggleAnalytics, onRefreshScenarios, ...props })
+      return () => h(TopBar, { detailsOpen: true, onToggleAnalytics, ...props })
     },
   })
   app.mount(host)
-  return { host, onToggleAnalytics, onRefreshScenarios, done: () => { app.unmount(); host.remove() } }
+  return { host, onToggleAnalytics, done: () => { app.unmount(); host.remove() } }
 }
 
 const admin = (host: HTMLElement) => host.querySelector('details[aria-label="Admin controls"]')
-const ADMIN_TOOLS = ['[data-testid="analytics-toggle"]', '[data-testid="scenarios-refresh"]', '[data-testid="admin-run-files"]'] as const
+const ADMIN_TOOLS = ['[data-testid="analytics-toggle"]', '[data-testid="admin-run-files"]'] as const
 
 describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there', () => {
   const files = (): Files => ({ runId: 'run-1', items: [], loading: false, refresh: vi.fn(async () => null), download: vi.fn() })
 
-  it('reproducer (в), unit half: with an admin token the analytics toggle, the catalogue refresh and the run files are inside Admin', async () => {
+  it('reproducer (в), unit half: with an admin token the analytics toggle and the run files are inside Admin', async () => {
     const { host, done } = mountTopBar(context(), { runFiles: files() })
     await nextTick()
     expect(admin(host), 'counter-check: the admin menu is rendered').not.toBeNull()
@@ -103,17 +102,20 @@ describe('048 S1 - the administrator\'s tools are in "Admin ▾", and only there
     }
   })
 
-  it('the catalogue refresh in Admin emits refresh-scenarios, and is disabled while the catalogue loads', async () => {
-    const loadingScenarios = ref(false)
-    const { host, onRefreshScenarios, done } = mountTopBar(context({ loadingScenarios }))
+  // The owner's word (2026-10-19, a rule): the refresh of the scenario catalogue is an edge case the interface ignores -
+  // the catalogue is read when the page loads; after an admin uploads a scenario, a reload picks it up. Replaces the test
+  // "the catalogue refresh in Admin emits refresh-scenarios…" (its contract is removed). By structure: the tools row of
+  // Admin holds the analytics toggle alone, and the scenario row has one button besides the run's (no icon button).
+  // Red on `fb818563`: the tools row held two buttons (Analytics and ↻).
+  it('no refresh of the scenario catalogue anywhere: Admin\'s tools row holds the analytics toggle alone', async () => {
+    const { host, done } = mountTopBar(context({ runId: ref(null), runStatus: ref(null) }), { runFiles: files() })
     await nextTick()
-    const btn = host.querySelector<HTMLButtonElement>('[data-testid="scenarios-refresh"]')!
-    btn.click()
-    expect(onRefreshScenarios).toHaveBeenCalledTimes(1)
-    loadingScenarios.value = true
-    await nextTick()
-    expect(btn.disabled).toBe(true)
-    expect(host.querySelector('.tb-run-controls [data-testid="scenarios-refresh"]'), 'not in the scenario row any more').toBeNull()
+    expect(admin(host), 'counter-check: Admin is rendered').not.toBeNull()
+    const tools = [...host.querySelectorAll<HTMLElement>('[data-testid="admin-tools"] button')].map((b) => b.dataset.testid ?? b.getAttribute('aria-label'))
+    expect(tools).toEqual(['analytics-toggle'])
+    // The scenario row: the select and Start (no run) - and no other button.
+    const runRow = [...host.querySelectorAll<HTMLElement>('.tb-run-controls > button')]
+    expect(runRow.length, 'Start only (no run is live), no refresh beside the scenario').toBe(1)
     done()
   })
 

@@ -58,7 +58,6 @@ const emit = defineEmits<{
 
   (e: 'set-ui-theme', v: UiThemeId): void
 
-  (e: 'refresh-scenarios'): void
   (e: 'start-run'): void
   (e: 'pause'): void
   (e: 'resume'): void
@@ -377,10 +376,6 @@ async function onAdminStopRun(runId: string) {
   emit('admin-stop-run', runId)
 }
 
-function onRefreshScenarios() {
-  emit('refresh-scenarios')
-}
-
 function onStartRun() {
   emit('start-run')
 }
@@ -631,8 +626,9 @@ function onApplyIntensity() {
                     </span>
                   </div>
 
-                  <!-- 048 S1 (decisions 1 and 5): the administrator's tools that left the service rows - the analytics
-                       dock's toggle (from the bottom bar) and the refresh of the scenario catalogue (from the scenario). -->
+                  <!-- 048 S1 (decision 1): the analytics dock's toggle (from the bottom bar). No refresh of the scenario
+                       catalogue anywhere in the UI (the owner's word, 2026-10-19: an edge case the interface ignores): the
+                       catalogue is read when the page loads; after an admin uploads a scenario, a reload picks it up. -->
                   <div class="ds-row tb-admin-actions" data-testid="admin-tools">
                     <button
                       class="ds-btn ds-btn--ghost ds-btn--sm"
@@ -642,17 +638,6 @@ function onApplyIntensity() {
                       @click="emit('toggle-analytics')"
                     >
                       Analytics
-                    </button>
-                    <button
-                      v-if="showRunControls"
-                      class="ds-btn ds-btn--icon tb-icon-28"
-                      type="button"
-                      data-testid="scenarios-refresh"
-                      :disabled="ctx.loadingScenarios.value"
-                      aria-label="Refresh scenarios"
-                      @click="onRefreshScenarios"
-                    >
-                      ↻
                     </button>
                   </div>
 
@@ -951,11 +936,6 @@ function onApplyIntensity() {
 .tb-run-controls {
   gap: var(--ds-space-2, 8px);
   flex-wrap: wrap;
-}
-
-.tb-icon-28 {
-  height: var(--ds-tb-icon-size);
-  width: var(--ds-tb-icon-size);
 }
 
 .tb-adv-row {

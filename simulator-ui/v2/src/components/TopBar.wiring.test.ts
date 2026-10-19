@@ -19,7 +19,7 @@ import TopBar from './TopBar.vue'
 
 const EVENTS = [
   'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent',
-  'set-ui-theme', 'refresh-scenarios', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
+  'set-ui-theme', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
   'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run', 'toggle-analytics',
 ] as const
 
@@ -126,9 +126,7 @@ describe('TopBar wiring - what each control emits', () => {
     host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')!.click()
     expect(spies.resume).toHaveBeenCalledTimes(1)
 
-    host.querySelector<HTMLButtonElement>('[data-testid="scenarios-refresh"]')!.click()
-    expect(spies['refresh-scenarios'], 'the catalogue refresh, in Admin').toHaveBeenCalled()
-    expect(row.querySelector('[data-testid="scenarios-refresh"]')?.closest('details[aria-label="Admin controls"]'), 'it lives in Admin').not.toBeNull()
+    // The owner's word (2026-10-19): no refresh of the scenario catalogue in the UI (it was in Admin, `refresh-scenarios`).
     done()
   })
 
