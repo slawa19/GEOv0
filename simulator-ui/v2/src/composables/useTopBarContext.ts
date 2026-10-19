@@ -40,6 +40,12 @@ export type TopBarContext = {
    */
   lastErrorTitle?: Readonly<Ref<string | null>>
   /**
+   * 048 S3 (decision 3, AGENTS.md section 12): the server's correlation id behind the error line (`runErrorLineRef`) -
+   * shown as the line's own quieter second line and `data-request-id`, never glued into the sentence. Optional: a context
+   * without it shows no id line.
+   */
+  lastErrorRef?: Readonly<Ref<string | null>>
+  /**
    * 046 wave 1: the error line is a start the global limit of runs refused, and may be tried again ("Try again" beside
    * it). Optional: a context without it offers no retry.
    */

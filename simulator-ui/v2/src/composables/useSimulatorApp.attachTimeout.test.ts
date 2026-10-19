@@ -14,6 +14,8 @@ import { API_TIMEOUT_CODE, ApiError } from '../api/http'
 import { getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
+import { t } from '../i18n/t'
+import { runErrorLineLog } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -113,7 +115,9 @@ describe('a run SNAPSHOT read that fails while the run is active (through the re
     await settle()
 
     expect(app.state.snapshot?.nodes.map((n) => n.id), 'the run scene was replaced by the scenario preview').toEqual(['RUN_NODE'])
-    expect(app.state.error).toContain('timeout')
+    // 048 S3: the drawn text is the sentence of the failure's kind; the transport's «timeout» is its detail.
+    expect(app.state.error).toBe(t('failure.noAnswer'))
+    expect(app.state.errorLine && runErrorLineLog(app.state.errorLine)).toContain('timeout')
   })
 
   it.each([

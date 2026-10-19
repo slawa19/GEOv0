@@ -22,7 +22,8 @@ describe('utils/runErrorClassification', () => {
     expect(isUserFacingRunErrorCode('CLEARING_ERROR')).toBe(false)
   })
 
-  it('runErrorText: CLEARING_REFUSED is the human step text in the interface language; other codes keep CODE: message', () => {
+  // 048 S3: "other codes keep CODE: message" -> other codes are a sentence with the code (the server's prose is the title).
+  it('runErrorText: CLEARING_REFUSED is the human step text in the interface language; other codes are a sentence with the code', () => {
     const refused = { code: 'CLEARING_REFUSED', message: 'occurrence amount is not a multiple of the step', at: 't' }
     expect(runErrorText(refused, 'en')).toBe(
       'Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.',
@@ -30,6 +31,6 @@ describe('utils/runErrorClassification', () => {
     expect(runErrorText(refused, 'ru')).toBe(
       'Клиринг отклонён: в базе есть долги мельче шага учёта эквивалента. Нужен пересев базы.',
     )
-    expect(runErrorText({ code: 'INTERNAL_ERROR', message: 'boom', at: 't' }, 'en')).toBe('INTERNAL_ERROR: boom')
+    expect(runErrorText({ code: 'INTERNAL_ERROR', message: 'boom', at: 't' }, 'en')).toBe('Something failed during the run (INTERNAL_ERROR); the run goes on.')
   })
 })

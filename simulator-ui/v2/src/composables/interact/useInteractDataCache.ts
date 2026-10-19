@@ -14,7 +14,7 @@ import { canonicalEquivalent, sameEquivalent } from '../../config/equivalents'
 // 046 wave 2: a coded answer is told by its code in the language of the interface (`actionErrorText`), not by the server's
 // English message; a failure without a code keeps its own text.
 function getErrorMessage(error: unknown, fallback: string): string {
-  return (error == null ? '' : actionErrorText(error).trim()) || fallback
+  return (error == null ? '' : actionErrorText(error).text.trim()) || fallback
 }
 
 export type PaymentTargetDetail = { hops: number; max_available: string | null }

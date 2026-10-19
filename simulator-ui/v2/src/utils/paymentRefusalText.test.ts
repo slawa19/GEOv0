@@ -7,7 +7,14 @@ import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecisi
 import { useEdgeTooltip } from '../composables/useEdgeTooltip'
 import { useInteractMode } from '../composables/useInteractMode'
 import { t } from '../i18n/t'
-import { ACTION_ERROR_CODES, PAYMENT_REFUSAL_REASONS, actionErrorText, clearingRefusalText, paymentRefusalText } from './paymentRefusalText'
+import * as refusals from './paymentRefusalText'
+import { ACTION_ERROR_CODES, PAYMENT_REFUSAL_REASONS } from './paymentRefusalText'
+
+// 048 S3: the three functions return the shown form (`{text, ref, detail}`); this file is about the SENTENCES, so it reads
+// `.text` (the request id, apart from the sentence since S3, is held by `paymentRefusalText.requestRef.test.ts` and below).
+const paymentRefusalText = (...a: Parameters<typeof refusals.paymentRefusalText>) => refusals.paymentRefusalText(...a).text
+const actionErrorText = (...a: Parameters<typeof refusals.actionErrorText>) => refusals.actionErrorText(...a).text
+const clearingRefusalText = (...a: Parameters<typeof refusals.clearingRefusalText>) => refusals.clearingRefusalText(...a).text
 
 const refusal = (code: string, details: Record<string, unknown>) => ({ status: 409, code, message: 'server text', details })
 
@@ -76,9 +83,22 @@ describe('046 wave 2 (decision 3): an action error is told by its code, by a clo
     }
   })
   it('an unknown code: the general text WITH the code, in both languages; the server message is not shown', () => {
-    expect(actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' }, 'en')).toBe('The action failed (HTTP_500).')
-    expect(actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' }, 'ru'))
-      .toBe(t('actionError.unknown', { code: 'HTTP_500' }, 'ru'))
+    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'en')).toBe('The action failed (X_NEW).')
+    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'ru')).toBe(t('actionError.unknown', { code: 'X_NEW' }, 'ru'))
+  })
+  // 048 S3 (decision 3): an answer that named no code of its own gets the client's `HTTP_<status>` - not printed (was:
+  // "The action failed (HTTP_500)."); the status is the block's title, the server's message the console line.
+  it('an answer without a code of its own (HTTP_<status>): a sentence without "HTTP", the status in the detail only', () => {
+    for (const locale of ['en', 'ru'] as const) {
+      const shown = refusals.actionErrorText({ status: 500, code: 'HTTP_500', message: 'Internal Server Error', requestId: 'req-5' }, locale)
+      expect(shown.text).toBe(t('actionError.httpFailed', {}, locale))
+      expect(shown.text).not.toMatch(/HTTP|500/)
+      expect(shown.detail, 'the title: identifiers only').toBe('HTTP 500')
+      expect(shown.log, 'the console line').toBe('HTTP 500: Internal Server Error')
+      expect(shown.ref).toBe('req-5')
+    }
+    // Counter-check: a code of the server's own is still told by its text.
+    expect(actionErrorText({ status: 404, code: 'RUN_NOT_FOUND', message: 'x' }, 'en')).toBe(t('actionError.RUN_NOT_FOUND', {}, 'en'))
   })
   it('kept as they are: no code, and an error the client marked as its own (clientMessage)', () => {
     expect(actionErrorText(new Error('boom'), 'ru')).toBe('boom')
@@ -99,11 +119,12 @@ describe('046 wave 2 (decision 3): an action error is told by its code, by a clo
     expect(actionErrorText(new Error(''), 'en')).toBe('The action failed (UNKNOWN).')
   })
   // Codex §15 round 1 (P3): the reference after the client's own text follows its language too.
-  it('the own text of the client carries the request reference in its language', () => {
-    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Ответ не получен', clientMessage: true, requestId: 'req-123' }, 'ru'))
-      .toBe('Ответ не получен (код запроса: req-123)')
-    expect(actionErrorText({ status: 408, code: 'TIMEOUT', message: 'No answer', clientMessage: true, requestId: 'req-123' }, 'en'))
-      .toBe('No answer (ref: req-123)')
+  // 048 S3: rewritten, not removed - the client's own text carries the id APART (it was glued: "… (код запроса: req-123)").
+  it('the own text of the client carries the request id - apart from the sentence', () => {
+    const ru = refusals.actionErrorText({ status: 408, code: 'TIMEOUT', message: 'Ответ не получен', clientMessage: true, requestId: 'req-123' }, 'ru')
+    expect(ru).toMatchObject({ text: 'Ответ не получен', ref: 'req-123' })
+    const en = refusals.actionErrorText({ status: 408, code: 'TIMEOUT', message: 'No answer', clientMessage: true, requestId: 'req-123' }, 'en')
+    expect(en).toMatchObject({ text: 'No answer', ref: 'req-123' })
   })
   // Codex §15 round 1 (P2): the operator's stop and the integrity hold answer CONFLICT with `details.reason`; before the
   // fix a clearing refused that way read "the system is busy; try again".

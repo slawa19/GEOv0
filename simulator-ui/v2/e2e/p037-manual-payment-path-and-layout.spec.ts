@@ -265,8 +265,9 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await page.locator('#mp-amount').fill('1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
-    // The application's own error toast shows the same sentence for a few seconds, over the lower part of a phone screen.
-    await expect(page.getByTestId('error-toast')).toBeHidden({ timeout: 15_000 })
+    // Until 048 S3 the application's own error toast showed the same sentence for a few seconds over the lower part of a
+    // phone screen; it is gone - the window's block is the one place.
+    await expect(page.getByTestId('error-toast')).toHaveCount(0)
 
     const banner = await measure(page, 'unresolved-banner')
     await c.press('Discard', '[data-testid="mp-discard"]')

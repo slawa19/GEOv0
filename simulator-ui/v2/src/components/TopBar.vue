@@ -509,6 +509,9 @@ function onApplyIntensity() {
         </div>
       </HudBar>
 
+      <!-- 048 S3 (decision 3): the run's failure - one sentence of the interface, no «Error» word before it; the technical
+           text (the HTTP status, the server's message) is the title only; the request id is a quieter line of its own and
+           `data-request-id` (AGENTS.md section 12). -->
       <div
         v-if="ctx.lastError.value"
         class="ds-alert ds-alert--err"
@@ -516,11 +519,13 @@ function onApplyIntensity() {
         role="alert"
         aria-atomic="true"
         data-testid="top-error"
+        :data-request-id="ctx.lastErrorRef?.value || undefined"
       >
-        <span class="ds-alert__icon">✕</span>
-        <span class="ds-label">{{ t('topBar.errorLabel') }}</span>
-        <!-- 048 decision 3: the line is the interface's sentence; its title keeps the server's full text when there is one. -->
-        <span class="ds-value ds-mono tb-fade-92" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
+        <span class="ds-alert__icon" aria-hidden="true">✕</span>
+        <span class="tb-error-lines">
+          <span class="ds-value ds-mono tb-fade-92" data-testid="error-text" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
+          <span v-if="ctx.lastErrorRef?.value" class="ds-mono tb-error-ref" data-testid="error-request-id">{{ t('common.requestId', { id: ctx.lastErrorRef.value }) }}</span>
+        </span>
         <!-- 046 wave 1: a start refused by the limit of runs (409 global_active_limit) can be tried again from here, on the first view. -->
         <button
           v-if="startRetryable"
@@ -713,6 +718,17 @@ function onApplyIntensity() {
 .tb-retry {
   margin-left: auto;
   flex-shrink: 0;
+}
+
+/* 048 S3: the sentence and, under it, the request id - one column beside the icon. */
+.tb-error-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.tb-error-ref {
+  font-size: 0.85em;
 }
 
 .tb-run-controls {

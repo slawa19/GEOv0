@@ -28,7 +28,8 @@ type R = { name: string; x: number; y: number; w: number; h: number }
 
 const HUD_PANELS = ['.ds-ov-top .ds-panel', '.ds-ov-bottom:not(.sar-interact-history-overlay) .ds-panel', '.graph-navigator', '.action-bar'] as const
 const WINDOWS = '.ws-shell'
-const TOASTS = '.ds-ov-toast--success, .ds-ov-toast--error, .sar-interact-history-overlay'
+// 048 S3: the error toast is gone (a window's failure is its own block).
+const TOASTS = '.ds-ov-toast--success, .sar-interact-history-overlay'
 
 const note = (id: string, row: unknown) => {
   console.log(`[039 ${id}]`, JSON.stringify(row))

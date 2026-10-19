@@ -2,10 +2,10 @@ import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 
 
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
-import { withRequestRef } from '../utils/errorMessage'
+import { shownError, type ShownError } from '../utils/errorMessage'
 import { paymentStatusText } from '../i18n/statusText'
 import { t, tn } from '../i18n/t'
-import { actionErrorText, clearingRefusalText, paymentRefusalText, uiLocale } from '../utils/paymentRefusalText'
+import { actionErrorText, clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -55,6 +55,28 @@ export type PaymentTargetEstimate =
   | { state: 'loading' }
   | { state: 'failed' }
   | { state: 'received'; hops: number; maxAvailable: string | null }
+
+/**
+ * 048 S3: a failure already told in the shown form (`ShownError`: the sentence, the request id, the detail) - thrown inside
+ * an operation so that `runBusy` writes it as it is instead of telling the bare `Error` again (which would lose the id).
+ */
+class ShownFailure extends Error {
+  readonly shown: ShownError
+  constructor(shown: ShownError) {
+    super(shown.text)
+    this.name = 'ShownFailure'
+    this.shown = shown
+  }
+}
+
+/** 048 S3 (decision 3): the technical detail of a window's failure goes to the console once, with its request id. */
+function logShownFailure(shown: ShownError): void {
+  const what = shown.log ?? shown.detail
+  if (!what && !shown.ref) return
+  const args: string[] = ['[action] failed:', what ?? shown.text]
+  if (shown.ref) args.push(`(request id: ${shown.ref})`)
+  console.warn(...args)
+}
 
 export function useInteractMode(opts: {
   actions: ReturnType<typeof useInteractActions>
@@ -655,16 +677,12 @@ export function useInteractMode(opts: {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
         // 046 wave 2: a coded answer (a trust line or clearing action) in the language of the interface, by its code.
-        const msg = actionErrorText(error)
-        // Ensure repeated identical errors still retrigger the ErrorToast timer.
-        if (state.error === msg) {
-          state.error = null
-          scheduleMicrotask(() => {
-            if (isCurrent()) state.error = msg
-          })
-        } else {
-          state.error = msg
-        }
+        // 048 S3 (decision 3): the window's error block is the one place of the failure - the sentence, the request id on
+        // its own line, the technical detail in the block's title and once in the console (the error toast, which showed
+        // the same text and cleared it after 4-8 s, is gone; so is the null-then-set that restarted its timer).
+        const shown = error instanceof ShownFailure ? error.shown : actionErrorText(error)
+        fsm.setError(shown)
+        logShownFailure(shown)
       }
       return undefined
     } finally {
@@ -730,12 +748,12 @@ export function useInteractMode(opts: {
     const { from, to, equivalent: eq, amount } = intent
     const begun = paymentIntents.begin(intent)
     if (begun.kind === 'unreadable') {
-      state.error = t('payment.storageUnreadable')
+      fsm.setError({ text: t('payment.storageUnreadable'), ref: null, detail: null })
       touchIntents()
       return
     }
     if (begun.kind === 'blocked') {
-      state.error = t('payment.unknownBlocksNew')
+      fsm.setError({ text: t('payment.unknownBlocksNew'), ref: null, detail: null })
       touchIntents()
       return
     }
@@ -743,7 +761,7 @@ export function useInteractMode(opts: {
     // Defence in depth: a payment - and above all the repeat of an unresolved one - never leaves without a valid key. A
     // missing key would not be a check, it would be a NEW payment.
     if (!isValidIdempotencyKey(record.key)) {
-      state.error = t('payment.noValidKey')
+      fsm.setError({ text: t('payment.noValidKey'), ref: null, detail: null })
       touchIntents()
       return
     }
@@ -777,8 +795,9 @@ export function useInteractMode(opts: {
             ? err.message
             : t('payment.unknownNoAnswer', { amount, unit: eq, from: names.from, to: names.to })
           : paymentRefusalText(e, eq, undefined, { keyed: true })
-        // The correlation id of the request goes with the text, like every user-facing error (AGENTS section 12).
-        throw new Error(withRequestRef(text, e, uiLocale()))
+        // The correlation id of the request goes with the text, like every user-facing error (AGENTS section 12) - since
+        // 048 S3 apart from it (`ShownError.ref`), not glued into the sentence.
+        throw new ShownFailure(typeof text === 'string' ? shownError(text, e) : text)
       }
 
       // The answer is a verdict only if it says COMMITTED: a success-shaped answer for a stored refusal is not a payment.
@@ -945,10 +964,10 @@ export function useInteractMode(opts: {
 
       // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
       const res = await opts.actions.runClearing(eq, { signal }).catch((e: unknown) => {
-        const message = clearingRefusalText(e, eq)
-        // The text stays as a state of the panel when the error toast is gone (the toast clears `state.error`).
-        if (isCurrent()) fsm.setClearingFailure(message)
-        throw new Error(message)
+        const failure = clearingRefusalText(e, eq)
+        // The failure stays a state of the panel (`clearingFailure`), with its request id apart from the sentence (048 S3).
+        if (isCurrent()) fsm.setClearingFailure(failure)
+        throw new ShownFailure(failure)
       })
       if (!isCurrent()) return
       fsm.setLastClearing(res)

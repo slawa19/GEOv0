@@ -5,13 +5,15 @@
  *             (3) a generic code (INVALID_AMOUNT, PAYMENT_REJECTED); (4) anything else -> the text of its code, or the
  *             general text with the code (046 wave 2; was: the server's message).
  *   clearing: (5) CLEARING_REFUSED + occurrence_amount_not_in_step; (6) anything else -> the text of its code (same).
+ *
+ * 048 S3 (decision 3), rewritten - not removed: the id is no longer glued into the sentence as «(код запроса: …)»; every
+ * branch carries it APART (`ShownError.ref`), and the sentence holds no id and no «ref»/«код запроса».
  */
 import { describe, expect, it } from 'vitest'
 
-import { t } from '../i18n/t'
-import { clearingRefusalText, paymentRefusalText, type UiLocale } from './paymentRefusalText'
+import { clearingRefusalText, paymentRefusalText, type ShownError, type UiLocale } from './paymentRefusalText'
 
-type Case = { branch: string; error: Record<string, unknown>; text: (e: unknown, l: UiLocale) => string }
+type Case = { branch: string; error: Record<string, unknown>; text: (e: unknown, l: UiLocale) => ShownError }
 
 const withId = (e: Record<string, unknown>) => ({ message: 'server words', requestId: 'req-x', ...e })
 
@@ -29,22 +31,22 @@ const CASES: Case[] = [
   { branch: '6 clearing other', error: withId({ code: 'CLEARING_FAILED' }), text: (e, l) => clearingRefusalText(e, 'UAH', l) },
 ]
 
-describe('every branch of the refusal texts carries (ref: <id>), in the language of the text', () => {
+describe('every branch of the refusal texts carries the request id - apart from the sentence (048 S3)', () => {
   it.each(CASES.flatMap((c) => (['en', 'ru'] as UiLocale[]).map((l) => [c.branch, l, c] as const)))(
     '%s [%s]',
     (_branch, locale, c) => {
-      const text = c.text(c.error, locale)
-      // 046 wave 2: the reference is in the language of the text ("(ref: req-x)" / "(запрос: req-x)").
-      const ref = t('common.requestRefOnly', { id: 'req-x' }, locale)
-      expect(text).toContain(ref)
-      expect(text.split(ref)).toHaveLength(2)
-      expect(text.match(/req-x/g)).toHaveLength(1)
+      const shown = c.text(c.error, locale)
+      expect(shown.ref).toBe('req-x')
+      // The sentence is the sentence only: no id, no «ref» / «код запроса» (red before S3: "… (ref: req-x)").
+      expect(shown.text).not.toContain('req-x')
+      expect(shown.text).not.toMatch(/\(ref:|код запроса/)
+      expect(shown.text.trim()).not.toBe('')
     },
   )
 
-  it('anti-vacuum: the same branches without an id add no reference, and the texts differ per branch', () => {
-    const texts = CASES.map((c) => c.text({ ...c.error, requestId: null }, 'en'))
-    for (const t of texts) expect(t).not.toContain('(ref:')
-    expect(new Set(texts).size).toBeGreaterThanOrEqual(4)
+  it('anti-vacuum: the same branches without an id carry no id, and the texts differ per branch', () => {
+    const shown = CASES.map((c) => c.text({ ...c.error, requestId: null }, 'en'))
+    for (const s of shown) expect(s.ref).toBeNull()
+    expect(new Set(shown.map((s) => s.text)).size).toBeGreaterThanOrEqual(4)
   })
 })

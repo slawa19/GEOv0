@@ -6,7 +6,7 @@ import { ApiError } from '../api/http'
 import { connectSse, type SseConnectOpts } from '../api/sse'
 import { createRun, getActiveRun, getRun, listArtifacts, stopRun } from '../api/simulatorApi'
 import type { ActiveRunResponse } from '../api/simulatorTypes'
-import { isUserFacingRunErrorCode, runErrorText } from '../utils/runErrorClassification'
+import { isUserFacingRunErrorCode, runErrorLineLog, runErrorText } from '../utils/runErrorClassification'
 import { t } from '../i18n/t'
 
 function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
@@ -1365,7 +1365,8 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       expect(harness.real.runId).toBe('r1')
       expect(harness.real.lastEventId).toBeNull()
       expect(harness.real.sseState).toBe('reconnecting')
-      expect(harness.real.lastError).toContain('503')
+      // 048 S3: the technical text is the line's detail (title/console); the drawn line is the sentence of `failure.*`.
+      expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('503')
       expect(seenCursors).toEqual(['evt_expired'])
       expect(snapshotCalls).toBe(1)
 
@@ -1425,7 +1426,10 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       harness.isRealModeRef.value = true
       await nextTick()
       await failedSnapshot.promise
-      await vi.waitFor(() => expect(harness.real.lastError).toContain('503'))
+      // 048 S3 (decision 3): the failed snapshot is shown in ONE place - the scene's (`state.error`, the overlay over the
+      // canvas); it is no longer copied to the run's error line as well.
+      await vi.waitFor(() => expect(harness.state.error).toContain('503'))
+      expect(harness.real.lastError, 'not a second place').toBe('')
 
       expect(harness.real.sseState).toBe('reconnecting')
       expect(seenCursors).toEqual(['evt_expired', null])
@@ -1467,7 +1471,8 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       await vi.waitFor(() => expect(seenCursors).toEqual(['evt_expired', null]))
 
       expect(harness.loadScene).toHaveBeenCalledTimes(1)
-      expect(harness.real.lastError).toContain('503')
+      // 048 S3: the technical text is the line's detail (title/console); the drawn line is the sentence of `failure.*`.
+      expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('503')
       expect(harness.onAnySseEvent).toHaveBeenCalledTimes(0)
 
       await vi.advanceTimersByTimeAsync(1000)
@@ -1512,7 +1517,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       harness.isRealModeRef.value = true
       await nextTick()
       await recoveryAttempted.promise
-      await vi.waitFor(() => expect(harness.real.lastError).toContain('strict run snapshot unavailable'))
+      await vi.waitFor(() => expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('strict run snapshot unavailable'))
 
       expect(seenCursors).toEqual(['evt_expired', null])
       expect(harness.real.lastEventId).toBeNull()
@@ -1981,7 +1986,8 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       await Promise.resolve()
 
       expect(connectionCalls).toBe(2)
-      expect(harness.real.lastError).toContain('buffer exceeded 512 messages')
+      expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('buffer exceeded 512 messages')
+      expect(harness.real.lastError).toBe(t('failure.streamFailed'))
       expect(harness.real.lastEventId).toBeNull()
       expect(harness.onAnySseEvent).toHaveBeenCalledTimes(0)
       expect(harness.runRealTxFx).toHaveBeenCalledTimes(0)
@@ -2196,14 +2202,16 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       expect(real.lastError).not.toContain(refused.message)
 
       // anti-vacuum: another user-facing code still keeps CODE: message on the same path. 046 wave 1, full (2026-10-19):
-      // on a run that goes on - a run ENDED by an error has its own sentence since (below).
+      // on a run that goes on - a run ENDED by an error has its own sentence since (below). 048 S3: a run that goes on
+      // has a sentence with the code too; the server's `CODE: message` is the line's title.
       getRunMock.mockImplementation(async () => ({
         ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
         state: 'running',
         last_error: { code: 'INTERNAL_ERROR', message: 'boom', at: 't' },
       }))
       await h.refreshRunStatus()
-      expect(real.lastError).toBe('INTERNAL_ERROR: boom')
+      expect(real.lastError).toBe(t('runLine.runningError', { code: 'INTERNAL_ERROR' }))
+      expect(runErrorLineLog(real.lastErrorLine)).toBe('INTERNAL_ERROR: boom')
 
       // BACKLOG 037-5 (a): a run in `error` shows the error it stopped with, whatever its code (page reload / attach path)
       getRunMock.mockImplementation(async () => ({
@@ -2261,7 +2269,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
       await untilReconnecting(harness)
 
       expect(harness.real.runId, 'a server error was read as "the run is gone"').toBe('r1')
-      expect(harness.real.lastError).toContain('SSE HTTP 500')
+      expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('SSE HTTP 500')
       expect(harness.real.sseState).toBe('reconnecting')
     } finally {
       harness.h.stopSse()
@@ -2364,7 +2372,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
       await harness.h.stop()
 
       expect(harness.real.runId, 'a failed stop was read as "the run is gone"').toBe('r1')
-      expect(harness.real.lastError).toContain('HTTP 500')
+      expect(runErrorLineLog(harness.real.lastErrorLine)).toContain('HTTP 500')
     } finally {
       harness.h.stopSse()
       restoreConnectSseImplementation(prevConnectImpl)
@@ -2621,7 +2629,7 @@ describe('useSimulatorRealMode - 034 S8: a failed replay-recovery snapshot is cl
     )
     try {
       expect(s.harness.real.runId, 'a server error was read as "the run is gone"').toBe('r1')
-      expect(s.harness.real.lastError).toContain('HTTP 503')
+      expect(runErrorLineLog(s.harness.real.lastErrorLine)).toContain('HTTP 503')
     } finally {
       s.cleanup()
     }

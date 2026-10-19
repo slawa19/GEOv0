@@ -29,13 +29,12 @@ import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
-import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
 import {
+  failureRunErrorLine,
   isGlobalLimitRefusal,
   NO_SCENARIO_LINE,
-  rawRunErrorLine,
   runStatusErrorLine,
   startRunErrorLine,
   writeRunErrorLine,
@@ -391,7 +390,7 @@ export function useSimulatorRealMode(opts: {
       await loadScene()
     } catch (error: unknown) {
       if (sceneContextRefreshSeq === seq && isSceneContextCurrent(context)) {
-        real.lastError = getErrorMessage(error)
+        writeRunErrorLine(real, failureRunErrorLine(error))
       }
     }
 
@@ -432,6 +431,7 @@ export function useSimulatorRealMode(opts: {
     if (resetOpts?.clearError ?? true) {
       real.lastError = ''
       state.error = ''
+      state.errorLine = null
     }
 
     // Keep selection usable after restart (do not auto-start).
@@ -454,11 +454,15 @@ export function useSimulatorRealMode(opts: {
       return 'current'
     } catch (e: unknown) {
       if (!isCurrent()) return 'superseded'
-      if (e instanceof ApiError && e.status === 404) {
+      // 048 S3 (044 closing review, advisor 2026-10-19): a 403 is a run of another session - the anonymous cookie was lost
+      // or expired - and is as gone for this page as a 404: the saved id is cleared the same way, so the opening goes on
+      // as without one (the scenario preview, then the autostart starts a run). A kept id with no status answered
+      // `unknown` and started nothing: the visitor was stuck until the browser's storage was cleared.
+      if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
         resetStaleRun({ clearError: true })
         return 'stale'
       }
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
       return 'transient'
     }
   }
@@ -520,7 +524,9 @@ export function useSimulatorRealMode(opts: {
             resetStaleRun({ clearError: true })
             return 'stale'
           }
-          real.lastError = getErrorMessage(e)
+          // 048 S3 (decision 3): a failure the scene loader already shows (`state.error`, the overlay over the canvas - a
+          // recovery load rethrows it) is not written on the run's error line too: one failure, one place.
+          if (!state.error) writeRunErrorLine(real, failureRunErrorLine(e))
           return 'transient'
         }
 
@@ -530,13 +536,11 @@ export function useSimulatorRealMode(opts: {
         // Snapshot change should be visible immediately even if deep idle stopped scheduling.
         wakeUp?.()
 
-        // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+        // The scene loader stores its failure in `state.error`; the overlay over the canvas shows it (048 S3: its ONE place -
+        // until S3 it was copied to the run's error line as well, the same failure twice).
         // A text is never read as "the run is gone" (034 S8, F-034-D14): the run's own 404 is handled by its status
         // where the error object still exists - in the scene's run-snapshot read and in the catch above.
-        if (isRealMode.value && state.error) {
-          showSceneError(state.error)
-          return 'transient'
-        }
+        if (isRealMode.value && state.error) return 'transient'
         return 'current'
       } finally {
         if (refreshSnapshotActivePromise === promise) {
@@ -588,7 +592,7 @@ export function useSimulatorRealMode(opts: {
     cancelPendingRefreshSnapshotDebounce()
     if (!isRealMode.value || real.runId !== input.runId || !input.isCurrent()) return 'superseded'
     if (!loadRecoveryScene) {
-      real.lastError = 'Strict replay recovery snapshot loader is not configured'
+      writeRunErrorLine(real, failureRunErrorLine(new Error('Strict replay recovery snapshot loader is not configured'), { client: 'stream' }))
       return 'transient'
     }
     return await startSnapshotRefresh({
@@ -620,31 +624,10 @@ export function useSimulatorRealMode(opts: {
     if (line) writeRunErrorLine(real, line, locale)
   })
 
-  // The HUD copy of a scene-load error (034 S8, review C2): only this copy is removed, what the HUD showed before
-  // (a run's own `last_error`) comes back, and an error written over the copy is left alone.
-  // WHEN, precisely: not on recovery but when the NEXT load STARTS - `state.error` is emptied before the request is
-  // answered - and the copy returns if that load fails. So while the request is in flight there is no warning.
-  // 046 wave 1 (§15 Codex fix-delta P2): the line put aside is kept as its VALUE (`lastErrorLine`, or its text when it has
-  // none), so it comes back in the language of the moment it comes back - and as the same value, so a retry offer that
-  // stood beside it comes back too (`startRetryOffered` compares the value, not the text).
-  let sceneErrorInHud: { text: string; displaced: RunErrorLine } | null = null
-  function showSceneError(text: string) {
-    const displaced = sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastErrorLine ?? rawRunErrorLine(real.lastError)
-    sceneErrorInHud = { text, displaced }
-    real.lastError = text
-  }
-
-  // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
-  watch(
-    () => state.error,
-    (e) => {
-      if (!isRealMode.value) return
-      if (e) return showSceneError(e)
-      if (sceneErrorInHud?.text === real.lastError) writeRunErrorLine(real, sceneErrorInHud.displaced.kind === 'raw' && !sceneErrorInHud.displaced.text ? null : sceneErrorInHud.displaced)
-      sceneErrorInHud = null
-    },
-    { flush: 'post' },
-  )
+  // 048 S3 (decision 3, «одна форма ошибки»): a scene-load failure has ONE place - the overlay over the canvas, in the
+  // place of the picture that did not come (`SimulatorAppRoot.vue`). Until S3 it was copied to this error line as well
+  // (the "HUD copy", 034 S8 review C2, and its put-aside-and-bring-back of the line it displaced, 046 wave 1): the same
+  // failure twice. The copy and its bookkeeping are gone; the line keeps the run's own failures.
 
   function nextBackoff(attempt: number): number {
     const steps = SSE_BACKOFF_STEPS_MS
@@ -819,7 +802,7 @@ export function useSimulatorRealMode(opts: {
         if (bufferedMessages.length >= REPLAY_GAP_BUFFER_MAX_MESSAGES) {
           if (!bufferOverflowed) {
             bufferOverflowed = true
-            real.lastError = `SSE replay recovery buffer exceeded ${REPLAY_GAP_BUFFER_MAX_MESSAGES} messages`
+            writeRunErrorLine(real, failureRunErrorLine(new Error(`SSE replay recovery buffer exceeded ${REPLAY_GAP_BUFFER_MAX_MESSAGES} messages`), { client: 'stream' }))
             resolveBufferOverflow()
             connectionCtrl.abort()
           }
@@ -858,7 +841,7 @@ export function useSimulatorRealMode(opts: {
       if (bootstrapOutcome.kind === 'connection') {
         if (!isCurrentContext()) return 'stop'
         if (bootstrapOutcome.outcome.status === 'error') throw bootstrapOutcome.outcome.error
-        real.lastError = 'SSE replay recovery connection ended before its bootstrap frame'
+        writeRunErrorLine(real, failureRunErrorLine(new Error('SSE replay recovery connection ended before its bootstrap frame'), { client: 'stream' }))
         return 'retry'
       }
       if (bufferOverflowed) {
@@ -890,7 +873,7 @@ export function useSimulatorRealMode(opts: {
         if (!isCurrentContext()) return 'stop'
         if (snapshotOrConnection.outcome.status === 'error') throw snapshotOrConnection.outcome.error
         if (!terminalBootstrap) {
-          real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
+          writeRunErrorLine(real, failureRunErrorLine(new Error('SSE replay recovery connection ended before the authoritative snapshot completed'), { client: 'stream' }))
           await settleAfterAbort()
           return 'retry'
         }
@@ -1070,7 +1053,7 @@ export function useSimulatorRealMode(opts: {
           return
         }
 
-        real.lastError = getErrorMessage(e)
+        writeRunErrorLine(real, failureRunErrorLine(e, { client: 'stream' }))
 
         // Unrecoverable replay cursor: clear it and rebuild authoritative state.
         if (status === 410) {
@@ -1176,7 +1159,7 @@ export function useSimulatorRealMode(opts: {
       real.scenarios = res.items ?? []
       ensureScenarioSelectionValid()
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     } finally {
       real.loadingScenarios = false
     }
@@ -1267,7 +1250,7 @@ export function useSimulatorRealMode(opts: {
           } catch (e: unknown) {
             if (i === delaysMs.length) {
               // Best-effort: still proceed so UI can show status/errors.
-              real.lastError = getErrorMessage(e)
+              writeRunErrorLine(real, failureRunErrorLine(e))
               break
             }
             await new Promise((r) => setTimeout(r, delaysMs[i]!))
@@ -1284,7 +1267,7 @@ export function useSimulatorRealMode(opts: {
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       // The one place a failed start is written to the error line (every start goes through here).
-      const line = startRunErrorLine(e) ?? rawRunErrorLine(getErrorMessage(e))
+      const line = startRunErrorLine(e) ?? failureRunErrorLine(e)
       writeRunErrorLine(real, line)
       real.retryableStartLine = isGlobalLimitRefusal(e) ? line : null
     } finally {
@@ -1303,7 +1286,7 @@ export function useSimulatorRealMode(opts: {
     try {
       real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1355,7 +1338,7 @@ export function useSimulatorRealMode(opts: {
     try {
       real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1379,7 +1362,7 @@ export function useSimulatorRealMode(opts: {
         return
       }
 
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
       // The stop request was not confirmed. The backend run may still be live,
       // so restore observation instead of leaving the UI permanently detached.
       if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
@@ -1408,7 +1391,7 @@ export function useSimulatorRealMode(opts: {
       // `lastError` was reset at the top of this attach, so what it holds now came from the reads above.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1441,7 +1424,7 @@ export function useSimulatorRealMode(opts: {
         resetStaleRun({ clearError: true })
         return
       }
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1459,7 +1442,7 @@ export function useSimulatorRealMode(opts: {
       real.artifacts = items
       return items
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
       return null
     } finally {
       real.artifactsLoading = false
@@ -1484,7 +1467,7 @@ export function useSimulatorRealMode(opts: {
       a.remove()
       URL.revokeObjectURL(blobUrl)
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 

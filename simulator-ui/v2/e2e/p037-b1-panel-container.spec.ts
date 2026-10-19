@@ -239,7 +239,8 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
-      await expect(page.getByTestId('error-toast')).toBeHidden({ timeout: 15_000 })
+      // 048 S3: no error toast over the window any more - the measurement needs no wait for it to go.
+      await expect(page.getByTestId('error-toast')).toHaveCount(0)
 
       const banner = await measure(page, 'unresolved', ['[data-testid="mp-retry"]', '[data-testid="mp-discard"]', '[data-testid="manual-payment-cancel"]'])
       await c.press('Discard', '[data-testid="mp-discard"]')

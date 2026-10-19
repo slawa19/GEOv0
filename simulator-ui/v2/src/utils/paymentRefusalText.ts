@@ -2,7 +2,7 @@ import { equivalentPrecision } from '../config/equivalentPrecision'
 import { en } from '../i18n/en'
 import { documentUiLocale, type UiLocale } from '../i18n/locale'
 import { t, type MessageKey } from '../i18n/t'
-import { plainErrorMessage, withRequestRef } from './errorMessage'
+import { plainErrorMessage, shownError, type ShownError } from './errorMessage'
 import { formatMoney, moneyText } from './money'
 
 /**
@@ -16,6 +16,7 @@ import { formatMoney, moneyText } from './money'
  * longer shown for a coded answer; an answer WITHOUT a code (a client-side failure) keeps its message.
  */
 export type { UiLocale }
+export type { ShownError }
 type Vars = { eq: string; max: string | null; precision: string; keyed: boolean }
 type Choose = (v: Vars) => MessageKey
 
@@ -53,11 +54,13 @@ export const PAYMENT_REFUSAL_REASONS: readonly string[] = Object.freeze(Object.k
 /** `details.reason` values that name the equivalent's state; told before the code's own text (Codex §15 round 1). */
 const ACTION_REASONS = new Set(Object.keys(en.actionReason))
 
-/** The closed set of the action error codes that have their own text (`actionError.*` minus the two general keys). */
+/** The closed set of the action error codes that have their own text (`actionError.*` minus the three general keys). */
 export const ACTION_ERROR_CODES: readonly string[] = Object.freeze(
-  Object.keys(en.actionError).filter((k) => k !== 'unknown' && k !== 'noRun'),
+  Object.keys(en.actionError).filter((k) => k !== 'unknown' && k !== 'noRun' && k !== 'httpFailed'),
 )
 const ACTION_ERROR_CODE_SET = new Set(ACTION_ERROR_CODES)
+/** The code `useInteractActions.ts` gives an answer that named no code of its own: `HTTP_<status>`. */
+const HTTP_STATUS_CODE = /^HTTP_\d+$/
 
 /**
  * 046 wave 2 (decision 3): the text of a failed action of the Interact windows (and of their data loads) in the language
@@ -67,15 +70,19 @@ const ACTION_ERROR_CODE_SET = new Set(ACTION_ERROR_CODES)
  * code's text: a `CONFLICT` for a stopped equivalent is not "the system is busy". Kept as it is: a value without a code
  * (an `Error` the client composed itself, a plain object or string), and an error the client marked as its own
  * (`clientMessage`: the "no answer" of a mutation, a thrown value that was not an HTTP answer) - a server code, even
- * `UNKNOWN`, is never taken for the client's. A kept text that is empty gets the general text, never nothing. The
- * request reference follows in the same language.
+ * `UNKNOWN`, is never taken for the client's. A kept text that is empty gets the general text, never nothing.
+ *
+ * 048 S3 (decision 3): the result is the shown form - the sentence, and APART from it the request id and the technical
+ * detail (`ShownError`): the id is no longer glued into the sentence. A code the client made from a bare HTTP status
+ * (`HTTP_<n>`, an answer without a code of its own) is not printed: the sentence says the server did not carry the action
+ * out, and the status is in the detail (the block's `title` and the console).
  */
-export function actionErrorText(error: unknown, locale: UiLocale = uiLocale()): string {
+export function actionErrorText(error: unknown, locale: UiLocale = uiLocale()): ShownError {
   const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown; clientMessage?: unknown }
   const code = typeof e.code === 'string' && e.code.trim() ? e.code.trim() : ''
   if (!code || e.clientMessage === true) {
     const own = plainErrorMessage(error).trim()
-    return withRequestRef(own || t('actionError.unknown', { code: code || 'UNKNOWN' }, locale), error, locale)
+    return shownError(own || t('actionError.unknown', { code: code || 'UNKNOWN' }, locale), error)
   }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
   const reason = typeof details.reason === 'string' ? details.reason : ''
@@ -83,8 +90,10 @@ export function actionErrorText(error: unknown, locale: UiLocale = uiLocale()): 
     ? t(`actionReason.${reason}` as MessageKey, {}, locale)
     : ACTION_ERROR_CODE_SET.has(code)
       ? t(`actionError.${code}` as MessageKey, {}, locale)
-      : t('actionError.unknown', { code }, locale)
-  return withRequestRef(text, error, locale)
+      : HTTP_STATUS_CODE.test(code)
+        ? t('actionError.httpFailed', {}, locale)
+        : t('actionError.unknown', { code }, locale)
+  return shownError(text, error)
 }
 
 /**
@@ -107,7 +116,7 @@ export function paymentRefusalText(
   equivalent: string,
   locale: UiLocale = uiLocale(),
   o: { keyed?: boolean } = {},
-): string {
+): ShownError {
   const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
   const code = typeof e.code === 'string' ? e.code : ''
@@ -117,8 +126,8 @@ export function paymentRefusalText(
     precision: String(details.precision ?? equivalentPrecision(eq)), keyed: o.keyed === true }
   const reason = typeof details.reason === 'string' ? details.reason : ''
   const choose = REASONS[reason] ?? REASONS[CODES[code] ?? '']
-  if (choose) return withRequestRef(t(choose(vars), { eq: vars.eq, max: vars.max ?? '', precision: vars.precision }, locale), error, locale)
-  return CODE_GENERIC.has(code) ? withRequestRef(t('refusal.generic', {}, locale), error, locale) : actionErrorText(error, locale)
+  if (choose) return shownError(t(choose(vars), { eq: vars.eq, max: vars.max ?? '', precision: vars.precision }, locale), error)
+  return CODE_GENERIC.has(code) ? shownError(t('refusal.generic', {}, locale), error) : actionErrorText(error, locale)
 }
 
 /**
@@ -138,13 +147,13 @@ export function clearingStepRefusalText(equivalent: string | null, locale: UiLoc
  * operator's stop and the integrity hold answer 409 `CONFLICT` with `details.reason` (`app/api/v1/simulator.py`
  * `MONEY_STOP_REASONS`) - said as the clearing's own refusal, before the generic `CONFLICT` ("the system is busy").
  */
-export function clearingRefusalText(error: unknown, equivalent: string, locale: UiLocale = uiLocale()): string {
+export function clearingRefusalText(error: unknown, equivalent: string, locale: UiLocale = uiLocale()): ShownError {
   const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
   if (e.code === 'CLEARING_REFUSED' && details.reason === 'occurrence_amount_not_in_step') {
-    return withRequestRef(clearingStepRefusalText(String(details.equivalent ?? equivalent), locale), error, locale)
+    return shownError(clearingStepRefusalText(String(details.equivalent ?? equivalent), locale), error)
   }
-  if (details.reason === 'equivalent_inactive') return withRequestRef(t('clearing.equivalentInactive', {}, locale), error, locale)
-  if (details.reason === 'equivalent_integrity_hold') return withRequestRef(t('clearing.equivalentIntegrityHold', {}, locale), error, locale)
+  if (details.reason === 'equivalent_inactive') return shownError(t('clearing.equivalentInactive', {}, locale), error)
+  if (details.reason === 'equivalent_integrity_hold') return shownError(t('clearing.equivalentIntegrityHold', {}, locale), error)
   return actionErrorText(error, locale)
 }

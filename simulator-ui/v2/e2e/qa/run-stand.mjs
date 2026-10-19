@@ -187,8 +187,13 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   open, then a node card..." (4.04 s). `analytics-panel` opens the page with `?debug=1` and clicks the toggle in the
  *   service row (no menu: a click less). Forecast from CI numbers only: the step took 555 s in that run (07:56:53 ->
  *   08:06:08; 138 tests, 548.0 s summed in its report) - 10.1 s = about 545 s.
+ * - 2026-10-19 (048 S3, decision 3 - one form of the viewer's error): gate 134 -> 132, full 226 -> 222. The window error
+ *   toast is gone (a window's failure is the window's own block), and the matrix entry `toast-error` with it: -2 in the
+ *   gate (`matrix [saas|hud] toast-error`, 4.99 and 5.08 s in the stand report of CI run 39256014175, `main` at
+ *   `57505f12`), -2 under `@extended` (its gallery frames). Forecast from CI numbers only: the step took 546 s in that run
+ *   (12:58:44 -> 13:07:50; 134 tests, 539.2 s summed in its report) - 10.1 s = about 536 s.
  */
-export const EXPECTED = { gate: 134, full: 226 }
+export const EXPECTED = { gate: 132, full: 222 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

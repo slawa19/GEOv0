@@ -28,7 +28,6 @@ import { t } from '../i18n/t'
 import ActionBar from './ActionBar.vue'
 import BottomBar from './BottomBar.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
-import ErrorToast from './ErrorToast.vue'
 import GraphNavigator from './GraphNavigator.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import Legend from './Legend.vue'
@@ -126,7 +125,8 @@ const bottomBarProps = () => ({
 async function mountFirstScreen(): Promise<void> {
   // The top bar: the administrator's "Подробнее" (it holds the visitor's and more), a stall and an error with "Try again".
   // The error line's holder renders its text in the current language (`useSimulatorRealMode.ts`); here a computed does.
-  mount(TopBar, { detailsOpen: true }, context({ accessToken: ref(ADMIN), lastError: computed(() => t('runStart.limitBusy')), startRetryable: ref(true) } as Partial<TopBarContext>))
+  // 048 S3: with its request id - the id's line is the interface's words too («код запроса» / «request id»; the id is data).
+  mount(TopBar, { detailsOpen: true }, context({ accessToken: ref(ADMIN), lastError: computed(() => t('runStart.limitBusy')), lastErrorRef: ref('1234-5678'), startRetryable: ref(true) } as Partial<TopBarContext>))
   // A visitor's first row only, on a paused run (the other words of the flow button and of the state).
   mount(TopBar, { detailsOpen: false }, context({ runStatus: ref({ run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus) }))
   // A stopped run with a reason, and the administrator's empty catalogue ("No scenarios…").
@@ -152,7 +152,6 @@ async function mountFirstScreen(): Promise<void> {
     edge: { key: 'alice->bob', fromId: 'alice', toId: 'bob', amountText: '', trustLimit: '100.00', used: '12.00', available: '-3.00', equivalent: 'UAH' },
   })
   mount(SuccessToast, { message: 'Алиса', onDismiss: vi.fn() })
-  mount(ErrorToast, { message: 'Борис', dismissMs: 4000, onDismiss: vi.fn() })
   await settle()
 }
 
@@ -163,7 +162,8 @@ describe('046 wave 1, full - the first screen in one language', () => {
       'network-state', 'flow-toggle', 'details-toggle', 'top-details-row', 'own-run-row', 'run-payments', 'stop-reason', 'top-error',
       'start-retry', 'capacity-stall', 'no-scenarios', 'action-bar', 'actionbar-busy-hint', 'actionbar-locked-hint', 'bottom-details-row',
       'layout-select', 'reset-view', 'system-balance', 'legend', 'graph-navigator', 'recent-actions', 'edge-tooltip', 'success-toast',
-      'error-toast',
+      // 048 S3: the error toast is gone (a window's failure is its block); the error line's request id is its own line.
+      'error-request-id',
     ]) expect(document.querySelector(`[data-testid="${id}"]`), id).not.toBeNull()
   })
 

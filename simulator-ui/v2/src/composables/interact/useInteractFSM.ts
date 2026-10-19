@@ -4,6 +4,7 @@ import type { GraphLink, GraphSnapshot } from '../../types'
 import { keyEdge, parseEdgeKey } from '../../utils/edgeKey'
 import { isActiveStatus } from '../../utils/status'
 import type { SimulatorActionClearingRealResponse, TrustlineInfo } from '../../api/simulatorTypes'
+import type { ShownError } from '../../utils/errorMessage'
 
 export type InteractPhase =
   | 'idle'
@@ -27,7 +28,15 @@ export type InteractState = {
   selectedEdgeKey: string | null
   /** Screen-space anchor for edge detail popup (host-relative coordinates). */
   edgeAnchor: { x: number; y: number } | null
+  /** The sentence of the window's failure (048 S3: the sentence only - the request id is `errorRef`, never glued in). */
   error: string | null
+  /**
+   * 048 S3 (decision 3, AGENTS.md section 12): the server's correlation id of the failure in `error` - the window's error
+   * block shows it as a muted second line and as `data-request-id`; `errorDetail` is the technical text (the HTTP
+   * status, the code) for the block's `title`. Written together with `error` (`setError`) and cleared with it.
+   */
+  errorRef?: string | null
+  errorDetail?: string | null
 
   /**
    * Last clearing action response. In `clearing-preview` (037 C: "the answer is awaited, then the result is shown") it is `null`
@@ -43,8 +52,10 @@ export type InteractState = {
    * 037 C: the text of a clearing that did not succeed (a refusal, or no usable answer), kept as a state of the panel: the error
    * toast that shows it for a few seconds is cleared by the application and must not take the explanation with it. Set when the
    * clearing fails, cleared when the next clearing starts and when the panel is closed (`resetToIdle`).
+   * 048 S3: the shown form - the sentence, the request id apart from it, the technical detail. (The error toast is gone
+   * since 048 S3; the failure stays a state of the panel because `state.error` is cleared by the next step of a flow.)
    */
-  clearingFailure?: string | null
+  clearingFailure?: ShownError | null
 }
 
 function findActiveLink(snapshot: GraphSnapshot | null, from: string | null, to: string | null): GraphLink | null {
@@ -66,6 +77,8 @@ export function useInteractFSM(opts: {
   isCanvasNodePickPhase: ComputedRef<boolean>
 
   clearError: () => void
+  /** 048 S3: the window's failure - the sentence, its request id and its detail, written together. */
+  setError: (shown: ShownError | null) => void
   resetToIdle: () => void
 
   startPaymentFlow: () => void
@@ -89,7 +102,7 @@ export function useInteractFSM(opts: {
   // Clearing helpers
   enterClearingPreview: () => void
   setLastClearing: (r: SimulatorActionClearingRealResponse | null) => void
-  setClearingFailure: (message: string | null) => void
+  setClearingFailure: (failure: ShownError | null) => void
 } {
   const state = reactive<InteractState>({
     phase: 'idle',
@@ -99,6 +112,8 @@ export function useInteractFSM(opts: {
     selectedEdgeKey: null,
     edgeAnchor: null,
     error: null,
+    errorRef: null,
+    errorDetail: null,
 
     lastClearing: null,
     clearingFailure: null,
@@ -116,7 +131,13 @@ export function useInteractFSM(opts: {
   })
 
   function clearError() {
-    state.error = null
+    setError(null)
+  }
+
+  function setError(shown: ShownError | null) {
+    state.error = shown ? shown.text : null
+    state.errorRef = shown ? shown.ref : null
+    state.errorDetail = shown ? shown.detail : null
   }
 
   /**
@@ -145,7 +166,7 @@ export function useInteractFSM(opts: {
     state.initiatedWithPrefilledFrom = false
     state.selectedEdgeKey = null
     state.edgeAnchor = null
-    state.error = null
+    clearError()
     // lastClearing intentionally preserved — see InteractState.lastClearing JSDoc.
     state.clearingFailure = null
   }
@@ -416,8 +437,8 @@ export function useInteractFSM(opts: {
     state.lastClearing = r
   }
 
-  function setClearingFailure(message: string | null) {
-    state.clearingFailure = message
+  function setClearingFailure(failure: ShownError | null) {
+    state.clearingFailure = failure
   }
 
   return {
@@ -427,6 +448,7 @@ export function useInteractFSM(opts: {
     isCanvasNodePickPhase,
 
     clearError,
+    setError,
     resetToIdle,
 
     startPaymentFlow,

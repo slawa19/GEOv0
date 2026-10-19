@@ -153,14 +153,13 @@ export async function emptyCanvasPoint(page: Page): Promise<Pt> {
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
-async function routeClearing(page: Page, kind: 'cycles' | 'refused'): Promise<void> {
+// 048 S3: the refused answer went with `toast-error` (its only reader).
+async function routeClearing(page: Page, _kind: 'cycles'): Promise<void> {
   await page.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, (r) =>
-    kind === 'refused'
-      ? json(r, { code: 'CLEARING_REFUSED', message: 'refused', details: { reason: 'occurrence_amount_not_in_step' } }, 409)
-      : json(r, {
-          ok: true, equivalent: EQ, cleared_cycles: 1, total_cleared_amount: '7.00', client_action_id: null,
-          cycles: [{ cleared_amount: '7.00', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }],
-        }))
+    json(r, {
+      ok: true, equivalent: EQ, cleared_cycles: 1, total_cleared_amount: '7.00', client_action_id: null,
+      cycles: [{ cleared_amount: '7.00', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }],
+    }))
 }
 
 async function routeAnalytics(page: Page): Promise<void> {
@@ -284,9 +283,8 @@ export const MATRIX: Entry[] = [
   { id: 'toast-success', catalogue: 'success-toast', clock: true,
     gesture: 'run a clearing that clears a cycle ("Run Clearing", "Confirm")', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.ds-ov-toast--success', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
-  { id: 'toast-error', catalogue: 'error-toast', clock: true,
-    gesture: 'run a clearing the backend refuses', beforeLoad: (p) => routeClearing(p, 'refused'),
-    root: '.ds-ov-toast--error', open: (page) => runClearing(page, '.ds-ov-toast--error'), policies: { inside: 'viewport' } },
+  // 048 S3 (decision 3): `toast-error` is gone with its surface - a window's failure is the window's own block (the
+  // clearing window is in the matrix as an interact window), and the error toast that duplicated it was removed.
   { id: 'interact-history', catalogue: 'interact-history-overlay', clock: true,
     gesture: 'appears after the first completed action (here: a clearing)', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.sar-interact-history-overlay', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
@@ -381,7 +379,6 @@ export const SURFACE_DOM: Array<{ selector: string; key: string | null }> = [
   { selector: '.sar-interact-history-overlay', key: 'interact-history-overlay' },
   { selector: '.ds-ov-bottom', key: 'bottom-hud-stack' },
   { selector: '.ds-ov-toast--success', key: 'success-toast' },
-  { selector: '.ds-ov-toast--error', key: 'error-toast' },
   { selector: '.ds-ov-tooltip', key: 'edge-tooltip' },
   { selector: '[data-surface="real-metrics-panel"]', key: 'real-metrics-panel' },
   { selector: '.labels-layer', key: 'canvas-labels-overlay' },

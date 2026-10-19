@@ -1,6 +1,8 @@
 import type { RunError } from '../api/simulatorTypes'
 import { toRaw } from 'vue'
 
+import { errorDetail, errorLog, requestIdOf } from './errorMessage'
+
 import type { UiLocale } from '../i18n/locale'
 import { t, tn, type MessageKey, type PluralKey } from '../i18n/t'
 import { uiLocale } from './paymentRefusalText'
@@ -32,12 +34,18 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  * is brought back as its value, so it comes back in the language of that moment. Scope: the top bar's run error line
  * only; the action windows keep their own texts (BACKLOG 046-3). 048 S3 («одна форма ошибки») builds on this value -
  * a new field (e.g. a request id) is added HERE, to the variants and to `renderRunErrorLine`, not as a new mechanism.
+ *
+ * 048 S3 (decision 3): `dict` and `code` carry the failure behind the line - `ref`, the server's correlation id (shown as
+ * the line's own second line and `data-request-id`, AGENTS.md section 12), and `detail`, its `title` (for a failed
+ * request: the identifiers «HTTP 500», «HTTP 409 CONFLICT»; for `code`: the server's `CODE: message`, as 046 wave 1 put
+ * it). A failed request is a `dict` line of `failureRunErrorLine`: the sentence of the dictionary by the kind of the
+ * failure, never the transport's English («HTTP 500 Internal Server Error for /…») - that is its `log`, one console line.
  */
 export type RunErrorLine =
-  | { readonly kind: 'dict'; readonly key: MessageKey }
+  | { readonly kind: 'dict'; readonly key: MessageKey; readonly ref?: string | null; readonly detail?: string; readonly log?: string }
   | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number }
   | { readonly kind: 'raw'; readonly text: string }
-  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string }
+  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string; readonly ref?: string | null }
 
 export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLocale()): string {
   switch (line.kind) {
@@ -56,7 +64,51 @@ export const rawRunErrorLine = (text: string): RunErrorLine => ({ kind: 'raw', t
 
 /** The server's full text behind a line (the `title` of the error line), when the line keeps one; else null. */
 export function runErrorLineTitle(line: RunErrorLine | null | undefined): string | null {
-  return line?.kind === 'code' && line.detail ? line.detail : null
+  return (line?.kind === 'code' || line?.kind === 'dict') && line.detail ? line.detail : null
+}
+
+/** 048 S3: the full technical text behind a line, for the console (a failed request's `log`, else its title), else null. */
+export function runErrorLineLog(line: RunErrorLine | null | undefined): string | null {
+  if (line?.kind === 'dict' && line.log) return line.log
+  return runErrorLineTitle(line)
+}
+
+/** 048 S3: the server's correlation id behind a line (its own second line and `data-request-id`), else null. */
+export function runErrorLineRef(line: RunErrorLine | null | undefined): string | null {
+  return (line?.kind === 'code' || line?.kind === 'dict') && line.ref ? line.ref : null
+}
+
+/**
+ * 048 S3 (decision 3): the line of a request that failed - one sentence «what happened → what to do» in the interface
+ * language, chosen by the KIND of the failure (no answer, no connection, not this session's run, no such run, the server
+ * failed), with the request id and the technical text kept apart (`ref`, `detail`). A value that is not an answer of the
+ * server (a check of the client, a broken stream) is `view` - the picture of the network could not be brought up to date -
+ * or `stream` when the caller knows the event stream broke. Nothing of the transport's English is drawn.
+ */
+export function failureRunErrorLine(e: unknown, o: { client?: 'view' | 'stream'; logPrefix?: string } = {}): RunErrorLine {
+  const key = failureKey(e, o.client ?? 'view')
+  const detail = errorDetail(e)
+  const log = errorLog(e)
+  const ref = requestIdOf(e)
+  return {
+    kind: 'dict',
+    key,
+    ...(ref ? { ref } : {}),
+    ...(detail ? { detail } : {}),
+    ...(log || o.logPrefix ? { log: `${o.logPrefix ?? ''}${log ?? ''}` } : {}),
+  }
+}
+
+function failureKey(e: unknown, client: 'view' | 'stream'): MessageKey {
+  const o = (e !== null && typeof e === 'object' ? e : {}) as { status?: unknown; code?: unknown; name?: unknown }
+  const status = typeof o.status === 'number' ? o.status : null
+  if (o.code === 'TIMEOUT') return 'failure.noAnswer'
+  // `fetch` rejects with a `TypeError` when there is no connection; an answer with status 0 is the same.
+  if (e instanceof TypeError || status === 0) return 'failure.noConnection'
+  if (status === 401 || status === 403) return 'failure.forbidden'
+  if (status === 404) return 'failure.notFound'
+  if (status !== null && status > 0) return 'failure.serverFailed'
+  return client === 'stream' ? 'failure.streamFailed' : 'failure.viewFailed'
 }
 
 /**
@@ -71,9 +123,14 @@ export function writeRunErrorLine(
 ): void {
   // 048 decision 3 (§12): the server's full text of a run ended by an error goes to the console ONCE - when this line
   // first replaces another, not on each status that repeats it, nor on a re-render after a switch of the language.
+  // 048 S3: the same for the technical text of any line that keeps one (a failed request), with its request id.
   const previous = target.lastErrorLine
-  if (line?.kind === 'code' && line.detail && !(previous?.kind === 'code' && previous.detail === line.detail)) {
-    console.warn('[run] stopped with an error:', line.detail)
+  const detail = runErrorLineLog(line)
+  if (line && detail && (runErrorLineLog(previous) !== detail || runErrorLineRef(previous) !== runErrorLineRef(line))) {
+    const ref = runErrorLineRef(line)
+    const args: string[] = [line.kind === 'code' && line.key === 'runLine.errorStopped' ? '[run] stopped with an error:' : '[run] error:', detail]
+    if (ref) args.push(`(request id: ${ref})`)
+    console.warn(...args)
   }
   target.lastError = line ? renderRunErrorLine(line, locale) : ''
   target.lastErrorLine = line
@@ -82,7 +139,7 @@ export function writeRunErrorLine(
 /**
  * The error line of a run status (BACKLOG 037-5 (a)). A run in `error` was stopped by `last_error`: it is shown whatever
  * its code, because it is the only answer to "why did the run stop". For a run that goes on, the list of user-facing
- * codes decides as before - its line is printed as sent (`CODE: message`). Null: no line.
+ * codes decides as before - since 048 S3 its line is a sentence with the code (`runErrorLine`). Null: no line.
  *
  * 046 wave 1, full (048 S2 hand-over P2-2): a visitor has no Start since 048 S2, so a run that ENDED says what to do -
  * reload the page (the opening then starts a new run, `useInteractAutoBootstrapRun.ts`): the idle stop (044), any other
@@ -128,10 +185,14 @@ export function runStatusErrorText(
   return line ? renderRunErrorLine(line, locale) : ''
 }
 
-/** The run-level error line: the step refusal is a human text in the interface language, the rest is `CODE: message`. */
+/**
+ * The run-level error line: the step refusal is a human text in the interface language. 048 S3 (decision 3): any other
+ * code of a run that goes on is a sentence of the interface with the code for correlation - the server's `CODE: message`
+ * is the line's detail (`title`, console), no longer drawn (it was, until S3: English prose on a Russian screen).
+ */
 export function runErrorLine(error: RunError): RunErrorLine {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return { kind: 'dict', key: 'refusal.clearingStepNoEq' }
-  return rawRunErrorLine(`${error.code}: ${error.message}`)
+  return { kind: 'code', key: 'runLine.runningError', code: error.code, detail: `${error.code}: ${error.message}` }
 }
 
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {

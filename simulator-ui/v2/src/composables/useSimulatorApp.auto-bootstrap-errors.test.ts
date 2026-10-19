@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { getScenarioPreview, getSnapshot } from '../api/simulatorApi'
 import { __autoBootstrapMaybeFillUiError, loadStrictRunRecoverySnapshot } from './useSimulatorApp'
+import { t } from '../i18n/t'
+import { runErrorLineLog, type RunErrorLine } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -23,7 +25,9 @@ describe('__autoBootstrapMaybeFillUiError()', () => {
       err: new Error('boom'),
     })
 
-    expect(state.error).toBe('Auto-start failed: boom')
+    // 048 S3: a sentence of the interface by the kind of the failure; "Auto-start failed: boom" is the detail (title, console).
+    expect(state.error).toBe(t('failure.viewFailed'))
+    expect(runErrorLineLog((state as { errorLine?: RunErrorLine | null }).errorLine)).toBe('Auto-start failed: boom')
   })
 
   it('does not overwrite when real.lastError is already set (lower level already populated error)', () => {

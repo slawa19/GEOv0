@@ -21,6 +21,7 @@ import {
   type TrustlineFiguresSource,
 } from '../composables/interact/trustlinesSourceState'
 import OverlaySelect from './common/OverlaySelect.vue'
+import WindowErrorBlock from './WindowErrorBlock.vue'
 
 type Props = {
   phase: InteractPhase
@@ -540,7 +541,14 @@ defineExpose({
         {{ noTrustlineText }}
       </div>
 
-      <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
+      <!-- 048 S3: the one place of the window's failure - the sentence, the request id on its own line (no toast). -->
+      <WindowErrorBlock
+        v-if="state.error"
+        testid="trustline-error"
+        :text="state.error"
+        :request-id="state.errorRef"
+        :detail="state.errorDetail"
+      />
 
       <div v-if="isEdit && closeRequested" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-requested">
         {{ t('trustline.closeRequested', { used: renderOrDash(effectiveUsed), unit }) }}

@@ -86,15 +86,17 @@ test.describe('037 C - the clearing result in a real browser', () => {
 })
 
 test.describe('037 C - what a held result survives', () => {
-  test('a refusal outlives the error toast: when the toast is gone the explanation and a working Close are still on the panel', async ({ page }) => {
+  // 048 S3 (decision 3): rewritten, not removed - there is no error toast any more; the refusal is the panel's own block
+  // (the toast showed the same sentence and cleared the error after 4-8 s; the panel's copy had to survive it).
+  test('a refusal stays on the panel: no toast beside it; the explanation and a working Close are there', async ({ page }) => {
     await open(page, { clearing: 'refused' })
     await runClearing(page)
     await expect(page.locator('[data-testid="clearing-error"]')).toBeVisible()
     const message = (await page.locator('[data-testid="clearing-error"]').textContent())!.trim()
 
-    // The REAL toast: it shows the same sentence for a few seconds and then the application clears the error.
-    await expect(page.getByTestId('error-toast')).toBeVisible()
-    await expect(page.getByTestId('error-toast')).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByTestId('error-toast'), 'one place: no toast beside the block').toHaveCount(0)
+    // That nothing clears the block after the seconds the toast lived is held on a controlled clock in the unit test
+    // (`SimulatorAppRoot.interact.test.ts`, "048 S3: a window error is the window block alone").
 
     await expect(page.locator('[data-testid="clearing-error"]')).toHaveText(message)
     await expect(page.locator('[data-testid="clearing-running"]')).toHaveCount(0)

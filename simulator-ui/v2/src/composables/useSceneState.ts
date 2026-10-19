@@ -1,7 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
-import { extractErrorMessage } from '../utils/errorMessage'
+import { failureRunErrorLine, renderRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
@@ -19,6 +19,8 @@ type LoadRecoverySnapshotFn = (context: Pick<RecoverySceneContext, 'runId' | 'eq
 type SceneState = {
   loading: boolean
   error: string
+  /** 048 S3: the value behind `error` (sentence key, request id, technical detail). */
+  errorLine?: RunErrorLine | null
   sourcePath: string
   snapshot: GraphSnapshot | null
   selectedNodeId: string | null
@@ -160,6 +162,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
 
     deps.state.loading = true
     deps.state.error = ''
+    deps.state.errorLine = null
 
     try {
       const { snapshot, sourcePath } = await input.loadSnapshot()
@@ -233,7 +236,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         clearScene()
         lastSnapshotNodeIds = null
       }
-      deps.state.error = extractErrorMessage(error)
+      // 048 S3 (decision 3): a sentence of the interface by the kind of the failure; the request id and the technical text
+      // (the transport's «HTTP 500 … for /…», a class name) are kept apart - never drawn as the sentence.
+      const line = failureRunErrorLine(error)
+      deps.state.errorLine = line
+      deps.state.error = renderRunErrorLine(line)
       if (input.rethrow) throw error
       return false
     } finally {
