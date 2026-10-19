@@ -9,6 +9,7 @@ import { isNodeCardWindow } from './windowManager/types'
 import type { FocusMode, WindowAnchor, WindowCloseReason, WindowDataByType, WindowManagerApi, WindowOpenArgs } from './windowManager/types'
 
 import { useWmEdgeDetail, type EdgeDetailCloseReason } from './useWmEdgeDetail'
+import { confirmCancelBusyOperation } from '../utils/confirmCancelBusy'
 
 // ARCH-4 (WM bridging): `watchEffect` запрещён.
 // `wm.open()`/`wm.closeGroup()` читают реактивное состояние WM, и `watchEffect` может
@@ -205,16 +206,8 @@ function dispatchTopmostWindowEsc(wm: WindowManagerApi): boolean {
 }
 
 function confirmCancelInteractBusy(): boolean {
-	// P0-2 policy B: ESC / outside-click while busy must ask for confirmation.
-	// Use a synchronous confirm for now (minimal UX) to keep the gate atomic.
-	try {
-		const c = window.confirm
-		if (typeof c !== 'function') return true
-		return !!c('Отменить операцию?')
-	} catch {
-		// Best-effort: if confirm cannot be shown, default to allowing cancel.
-		return true
-	}
+	// P0-2 policy B: ESC / outside-click while busy must ask for confirmation (046 wave 3: in the language of the interface).
+	return confirmCancelBusyOperation()
 }
 
 export function useWindowController(opts: {

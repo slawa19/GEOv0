@@ -1,7 +1,8 @@
 import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
-import { t } from '../i18n/t'
+import type { UiLocale } from '../i18n/locale'
+import { t, type MessageKey } from '../i18n/t'
 import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
 import { paymentOutcomeUnknown } from './interact/paymentIntent'
 import {
@@ -51,6 +52,12 @@ export type InteractActionError = {
    * the server's - `actionErrorText` shows it instead of the text of `code`.
    */
   clientMessage?: boolean
+  /**
+   * 046 wave 3 (BACKLOG 046-3): the client's own text as what makes it - told in a language when it is shown, so a window
+   * that keeps the failure re-renders it on a switch. Set with `clientMessage`; `message` is its text at the moment of the
+   * failure (for diagnosis and for a reader without a language).
+   */
+  clientText?: (locale: UiLocale) => string
 }
 
 /**
@@ -60,9 +67,12 @@ export type InteractActionError = {
  * by its code instead.
  */
 export class ClientTextError extends Error {
-  constructor(message: string) {
-    super(message)
+  /** 046 wave 3: the dictionary key of the text - kept, so it is told in the language of the moment it is shown. */
+  readonly key: MessageKey
+  constructor(key: MessageKey) {
+    super(t(key))
     this.name = 'ClientTextError'
+    this.key = key
   }
 }
 
@@ -142,7 +152,8 @@ function mapToInteractActionError(e: unknown): InteractActionError {
   // with a `TypeError` on a network failure - NETWORK, "no connection to the server"; any other value - UNKNOWN, the
   // general text with the code. The message stays for diagnosis; it is not shown.
   if (e instanceof ClientTextError) {
-    return { status: 0, code: 'UNKNOWN', message: e.message, details: null, clientMessage: true }
+    const key = e.key
+    return { status: 0, code: 'UNKNOWN', message: e.message, details: null, clientMessage: true, clientText: (locale) => t(key, {}, locale) }
   }
   return {
     status: 0,
@@ -223,7 +234,7 @@ export function useInteractActions(opts: {
 
   function requireRunId(): string {
     const id = opts.runId.value.trim()
-    if (!id) throw mapToInteractActionError(new ClientTextError(t('actionError.noRun')))
+    if (!id) throw mapToInteractActionError(new ClientTextError('actionError.noRun'))
     return id
   }
 
@@ -240,8 +251,10 @@ export function useInteractActions(opts: {
       // carried out (`outcomeUnknown` is never set for a read). Say so, in the client's own words, instead of the
       // technical timeout line that reads like a failed request.
       if (e instanceof ApiError && e.outcomeUnknown) {
-        mapped.message = actionOutcomeUnknownText(e.timeoutMs)
+        const timeoutMs = e.timeoutMs
+        mapped.message = actionOutcomeUnknownText(timeoutMs)
         mapped.clientMessage = true
+        mapped.clientText = (locale) => actionOutcomeUnknownText(timeoutMs, locale)
       }
 
       // If the run no longer exists, stop issuing run-scoped calls.

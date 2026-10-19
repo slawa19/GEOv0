@@ -235,18 +235,8 @@ export function resolveVizColors(mapping: VizMapping, scope: Element | null | un
 
 export type LegendEntryId = 'debtor' | 'creditor' | 'neutral' | 'unknown' | 'frozen' | 'hub' | 'person' | 'organisation'
 
-/**
- * Words of a role, plain - the node card's (English as a whole until wave 3 of 046 moves the card). The legend says the
- * roles in the language of the interface from the dictionary (`legend.entry.*`, 046 wave 1, words of 048 §G).
- */
-export const ROLE_TEXT: Record<NodeRole, string> = {
-  debtor: 'Owes more',
-  creditor: 'Is owed more',
-  neutral: 'Even overall',
-  unknown: 'Balance unknown',
-}
-export const FROZEN_TEXT = 'Frozen'
-export const HUB_TEXT = 'Hub'
+// 046 wave 3: the words of a role are the dictionary's (`legend.entry.*`, words of 048 §G), for the legend AND the node
+// card - the card's own English words (`ROLE_TEXT`, `FROZEN_TEXT`, `HUB_TEXT`) are gone.
 
 /**
  * The fixed vocabulary of the legend. The ORDER of this list is the order on screen. 046 wave 1: the words of an entry

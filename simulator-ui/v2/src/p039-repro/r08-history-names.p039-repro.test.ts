@@ -16,6 +16,7 @@ import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useInteractMode } from '../composables/useInteractMode'
+import { historyEntryText } from '../composables/interact/useInteractHistory'
 import type { GraphSnapshot } from '../types'
 import { measured } from './p039'
 
@@ -51,7 +52,8 @@ function mode() {
   return useInteractMode({ actions, runId: computed(() => 'run_test'), equivalent: computed(() => 'UAH'), snapshot })
 }
 
-const texts = (im: ReturnType<typeof mode>) => im.history.map((e) => e.text)
+// 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3); its text is `historyEntryText`.
+const texts = (im: ReturnType<typeof mode>) => im.history.map((e) => historyEntryText(e))
 
 describe('039 R8 - the Interact history names participants', () => {
   it('counter-check (already green, 037 A2): the history line of a PAYMENT carries both names - the harness resolves names', async () => {

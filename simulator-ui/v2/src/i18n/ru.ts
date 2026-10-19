@@ -29,6 +29,7 @@ export const ru = {
     stepHint: '{eq}: не больше {precision} знаков после точки; сервер такую сумму не примет.',
     overLimit: 'сверх лимита на {amount}',
     requestId: 'код запроса: {id}',
+    cancelOperationConfirm: 'Отменить операцию?',
   },
 
   participantStatus: {
@@ -37,6 +38,12 @@ export const ru = {
     suspended: 'приостановлен',
     left: 'покинул сообщество',
     deleted: 'удалён',
+  },
+
+  // The subject is «линия» (ж. р.).
+  trustlineStatus: {
+    active: 'действует',
+    closed: 'закрыта',
   },
 
   paymentStatus: {
@@ -284,10 +291,51 @@ export const ru = {
     clearingToast: 'Клиринг выполнен: циклов {cleared}/{total}',
   },
 
+  // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and
+  // «этому участнику» only in the hints.
   card: {
     flowOpenReason: 'Сначала отмените текущее действие (Esc).',
     busyReason: 'Идёт операция… подождите.',
     lineAvailable: 'доступно {amount} {unit}',
+    pin: 'Закрепить',
+    unpin: 'Открепить',
+    trustsOthers: 'Доверяет:',
+    trustedBy: 'Доверяют:',
+    trustsOthersHint: 'Сумма лимитов, которые этот участник открыл другим как кредитор.',
+    trustedByHint: 'Сумма лимитов, которые другие открыли этому участнику как должнику.',
+    pay: 'Платёж',
+    newLine: 'Новая линия',
+    trustsGroup: 'Доверяет ({count})',
+    trustedByGroup: 'Доверяют ({count})',
+    edit: 'Изменить',
+    editLine: 'Изменить линию доверия',
+    editLineFrom: 'Изменить линию доверия от {name}',
+    loading: 'Линии доверия загружаются…',
+    none: 'Линий доверия нет',
+  },
+
+  // 048 item 13 (б): the explaining sentence is the spec's text word for word.
+  edgeWindow: {
+    aria: 'Сведения о линии доверия',
+    titleFallback: 'Линия',
+    used: 'Долг',
+    limit: 'Лимит',
+    available: 'доступно',
+    utilization: 'Занятость лимита',
+    utilizationBar: 'Полоса занятости лимита',
+    utilizationUnknown: 'неизвестно',
+    closeDisabledUntil: 'До тех пор закрыть линию нельзя.',
+    closeRequested: 'Закрытие запрошено: лимит остаётся 0; линия закроется, когда её долг будет погашен.',
+    closeRequestNote: 'Закрыть линию с долгом ({used} {unit}) можно только запросом: лимит станет 0 до погашения.',
+    pay: 'Заплатить {name}',
+    payNoName: 'Заплатить',
+    // Short: «Заплатить Bob · Изменить лимит · Закрыть линию» took two rows of the 320 px window at 1366x768 in both themes
+    // (e2e/p046-w3-inspectors.spec.ts, 2026-10-19: 117 + 124 + 117 px against 282 px of row in hud); the title says it whole.
+    changeLimit: 'Изменить',
+    changeLimitTitle: 'Изменить лимит этой линии',
+    closeLine: 'Закрыть',
+    closeLineTitle: 'Закрыть эту линию',
+    trustExplanation: '{from} доверяет {to} до лимита — столько {to} может быть должен {from}.',
   },
 
   metrics: {
@@ -553,5 +601,9 @@ export const ru = {
     closeWindow: 'Закрыть окно',
     clearingTitle: 'Клиринг',
     layer: 'Слой окон',
+    lineDetails: 'Сведения о линии доверия',
+    lineDetailsPair: 'Сведения о линии доверия: {from} → {to}',
+    nodeDetails: 'Карточка участника',
+    nodeDetailsNamed: 'Карточка участника: {name}',
   },
 } as const satisfies Messages<typeof en>

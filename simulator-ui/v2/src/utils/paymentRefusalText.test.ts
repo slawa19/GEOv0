@@ -6,6 +6,7 @@ import SystemBalanceBar from '../components/SystemBalanceBar.vue'
 import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecision'
 import { useEdgeTooltip } from '../composables/useEdgeTooltip'
 import { useInteractMode } from '../composables/useInteractMode'
+import { setUiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
 import * as refusals from './paymentRefusalText'
 import { ACTION_ERROR_CODES, PAYMENT_REFUSAL_REASONS } from './paymentRefusalText'
@@ -18,11 +19,13 @@ const clearingRefusalText = (...a: Parameters<typeof refusals.clearingRefusalTex
 
 const refusal = (code: string, details: Record<string, unknown>) => ({ status: 409, code, message: 'server text', details })
 
-afterEach(() => { document.documentElement.lang = 'en' })
+afterEach(() => { setUiLocale('en'); document.documentElement.lang = 'en' })
 
 describe('F-028-51: the human text of a payment refusal', () => {
   it('repro: insufficient_capacity with max_available reaches the payer in the interface language', async () => {
-    document.documentElement.lang = 'ru'
+    // 046 wave 3 (2026-10-19): a window keeps its failure and draws it in the module's language (`uiLocaleRef`, BACKLOG
+    // 046-3) - the language is chosen through the module, not by writing `<html lang>` behind its back.
+    setUiLocale('ru')
     const sendPayment = vi.fn(async () => {
       throw refusal('INSUFFICIENT_CAPACITY', { reason: 'insufficient_capacity', max_available: '0.5', equivalent: 'UAH' })
     })
@@ -178,11 +181,12 @@ describe('031 item 17: the human text of a clearing refusal', () => {
   }
 
   it('repro: Interact shows the step refusal in the interface language, not the server text', async () => {
-    document.documentElement.lang = 'ru'
+    // 046 wave 3 (2026-10-19): the language through the module (the window draws its kept failure in `uiLocaleRef`).
+    setUiLocale('ru')
     const im = runClearingRefused(stepRefusal)
     await im.confirmClearing()
     expect(im.state.error).toBe('Клиринг отклонён: в базе есть долги мельче шага учёта эквивалента UAH. Нужен пересев базы.')
-    document.documentElement.lang = 'en'
+    setUiLocale('en')
     const en = runClearingRefused(stepRefusal)
     await en.confirmClearing()
     expect(en.state.error).toBe(

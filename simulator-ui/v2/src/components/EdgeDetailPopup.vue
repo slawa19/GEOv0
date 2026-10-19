@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { t } from '../i18n/t'
-import { interactText } from '../i18n/interactStrings'
+import { trustlineStatusText } from '../i18n/statusText'
+import { useUiLocale } from '../composables/useUiLocale'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
@@ -50,6 +50,10 @@ type Props = {
 
 const props = defineProps<Props>()
 
+// 046 wave 3: every word of the window is the dictionary's (`edgeWindow.*` and the shared keys), in the language of the
+// interface; the notices of the source (`trustlineSource.*`) are told in it too.
+const { t, locale } = useUiLocale()
+
 /**
  * `F-013-7`. Отсутствие основания = оснований нет (`canActOnTrustlineFigures(undefined) === false`):
  * типы ловят забывшего вызывающего на сборке, эта ветка — в рантайме.
@@ -91,12 +95,11 @@ const figures = computed(() => {
   }
 })
 /** Источник не ответил вовсе. */
-const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
+const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource, locale.value))
 // 048 S3 (§15 Codex P2, AGENTS.md section 12): the request id of a failed trust-lines read - its own line, not glued in.
-// English, as the notice above and the rest of this popup until 046 wave 3.
 const sourceUnavailableRef = computed<string | null>(() => trustlineFiguresNoticeRef(props.figuresSource))
 /** Источник ответил, и линии у пары нет — другой факт, другие последствия, своё сообщение. */
-const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource))
+const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource, locale.value))
 /**
  * Показана ЗАМОРОЖЕННАЯ копия прежнего ответа (`keepAlive`). Действовать по ней позволено — это
  * устаревание, а не отсутствие, — но выдавать её за живое состояние нельзя: окно в этот момент
@@ -106,7 +109,7 @@ const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props
  * исключительно в режиме `keepAlive` окна edge-detail (`SimulatorAppRoot.wmEdgeDetailFiguresSource`),
  * и панель этого основания не получает никогда.
  */
-const frozenText = computed<string | null>(() => trustlineFrozenNotice(props.figuresSource))
+const frozenText = computed<string | null>(() => trustlineFrozenNotice(props.figuresSource, locale.value))
 
 const emit = defineEmits<{
   (e: 'changeLimit'): void
@@ -121,15 +124,28 @@ const title = computed(() => {
   const from = props.state.fromPid
   const to = props.state.toPid
   if (from && to) return `${showPid(from)} → ${showPid(to)}`
-  return props.state.selectedEdgeKey ?? 'Edge'
+  return props.state.selectedEdgeKey ?? t('edgeWindow.titleFallback')
 })
 
-// ED-3 polish: make the payment button label contextual to reduce direction confusion.
-// Spec: prefer display name when available; fallback is pid.
-// In this component we only have access to InteractState.{fromPid}, so use it as best-effort.
-const sendPaymentFromLabel = computed(() => {
+/**
+ * 048 item 13 (б): one sentence that says what this line is - "A trusts B up to the limit - that is how much B may owe
+ * A", in the names of the title (creditor first: the line runs creditor -> debtor). Only with both parties.
+ */
+const trustExplanation = computed<string | null>(() => {
+  const from = props.state.fromPid
+  const to = props.state.toPid
+  return from && to ? t('edgeWindow.trustExplanation', { from: showPid(from), to: showPid(to) }) : null
+})
+
+/** The status of the line in the words of the interface (`trustlineStatus.*`); an unknown one as it came. */
+const statusText = computed(() => (figures.value.status == null ? null : trustlineStatusText(figures.value.status, locale.value)))
+
+// ED-3 polish: make the payment button label contextual to reduce direction confusion: "Pay <creditor>" - the payment
+// goes TO the line's creditor (`onEdgeDetailSendPayment`: trustline from -> to => payment to -> from).
+// 046 wave 3: without a party the button is "Pay" (was "Pay sender", which named the wrong party).
+const sendPaymentLabel = computed(() => {
   const pid = (props.state.fromPid ?? '').trim()
-  return pid ? showPid(pid) : 'sender'
+  return pid ? t('edgeWindow.pay', { name: showPid(pid) }) : t('edgeWindow.payNoName')
 })
 
 // 026 (owner В1): a close with the supported debt (`used`) is a request; the reverse debt is the other line's.
@@ -165,7 +181,7 @@ const utilizationLabel = computed(() => {
 
 const utilizationAriaValueText = computed(() => {
   // A11y: distinguish unknown utilization from 0%.
-  if (utilizationPct.value == null) return 'unknown'
+  if (utilizationPct.value == null) return t('edgeWindow.utilizationUnknown')
   return utilizationLabel.value
 })
 
@@ -195,7 +211,7 @@ function onCloseLine() {
   <div
     class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"
     data-testid="edge-detail-popup"
-    aria-label="Edge detail popup"
+    :aria-label="t('edgeWindow.aria')"
   >
     <!-- 045 S3 (decision 3): the pair and its equivalent are the title; the window closes from × (and Escape, handled by
          the window manager). The equivalent is said once, here: the figures below are all of it. -->
@@ -205,8 +221,8 @@ function onCloseLine() {
       <button
         class="ds-btn ds-btn--ghost ds-btn--icon popup__close"
         type="button"
-        aria-label="Close"
-        title="Close"
+        :aria-label="t('common.close')"
+        :title="t('common.close')"
         aria-keyshortcuts="Escape"
         @click="close"
       >×</button>
@@ -215,17 +231,20 @@ function onCloseLine() {
     <!-- One line: Used / Limit · avail (the equivalent is in the title); the status ends the bar's line - at 320 px the hud
          monospace does not hold all four on one line (measured 2026-10-18). -->
     <div class="popup__stats" data-testid="edge-stats">
-      <span class="popup__k">Used</span>{{ ' ' }}<span data-testid="edge-used">{{ renderOrDash(figures.used) }}</span>{{ ' / ' }}<span
-        class="popup__k">Limit</span>{{ ' ' }}<span data-testid="edge-limit">{{ renderOrDash(figures.limit) }}</span>{{ ' · ' }}<span
-        class="popup__k">avail</span>{{ ' ' }}<span data-testid="edge-available">{{ renderAvailable(figures.available) }}</span>
+      <span class="popup__k">{{ t('edgeWindow.used') }}</span>{{ ' ' }}<span data-testid="edge-used">{{ renderOrDash(figures.used) }}</span>{{ ' / ' }}<span
+        class="popup__k">{{ t('edgeWindow.limit') }}</span>{{ ' ' }}<span data-testid="edge-limit">{{ renderOrDash(figures.limit) }}</span>{{ ' · ' }}<span
+        class="popup__k">{{ t('edgeWindow.available') }}</span>{{ ' ' }}<span data-testid="edge-available">{{ renderAvailable(figures.available, locale) }}</span>
     </div>
 
+    <!-- 048 item 13 (б): what a trust line is, in this line's names (one sentence, under the figures). -->
+    <div v-if="trustExplanation" class="ds-help popup__explain" data-testid="edge-trust-explanation">{{ trustExplanation }}</div>
+
     <!-- ED-2: capacity utilization bar (used/limit), shown under the figures. -->
-    <div class="popup__util" aria-label="Utilization">
+    <div class="popup__util" :aria-label="t('edgeWindow.utilization')">
       <div
         class="popup__util-bar"
         role="progressbar"
-        aria-label="Utilization bar"
+        :aria-label="t('edgeWindow.utilizationBar')"
         :aria-valuenow="utilizationPct == null ? undefined : utilizationPct"
         :aria-valuetext="utilizationAriaValueText"
         aria-valuemin="0"
@@ -234,7 +253,7 @@ function onCloseLine() {
         <div class="popup__util-fill" :style="{ width: utilizationWidth, background: utilizationColor }" />
       </div>
       <div class="popup__util-pct ds-label ds-mono" data-testid="edge-utilization-pct">{{ utilizationLabel }}</div>
-      <span class="popup__status" data-testid="edge-status">{{ renderOrDash(figures.status) }}</span>
+      <span class="popup__status" data-testid="edge-status">{{ renderOrDash(statusText) }}</span>
     </div>
 
     <!-- Warnings: a line each, only when there is one. -->
@@ -244,8 +263,8 @@ function onCloseLine() {
       data-testid="edge-source-unavailable"
       :data-request-id="sourceUnavailableRef || undefined"
     >
-      {{ sourceUnavailableText }} Closing the line is disabled until then.
-      <div v-if="sourceUnavailableRef" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }, 'en') }}</div>
+      {{ sourceUnavailableText }} {{ t('edgeWindow.closeDisabledUntil') }}
+      <div v-if="sourceUnavailableRef" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }) }}</div>
     </div>
     <div v-if="noTrustlineText" class="ds-help popup__warn" data-testid="edge-no-trustline">
       {{ noTrustlineText }}
@@ -254,16 +273,16 @@ function onCloseLine() {
       {{ frozenText }}
     </div>
     <div v-if="closeRequested" class="ds-help popup__warn" data-testid="edge-close-requested">
-      Close requested: limit stays 0; the line closes when its debt is repaid.
+      {{ t('edgeWindow.closeRequested') }}
     </div>
     <div v-else-if="closeIsRequest" class="ds-help" data-testid="edge-close-request-note">
-      Closing with debt (used: {{ renderOrDash(figures.used) }} {{ unit }}) is a request: limit becomes 0 until repaid.
+      {{ t('edgeWindow.closeRequestNote', { used: renderOrDash(figures.used), unit }) }}
     </div>
 
     <!-- F-037-4: why Pay runs against the line's arrow - closed by default, as on the payment panel. Always in the DOM. -->
     <details class="ds-help popup__direction" data-testid="edge-payment-direction">
-      <summary>{{ interactText('lineDirectionTitle') }}</summary>
-      <div data-testid="edge-payment-direction-note">{{ interactText('lineDirectionNote') }}</div>
+      <summary>{{ t('payment.lineDirectionTitle') }}</summary>
+      <div data-testid="edge-payment-direction-note">{{ t('payment.lineDirectionNote') }}</div>
     </details>
 
     <div class="popup__actions">
@@ -274,19 +293,27 @@ function onCloseLine() {
         data-testid="edge-send-payment"
         @click="emit('sendPayment')"
       >
-        Pay {{ sendPaymentFromLabel }}
+        {{ sendPaymentLabel }}
       </button>
-      <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" data-testid="edge-change-limit" @click="emit('changeLimit')">
-        Change limit
+      <button
+        class="ds-btn ds-btn--secondary ds-btn--sm"
+        type="button"
+        :disabled="!!busy"
+        :title="t('edgeWindow.changeLimitTitle')"
+        data-testid="edge-change-limit"
+        @click="emit('changeLimit')"
+      >
+        {{ t('edgeWindow.changeLimit') }}
       </button>
       <button
         class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
         :disabled="!!busy || closeRequested || noExistingLine"
+        :title="closeArmed ? undefined : t('edgeWindow.closeLineTitle')"
         data-testid="edge-close-line-btn"
         @click="onCloseLine"
       >
-        {{ closeArmed ? 'Confirm close' : 'Close line' }}
+        {{ closeArmed ? t('trustline.confirmClose') : t('edgeWindow.closeLine') }}
       </button>
 
       <button
@@ -297,7 +324,7 @@ function onCloseLine() {
         data-testid="edge-close-line-cancel"
         @click="disarmClose"
       >
-        Cancel
+        {{ t('common.cancel') }}
       </button>
     </div>
   </div>

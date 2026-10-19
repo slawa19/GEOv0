@@ -13,10 +13,11 @@ function mountInteractHistoryLog(overrides: Record<string, unknown> = {}) {
   document.body.appendChild(host)
 
   const defaultProps: Record<string, unknown> = {
+    // 046 wave 3 (2026-10-19): a line is kept as its dictionary key and data (BACKLOG 046-3); the data tells them apart.
     entries: [
-      { id: '1', icon: 'A', text: 'First action', timeText: '10:00' },
-      { id: '2', icon: 'B', text: 'Second action', timeText: '10:01' },
-      { id: '3', icon: 'C', text: 'Third action', timeText: '10:02' },
+      { id: '1', icon: 'A', line: { key: 'history.trustlineClosed', vars: { from: 'First', to: 'action' } }, timeText: '10:00' },
+      { id: '2', icon: 'B', line: { key: 'history.trustlineClosed', vars: { from: 'Second', to: 'action' } }, timeText: '10:01' },
+      { id: '3', icon: 'C', line: { key: 'history.trustlineClosed', vars: { from: 'Third', to: 'action' } }, timeText: '10:02' },
     ],
     maxVisible: 2,
   }
@@ -37,8 +38,8 @@ describe('InteractHistoryLog', () => {
 
     const items = Array.from(host.querySelectorAll('.interact-history__item'))
     expect(items).toHaveLength(2)
-    expect(items[0]?.textContent).toContain('Third action')
-    expect(items[1]?.textContent).toContain('Second action')
+    expect(items[0]?.textContent).toContain('Trustline closed: Third → action')
+    expect(items[1]?.textContent).toContain('Trustline closed: Second → action')
     expect(items[0]?.classList.contains('interact-history__item--latest')).toBe(true)
 
     app.unmount()

@@ -62,3 +62,18 @@ export function tn(key: PluralKey, count: number, vars?: MessageVars, locale: Ui
   const m = lookup(locale, key)
   return isPluralMessage(m) ? formatPlural(m, locale, count, vars) : key
 }
+
+/**
+ * 046 wave 3 (BACKLOG 046-3): a text KEPT as what made it - the key and its data - and drawn in the language of NOW, so a
+ * text that outlives the moment it was made (a history line, a success notification) follows a switch. The same pattern
+ * as the navigator's announcement (wave 1) and the run's error line (`RunErrorLine`): the value carries its cause; the
+ * text is never parsed back into one. `vars` are data (names, amounts, counts) - the same in every language.
+ */
+export type KeptText =
+  | { readonly key: MessageKey; readonly vars?: MessageVars }
+  | { readonly plural: PluralKey; readonly count: number; readonly vars?: MessageVars }
+
+/** The text of a kept text in `locale` (the language of the interface by default: a template calling this follows it). */
+export function keptText(v: KeptText, locale: UiLocale = uiLocaleRef.value): string {
+  return 'plural' in v ? tn(v.plural, v.count, v.vars, locale) : t(v.key, v.vars, locale)
+}

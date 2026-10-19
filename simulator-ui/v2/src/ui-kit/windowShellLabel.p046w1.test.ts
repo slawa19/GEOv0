@@ -47,8 +47,13 @@ describe('046 wave 1 - the window shell is named in the interface language', () 
     expect(resolveWindowSurfaceDescriptor(w).ariaLabel).toBe('Окно платежа')
   })
 
-  it('counter-check: the inspector windows stay English in ru until wave 3 moves them with their content', () => {
+  // 046 wave 3 (2026-10-19): the inspector windows moved with their content - their shells are named in the language of the
+  // interface (until wave 3 this held them English in ru). English stays byte for byte.
+  it('the inspector windows are named in the language of the interface (wave 3); English as before', () => {
     setUiLocale('ru')
+    expect(resolveWindowSurfaceDescriptor(win('edge-detail', { fromPid: 'alice', toPid: 'bob' })).ariaLabel).toBe('Сведения о линии доверия: alice → bob')
+    expect(resolveWindowSurfaceDescriptor(win('node-card', { nodeId: 'bob' }), { getNodeName: () => 'Bob' }).ariaLabel).toBe('Карточка участника: Bob')
+    setUiLocale('en')
     expect(resolveWindowSurfaceDescriptor(win('edge-detail', { fromPid: 'alice', toPid: 'bob' })).ariaLabel).toBe('Trustline details: alice to bob')
     expect(resolveWindowSurfaceDescriptor(win('node-card', { nodeId: 'bob' }), { getNodeName: () => 'Bob' }).ariaLabel).toBe('Node details: Bob')
   })

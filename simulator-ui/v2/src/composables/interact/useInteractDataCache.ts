@@ -1,6 +1,7 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../../types'
+import { uiLocaleRef, type UiLocale } from '../../i18n/locale'
 import { t } from '../../i18n/t'
 import { actionErrorText } from '../../utils/paymentRefusalText'
 import { requestIdOf } from '../../utils/errorMessage'
@@ -15,8 +16,10 @@ import { canonicalEquivalent, sameEquivalent } from '../../config/equivalents'
 // 046 wave 2: a coded answer is told by its code in the language of the interface (`actionErrorText`), not by the server's
 // English message; a failure without a code keeps its own text.
 // 048 S3 (§15 Codex P2): the text only - the request id is kept apart by the caller that shows it (`trustlinesLastErrorId`).
-function getErrorMessage(error: unknown, fallback: string): string {
-  return (error == null ? '' : actionErrorText(error).text.trim()) || fallback
+// 046 wave 3 (BACKLOG 046-3): told in the asked language; the cache keeps the ERROR, not this text, so a reader that
+// computes it follows a switch.
+function getErrorMessage(error: unknown, fallback: string, locale: UiLocale): string {
+  return (error == null ? '' : actionErrorText(error, locale).text.trim()) || fallback
 }
 
 export type PaymentTargetDetail = { hops: number; max_available: string | null }
@@ -64,7 +67,7 @@ export function useInteractDataCache(opts: {
   /** Loading flags per key. Key must match paymentTargetsByKey key. */
   paymentTargetsLoadingByKey: Ref<Map<string, boolean>>
   /** Error per cache key; stale failures cannot degrade a different active sender. */
-  paymentTargetsLastErrorByKey: Ref<Map<string, string>>
+  paymentTargetsLastErrorByKey: ComputedRef<Map<string, string>>
   paymentTargetsKey: (o: { runId: string; eq: string; fromPid: string; maxHops: number }) => string
   invalidateTrustlinesCache: (eq?: string) => void
   patchTrustlineLimitLocal: (from: string, to: string, newLimit: string, eq?: string) => void
@@ -123,7 +126,15 @@ export function useInteractDataCache(opts: {
 
   const trustlinesLoadingRef = ref(false)
 
-  const trustlinesLastErrorRef = ref<string | null>(null)
+  // 046 wave 3 (BACKLOG 046-3): the failure is kept as the error itself (in a box: an error may be any value); its sentence is
+  // told in the language of now by the computed below - until wave 3 the composed text was stored, in the language it
+  // failed in.
+  const trustlinesLastFailure = shallowRef<{ readonly error: unknown } | null>(null)
+  const trustlinesFailureText = (locale: UiLocale): string | null => {
+    const failure = trustlinesLastFailure.value
+    return failure ? getErrorMessage(failure.error, t('trustlineSource.trustlinesFailed', {}, locale), locale) : null
+  }
+  const trustlinesLastErrorRef = computed(() => trustlinesFailureText(uiLocaleRef.value))
   /** 048 S3 (§15 Codex P2): the request id of that failure (AGENTS.md section 12), written and cleared with it. */
   const trustlinesLastErrorId = ref<string | null>(null)
 
@@ -163,7 +174,12 @@ export function useInteractDataCache(opts: {
     if (answeredTrustlines.value != null) return { kind: 'answered' }
     if (trustlinesLoadingRef.value) return { kind: 'loading' }
     const message = trustlinesLastErrorRef.value
-    if (message) return { kind: 'failed', message, ...(trustlinesLastErrorId.value ? { ref: trustlinesLastErrorId.value } : {}) }
+    const failure = trustlinesLastFailure.value
+    // `render`: the same sentence in another language - a frozen copy of this state keeps it (046 wave 3).
+    if (message && failure) {
+      const render = (locale: UiLocale) => getErrorMessage(failure.error, t('trustlineSource.trustlinesFailed', {}, locale), locale)
+      return { kind: 'failed', message, render, ...(trustlinesLastErrorId.value ? { ref: trustlinesLastErrorId.value } : {}) }
+    }
     return { kind: 'never-asked' }
   })
 
@@ -257,7 +273,7 @@ export function useInteractDataCache(opts: {
         fetchedTrustlinesEq.value = eq
         fetchedTrustlinesRunId.value = runId
         trustlinesFetchedAtMs = now
-        trustlinesLastErrorRef.value = null
+        trustlinesLastFailure.value = null
         trustlinesLastErrorId.value = null
       }
     } catch (error) {
@@ -270,7 +286,7 @@ export function useInteractDataCache(opts: {
       // Best-effort: fall back on snapshot-derived trustlines.
       // Keep a lightweight error signal for UI hints/debugging.
       trustlinesLastErrorId.value = requestIdOf(error)
-      trustlinesLastErrorRef.value = getErrorMessage(error, t('trustlineSource.trustlinesFailed'))
+      trustlinesLastFailure.value = { error }
     } finally {
       if (
         trustlinesFetchEpoch === myEpoch &&
@@ -309,7 +325,16 @@ export function useInteractDataCache(opts: {
   const paymentTargetsByKey = ref(new Map<string, Set<string>>())
   const paymentTargetDetailsByKey = ref(new Map<string, Map<string, PaymentTargetDetail>>())
   const paymentTargetsLoadingByKey = ref(new Map<string, boolean>())
-  const paymentTargetsLastErrorByKey = ref(new Map<string, string>())
+  // 046 wave 3 (BACKLOG 046-3): the failures are kept as the errors; their sentences are told in the language of now.
+  const paymentTargetsLastFailureByKey = ref(new Map<string, { readonly error: unknown }>())
+  const paymentTargetsLastErrorByKey = computed(() => {
+    const locale = uiLocaleRef.value
+    const out = new Map<string, string>()
+    for (const [key, failure] of paymentTargetsLastFailureByKey.value) {
+      out.set(key, getErrorMessage(failure.error, t('trustlineSource.paymentTargetsFailed', {}, locale), locale))
+    }
+    return out
+  })
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
   const paymentTargetsFetchedAtMsByKey = new Map<string, number>()
   let paymentTargetsRequestSerial = 0
@@ -329,11 +354,11 @@ export function useInteractDataCache(opts: {
     paymentTargetsLoadingByKey.value = next
   }
 
-  function setPaymentTargetsError(key: string, error: string | null) {
-    const next = new Map(paymentTargetsLastErrorByKey.value)
-    if (error) next.set(key, error)
+  function setPaymentTargetsError(key: string, failure: { readonly error: unknown } | null) {
+    const next = new Map(paymentTargetsLastFailureByKey.value)
+    if (failure) next.set(key, failure)
     else next.delete(key)
-    paymentTargetsLastErrorByKey.value = next
+    paymentTargetsLastFailureByKey.value = next
   }
 
   async function refreshPaymentTargets(o: { fromPid: string; maxHops: number; force?: boolean }) {
@@ -401,7 +426,7 @@ export function useInteractDataCache(opts: {
       const nextDetails = new Map(paymentTargetDetailsByKey.value)
       nextDetails.set(key, new Map())
       paymentTargetDetailsByKey.value = nextDetails
-      setPaymentTargetsError(key, getErrorMessage(error, t('trustlineSource.paymentTargetsFailed')))
+      setPaymentTargetsError(key, { error })
       // Treat error response as “known” for UI determinism, but still revalidate after TTL.
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } finally {
@@ -422,7 +447,7 @@ export function useInteractDataCache(opts: {
       paymentTargetsByKey.value = new Map()
       paymentTargetDetailsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
-      paymentTargetsLastErrorByKey.value = new Map()
+      paymentTargetsLastFailureByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
       paymentTargetsFetchedAtMsByKey.clear()
     },
@@ -443,7 +468,7 @@ export function useInteractDataCache(opts: {
       paymentTargetsByKey.value = new Map()
       paymentTargetDetailsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
-      paymentTargetsLastErrorByKey.value = new Map()
+      paymentTargetsLastFailureByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
       paymentTargetsFetchedAtMsByKey.clear()
     },
@@ -485,7 +510,7 @@ export function useInteractDataCache(opts: {
       fetchedTrustlinesRunId.value = ''
       trustlinesFetchedAtMs = 0
       trustlinesLoadingRef.value = false
-      trustlinesLastErrorRef.value = null
+      trustlinesLastFailure.value = null
       trustlinesLastErrorId.value = null
       snapshotTrustlines.value = []
       void refreshTrustlines()

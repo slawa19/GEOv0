@@ -1,12 +1,12 @@
 import type { TrustlineInfo } from '../../api/simulatorTypes'
-import type { UiLocale } from '../../i18n/locale'
+import { uiLocaleRef, type UiLocale } from '../../i18n/locale'
 import { t } from '../../i18n/t'
 
 /*
  * 046 wave 2: the three notices below are the dictionary's (`trustlineSource.*`). Each takes the language to speak in; the
- * trust line window passes the interface's. Without one they are English: the other reader, the line window
- * (`EdgeDetailPopup.vue`, wave 3), is English as a whole until wave 3 moves it, and a Russian notice inside it would be
- * the mixed string spec 046 forbids.
+ * trust line window and the line window pass the interface's. 046 wave 3: without one, the language of the interface
+ * (until wave 3 English by default - the line window was English as a whole then). A `failed` source may carry `render`:
+ * the failure's own sentence in a language, so a notice drawn later - or from a frozen copy - follows a switch.
  */
 
 /**
@@ -30,7 +30,7 @@ export type TrustlinesFetchState =
   | { kind: 'never-asked' }
   | { kind: 'loading' }
   /** 048 S3 (§15 Codex P2, AGENTS.md section 12): `ref` - the request id of the failed answer, shown apart from the text. */
-  | { kind: 'failed'; message: string; ref?: string | null }
+  | { kind: 'failed'; message: string; ref?: string | null; render?: (locale: UiLocale) => string }
   /** Источник ответил для текущих (run, equivalent). Пустой ответ — тоже ответ. */
   | { kind: 'answered' }
 
@@ -79,7 +79,7 @@ export type TrustlineFiguresSource =
   | { kind: 'frozen' }
   | { kind: 'never-asked'; frozen?: true }
   | { kind: 'loading'; frozen?: true }
-  | { kind: 'failed'; message: string; ref?: string | null; frozen?: true }
+  | { kind: 'failed'; message: string; ref?: string | null; render?: (locale: UiLocale) => string; frozen?: true }
 
 /** Виды, которые означают ОТВЕТ источника (вопрос А). Набор назван ровно один раз — здесь. */
 export type AnsweredTrustlineFiguresSource = Extract<
@@ -168,7 +168,7 @@ export function freezeTrustlineFiguresSource(
     case 'loading':
       return { kind: 'loading', frozen: true }
     case 'failed':
-      return { kind: 'failed', message: frozen.message, ...(frozen.ref ? { ref: frozen.ref } : {}), frozen: true }
+      return { kind: 'failed', message: frozen.message, ...(frozen.ref ? { ref: frozen.ref } : {}), ...(frozen.render ? { render: frozen.render } : {}), frozen: true }
   }
 }
 
@@ -197,7 +197,7 @@ export function trustlineSourceFrozen(source: TrustlineFiguresSource | null | un
  * называть его ответ отсутствием ответа — значит повторить ту же подмену этажом выше. Этот случай
  * говорит `trustlineNoRowNotice`.
  */
-export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
+export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = uiLocaleRef.value): string | null {
   const resolved: TrustlineFiguresSource = source ?? { kind: 'never-asked' }
   // ВОПРОС А ЗАДАЁТСЯ ОДИН РАЗ И ЗДЕСЬ. Раньше на этом месте стоял собственный список видов
   // (`row | no-row | frozen`) — вторая копия того же правила, из-за которой `trustlineSourceAnswered`
@@ -212,7 +212,8 @@ export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | u
       // значит утверждать про окно то, чего с ним никогда не случится.
       return resolved.frozen === true ? t('trustlineSource.loadingFrozen', {}, locale) : t('trustlineSource.loading', {}, locale)
     case 'failed':
-      return t('trustlineSource.failed', { message: resolved.message }, locale)
+      // 046 wave 3: the failure's own sentence in the asked language when the source carries what makes it (`render`).
+      return t('trustlineSource.failed', { message: resolved.render ? resolved.render(locale) : resolved.message }, locale)
   }
 }
 
@@ -237,7 +238,7 @@ export function trustlineFiguresNoticeRef(source: TrustlineFiguresSource | null 
  *
  * `null` — во всех остальных состояниях.
  */
-export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
+export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = uiLocaleRef.value): string | null {
   // ЧТО ИЗМЕНИЛОСЬ (кросс-ревью, P3). Здесь стояло `source?.kind !== 'frozen'`, то есть
   // уведомление о заморозке доставалось ОДНОМУ из способов быть замороженным — заморозке ответа
   // со строкой. Замороженные `no-row`, `never-asked`, `loading` и `failed` оставались наблюдаемо
@@ -261,7 +262,7 @@ export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | un
  *
  * `null` — во всех остальных состояниях.
  */
-export function trustlineNoRowNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = 'en'): string | null {
+export function trustlineNoRowNotice(source: TrustlineFiguresSource | null | undefined, locale: UiLocale = uiLocaleRef.value): string | null {
   // Сначала вопрос А тем же предикатом: рассказывать СОДЕРЖАНИЕ ответа можно только там, где
   // ответ был. Это не перестраховка, а отказ от третьей копии набора видов.
   if (!trustlineSourceAnswered(source)) return null

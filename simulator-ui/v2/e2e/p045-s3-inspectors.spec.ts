@@ -23,6 +23,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { mockApp, ready, settleShell } from './helpers/p037Mock.js'
+import { t } from '../src/i18n/t'
 
 const THEMES = ['saas', 'hud'] as const
 type Theme = (typeof THEMES)[number]
@@ -144,7 +145,9 @@ for (const theme of THEMES) {
         balance: await centreY(card.locator('.ds-ov-node-card__balance')),
         close: await centreY(card.getByRole('button', { name: 'Close' })),
       }
-      const stats = await Promise.all(['Out', 'In'].map(async (t) => centreY(card.locator('.ds-label', { hasText: new RegExp(`^${t}$`) }))))
+      // 046 wave 3 (2026-10-19): the labels are the dictionary's (English page): «Trusts others» / «Trusted by» (were Out / In).
+      const labels = [t('card.trustsOthers', {}, 'en'), t('card.trustedBy', {}, 'en')]
+      const stats = await Promise.all(labels.map(async (label) => centreY(card.locator('.ds-label', { hasText: new RegExp(`^${label}$`) }))))
       const values = await card.locator('.ds-ov-node-card__stats .ds-value').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }))
       info.annotations.push({ type: 'P045S3-e1e2', description: JSON.stringify({ head, stats, values }) })
       const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs)
@@ -160,7 +163,8 @@ for (const theme of THEMES) {
       await open(page, theme)
       const card = await openCard(page)
       const row = card.locator('.nco-trustline-row').first()
-      await expect(row).toHaveAttribute('title', /avail: 100\.00/)
+      // 046 wave 3 (2026-10-19): the title is the row's sentence of what is available (`card.lineAvailable`; was "avail: …").
+      await expect(row).toHaveAttribute('title', /^available 100\.00 /)
       const texts = await row.evaluate((el) => Array.from(el.children).filter((c) => !c.matches('button') && c.getBoundingClientRect().width > 1).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()))
       expect(texts, 'peer and used / limit only').toEqual(['Bob', '0.00 / 100.00'])
       expect((await row.boundingBox())!.height, 'a row is 24 px (the smallest pointer target)').toBeLessThanOrEqual(24.5)
@@ -187,11 +191,13 @@ for (const theme of THEMES) {
       const card = await openCard(page)
       await expect(card.locator('.nco-trustline-row')).toHaveCount(9)
       const stats = card.locator('[data-testid="node-card-stats"]')
-      await expect(stats.locator('.ds-label'), 'the statistics say Out and In, and nothing else').toHaveText(['Out', 'In'])
+      // 046 wave 3 (2026-10-19): the advisor's words of 2026-10-18 (were Out / In, OUT → N / IN ← N).
+      await expect(stats.locator('.ds-label'), 'the statistics say «Trusts others» and «Trusted by», and nothing else')
+        .toHaveText([t('card.trustsOthers', {}, 'en'), t('card.trustedBy', {}, 'en')])
       // Alice is the creditor of eight lines of 50.00 (Out) and the debtor of one line of 100.00 (In).
       await expect(stats.locator('.ds-value')).toHaveText(['400.00', '100.00'])
-      await expect(card.getByText('OUT → 8', { exact: true })).toBeVisible()
-      await expect(card.getByText('IN ← 1', { exact: true })).toBeVisible()
+      await expect(card.getByText(t('card.trustsGroup', { count: 8 }, 'en'), { exact: true })).toBeVisible()
+      await expect(card.getByText(t('card.trustedByGroup', { count: 1 }, 'en'), { exact: true })).toBeVisible()
     })
 
     test('(е5) 043-4: while the payment is open, Pay and New line are disabled and the card says why', async ({ page }) => {

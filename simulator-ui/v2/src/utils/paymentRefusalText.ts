@@ -78,10 +78,13 @@ const HTTP_STATUS_CODE = /^HTTP_\d+$/
  * out, and the status is in the detail (the block's `title` and the console).
  */
 export function actionErrorText(error: unknown, locale: UiLocale = uiLocale()): ShownError {
-  const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown; clientMessage?: unknown }
+  const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown; clientMessage?: unknown; clientText?: unknown }
   const code = typeof e.code === 'string' && e.code.trim() ? e.code.trim() : ''
   if (!code || e.clientMessage === true) {
-    const own = plainErrorMessage(error).trim()
+    // 046 wave 3: the client's own text in the asked language when it carries what makes it (`clientText`), else as it is.
+    const own = (e.clientMessage === true && typeof e.clientText === 'function'
+      ? String((e.clientText as (l: UiLocale) => string)(locale))
+      : plainErrorMessage(error)).trim()
     return shownError(own || t('actionError.unknown', { code: code || 'UNKNOWN' }, locale), error)
   }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>

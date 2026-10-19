@@ -72,6 +72,7 @@ import { useSystemBalance } from './useSystemBalance'
 
 import { CLEARING_EFFECT_MS, useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
 import { useRealTxFx } from './realFx/useRealTxFx'
+import { confirmCancelBusyOperation } from '../utils/confirmCancelBusy'
 import {
   createLivePathDelivery,
   createRecordingSceneSource,
@@ -1467,15 +1468,8 @@ export function useSimulatorApp(opts?: {
       isInteractCanvasNodePickPhase: isInteractCanvasNodePickPhase.value,
       interactSelectNode: (nodeId) => interactMode.selectNode(nodeId),
       isInteractBusy: !!interactMode.busy.value,
-      confirmCancelInteractBusy: () => {
-        try {
-          const c = window.confirm
-          if (typeof c !== 'function') return true
-          return !!c('Отменить операцию?')
-        } catch {
-          return true
-        }
-      },
+      // 046 wave 3: the question in the language of the interface (one place, `utils/confirmCancelBusy.ts`).
+      confirmCancelInteractBusy: confirmCancelBusyOperation,
 
       closeTopmostOverlayOnOutsideClick: () => {
         void closeTopmostOverlayOnOutsideClick()

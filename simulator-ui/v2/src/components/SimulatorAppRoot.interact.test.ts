@@ -726,11 +726,12 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           const isBusy = busyRef?.value === true
 
           if (isBusy) {
-            // Show confirm gate (mirrors real confirmCancelInteractBusy).
+            // Show confirm gate (mirrors real confirmCancelInteractBusy). 046 wave 3: the question itself is not judged here -
+            // it is the dictionary's (`utils/confirmCancelBusy.ts`, held by `inspectors.p046w3.test.ts`).
             try {
               const c = typeof window.confirm === 'function' ? window.confirm : null
               if (typeof c === 'function') {
-                const ok = !!c('Отменить операцию?')
+                const ok = !!c('(the question of utils/confirmCancelBusy.ts)')
                 if (!ok) return
               }
             } catch {
@@ -1580,8 +1581,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('keeps InteractHistoryLog coexisting with BottomBar without polluting bottom-stack geometry ownership', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [
-      { id: '1', icon: 'P', text: 'Send payment', timeText: '10:00' },
-      { id: '2', icon: 'T', text: 'Update trustline', timeText: '10:01' },
+      // 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3).
+      { id: '1', icon: 'P', line: { key: 'history.payment', vars: { amount: '1.00', unit: 'UAH', from: 'Alice', to: 'Bob' } }, timeText: '10:00' },
+      { id: '2', icon: 'T', line: { key: 'history.trustlineUpdated', vars: { from: 'Alice', to: 'Bob', limit: '20.00' } }, timeText: '10:01' },
     ])
     setUrl('/?mode=real&ui=interact')
 
@@ -6368,7 +6370,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
   })
 
   it('the history is three lines in the bottom overlay shell (was eight)', async () => {
-    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5].map((i) => ({ id: `h${i}`, icon: '•', text: `action ${i}`, timeText: `10:0${i}` })))
+    // 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3); the data tells the lines apart.
+    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5].map((i) => ({ id: `h${i}`, icon: '•', line: { key: 'history.trustlineClosed', vars: { from: 'action', to: String(i) } }, timeText: `10:0${i}` })))
     const { host, done } = mount()
     try {
       await nextTick()
@@ -6376,7 +6379,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(shell, 'the overlay shell hosts it').not.toBeNull()
       const items = [...shell!.querySelectorAll('.interact-history__item')].map((li) => (li.textContent ?? '').replace(/\s+/g, ' ').trim())
       expect(items).toHaveLength(3)
-      expect(items[0]).toContain('action 5')
+      expect(items[0]).toContain('action → 5')
     } finally {
       done()
     }
