@@ -249,7 +249,7 @@ async def test_p047_the_peak_of_one_reconciliation_does_not_grow_with_the_histor
     """1 000 vs 10 000 payment envelopes of one shape: the larger history's peak within `PEAK_RATIO_BOUND` of the smaller.
 
     RED BEFORE (`main` `e902e332`, materialised reads): the peak grows with the history, ratio ≈9.
-    MUTATION: `.all()` the envelopes in `_criterion_b` instead of streaming them - red.
+    MUTATION: `.all()` the envelopes in `_streamed_criterion_b` instead of streaming them - red.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -309,7 +309,7 @@ async def test_p047_a_one_atom_divergence_at_the_end_of_a_long_history_is_failed
 
     The last row of the journal stream (ordered by operation id) belongs to the last envelope of the envelope stream:
     the divergence is where a reading that stopped early, or dropped its last batch, would never look.
-    MUTATION: stop `_criterion_b`'s merge one envelope early, and skip the last batch of `_journal_sums` - each red.
+    MUTATION: stop `_streamed_criterion_b`'s merge one envelope early, and skip the last batch of `_journal_sums` - each red.
     """
     from tests.conftest import TestingSessionLocal as factory
 

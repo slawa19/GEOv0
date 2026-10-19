@@ -56,7 +56,7 @@ only how they are read: through server-side cursors (`_streamed`), `_STREAM_BATC
 caller's one snapshot. Until then the journal and the envelopes with their decoded intents were materialised
 whole, ≈6.5 KB of peak memory per operation (044 stage 2), so one run's peak grew with the history without
 bound. What stays in memory now is O(edges): the per-edge sums, the debts, the offsets, and the findings
-themselves; criterion (b) holds one envelope and its entries at a time (`_criterion_b`, a merge of the envelopes
+themselves; criterion (b) holds one envelope and its entries at a time (`_streamed_criterion_b`, a merge of the envelopes
 ordered by id with the entries ordered by operation id). Rows READ still grow with the history - detection
 reads every entry - rows HELD do not.
 
@@ -392,7 +392,7 @@ async def _journal_sums(session: Any, equivalent_id: uuid.UUID) -> tuple[dict[Ed
     """Per-edge sum of every recorded delta, the rows that contradict their own arithmetic, and the row count.
 
     Every row is read and checked, streamed (`_streamed`): what is held is one sum per edge and the
-    contradictions. Criterion (b) reads the same rows again, per operation, in the same snapshot (`_criterion_b`);
+    contradictions. Criterion (b) reads the same rows again, per operation, in the same snapshot (`_streamed_criterion_b`);
     until 047 `T4703` this one read also grouped every row by operation for it, which held the whole journal."""
 
     entries = debt_journal_entries.c
@@ -480,7 +480,7 @@ def _here(equivalent_id: uuid.UUID) -> Any:
 
 def _operations(equivalent_id: uuid.UUID) -> Any:
     """Every envelope that is here (`_here`), in ONE statement, ordered by id - the order criterion (b) examines
-    them in (PostgreSQL orders `uuid` bytewise, as `uuid.UUID` compares) and the order `_criterion_b` merges on."""
+    them in (PostgreSQL orders `uuid` bytewise, as `uuid.UUID` compares) and the order `_streamed_criterion_b` merges on."""
 
     ops = debt_operations.c
     transactions = Transaction.__table__
@@ -513,7 +513,7 @@ def _operations(equivalent_id: uuid.UUID) -> Any:
 
 
 def _entries_by_operation(equivalent_id: uuid.UUID) -> Any:
-    """This equivalent's journal rows as criterion (b) reads them, ordered by operation id (`_criterion_b`).
+    """This equivalent's journal rows as criterion (b) reads them, ordered by operation id (`_streamed_criterion_b`).
 
     A row without an operation id exists only if the column's NOT NULL was dropped; no envelope has that id, so the
     grouping by operation never handed it to a rule, and it is left out here too (criterion (a) has read it)."""
@@ -945,7 +945,23 @@ def _examine_operation(
         return [_finding("b_intent_malformed", op, reason=malformed.reason)]
 
 
-async def _criterion_b(
+def _criterion_b(
+    equivalent_id: uuid.UUID,
+    operations: list[Any],
+    entries_by_operation: dict[uuid.UUID, list[_Entry]],
+) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
+    """Criterion (b) over envelopes and entries already in hand, examined in id order - the rule-level entry point
+    (`tests/unit/test_p023_b_clearing_intent_v2_rule.py`). The verifier itself streams (`_streamed_criterion_b`) and
+    examines each envelope by the same `_examine_operation`."""
+
+    findings: list[dict[str, Any]] = []
+    coverage: Counter[tuple[str, str]] = Counter()
+    for op in sorted(operations, key=lambda row: row.id.bytes):
+        findings.extend(_examine_operation(op, entries_by_operation.get(op.id, []), equivalent_id, coverage))
+    return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
+
+
+async def _streamed_criterion_b(
     session: Any, equivalent_id: uuid.UUID
 ) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
     """Criterion (b) over every envelope that is here, ONE envelope and its entries in memory at a time.
@@ -1076,7 +1092,7 @@ async def verify_journal_equals_change(
 
     # Criterion (b), the correspondence and the structure need no baseline: each contradiction is
     # conclusive on its own, like a row that contradicts its own arithmetic.
-    b_findings, coverage = await _criterion_b(session, equivalent_id)
+    b_findings, coverage = await _streamed_criterion_b(session, equivalent_id)
     findings.extend(b_findings)
     correspondence, transactions_read, pairs = await _correspondence(session, equivalent_id)
     findings.extend(correspondence)
