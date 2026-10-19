@@ -64,13 +64,13 @@
 | `node-card` | `wm-inspector-window` | двойной клик по узлу | внутри viewport с отступом; Escape закрывает; клик по пустой канве закрывает; фокус — на открывший элемент (с канвы — на `body`, из навигатора — на «Inspect node») |
 | `edge-popup` | `wm-inspector-window` | клик по линии доверия | то же |
 | `payment-from-list`, `trustline-from-list` | `interact-select-dropdown` | клик по списку «From» | внутри viewport; Escape закрывает **список, а не панель**, фокус — на триггер; Tab не покидает список |
-| `menu-admin` (после «Подробнее»; `menu-artifacts` снята 048 S1 — файлы прогона теперь внутри «Admin ▾») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
+| ~~`menu-admin`~~ — снята 048 S2 (2026-10-19) вместе с меню «Admin ▾» (`menu-artifacts` снята 048 S1). Экземпляров типа `hud-dropdown` не осталось: ключ — в `EXCLUDED_FROM_MATRIX` с причиной и датой; новое меню снова требует записи (скан экземпляров сообщает о меню без записи) | `hud-dropdown` | — | — |
 | `top-bar-interact`, `top-bar-auto-run`, `graph-navigator` | `top-hud-stack` | на экране всегда; навигатор — клик «Inspect graph» | внутри viewport |
 | `bottom-bar` | `bottom-hud-stack` | на экране всегда | внутри viewport |
 | `toast-success`, `toast-error` | `success-toast`, `error-toast` | клиринг с циклом; клиринг с отказом бэкенда | внутри viewport; Escape, фокус и клик вне не применяются |
 | `interact-history` | `interact-history-overlay` | после первого выполненного действия | внутри viewport |
 | `edge-tooltip` | `edge-tooltip` | клик по узлу, затем наведение на его линию | внутри viewport |
-| `analytics-panel` | `real-metrics-panel` | кнопка «Analytics» в «Admin ▾» (048 S1), затем Escape закрывает меню | внутри viewport |
+| `analytics-panel` | `real-metrics-panel` | адрес с `?debug=1`, кнопка «Analytics» в служебном ряду верхней панели (048 S2; в 048 S1 — в «Admin ▾») | внутри viewport |
 | `node-labels`, `event-labels` | `canvas-labels-overlay`, `canvas-floating-labels-overlay` | клик по узлу; событие платежа из потока (не жест пользователя) | кадр; слой растянут на сцену, политик нет |
 | `loading-message`, `error-message` | `loading-message-overlay`, `error-message-overlay` | загрузка страницы, пока сцена не ответила; сцена не загрузилась | внутри viewport |
 | `dev-perf-overlay` | `dev-perf-overlay` | адрес с `?perf=1` | внутри viewport |
@@ -169,8 +169,8 @@
 
 Окна и меню (S2):
 
-- **Нативные `<select>`.** Их выпадающие списки рисует браузер вне DOM: у них нет прямоугольника, их нет на скриншоте и в axe. Это «UI theme», «Scenario», «Equivalent», «Layout», «Quality», «Labels», «Scene», «Node» и «Edge» навигатора (`NATIVE_SELECTS`).
-- **Состояния, до которых рецепт не доходит.** Панель платежа проверяется на первом шаге, а не на подтверждении и не на результате; панель линии — на выборе «From»; попап линии — у активной линии; верхняя панель — без строки ошибки и без строки «Stall»; меню «Admin» — с пустым списком ранов; панель аналитики — без рядов.
+- **Нативные `<select>`.** Их выпадающие списки рисует браузер вне DOM: у них нет прямоугольника, их нет на скриншоте и в axe. Это «UI theme», «Scenario» (с admin‑токеном — он у зрителя стенда есть), «Equivalent», «Layout», «Quality» и «Источник» (с `?debug=1`), «Плейлист» (офлайн, `?debug=1`), «Node» и «Edge» навигатора (`NATIVE_SELECTS`); «Scene» удалён 048 S1, «Labels» — 048 S2.
+- **Состояния, до которых рецепт не доходит.** Панель платежа проверяется на первом шаге, а не на подтверждении и не на результате; панель линии — на выборе «From»; попап линии — у активной линии; верхняя панель — без строки ошибки и без строки «Stall»; панель аналитики — без рядов.
 - **Меню «Dev Tools»** существует только в dev-сборке; на production-сборке его нет, и стенд этого не проверяет.
 - **Клик вне HUD-меню.** Политикой в коде не объявлен: меню остаётся открытым. Стенд это не утверждает ни в какую сторону.
 - **Escape при фокусе в поле ввода** намеренно не закрывает окно (`useWindowController.ts`, `isFormLikeTarget`); стенд жмёт Escape там, где фокус оставил жест открытия.

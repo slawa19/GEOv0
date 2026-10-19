@@ -29,13 +29,6 @@ function createTopBarContext(overrides: Partial<TopBarContext> = {}): TopBarCont
       errorsByCode: {},
     }),
     accessToken: ref(null),
-    adminRuns: ref(null),
-    adminRunsLoading: ref(false),
-    adminLastError: ref(undefined),
-    adminCanGetRuns: ref(false),
-    adminCanStopRuns: ref(false),
-    adminCanAttachRun: ref(false),
-    adminCanStopRun: ref(false),
     ...overrides,
   }
 }
@@ -73,6 +66,9 @@ async function mountTopBar(overrides: Partial<TopBarContext> = {}) {
   return { host, app }
 }
 
+// 048 S2 (amendment 9): the test "moves keyboard-opened focus inside Admin and restores summary focus on Escape" is gone
+// with "Admin ▾" (a removed contract: the bar has no menu any more). The focus rules of a HUD menu are
+// `useHudDropdownFocus.test.ts`'s; the live region and the error alert stay below.
 describe('TopBar dropdown focus contract', () => {
   // 048 S1 (decision 4): the "Run <state>" badge of the service row is gone (the state of the first row says the same);
   // its live region moved to that state, so a change of the run is still announced - and from the first view.
@@ -121,7 +117,8 @@ describe('TopBar dropdown focus contract', () => {
   })
 
   it('042 S2: the top bar has no run-pipeline choice (no Pipeline row, no sandbox option); 043 S3: no Advanced menu', async () => {
-    const { app, host } = await mountTopBar()
+    // 048 S2 (amendment 8): the scenario select and the tempo are the administrator's - mounted with an admin token.
+    const { app, host } = await mountTopBar({ accessToken: ref('admin-token') })
 
     expect(host.querySelector('[aria-label="Run pipeline"]')).toBeNull()
     // 048 S1 (Verification plan, forbidden item 4): by structure, not by words - the selects of the bar are the theme,
@@ -135,60 +132,6 @@ describe('TopBar dropdown focus contract', () => {
     const intensity = host.querySelector('[aria-label="Intensity"] input[aria-label="Intensity percent"]')
     expect(intensity).toBeTruthy()
     expect(intensity!.closest('details'), 'the tempo is not inside a menu').toBeNull()
-
-    app.unmount()
-    host.remove()
-  })
-
-  it('moves keyboard-opened focus inside Admin and restores summary focus on Escape', async () => {
-    const { app, host } = await mountTopBar({
-      accessToken: ref('admin-token'),
-      adminRuns: ref([
-        {
-          run_id: 'run-1',
-          state: 'running',
-          scenario_id: 'scenario-1',
-          owner_id: 'owner-1',
-          owner_kind: 'participant',
-        },
-      ]),
-      adminCanGetRuns: ref(true),
-      adminCanStopRuns: ref(true),
-      adminCanAttachRun: ref(true),
-      adminCanStopRun: ref(true),
-    })
-
-    const details = host.querySelector('details[aria-label="Admin controls"]') as HTMLDetailsElement
-    const summary = host.querySelector('[aria-label="Admin"]') as HTMLElement
-    const refreshButton = host.querySelector('button[aria-label="Refresh runs list"]') as HTMLButtonElement
-
-    expect(details).toBeTruthy()
-    expect(summary).toBeTruthy()
-    expect(refreshButton).toBeTruthy()
-
-    summary.focus()
-    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    details.open = true
-    details.dispatchEvent(new Event('toggle'))
-    await nextTick()
-
-    expect(document.activeElement).toBe(refreshButton)
-
-    const stopButtons = Array.from(details.querySelectorAll('button')).filter(
-      (candidate) => candidate.textContent?.trim() === 'Stop',
-    )
-    const lastButton = stopButtons[stopButtons.length - 1] as HTMLButtonElement | undefined
-    expect(lastButton).toBeTruthy()
-
-    lastButton?.focus()
-    lastButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(refreshButton)
-
-    refreshButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    await nextTick()
-
-    expect(details.open).toBe(false)
-    expect(document.activeElement).toBe(summary)
 
     app.unmount()
     host.remove()

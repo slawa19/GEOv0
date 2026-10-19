@@ -170,11 +170,6 @@ async function routeAnalytics(page: Page): Promise<void> {
     json(r, { api_version: 'simulator-api/1', run_id: RUN_ID, equivalent: EQ, items: [] }))
 }
 
-async function routeToolbars(page: Page): Promise<void> {
-  await page.route(`**/simulator/runs/${RUN_ID}/artifacts`, (r) => json(r, { items: [] }))
-  await page.route('**/simulator/admin/runs', (r) => json(r, { items: [] }))
-}
-
 /** Scene reads that never answer (`hold`) or answer 500: the two states without a scene. */
 async function routeScene(page: Page, how: 'hold' | 'fail'): Promise<void> {
   await page.route(/\/graph\/(snapshot|preview)/i, (r) =>
@@ -193,12 +188,6 @@ async function openList(page: Page, panelButton: string, id: string): Promise<vo
   if (!(await page.locator(`#${id}__surface`).isVisible())) await page.locator(`#${id}__trigger`).click()
 }
 
-/** A summoned HUD menu: `<details>` driven by `useHudDropdownFocus`. (Named `openDetails` until 043 S1 - the element, not the toggle.) */
-const openMenu = (summary: string) => async (page: Page) => {
-  const s = page.locator(summary)
-  if ((await s.evaluate((el) => (el.parentElement as HTMLDetailsElement).open)) === false) await s.click()
-}
-
 /** Run a clearing through the panel: the answer of the backend is what puts a toast and a history line on screen. */
 async function runClearing(page: Page, toast: string): Promise<void> {
   await page.clock.resume() // the flow is driven by real clicks; the toast is frozen below, before its timer fires
@@ -210,12 +199,8 @@ async function runClearing(page: Page, toast: string): Promise<void> {
   await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 250))
 }
 
-const HUD_DROPDOWN: Policies = {
-  inside: 'wm-pad', // the menu is shifted in by the same pad (useHudDropdownFocus.ts, clampSurfaceIntoViewport)
-  escape: { focusBackTo: '', declared: 'useHudDropdownFocus.ts: onDetailsKeydown -> closeAndRestoreFocus' },
-  tabStaysInside: { declared: 'dropdownFocusCore.ts: trapDropdownTabNavigation' },
-}
-const hudDropdown = (summary: string): Policies => ({ ...HUD_DROPDOWN, escape: { ...HUD_DROPDOWN.escape!, focusBackTo: summary } })
+// 048 S2: the recipe and the policies of a HUD menu (`openMenu`, `HUD_DROPDOWN`) went with "Admin ▾", the last menu;
+// a new menu brings them back with its entry (history: `git log -S HUD_DROPDOWN -- e2e/qa/surfaceMatrix.ts`).
 
 const INTERACT_PANEL = (opener: string): Policies => ({
   inside: 'wm-pad',
@@ -267,14 +252,10 @@ export const MATRIX: Entry[] = [
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
-  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" and "Dev Tools" removed by 043 S3).
-  // 048 S1 (decision 5): one menu is left - "Admin ▾". The bottom bar's "Artifacts" menu moved INTO it (the run files),
-  // with the analytics toggle and the catalogue refresh; its entry `menu-artifacts` went with it - the surface is this
-  // one. Selectors by test id (Verification plan of 048, forbidden item 4).
-  { id: 'menu-admin', catalogue: 'hud-dropdown', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
-    beforeLoad: routeToolbars, details: { hiddenByDefault: '[data-testid="admin-summary"]' },
-    root: '[data-testid="admin-menu"] > .ds-ov-dropdown', open: openMenu('[data-testid="admin-summary"]'),
-    policies: hudDropdown('[data-testid="admin-summary"]') },
+  // hud-dropdown: the menus of the two bars ("Advanced" and "Dev Tools" removed by 043 S3, "Artifacts" moved into "Admin ▾"
+  // by 048 S1). 048 S2 (amendment 9, 2026-10-19): "Admin ▾", the last one, is gone - its entry `menu-admin` with it (a
+  // removed surface; the run list, Stop all and the run files are the API's). No instance of the type is left: the key
+  // is in `EXCLUDED_FROM_MATRIX` below, by name and date.
 
   // the two bars and what expands inside them
   { id: 'top-bar-interact', catalogue: 'top-hud-stack', gesture: 'always on screen (the first view)',
@@ -282,7 +263,7 @@ export const MATRIX: Entry[] = [
   { id: 'top-bar-interact-details', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (the row of service controls and the metrics)',
     details: { hiddenByDefault: '[data-testid="top-details-row"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (scenario and run controls; since 043 S2 the same screen as the entry above, kept for its own anti-vacuum: the scenario selector is not rendered on the first view)',
+  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (scenario and run controls - since 048 S2 the row of the administrator: the viewer of the stand has the admin token of the dev build; since 043 S2 the same screen as the entry above, kept for its own anti-vacuum: the scenario selector is not rendered on the first view)',
     details: { hiddenByDefault: '[data-testid="scenario-select"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
   { id: 'graph-navigator', catalogue: 'bottom-hud-stack', gesture: 'click "Inspect graph" in the bottom bar ("Подробнее" on)',
@@ -320,17 +301,14 @@ export const MATRIX: Entry[] = [
       await page.mouse.move(e.at.x, e.at.y, { steps: 4 })
     },
     policies: { inside: 'viewport' } },
-  // 048 S1 (decision 1): the toggle is in "Admin ▾" (the administrator's dock); the menu is closed again (Escape) once
-  // the dock is open, so the dock is what is judged.
-  { id: 'analytics-panel', catalogue: 'real-metrics-panel', gesture: 'click "Analytics" in "Admin ▾" (admin token, "Подробнее" on)',
-    beforeLoad: (p) => Promise.all([routeAnalytics(p), routeToolbars(p)]).then(() => undefined),
-    root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="admin-summary"]' },
+  // 048 S2 (amendment 10, 2026-10-19): the dock is the developer's tool - its toggle is in the top bar's service row with
+  // `?debug=1` (it was in "Admin ▾" since 048 S1). The recipe opens the page with `?debug=1`; the dock is what is judged.
+  { id: 'analytics-panel', catalogue: 'real-metrics-panel', gesture: 'click "Analytics" in the service row (?debug=1, "Подробнее" on)',
+    query: '&debug=1', beforeLoad: routeAnalytics,
+    root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="analytics-toggle"]' },
     open: async (page) => {
       if (await page.locator('[data-surface="real-metrics-panel"]').isVisible()) return
-      await openMenu('[data-testid="admin-summary"]')(page)
       await page.locator('[data-testid="analytics-toggle"]').click()
-      await page.keyboard.press('Escape')
-      await expect(page.locator('[data-testid="admin-menu"] > .ds-ov-dropdown'), 'the menu is closed again').toBeHidden()
     },
     policies: { inside: 'viewport' } },
 
@@ -362,7 +340,14 @@ export const MATRIX: Entry[] = [
  * Catalogue keys that have no entry in the matrix. Empty today: every key has at least one. A key may be put here
  * only with a reason and a date (spec 038: "silently excluding a surface from the matrix" is forbidden).
  */
-export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }> = {}
+export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }> = {
+  'hud-dropdown': {
+    why: '048 S2 (amendment 9): "Admin ▾", the last menu of the bars, was removed - no instance of the type is on any screen. '
+      + 'The type stays in the catalogue (the design system, 045); a new menu needs its matrix entry again, and the scan of '
+      + 'instances (`unmatchedInstances`) reports one that has none.',
+    since: '2026-10-19',
+  },
+}
 
 /**
  * Native `<select>` controls of the HUD. Their popups are drawn by the browser, not by the page: they have no DOM
@@ -370,8 +355,9 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
  * recorded blind zone (2026-10-11), not an oversight.
  */
 export const NATIVE_SELECTS = [
-  'top bar: "UI theme"', 'top bar: "Scenario"',
-  'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Labels"',
+  // 048 S2: "Scenario" is the administrator's (the stand's viewer has the dev build's admin token); "Labels" was removed.
+  'top bar: "UI theme"', 'top bar (admin token): "Scenario"',
+  'bottom bar: "Equivalent"', 'bottom bar: "Layout"',
   // 048 S1: the developer's selects (`?debug=1`); the stand's viewer has no `?debug=1`. "Scene" was removed (no reader).
   'bottom bar (?debug=1): "Quality"', 'bottom bar (?debug=1): "Источник"',
   'bottom bar (offline, ?debug=1): "Плейлист"', // 042 T4205; the stand runs the server source, where the workbench is not shown

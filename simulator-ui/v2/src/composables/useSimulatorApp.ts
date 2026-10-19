@@ -64,7 +64,6 @@ import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 
 import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
-import { useAdminRunsPanel } from './useAdminRunsPanel'
 import { defaultIntensityPercentFor, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
@@ -157,7 +156,6 @@ export async function loadActiveRunSnapshot(input: {
 }
 
 type RealModeApi = ReturnType<typeof useSimulatorRealMode>
-type AdminRunsPanelApi = ReturnType<typeof useAdminRunsPanel>
 type CookieSessionApi = ReturnType<typeof useCookieSessionBootstrap>
 type InteractActionsApi = ReturnType<typeof useInteractActions>
 type InteractModeApi = ReturnType<typeof useInteractMode>
@@ -205,15 +203,18 @@ export type SimulatorAppApi = {
     | 'stop'
     | 'applyIntensity'
     | 'refreshSnapshot'
-    | 'refreshArtifacts'
-    | 'downloadArtifact'
   >
 
   session: Pick<CookieSessionApi, 'actorKind' | 'ownerId' | 'bootstrapping' | 'tryEnsure'>
 
-  admin: Pick<AdminRunsPanelApi, 'runs' | 'loading' | 'lastError' | 'getRuns' | 'stopRuns'> & {
+  /**
+   * 048 S2 (amendment 9): "Admin ▾" is gone from the UI - the run list, Stop and Stop all are the API's
+   * (`real-mode-runbook.md`, "где и что смотреть"). What is left is the attach to a run by its id: no control of the UI
+   * calls it since S2; the composable tests enter the attach of `useSimulatorRealMode.ts` through it (the rules of the
+   * shown run's scene that start and boot share). Whether that mechanism goes too is a cleanup of its own (BACKLOG).
+   */
+  admin: {
     attachRun: (runId: string) => Promise<void>
-    stopRun: (runId: string) => Promise<void>
   }
 
   state: SimulatorAppState
@@ -675,18 +676,6 @@ export function useSimulatorApp(opts?: {
     isRealMode,
     apiBase: computed(() => real.apiBase),
     accessToken: computed(() => real.accessToken),
-  })
-
-  // ============================
-  // Admin state (requires admin token)
-  // ============================
-
-  const adminRunsPanel = useAdminRunsPanel({
-    isRealMode,
-    apiBase: computed(() => real.apiBase),
-    accessToken: computed(() => real.accessToken),
-    runId: computed(() => real.runId),
-    runStatus: computed(() => real.runStatus),
   })
 
 
@@ -1922,8 +1911,7 @@ export function useSimulatorApp(opts?: {
       },
       applyIntensity: realMode.applyIntensity,
       refreshSnapshot: realMode.refreshSnapshot,
-      refreshArtifacts: realMode.refreshArtifacts,
-      downloadArtifact: realMode.downloadArtifact,
+      // 048 S2 (amendment 9): no run files in the UI - the index and the downloads are the API's (`real-mode-runbook.md`).
     },
 
     // §10: Cookie session state (anonymous visitors)
@@ -1934,30 +1922,10 @@ export function useSimulatorApp(opts?: {
       tryEnsure: session.tryEnsure,
     },
 
-    // Admin controls (admin-token required)
+    // 048 S2 (amendment 9): no admin menu; the attach by id is kept for its tests (see `SimulatorAppApi.admin`).
     admin: {
-      runs: adminRunsPanel.runs,
-      loading: adminRunsPanel.loading,
-      lastError: adminRunsPanel.lastError,
-      getRuns: adminRunsPanel.getRuns,
-      // 044 stage 2 (Codex §15): every stop the person triggers on this page - Stop, admin stop-one, admin stop-all -
-      // spends the opening's pending start (decision 2).
-      stopRuns: () => {
-        liveAutostart.cancel()
-        return adminRunsPanel.stopRuns()
-      },
       attachRun: async (runId: string) => {
         await realMode.attachToRun(runId)
-      },
-      stopRun: async (runId: string) => {
-        liveAutostart.cancel()
-        adminRunsPanel.lastError.value = ''
-        try {
-          await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
-          await adminRunsPanel.getRuns()
-        } catch (e: unknown) {
-          adminRunsPanel.lastError.value = extractErrorMessage(e)
-        }
       },
     },
 

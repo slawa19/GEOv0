@@ -19,7 +19,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { boot, openDetails, ringSnapshot, screenNodes } from './stand.js'
 import { AXE_BASELINE, AXE_WHY, KNOWN_FINDINGS } from './surfaceBaseline.js'
 import {
-  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, freeNode, MATRIX, settled, SURFACE_DOM, THEMES, unmatchedInstances,
+  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, MATRIX, settled, SURFACE_DOM, THEMES, unmatchedInstances,
   VIEWPORT_LARGE, VIEWPORT_MAIN, VIEWPORT_RESIZED, type Box, type Entry, type Theme, type Viewport,
 } from './surfaceMatrix.js'
 
@@ -424,65 +424,13 @@ test('matrix [hud] node-card opened from the graph navigator: Escape returns the
   await expect(opener, 'the focus is back on the control that opened the card (useWindowManager.ts restoreFocusAfterClose)').toBeFocused()
 })
 
-// --- a way round the keyboard policy of a HUD menu: the focus falls out of it ---------------------------------------
-
-test('matrix [hud] menu-admin: when its focused control is disabled under the focus (runs are loading), Escape still closes the menu and Tab goes back inside', async ({ page }) => {
-  // "Refresh" is the first control of the menu and is disabled while the list of runs loads (TopBar.vue). The list also
-  // reloads by itself on every change of the run (useAdminRunsPanel.ts, scheduleRefresh). A disabled element cannot
-  // hold the focus: the browser drops it to `body`, outside the `<details>` whose key handler declares the policy.
-  const e = MATRIX.find((x) => x.id === 'menu-admin')!
-  let release: () => void = () => {}
-  let held = 0
-  await bootEntry(page, { ...e, beforeLoad: async (p) => {
-    await p.route('**/simulator/admin/runs', async (r) => {
-      held += 1
-      if (held > 1) await new Promise<void>((done) => { release = done })
-      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) })
-    })
-  } }, 'hud', VIEWPORT_MAIN)
-  await expect.poll(() => held, { message: 'the list of runs loaded once by itself after the start' }).toBe(1)
-  const menu = page.locator(e.root)
-  const refresh = menu.getByRole('button', { name: 'Refresh runs list' })
-  await e.open(page)
-  await expect(refresh, 'counter-check: the mouse gesture moved the focus onto the first control').toBeFocused()
-
-  await page.keyboard.press('Enter') // the user asks for the list; the answer is held, so "Refresh" stays disabled
-  await expect(refresh).toBeDisabled()
-  expect(await page.evaluate(() => document.activeElement === document.body), 'counter-check: the browser dropped the focus to body').toBe(true)
-
-  await page.keyboard.press('Tab')
-  expect.soft(await activeInside(page, e.root) || await activeIs(page, e.root), `Tab from the fallen focus goes back into the menu; the focus is on ${await activeName(page)}`).toBe(true)
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-  await page.keyboard.press('Escape')
-  await expect(menu, 'Escape closes the menu although the focus fell out of it (useHudDropdownFocus.ts)').toBeHidden()
-  await expect(page.locator('summary[aria-label="Admin"]'), 'and the focus is back on its summary').toBeFocused()
-  release()
-})
-
-for (const id of ['menu-admin']) {
-  test(`matrix [hud] ${id} left open, then a node card opened from the canvas: Escape and Tab belong to the card, not to the menu`, async ({ page }) => {
-    // The other side of the rule above (038 S2, D2): the focus is on `body` here too, but because the user went
-    // elsewhere - a card opened from the canvas has its focus on `body` by declaration - not because it fell out.
-    const e = MATRIX.find((x) => x.id === id)!
-    await bootEntry(page, e, 'hud', VIEWPORT_MAIN)
-    await e.open(page)
-    const menu = page.locator(e.root)
-    await expect(menu).toBeVisible()
-
-    const node = await freeNode(page)
-    await page.mouse.dblclick(node.at.x, node.at.y)
-    const card = page.locator('.ws-shell[data-win-type="node-card"]')
-    await expect(card).toBeVisible()
-    await expect(menu, 'counter-check: the menu has no outside-click rule and is still open').toBeVisible()
-
-    await page.keyboard.press('Tab')
-    expect.soft(await activeInside(page, e.root), `Tab is not pulled into the menu the user has left; the focus is on ${await activeName(page)}`).toBe(false)
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-    await page.keyboard.press('Escape')
-    await expect.soft(card, 'Escape closes the card (useWindowManager.ts getPolicy: escBehavior close)').toBeHidden({ timeout: 2000 })
-    await expect.soft(menu, 'and leaves the menu as it was').toBeVisible()
-  })
-}
+// --- the keyboard policy of a HUD menu --------------------------------------------------------------------------------
+// 048 S2 (amendment 9, 2026-10-19): "Admin ▾", the last menu of the bars, is gone - and with it its two tests here:
+// "matrix [hud] menu-admin: when its focused control is disabled under the focus (runs are loading), Escape still closes
+// the menu and Tab goes back inside" and "matrix [hud] menu-admin left open, then a node card opened from the canvas:
+// Escape and Tab belong to the card, not to the menu" (a removed contract: no menu is left to open). The policy itself
+// stays unit-tested (`useHudDropdownFocus.test.ts`), and the scan of instances still reports a menu nobody opens (the
+// injected "fifth menu" above).
 
 // --- a defect outside the owner surface of 038: recorded as a reproducer, not fixed ---------------------------------
 

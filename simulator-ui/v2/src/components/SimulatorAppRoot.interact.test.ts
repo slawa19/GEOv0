@@ -562,8 +562,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           stop: vi.fn(),
           applyIntensity: vi.fn(),
           refreshSnapshot: vi.fn(),
-          refreshArtifacts: vi.fn(),
-          downloadArtifact: vi.fn(),
         },
 
         // §10: Cookie session state (anonymous visitors)
@@ -574,13 +572,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           tryEnsure: vi.fn(),
         },
 
-        // Admin controls (admin-token required)
+        // 048 S2: the attach by id is all that is left of the admin facade; the root does not read it.
         admin: {
-          runs: ref<Array<Record<string, unknown>>>([]),
-          loading: ref(false),
-          lastError: ref(''),
-          getRuns: vi.fn(),
-          stopRuns: vi.fn(),
+          attachRun: vi.fn(),
         },
 
         // state + prefs
@@ -1663,11 +1657,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     // The old Interact address: `ui=interact` is ignored, the same screen opens.
     setUrl('/?mode=real&ui=interact')
     storedDetails(true)
+    // 048 S2 (amendment 8): the run controls and the tempo are the administrator's row - an admin token (read at the mount).
+    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
 
     const app = mountSimulatorAppRoot(host)
+    clearGeoTestGlobals('__GEO_TEST_ACCESS_TOKEN')
     await nextTick()
 
     // No mode segment any more (decision 2), with Details on as well.
@@ -5262,7 +5259,7 @@ function analyticsDock(host: HTMLElement): HTMLElement | null {
   return host.querySelector('[data-surface="real-metrics-panel"]')
 }
 
-/** 048 S1: the toggle is in "Admin ▾" of the top bar (an admin token; was the bottom bar's). */
+/** 048 S2 (amendment 10): the toggle is in the top bar's service row with `?debug=1` (was in "Admin ▾" since S1). */
 function analyticsToggle(host: HTMLElement): HTMLButtonElement {
   const btn = host.querySelector('[data-testid="analytics-toggle"]')
   expect(btn).toBeTruthy()
@@ -5302,15 +5299,16 @@ function makeAnalyticsBottlenecks(target: AnalyticsTestTarget): BottlenecksRespo
 
 describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => {
   // 043 S1: the Analytics toggle and its dock live behind "Подробнее" (the off case: its own test below).
-  // 048 S1 (decision 1): and they are the administrator's - every test here but the visitor's runs with an admin token.
+  // 048 S2 (amendment 10): and they are the developer's - every test here but the one without it runs with `?debug=1`
+  // (the mock's `isDebugUi`), and with no token: the dock asks for none (was: the administrator's, S1).
   afterEach(() => {
     storedDetails(null)
-    clearGeoTestGlobals('__GEO_TEST_ACCESS_TOKEN')
+    clearGeoTestGlobals('__GEO_TEST_ACCESS_TOKEN', '__GEO_TEST_DEBUG_UI')
   })
 
   beforeEach(() => {
     storedDetails(true)
-    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token')
+    setGeoTestGlobal('__GEO_TEST_DEBUG_UI', true)
     const simStorage = getSimStorage()
     simStorage.readAnalyticsPanelOpen.mockReturnValue(null)
     simStorage.writeAnalyticsPanelOpen.mockClear()
@@ -5337,15 +5335,17 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
   })
 
   /**
-   * 048 S1 (decision 1), reproducer (в), the root's half: a visitor has no toggle, and a dock a browser remembers open
-   * is neither mounted nor polled (the gate the root feeds `useSimulatorApp` is false). Red before S1: the toggle was in
-   * the bottom bar for everyone and the remembered dock was on screen. The counter-check is the test below: the same
-   * mount with an admin token has both.
+   * 048 S2 (amendment 10), the root's half: without `?debug=1` there is no toggle, and a dock a browser remembers open
+   * is neither mounted nor polled (the gate the root feeds `useSimulatorApp` is false) - for a visitor AND for the
+   * administrator. Rewritten from S1's "a visitor (no admin token)…": red before S2 for the admin token (the toggle was in
+   * "Admin ▾" and the remembered dock on screen). The counter-check is the test below: the same mount with `?debug=1`
+   * has both, with no token.
    */
-  it('a visitor (no admin token): no analytics toggle, and a remembered open dock is neither shown nor polled', async () => {
+  it('without ?debug=1 (no token, a participant JWT, an admin token): no analytics toggle, and a remembered open dock is neither shown nor polled', async () => {
     setUrl('/?mode=real')
+    setGeoTestGlobal('__GEO_TEST_DEBUG_UI', false)
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
-    for (const token of ['', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl']) {
+    for (const token of ['', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl', 'admin-token']) {
       setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', token)
       const host = document.createElement('div')
       document.body.appendChild(host)
@@ -5363,8 +5363,8 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     }
   })
 
-  it('the toggle (in Admin) shows and hides the surface, and persists the choice', async () => {
-    setUrl('/?mode=real')
+  it('the toggle (?debug=1, no token) shows and hides the surface, and persists the choice', async () => {
+    setUrl('/?mode=real&debug=1')
     const simStorage = getSimStorage()
 
     const host = document.createElement('div')
@@ -6055,13 +6055,13 @@ describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', (
  * Hidden means NOT RENDERED: every check below looks for the element in the DOM, not at its style.
  */
 describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces', () => {
-  // 048 S1 (decisions 4 and 5): a visitor's service controls. The source and the quality are `?debug=1`'s, the analytics
-  // toggle is in "Admin ▾" (an admin token), the "Run <state>" badge is gone - each has its own test below.
+  // 048 S1 (decisions 4 and 5): a visitor's service controls. The source and the quality are `?debug=1`'s, the "Run
+  // <state>" badge is gone - each has its own test below. 048 S2: the Labels select is gone (amendment 11), the analytics
+  // toggle is `?debug=1`'s (amendment 10); the whole of "Подробнее" by addressee - the test "048 S2 (amendment 12)".
   const SERVICE = [
     ['theme switcher', '[data-testid="theme-select"]'],
     ['equivalent', '[data-testid="equivalent-select"], [data-testid="equivalent-text"]'],
     ['layout', '[data-testid="layout-select"]'],
-    ['labels', '[data-testid="labels-select"]'],
     ['graph navigator', '[role="region"][aria-label="Graph navigator"]'],
     ['full metrics', '[aria-label="System metrics"]'],
   ] as const
@@ -6069,6 +6069,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     ['source select', '[data-testid="source-select"]'],
     ['quality', '[data-testid="quality-select"]'],
     ['SSE badge', '[data-testid="sse-badge"]'],
+    ['analytics toggle', '[data-testid="analytics-toggle"]'],
   ] as const
 
   const SNAPSHOT = {
@@ -6168,7 +6169,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
    * only, never by "Подробнее" alone. Red before S1: all three were in every visitor's "Подробнее". Hidden means not
    * rendered (the counter-check: the same query finds all three with `debug`).
    */
-  it('?debug=1 alone adds the source, the quality and the SSE badge to "Подробнее"', async () => {
+  it('?debug=1 alone adds the source, the quality, the SSE badge and (048 S2) the analytics toggle to "Подробнее"', async () => {
     const devPresent = (host: HTMLElement) => DEVELOPER.filter(([, sel]) => host.querySelector(sel)).map(([name]) => name)
     for (const debug of [false, true]) {
       storedDetails(true)
@@ -6200,12 +6201,66 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     }
   })
 
+  /**
+   * 048 S2 (amendment 12; Verification plan 2 of the brief): the whole of "Подробнее", by addressee - read from the
+   * mounted root as a list of what each part holds (a control by its test id, aria-label or text; a passive item by
+   * its test id), by structure, not by words. A visitor: top - the theme, the language, the stop reason (when there is
+   * one); the network figures; bottom - the equivalent, the layout, "Inspect graph". The administrator: the same plus the
+   * row of the own run and the payments badge. Anti-vacuum: both lists are read by the same function on the same page,
+   * and differ exactly by the administrator's row. Red before S2: the visitor's top had the scenario, Stop, the tempo,
+   * Apply and the badge, and the bottom had Labels.
+   */
+  it('048 S2 (amendment 12): the whole of «Подробнее» - the visitor\'s, and the administrator\'s (the same plus the own run)', async () => {
+    const contents = (host: HTMLElement) => {
+      const list = (root: Element | null) => (root ? [...root.querySelectorAll<HTMLElement>(
+        'select, button, input, summary, [data-testid="stop-reason"], [data-testid="run-payments"], [data-testid="sse-badge"], [data-testid="equivalent-text"]',
+      )] : []).filter((el) => {
+        // A control inside a closed menu is not on screen (its summary is): the navigator's own fields.
+        const closed = el.closest('details:not([open])')
+        return !closed || (el.tagName === 'SUMMARY' && el.parentElement === closed)
+      }).map((el) => el.dataset.testid ?? el.getAttribute('aria-label') ?? (el.textContent ?? '').replace(/\s+/g, ' ').trim())
+      const figures = [...host.querySelectorAll<HTMLElement>('[aria-label="System metrics"] [data-testid^="sbb-"]')].map((el) => el.dataset.testid)
+      return {
+        top: list(host.querySelector('[data-testid="top-details-row"]')),
+        figures,
+        bottom: list(host.querySelector('[data-testid="bottom-details-row"]')),
+      }
+    }
+    const VISITOR = {
+      top: ['theme-select', 'language-select'],
+      figures: ['sbb-available', 'sbb-trustlines', 'sbb-participants', 'sbb-utilization'],
+      bottom: ['equivalent-text', 'layout-select', 'Inspect graph'],
+    }
+    for (const [who, token, ownRun] of [
+      ['a visitor (no token)', '', [] as string[]],
+      ['a visitor (a participant JWT)', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl', [] as string[]],
+      ['the administrator (an admin token)', 'admin-token', ['scenario-select', 'Stop', 'Intensity percent', 'Apply', 'run-payments']],
+    ] as const) {
+      storedDetails(true)
+      setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', token)
+      const { host, app, done } = mount('/?mode=real')
+      try {
+        const real = rootSetup(app).real as Record<string, unknown>
+        real.runStatus = { run_id: 'run-mock', scenario_id: 'sc1', state: 'running' }
+        await nextTick()
+        expect(contents(host), `${who}, a running run`).toEqual({ ...VISITOR, top: [...VISITOR.top, ...ownRun] })
+        // A stopped run with a reason: the reason is passive text for everyone (044); Start replaces Stop in the row.
+        real.runStatus = { run_id: 'run-mock', scenario_id: 'sc1', state: 'stopped', stop_source: 'server', stop_reason: 'idle_no_subscribers' }
+        await nextTick()
+        const stoppedRow = ownRun.length ? ['scenario-select', 'Start', 'Intensity percent', 'Apply', 'stop-reason', 'run-payments'] : ['stop-reason']
+        expect(contents(host).top, `${who}, a stopped run`).toEqual([...VISITOR.top, ...stoppedRow])
+      } finally {
+        done()
+      }
+    }
+  })
+
   // The polling half is the real composable's (`useSimulatorApp.analyticsGate.test.ts`: `analytics.isVisible`, which
   // gates the poll, follows the getter the root feeds); here the analytics are mocked and only the DOM is observed.
   it('a remembered open analytics dock is not shown while Details is off, and comes back with it', async () => {
     storedDetails(null)
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
-    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token') // 048 S1: the dock is the administrator's
+    setGeoTestGlobal('__GEO_TEST_DEBUG_UI', true) // 048 S2: the dock is the developer's (`?debug=1`)
     const { host, done } = mount()
     try {
       await nextTick()
@@ -6300,13 +6355,16 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
   it('wiring (was a source-text guard): the controls of the top bar reach the actions of the app', async () => {
     storedDetails(true)
     setGeoTestGlobal('__GEO_TEST_DEBUG_UI', true) // 048 S1: "Источник" is `?debug=1`'s
+    // 048 S2 (amendment 8): the scenario, Start/Stop and the tempo are the administrator's row - an admin token (the mock
+    // reads it at the mount).
+    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token')
     const { host, app, done } = mount('/?mode=real&debug=1')
+    clearGeoTestGlobals('__GEO_TEST_ACCESS_TOKEN')
     try {
       await nextTick()
       const setup = rootSetup(app)
       const real = setup.real as Record<string, unknown>
       const actions = setup.realActions as Record<string, Mock>
-      const admin = setup.admin as Record<string, Mock>
       for (const fn of Object.values(actions)) fn.mockClear?.()
 
       const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
@@ -6345,28 +6403,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       byText('Start')!.click()
       expect(actions.startRun).toHaveBeenCalledTimes(1)
 
-      // The mocked app has no per-run admin actions; they are given before the Admin menu is first rendered (its
-      // "can attach / can stop" flags are read then), with one run in the list, so all four admin bindings are walked.
-      admin.attachRun = vi.fn()
-      admin.stopRun = vi.fn()
-      ;(admin.runs as unknown as { value: unknown[] }).value = [{ run_id: 'run-9', state: 'running', scenario_id: 'sc1', owner_id: 'o' }]
-      real.accessToken = 'admin-token'
-      // The root binds a member-expression handler by value at render: it renders again (Details off and on) so the
-      // handlers given above are the ones bound - in the app they exist from the start.
-      toggle(host).click()
-      await nextTick()
-      toggle(host).click()
-      await nextTick()
-      const adminSummary = host.querySelector<HTMLElement>('summary[aria-label="Admin"]')
-      expect(adminSummary, 'Admin with an admin token').not.toBeNull()
-      host.querySelector<HTMLButtonElement>('button[aria-label="Refresh runs list"]')!.click()
-      expect(admin.getRuns).toHaveBeenCalledTimes(1)
-      host.querySelector<HTMLButtonElement>('button[aria-label="Stop all runs"]')!.click()
-      expect(admin.stopRuns, 'admin-stop-runs reaches admin.stopRuns').toHaveBeenCalledTimes(1)
-      host.querySelector<HTMLButtonElement>('button[aria-label="Attach to selected run"]')!.click()
-      expect(admin.attachRun, 'admin-attach-run reaches admin.attachRun with the run id').toHaveBeenCalledWith('run-9')
-      host.querySelector<HTMLButtonElement>('button[aria-label="Stop selected run"]')!.click()
-      expect(admin.stopRun, 'admin-stop-run reaches admin.stopRun with the run id').toHaveBeenCalledWith('run-9')
+      // 048 S2 (amendment 9): "Admin ▾" and its four bindings (runs, stop all, attach, stop one) are gone - nothing to walk.
 
       const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
       theme.value = 'hud'

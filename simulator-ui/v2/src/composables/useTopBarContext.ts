@@ -1,12 +1,12 @@
 import { inject, provide, type InjectionKey, type Ref } from 'vue'
 import type { RunStatus, ScenarioSummary } from '../api/simulatorTypes'
-import type { AdminRunSummary } from '../api/simulatorApi'
 import type { UiThemeId } from '../types/uiPrefs'
 import { isJwtLike } from '../utils/isJwtLike'
 
 /**
- * Who sees the administrator's controls (TopBar "Admin ▾"; 048 S1: also the analytics dock and the run files): an admin
- * token - not a participant JWT - on the server source. One rule for the top bar and the root that mounts the dock.
+ * Who sees the administrator's controls: an admin token - not a participant JWT - on the server source. 048 S2: the row
+ * of the own run and the payments badge of the top bar (amendment 8); "Admin ▾" is gone and the analytics dock is the
+ * developer's (`?debug=1`), so the top bar is the one reader.
  */
 export function isAdminViewer(accessToken: string | null | undefined, apiMode: 'fixtures' | 'real'): boolean {
   const t = String(accessToken ?? '').trim()
@@ -53,21 +53,8 @@ export type TopBarContext = {
     }>
   >
 
-  // admin
-  /** Current access token — used to determine if admin controls should be shown. */
+  /** The current access token: decides whether the administrator's controls are shown (`isAdminViewer`). */
   accessToken: Readonly<Ref<string | null | undefined>>
-  /** Admin: list of all runs (populated after adminGetRuns). */
-  adminRuns: Readonly<Ref<AdminRunSummary[] | null | undefined>>
-  /** Admin: true while loading all runs. */
-  adminRunsLoading: Readonly<Ref<boolean | undefined>>
-  /** Admin: last error from admin actions. */
-  adminLastError: Readonly<Ref<string | undefined>>
-
-  // admin capabilities (mirror previous optional callback-props existence)
-  adminCanGetRuns: Readonly<Ref<boolean>>
-  adminCanStopRuns: Readonly<Ref<boolean>>
-  adminCanAttachRun: Readonly<Ref<boolean>>
-  adminCanStopRun: Readonly<Ref<boolean>>
 }
 
 export const TOP_BAR_CONTEXT: InjectionKey<TopBarContext> = Symbol('TopBarContext')

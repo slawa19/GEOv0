@@ -202,7 +202,7 @@ CREATE INDEX IF NOT EXISTS idx_simulator_run_artifacts_created_at
   - исторические снапшоты
   - bundle.zip
 
-UI в браузере не «открывает папки», поэтому артефакты должны быть доступны как URL на скачивание.
+Артефакты отдаются как URL на скачивание (индекс `GET /api/v1/simulator/runs/{run_id}/artifacts`, файл — `…/artifacts/{name}`): их читают инструменты и ИИ; интерфейс демо файлов прогона не показывает с 048 S2 (2026-10-19), где лежат и что в них — `real-mode-runbook.md`, раздел 6.7.
 
 ## 4) Очистка
 - `in-memory` очищается TTL.

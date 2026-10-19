@@ -44,12 +44,12 @@ const TWO_LINE_LABELS: ReadonlySet<string> = new Set(['Кто доверяет']
 const FRAMES = process.env.P046_FRAMES === '1'
 const FRAMES_DIR = fileURLToPath(new URL('../../../.local-run/owner-review/2026-10-18-046-w2/', import.meta.url))
 
-async function open(page: Page, theme: Theme, lang: Lang, opts: { running?: boolean } = {}): Promise<void> {
+async function open(page: Page, theme: Theme, lang: Lang, opts: { running?: boolean; debug?: boolean } = {}): Promise<void> {
   // Two more lines alice -> x01 (no debt), alice -> x02 (debt 1.00): the edit row of a line WITH debt is measured too.
   await mockApp(page, { paymentRealBodies: [], extraTargets: 2, aliceLines: 2 })
   if (opts.running) await mockAnalytics(page)
   await page.setViewportSize({ width: 1366, height: 768 })
-  await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}&lang=${lang}`)
+  await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}&lang=${lang}${opts.debug ? '&debug=1' : ''}`)
   await ready(page, true)
   await expect(page.locator('html')).toHaveAttribute('lang', lang)
 }
@@ -302,10 +302,9 @@ test('046 W2 frames: the analytics panel and its bottlenecks, both themes and la
   for (const theme of THEMES) {
     for (const lang of LANGS) {
       await page.unrouteAll({ behavior: 'ignoreErrors' })
-      await open(page, theme, lang, { running: true })
+      // 048 S2 (amendment 10): the analytics toggle is in the service row with `?debug=1` ("Admin ▾" is gone).
+      await open(page, theme, lang, { running: true, debug: true })
       await page.locator('[data-testid="details-toggle"]').click()
-      // 048 S1 (decision 1): the analytics toggle is in "Admin ▾" (the dev build carries the admin token).
-      await page.locator('[data-testid="admin-summary"]').click()
       await page.locator('[data-testid="analytics-toggle"]').click()
       await expect(page.locator('.rmp')).toBeVisible()
       // Wait for the measurements and the bottlenecks to arrive (a frame of the loading state is still a frame).
@@ -321,19 +320,17 @@ test('046 W2 frames: a failed analytics request and a clearing refused on a stop
   test.skip(!FRAMES, 'frames are written on request only (P046_FRAMES=1)')
   for (const lang of LANGS) {
     await page.unrouteAll({ behavior: 'ignoreErrors' })
-    await open(page, 'saas', lang, { running: true })
+    await open(page, 'saas', lang, { running: true, debug: true }) // 048 S2: the analytics toggle is `?debug=1`'s
     await page.route(new RegExp(`/simulator/runs/${RUN_ID}/(metrics|bottlenecks)`, 'i'), (r) => r.fulfill({
       status: 500, contentType: 'text/plain', headers: { 'X-Request-ID': 'req-500-a' }, body: 'Internal Server Error' }))
     await page.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, (r) => r.fulfill({
       status: 409, contentType: 'application/json', headers: { 'X-Request-ID': 'req-409-c' },
       body: JSON.stringify({ code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }) }))
     await page.locator('[data-testid="details-toggle"]').click()
-    await page.locator('[data-testid="admin-summary"]').click() // 048 S1: the toggle is in "Admin ▾"
     await page.locator('[data-testid="analytics-toggle"]').click()
     await expect(page.locator('.rmp [data-state="error"]').first()).toBeVisible({ timeout: 10_000 })
     await frame(page, `saas-${lang}-9-analytics-error`)
     await page.locator('[data-testid="analytics-toggle"]').click()
-    await page.keyboard.press('Escape') // close "Admin ▾" before the action
     await page.locator('[data-testid="actionbar-clearing"]').click()
     await page.locator('[data-testid="clearing-confirm"]').click()
     await expect(page.locator('[data-testid="clearing-error"]')).toContainText(t('clearing.equivalentInactive', {}, lang))

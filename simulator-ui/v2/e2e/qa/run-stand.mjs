@@ -180,8 +180,15 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   (run 39149083576; 13.1 s in 39135012070); locally, side by side, the new test takes 0.40 of it (4.3-4.4 s
  *   against 10.8 s) - about 5.4 s in CI. Forecast of the step: 592 s on main (run 39154847251) - 43.0 s moved out
  *   (R3 med/high 18.81 + 18.98 s, menu-artifacts 2.61 + 2.61 s in its report) + 5.4 s = about 554 s.
+ * - 2026-10-19 (048 S2, amendment 9 - "Admin ▾" removed): gate 138 -> 134, full 232 -> 226. The matrix entry
+ *   `menu-admin` is gone with its surface: -2 in the gate (`matrix [saas|hud] menu-admin`, 2.64 and 2.60 s in the stand
+ *   report of CI run 39219089275, `main` at `1c0359e1`), -2 under `@extended` (its gallery frames); and the two tests of
+ *   `surfaces.qa.ts` that opened it: "menu-admin: when its focused control is disabled..." (0.84 s) and "menu-admin left
+ *   open, then a node card..." (4.04 s). `analytics-panel` opens the page with `?debug=1` and clicks the toggle in the
+ *   service row (no menu: a click less). Forecast from CI numbers only: the step took 555 s in that run (07:56:53 ->
+ *   08:06:08; 138 tests, 548.0 s summed in its report) - 10.1 s = about 545 s.
  */
-export const EXPECTED = { gate: 138, full: 232 }
+export const EXPECTED = { gate: 134, full: 226 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
