@@ -126,6 +126,9 @@ async def test_p047_an_unanswered_redis_set_fails_the_attempt_and_the_loop_goes_
     """`SET NX EX` never answers -> each attempt ends at the Redis call bound as `<reason>_timed_out`, our possibly
     landed token is deleted by a bounded compare-and-delete, and `_integrity_loop` runs its next attempt.
 
+    Since the merge with the 047 cadence rule (2026-10-19): a timed-out attempt is not a completed check, so the loop
+    retries it as the same `startup` attempt after `RETRY_FAST_SECONDS` (shortened here), not after the interval.
+
     The attempt deadline is set far above the test's own bound, so only the Redis bound can end the attempts.
     MUTATION: remove `call_timeout_seconds` from the integrity lock - the first `SET` hangs, the bound fails the test.
     """
@@ -135,7 +138,7 @@ async def test_p047_an_unanswered_redis_set_fails_the_attempt_and_the_loop_goes_
     _stand(monkeypatch, reconciliation=reconciled)
     monkeypatch.setattr(settings, "INTEGRITY_ATTEMPT_TIMEOUT_SECONDS", 600.0)
     monkeypatch.setattr(settings, "INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 1)  # the loop's own wait between attempts
+    monkeypatch.setattr(maintenance_jobs, "RETRY_FAST_SECONDS", 0.01)  # the loop's own wait before the retry
     app = _app(redis)
     events: list[str] = []
     original = maintenance_jobs._record_background_job_event
@@ -151,7 +154,7 @@ async def test_p047_an_unanswered_redis_set_fails_the_attempt_and_the_loop_goes_
         await maintenance_jobs._integrity_loop(app)
 
     assert len(redis.sets) == 2, f"the loop did not go on to a second attempt: {redis.sets}"
-    assert events == ["startup_timed_out", "periodic_timed_out"], events
+    assert events == ["startup_timed_out", "startup_timed_out"], events
     assert [token for _key, token in redis.evals] == redis.sets, "a SET past its bound was not followed by its delete"
     assert app.state.background_jobs["integrity"]["status"] == "failed"
     assert reconciled.await_count == 0, "no check ran without the lock, yet nothing may read as checked"

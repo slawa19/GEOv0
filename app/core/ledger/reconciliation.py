@@ -1055,20 +1055,24 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
     * Within one process the runs are strictly sequential: `_integrity_loop` (`app/core/maintenance_jobs.py`)
       awaits the startup run and then each periodic run before scheduling the next, and it is started once
       (`_start_configured_background_tasks`). A task that dies is recorded (`_on_background_task_done` in
-      `app/utils/background_jobs.py`), not restarted concurrently.
+      `app/utils/background_jobs.py`), not restarted concurrently. The operator's `scripts/reconcile_debts.py`
+      (047 `T4702`) is a second process on the same database and takes no lock: a run of it that overlaps a
+      scheduled run is the case described here, accepted at a daily cadence (spec 047, decision B, item 3).
     * No launcher, compose file or Dockerfile starts more than one worker (no `--workers`,
       `WEB_CONCURRENCY` or gunicorn anywhere in them). Overlap needs two or more processes on one
       database WITHOUT Redis, which is not a configured deployment. With Redis the integrity loop's
       distributed lock serialises the runs; without it that lock is a no-op
       (`app/utils/distributed_lock.py`).
     * The damage is bounded, and the bound is the interval PLUS a run's duration, not the interval:
-      `_integrity_loop` waits `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS` (300 s by default) after the
+      `_integrity_loop` waits `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS` (86400 s by default since 047; 300 s
+      when this was decided) after the
       previous run COMPLETES, and the next run then takes as long as the checkpoints and this verifier
       over every equivalent take. A stale verdict is replaced when that next run publishes, because the
       persisting state recomputes a different fingerprint from the stale one and is stored as a
       transition; and step 5c re-verifies in one snapshot before it holds anything.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
-      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/core/maintenance_jobs.py`) and never
+      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default 300 s since 047 - `max(30, interval)` before -,
+      `app/core/maintenance_jobs.py`) and never
       extends it, so a run longer than the TTL could overlap a second Redis-backed process. Acceptable
       for the single-worker v0.1 deployment; a renewable lease is registered as a follow-up and is not
       built here.
@@ -1418,8 +1422,9 @@ async def run_scheduled_reconciliation(
 ) -> dict[str, Any]:
     """Verify every equivalent in its own fresh session and transaction, persisting each result.
 
-    Called only from the scheduled integrity loop, after the checkpoints have committed
-    (`_run_debt_reconciliation_once` in `app/core/maintenance_jobs.py`). Inactive equivalents are verified too:
+    Called from the scheduled integrity loop, after the checkpoints have committed
+    (`_run_debt_reconciliation_once` in `app/core/maintenance_jobs.py`), and - since 047 `T4702` - by the operator's
+    `scripts/reconcile_debts.py`, one equivalent per call, without the checkpoints. Inactive equivalents are verified too:
     reading is not moving money, and a held equivalent keeps being verified - a later `PASSED` is what permits an admin to clear it.
 
     A failure while verifying ONE equivalent is logged as an error and leaves NO result row for it -

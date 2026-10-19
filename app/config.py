@@ -316,11 +316,21 @@ class Settings(BaseSettings):
     CLEARING_PERIODIC_ENABLED: bool = False
     CLEARING_PERIODIC_INTERVAL_SECONDS: int = 300
 
-    # Integrity checkpoints
+    # Integrity checkpoints and the debt reconciliation after them (`app/core/maintenance_jobs.py`). The loop runs
+    # once at process start and then every interval after the previous run completes.
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
-    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300
+    # 2026-10-18, programme 047 `T4701`, owner decision «B»: once a day, was 300 s. No class of discrepancy is caught
+    # by the periodic run that one run does not catch (047 F-047-3); each run reads the equivalent's whole history
+    # (044 stage 2: ~6.5 KB of memory per operation). An operator who touched the database runs
+    # `scripts/reconcile_debts.py` instead of waiting (`docs/ru/runbook-integrity-hold.md` §3). The freshness policy
+    # of a stored result follows this value (`result_freshness_threshold`, 2 x interval + 5 min). A deployment may set
+    # another value (an explicit 0 means 300 s, as before 047); `INTEGRITY_CHECKPOINT_ENABLED=false` would also drop
+    # the start-up run.
+    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 86400
     # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
-    # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
+    # 0 = auto: 300 s, independent of the interval since the 047 fix-delta (2026-10-18; it was max(30, interval), a day
+    # at the daily default, and a killed run's lock then silenced the replacement's start-up run for a day).
+    # `INTEGRITY_LOCK_TTL_DEFAULT_SECONDS` in `app/core/maintenance_jobs.py` holds the value and its limitation.
     INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
     # 047 class-1 fix, 2026-10-18 (Codex §15 static review): an integrity attempt that blocks must END, as a failed
     # attempt, not hang - a hung attempt stopped detection with the job still `running` while money moved.
@@ -420,6 +430,13 @@ class Settings(BaseSettings):
             return int(text)
         except ValueError:
             return cls.model_fields[info.field_name].default
+
+    @field_validator("INTEGRITY_CHECKPOINT_INTERVAL_SECONDS")
+    @classmethod
+    def _integrity_interval(cls, value: int) -> int:
+        """047 (2026-10-18, Codex §15 P3): not positive -> 300 s, the meaning an explicit 0 already had (`or 300` in its
+        readers). A negative interval was the loop's wait as is - runs back to back, the stop unheard in that wait."""
+        return value if value > 0 else 300
 
     @field_validator("SIMULATOR_ACTIONS_ENABLE", mode="before")
     @classmethod
