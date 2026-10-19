@@ -161,3 +161,10 @@
   - **Тесты:** тест «the catalogue refresh in Admin emits refresh-scenarios…» заменён — его контракт удалён. Новый: «no refresh of the scenario catalogue anywhere: Admin's tools row holds the analytics toggle alone»; в ряду сценария, кроме Start, кнопок нет. Красное до (на `fb818563`): `expected [ 'analytics-toggle', 'scenarios-refresh' ] to deeply equal [ 'analytics-toggle' ]`. Из `TopBar.wiring.test.ts` и проводки корня событие ушло. В e2e админа ряд инструментов — одна кнопка.
   - **Документы:** `real-mode-runbook.md` и `api-examples.md` (после загрузки сценария — перезагрузить страницу), `hud-user-guide.md` §3.3, `simulator-ui/v2/README.md`; решение 5 этой спеки поправлено датированно. Таблица слов §G («Обновить каталог») для 046 больше не нужна в этой части.
   - **Кадры:** `*-5-admin-menu-open` и `*-5a-admin-menu-files-not-read` пересняты в обеих темах.
+- **2026-10-19 — S1: гейты круга (кнопка «Inspect graph», ↻ из UI, слияние `main` после 047) на `d4449dfb`** (Windows, локально; `d4449dfb` — проверка размещения ждёт ряд условием, а не `waitForTimeout`: страж стенда `test_p038_qa_stand_gate.py` отказал на первой версии, единственный красный прогон тира инструментов в этом круге). Результаты:
+  - `verify_local -TaskSlug p048_s1 -UiOnly` 0 (Simulator UI 190 / 2161, Admin UI 60 / 446);
+  - полный `test:e2e` 0 — 173 собрано, 170 passed, 3 skipped (кадры 046 W2 только с `P046_FRAMES=1`); в нём `scenes` 5/5 против текущих эталонов (не регенерировались). Предыдущий прогон шёл параллельно с тиром инструментов: один тест `p045-s3-inspectors` не дождался `data-ready` за 20 с; отдельно файл — 24 passed, весь набор повторён последовательно;
+  - `test:e2e:smoke` 0, 1 passed;
+  - гейт стенда 0 — «ran 138 (as expected 138, failed 0, flaky 0), recorded 138», 467 с локально (не прогноз; прогноз CI ≈ 557 с — запись выше);
+  - `-ToolingOnly -ToolingPartition all` 0, 710 passed;
+  - `git diff --check` чист.
