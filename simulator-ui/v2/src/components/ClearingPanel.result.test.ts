@@ -6,6 +6,7 @@
  * from -> to - "Alice → Bob: debt reduced by X" (was "Bob’s debt to Alice reduced by X"; round 1 had "Bob → Alice", the
  * advisor's premise "as the line window's title" corrected the same day: that title is from -> to).
  */
+import type { ShownError } from '../utils/errorMessage'
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -189,16 +190,19 @@ describe('the states that are not a success', () => {
 describe('037 C fix-delta: honest states that do not depend on a toast', () => {
   it('a finished refusal keeps its text and a working Close after the transient error is gone', async () => {
     const { host, state, calls } = mount({ last: null, error: null })
-    ;(state as unknown as { clearingFailure: string | null }).clearingFailure = 'Clearing refused: the step is too small. (request abc)'
+    // 048 S3: the failure is the shown form - the sentence and, apart from it, the request id (no longer glued in).
+    ;(state as unknown as { clearingFailure: ShownError | null }).clearingFailure = { text: 'Clearing refused: the step is too small.', ref: 'abc', detail: null }
     await settle()
-    expect(text(host, 'clearing-error')).toContain('request abc')
+    expect(text(host, 'clearing-error')).toContain('Clearing refused: the step is too small.')
+    expect(q(host, 'clearing-error')!.getAttribute('data-request-id')).toBe('abc')
     expect(q(host, 'clearing-running')).toBeNull()
 
-    state.error = 'Clearing refused: the step is too small. (request abc)'
+    state.error = 'Clearing refused: the step is too small.'
     await settle()
-    state.error = null // the error toast expired and the application cleared it
+    state.error = null // the next step of a flow cleared it (048 S3: there is no error toast any more)
     await settle()
-    expect(text(host, 'clearing-error')).toContain('request abc')
+    expect(text(host, 'clearing-error')).toContain('Clearing refused: the step is too small.')
+    expect(q(host, 'clearing-error')!.getAttribute('data-request-id')).toBe('abc')
     const close = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as HTMLButtonElement
     expect(close.disabled).toBe(false)
     close.click()

@@ -3,6 +3,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { GraphSnapshot } from '../../types'
 import { t } from '../../i18n/t'
 import { actionErrorText } from '../../utils/paymentRefusalText'
+import { requestIdOf } from '../../utils/errorMessage'
 import { subMoney } from '../../utils/money'
 import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
@@ -13,8 +14,9 @@ import { canonicalEquivalent, sameEquivalent } from '../../config/equivalents'
 // Register 271: an `InteractActionError` is a plain object, not an `Error` - read its `message` too.
 // 046 wave 2: a coded answer is told by its code in the language of the interface (`actionErrorText`), not by the server's
 // English message; a failure without a code keeps its own text.
+// 048 S3 (§15 Codex P2): the text only - the request id is kept apart by the caller that shows it (`trustlinesLastErrorId`).
 function getErrorMessage(error: unknown, fallback: string): string {
-  return (error == null ? '' : actionErrorText(error).trim()) || fallback
+  return (error == null ? '' : actionErrorText(error).text.trim()) || fallback
 }
 
 export type PaymentTargetDetail = { hops: number; max_available: string | null }
@@ -122,6 +124,8 @@ export function useInteractDataCache(opts: {
   const trustlinesLoadingRef = ref(false)
 
   const trustlinesLastErrorRef = ref<string | null>(null)
+  /** 048 S3 (§15 Codex P2): the request id of that failure (AGENTS.md section 12), written and cleared with it. */
+  const trustlinesLastErrorId = ref<string | null>(null)
 
   /**
    * Ответ источника ДЛЯ ТЕКУЩЕГО контекста (run + equivalent), без снапшотного фоллбэка.
@@ -159,7 +163,7 @@ export function useInteractDataCache(opts: {
     if (answeredTrustlines.value != null) return { kind: 'answered' }
     if (trustlinesLoadingRef.value) return { kind: 'loading' }
     const message = trustlinesLastErrorRef.value
-    if (message) return { kind: 'failed', message }
+    if (message) return { kind: 'failed', message, ...(trustlinesLastErrorId.value ? { ref: trustlinesLastErrorId.value } : {}) }
     return { kind: 'never-asked' }
   })
 
@@ -254,6 +258,7 @@ export function useInteractDataCache(opts: {
         fetchedTrustlinesRunId.value = runId
         trustlinesFetchedAtMs = now
         trustlinesLastErrorRef.value = null
+        trustlinesLastErrorId.value = null
       }
     } catch (error) {
       if (
@@ -264,6 +269,7 @@ export function useInteractDataCache(opts: {
         return
       // Best-effort: fall back on snapshot-derived trustlines.
       // Keep a lightweight error signal for UI hints/debugging.
+      trustlinesLastErrorId.value = requestIdOf(error)
       trustlinesLastErrorRef.value = getErrorMessage(error, t('trustlineSource.trustlinesFailed'))
     } finally {
       if (
@@ -480,6 +486,7 @@ export function useInteractDataCache(opts: {
       trustlinesFetchedAtMs = 0
       trustlinesLoadingRef.value = false
       trustlinesLastErrorRef.value = null
+      trustlinesLastErrorId.value = null
       snapshotTrustlines.value = []
       void refreshTrustlines()
     },

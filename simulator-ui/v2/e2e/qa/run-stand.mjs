@@ -187,6 +187,20 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   open, then a node card..." (4.04 s). `analytics-panel` opens the page with `?debug=1` and clicks the toggle in the
  *   service row (no menu: a click less). Forecast from CI numbers only: the step took 555 s in that run (07:56:53 ->
  *   08:06:08; 138 tests, 548.0 s summed in its report) - 10.1 s = about 545 s.
+ * - 2026-10-19 (048 S3, decision 3 - one form of the viewer's error): gate 134 -> 132, full 226 -> 220 (corrected the
+ *   same day: this line said 222 - the full scope was not run, and `--list` shows the entry had four `@extended` tests, its
+ *   resize and its frame-and-axe test in each theme, not two). The window error
+ *   toast is gone (a window's failure is the window's own block), and the matrix entry `toast-error` with it: -2 in the
+ *   gate (`matrix [saas|hud] toast-error`, 4.99 and 5.08 s in the stand report of CI run 39256014175, `main` at
+ *   `57505f12`), -4 under `@extended`. Forecast from CI numbers only: the step took 546 s in that run
+ *   (12:58:44 -> 13:07:50; 134 tests, 539.2 s summed in its report) - 10.1 s = about 536 s.
+ * - 2026-10-19 (048 S3, §15 Codex: STAND-RECIPES WEAK - no recipe opened a window holding a refusal any more): gate
+ *   132 -> 134, full 220 -> 226 (counted with `playwright test --list`: 134 without `@extended`, 226 in all). The matrix
+ *   entry `clearing-refused` - the clearing window with its error block (a refused answer with a request id) - +2 in the
+ *   gate (`matrix [saas|hud] clearing-refused`: catalogue, viewport, targets, frame, axe, `inside`), +4 under `@extended`
+ *   (its resize and its frame-and-axe test in each theme). Cost from CI numbers only: the removed
+ *   `toast-error`, the same gesture (a clearing the backend refuses) with the same checks, took 4.99 and 5.08 s in CI run
+ *   39256014175; forecast of the step: about 536 + 10.1 = about 546 s, as on `main` (546 s in that run).
  * - 2026-10-19 (039 slice D, "was -> now" of the total debt): gate 134 -> 136, full 226 -> 228. One new file,
  *   `debt-before-after.qa.ts`, two tests in the gate (`[ru]`, `[en]`): a payment and a clearing written in one call
  *   state "was 55.00 -> now 25.00", a status frame keeps the pair, a clearing that changes nothing drops it, the next
@@ -201,6 +215,8 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-19 (039 slice D, advisor's decision (a) and §15 Codex): count unchanged. `debt-before-after.qa.ts` now holds
  *   that only a clearing states "was -> now" (a payment before it states nothing, a payment after it leaves the pair),
  *   and that "now" is seen as well as "was" (R7 held both; the first form of the file only "was").
+ * - 2026-10-19 (merge of 039 D into 048 S3, orchestrator): gate 137, full 229 - 039 D +3 gate / +3 full on 134 / 226,
+ *   048 S3 net 0 (toast-error -2/-6, clearing-refused +2/+6); last CI with 137 tests: 569 s (run 39269368139).
  */
 export const EXPECTED = { gate: 137, full: 229 }
 

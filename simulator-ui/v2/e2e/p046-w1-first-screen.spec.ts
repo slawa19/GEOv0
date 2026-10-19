@@ -192,7 +192,8 @@ for (const theme of THEMES) {
       await expect(line).toContainText(tn('runStart.limitAll', 10, undefined, lang))
       const retry = line.locator('[data-testid="start-retry"]')
       await expect(retry).toHaveText(t('topBar.retry', undefined, lang))
-      await expect(line.locator('.ds-label')).toHaveText(t('topBar.errorLabel', undefined, lang))
+      // 048 S3 (decision 3): no «Ошибка» / «Error» word before the sentence - the label is gone, not hidden.
+      await expect(line.locator('.ds-label')).toHaveCount(0)
       expect(creates).toBe(1)
       await frame(page, `${theme}-${lang}-3-limit-retry`)
       // §15 Codex P2: the refusal on screen follows a language switch - its text and title - and keeps its "Try again".

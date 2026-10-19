@@ -29,7 +29,8 @@ import { t } from '../../i18n/t'
 export type TrustlinesFetchState =
   | { kind: 'never-asked' }
   | { kind: 'loading' }
-  | { kind: 'failed'; message: string }
+  /** 048 S3 (§15 Codex P2, AGENTS.md section 12): `ref` - the request id of the failed answer, shown apart from the text. */
+  | { kind: 'failed'; message: string; ref?: string | null }
   /** Источник ответил для текущих (run, equivalent). Пустой ответ — тоже ответ. */
   | { kind: 'answered' }
 
@@ -78,7 +79,7 @@ export type TrustlineFiguresSource =
   | { kind: 'frozen' }
   | { kind: 'never-asked'; frozen?: true }
   | { kind: 'loading'; frozen?: true }
-  | { kind: 'failed'; message: string; frozen?: true }
+  | { kind: 'failed'; message: string; ref?: string | null; frozen?: true }
 
 /** Виды, которые означают ОТВЕТ источника (вопрос А). Набор назван ровно один раз — здесь. */
 export type AnsweredTrustlineFiguresSource = Extract<
@@ -167,7 +168,7 @@ export function freezeTrustlineFiguresSource(
     case 'loading':
       return { kind: 'loading', frozen: true }
     case 'failed':
-      return { kind: 'failed', message: frozen.message, frozen: true }
+      return { kind: 'failed', message: frozen.message, ...(frozen.ref ? { ref: frozen.ref } : {}), frozen: true }
   }
 }
 
@@ -213,6 +214,15 @@ export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | u
     case 'failed':
       return t('trustlineSource.failed', { message: resolved.message }, locale)
   }
+}
+
+/**
+ * 048 S3 (§15 Codex P2, AGENTS.md section 12): the request id behind the notice of a FAILED source - shown as the notice's
+ * own line and `data-request-id`, never glued into its text. Null for every other notice (and a failure without an id).
+ */
+export function trustlineFiguresNoticeRef(source: TrustlineFiguresSource | null | undefined): string | null {
+  if (trustlineSourceAnswered(source ?? null)) return null
+  return source?.kind === 'failed' && source.ref ? source.ref : null
 }
 
 /**

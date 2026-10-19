@@ -586,9 +586,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('#mp-amount').fill('1.00')
     await page.locator('[data-testid="manual-payment-confirm"]').click()
 
-    // Success toast visible; no ErrorToast with NO_ROUTE.
+    // Success toast visible; no NO_ROUTE failure (048 S3: a window's failure is its own block - the error toast is gone).
     await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
-    await expect(page.getByTestId('error-toast')).toBeHidden()
+    await expect(page.getByTestId('manual-payment-error')).toHaveCount(0)
     await expect(page.getByTestId('success-toast')).not.toContainText('NO_ROUTE')
   })
 
@@ -715,10 +715,11 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
   // 026 (owner В1, `T2603.2`): the reverse debt belongs to the other line and neither blocks Close nor is
   // announced, and the backend no longer refuses a close over debt (the pre-026 `TL_CLOSE_CONFLICT` 409 this
   // scenario mocked is gone). What stays reachable and worth proving at the UI is a backend refusal of Close
-  // reaching the ErrorToast - here the line was closed elsewhere first (`TRUSTLINE_NOT_FOUND`, simulator.py).
+  // reaching the screen - here the line was closed elsewhere first (`TRUSTLINE_NOT_FOUND`, simulator.py). 048 S3: it
+  // reaches the trust line window's own error block (the error toast that duplicated it is gone).
   // The list answers with a row: since 013 the panel will not offer Close without figures for the line, which is
   // why the old "list fails, panel falls back to the snapshot" setup left the button disabled.
-  test('E-5: TL close -> backend refuses (404 TRUSTLINE_NOT_FOUND) -> ErrorToast; reverse debt does not block Close', async ({ page }) => {
+  test('E-5: TL close -> backend refuses (404 TRUSTLINE_NOT_FOUND) -> the window error block; reverse debt does not block Close', async ({ page }) => {
     const participants: Participant[] = [
       { pid: 'alice', name: 'Alice' },
       { pid: 'bob', name: 'Bob' },
@@ -774,8 +775,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await closeBtn.click()
     await closeBtn.click()
 
-    await expect(page.getByTestId('error-toast')).toBeVisible()
-    await expect(page.getByTestId('error-toast')).toContainText('Trustline not found')
+    await expect(page.getByTestId('trustline-error')).toBeVisible()
+    await expect(page.getByTestId('trustline-error')).toContainText('Trustline not found')
+    expect(await page.getByTestId('error-toast').count()).toBe(0) // at once: `toHaveCount(0)` would retry until a toast expired
   })
 })
 

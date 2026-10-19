@@ -11,6 +11,8 @@
  * `useSimulatorApp.unknownRunStatus.test.ts`. Cases marked CONTRACT pin what stays by design.
  *
  * Not judged here: how the error is worded or drawn (the existing error surface shows `state.error` as is).
+ * 048 S3: WHICH failure is on screen is read from the value's technical detail (`runErrorLineLog`): the drawn text is
+ * the sentence of the failure's kind since then (the transport's «HTTP 503 … /graph/preview» is the title, not the line).
  */
 import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,6 +23,7 @@ import { connectSse } from '../api/sse'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
 import { t } from '../i18n/t'
+import { runErrorLineLog } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -142,7 +145,7 @@ describe('F-034-D2: a failed scenario preview', () => {
     await settle()
 
     expect(app.state.snapshot, 'a failed preview became a loaded empty network').toBeNull()
-    expect(app.state.error).toContain('HTTP 503')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('HTTP 503')
   })
 
   it('on a refresh of the shown preview: the shown scene stays and the error is shown', async () => {
@@ -156,7 +159,7 @@ describe('F-034-D2: a failed scenario preview', () => {
     await settle()
 
     expect(ids(app), 'the shown preview was replaced by an empty network').toEqual(['PREVIEW_NODE'])
-    expect(app.state.error).toContain('Failed to fetch')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('Failed to fetch')
   })
 
   it('a preview that answers 404 (the scenario is gone) is an error on screen too, and it is not cleared', async () => {
@@ -170,8 +173,11 @@ describe('F-034-D2: a failed scenario preview', () => {
     await settle()
 
     expect(ids(app), 'the shown preview was replaced by an empty network').toEqual(['PREVIEW_NODE'])
-    expect(app.state.error, 'the preview error was wiped as if it were a stale run').toContain('HTTP 404')
-    expect(app.real.lastError).toContain('HTTP 404')
+    expect(runErrorLineLog(app.state.errorLine), 'the preview error was wiped as if it were a stale run').toContain('HTTP 404')
+    // 048 S3: the scene failure's one place is the overlay (`state.error`); the run's line carries no copy of it.
+    expect(runErrorLineLog(app.real.lastErrorLine) ?? '').not.toContain('/graph/preview')
+    // Adversarial pass F7: a copy written back as plain text nulls the line's value (the sync watcher) - so the text too.
+    expect(app.real.lastError, 'the scene error is not copied as text either').not.toBe(app.state.error)
   })
 })
 
@@ -230,7 +236,7 @@ describe('F-034-D2, narrowed: a failed snapshot of a live run (behaviour from be
     await settle()
 
     expect(ids(app), 'the shown scene was replaced by an empty network').toEqual(['R_NODE'])
-    expect(app.state.error).toContain('/graph/preview')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('/graph/preview')
   })
 
   it('CONTRACT: a 404 means the run is gone - it is reset and the preview of the scenario is the scene', async () => {
@@ -298,7 +304,7 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
 
     expect(sceneOfA.nodes[0]?.net_balance, 'an event of run B patched the graph of run A').toBeUndefined()
     expect(app.state.snapshot, 'the scene of run A stayed on screen while the page follows run B').toBeNull()
-    expect(app.state.error).toContain('HTTP 503')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('HTTP 503')
   })
 
   it('a switch of the equivalent whose load fails: the graph of the old equivalent is not left under the new selector', async () => {
@@ -312,7 +318,7 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
     await settle()
 
     expect(app.state.snapshot, 'the UAH graph is shown while EUR is selected').toBeNull()
-    expect(app.state.error).toContain('HTTP 503')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('HTTP 503')
   })
 
   it('a choice of another scenario whose preview fails: the graph of the old scenario is not left on screen', async () => {
@@ -326,7 +332,7 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
     await settle()
 
     expect(app.state.snapshot).toBeNull()
-    expect(app.state.error).toContain('HTTP 503')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('HTTP 503')
   })
 })
 
@@ -334,34 +340,41 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
  * External review of 034 S8, C2: the error the top HUD shows for a failed scene load (`real.lastError`, a copy of
  * `state.error`) goes away when that load recovers - and only that error: what the HUD showed before it (a run's
  * own `last_error`) comes back.
+ *
+ * 048 S3 (decision 3, «одна форма ошибки»), rewritten - not removed: the HUD copy is gone - a scene failure has ONE place,
+ * the overlay over the canvas (`state.error`). What these tests held - "the run's own failure is on the line again after
+ * the scene recovers" - now holds THROUGHOUT: the scene failure never takes the line. Red if the copy comes back.
  */
-describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
+describe('F-034-D2, review C2 -> 048 S3: a scene error is not copied to the run line; the line keeps the run\'s own', () => {
   // 043 S2: "without a run" at opening now means the opening's own start was refused (decision 2: opening starts one);
-  // that refusal is what the HUD shows before the scene error, and what it must show again after the scene recovers.
-  it('without a run: the preview fails, then loads - the scene error is gone from the HUD, what it displaced is back', async () => {
+  // that refusal is what the HUD shows before the scene error, and what it must show while and after the scene fails.
+  it('without a run: the preview fails, then loads - the refused start stays on the line throughout; the scene error is the overlay\'s', async () => {
     withoutRun()
     vi.mocked(createRun).mockRejectedValue(HTTP(503, '/simulator/runs'))
     const app = boot()
     await settle()
     expect(app.real.runId, 'precondition: no run').toBeNull()
-    const before = app.real.lastError
+    // 048 S3: both failures are 503 - the same sentence; WHICH one is on the line is its detail (not vacuous by text).
+    const before = runErrorLineLog(app.real.lastErrorLine)
     expect(before, 'precondition: the HUD shows the refused start').toContain('/simulator/runs')
     vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
     await app.realActions.refreshSnapshot()
     await settle()
-    expect(app.real.lastError, 'precondition: the HUD shows the scene error').toContain('/graph/preview')
+    expect(runErrorLineLog(app.state.errorLine), 'the scene error is shown - in its own place').toContain('/graph/preview')
+    expect(runErrorLineLog(app.real.lastErrorLine), 'not copied to the run line: the refused start stays').toBe(before)
 
     await app.realActions.refreshSnapshot()
     await settle()
 
     expect(app.state.error).toBe('')
-    expect(app.real.lastError, 'the scene recovered, the HUD still shows its error').toBe(before)
+    expect(runErrorLineLog(app.real.lastErrorLine), 'the scene recovered, the line still shows the refused start').toBe(before)
+    expect(app.real.lastError).toBe(t('failure.serverFailed'))
   })
 
   // 043 S2: a run found ENDED at opening is replaced by a live one (decision 2), so the run here stops with an error
   // AFTER the opening - the opening attaches to it while it runs, and a later read of its status (Admin -> Attach to the
   // same run) finds it stopped with an error.
-  it('a run stopped with an error: its own error is back in the HUD after the scene error is gone', async () => {
+  it('a run stopped with an error: its own error stays on the line while the scene fails and after', async () => {
     let stopped = false
     vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => (stopped ? {
       ...RUN_STATUS(runId),
@@ -380,7 +393,8 @@ describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
     vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
     await app.realActions.refreshSnapshot()
     await settle()
-    expect(app.real.lastError).toContain('HTTP 503')
+    expect(runErrorLineLog(app.state.errorLine), 'the scene error is shown - in its own place').toContain('HTTP 503')
+    expect(app.real.lastError, 'not copied to the run line').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
 
     await app.realActions.refreshSnapshot()
     await settle()

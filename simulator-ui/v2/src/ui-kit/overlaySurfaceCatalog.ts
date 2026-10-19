@@ -122,7 +122,6 @@ export type OverlaySurfaceKey =
   | 'bottom-hud-stack'
   | 'hud-dropdown'
   | 'success-toast'
-  | 'error-toast'
   | 'interact-history-overlay'
   | 'dev-perf-overlay'
   | 'edge-tooltip'
@@ -227,20 +226,6 @@ export const overlaySurfaceCatalog = {
       role: 'status',
       ariaLive: 'polite',
       ariaLabel: 'Success notification',
-    },
-  },
-  'error-toast': {
-    key: 'error-toast',
-    family: 'notification-toast',
-    sizingMode: 'intrinsic',
-    positioningOwner: 'bottom-stack-offset',
-    widthOwner: 'toast-clamp-tokens',
-    heightOwner: 'content',
-    zLayerToken: '--ds-z-alert',
-    a11y: {
-      role: 'alert',
-      ariaLive: 'assertive',
-      ariaLabel: 'Error notification',
     },
   },
   'interact-history-overlay': {

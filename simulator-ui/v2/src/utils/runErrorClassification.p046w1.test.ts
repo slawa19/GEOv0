@@ -110,10 +110,12 @@ describe('046 wave 1 (§15 Codex) - every line of the run error line is a value 
       expect(ru, JSON.stringify(line)).toMatch(/[Ѐ-ӿ]/)
     }
     expect(renderRunErrorLine(startRunErrorLine(limit({ max_active_runs: 4 }))!, 'ru')).toBe('Сейчас заняты все 4 места: демо смотрят 4 человека. Попробуйте через минуту.')
-    // Counter-check: the server's own `CODE: message` is a raw line - the same text in both languages.
-    const raw = runErrorLine({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' })
-    expect(raw).toEqual({ kind: 'raw', text: 'PAYMENT_TIMEOUT: timed out' })
-    expect(renderRunErrorLine(raw, 'ru')).toBe(renderRunErrorLine(raw, 'en'))
+    // 048 S3 (decision 3), rewritten: the code of a run that goes on is no longer a raw `CODE: message` line (English prose
+    // on a Russian screen) - a sentence of the language with the code; the server's text is the detail (title, console).
+    const running = runErrorLine({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' })
+    expect(running).toEqual({ kind: 'code', key: 'runLine.runningError', code: 'PAYMENT_TIMEOUT', detail: 'PAYMENT_TIMEOUT: timed out' })
+    expect(renderRunErrorLine(running, 'ru')).toMatch(/[Ѐ-ӿ]/)
+    expect(renderRunErrorLine(running, 'en')).not.toContain('timed out')
   })
 
   it('writeRunErrorLine writes the text of the language, then the value', () => {
@@ -159,11 +161,13 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
     expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })
   })
 
-  it('counter-checks: the idle stop keeps its line; the administrator\'s own Stop writes none; a live run keeps CODE: message', () => {
+  // 048 S3: "a live run keeps CODE: message" became "a live run's code is a sentence with the code" (decision 3).
+  it('counter-checks: the idle stop keeps its line; the administrator\'s own Stop writes none; a live run keeps its code', () => {
     expect(runStatusErrorLine(status('stopped', 'idle_no_subscribers'), always)).toEqual({ kind: 'dict', key: 'runLine.idleStopped' })
     expect(runStatusErrorLine(status('stopped', 'user_stop'), always), 'Stop of this screen: Start is beside it').toBeNull()
     expect(runStatusErrorLine(status('running', 'admin_stop'), always), 'the reason of a run that is not stopped says nothing').toBeNull()
-    expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always)).toEqual(rawRunErrorLine('INTERNAL_ERROR: boom'))
+    expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always))
+      .toEqual({ kind: 'code', key: 'runLine.runningError', code: 'INTERNAL_ERROR', detail: 'INTERNAL_ERROR: boom' })
   })
 })
 

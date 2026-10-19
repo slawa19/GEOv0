@@ -190,15 +190,16 @@ describe('F-037-2 (UI): "send the same payment again" is advice that needs a key
 
   it('REPRODUCER (red now): with no key in play the busy refusal does not tell the user to repeat the payment', () => {
     // Today the UI never sends a key, so this is the only situation there is: a repeat is a SECOND payment.
-    const en = paymentRefusalText(busy, 'UAH', 'en')
-    const ru = paymentRefusalText(busy, 'UAH', 'ru')
+    // 048 S3: the functions return the shown form; the sentence is `.text`.
+    const en = paymentRefusalText(busy, 'UAH', 'en').text
+    const ru = paymentRefusalText(busy, 'UAH', 'ru').text
     expect(en, 'F-037-2 (en): advises a repeat that creates a second payment').not.toMatch(/again|retry|repeat/i)
     expect(ru, 'F-037-2 (ru): advises a repeat that creates a second payment').not.toMatch(/ещё раз|повтор/i)
   })
 
   it('CONTROL (green now): the busy refusal is still recognised and worded (the reader is not vacuous)', () => {
-    const en = paymentRefusalText(busy, 'UAH', 'en')
+    const en = paymentRefusalText(busy, 'UAH', 'en').text
     expect(en).toMatch(/busy/i)
-    expect(paymentRefusalText({ ...busy, details: { reason: 'timeout' } }, 'UAH', 'en')).toMatch(/timed out/i)
+    expect(paymentRefusalText({ ...busy, details: { reason: 'timeout' } }, 'UAH', 'en').text).toMatch(/timed out/i)
   })
 })

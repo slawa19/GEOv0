@@ -67,7 +67,7 @@
 | ~~`menu-admin`~~ — снята 048 S2 (2026-10-19) вместе с меню «Admin ▾» (`menu-artifacts` снята 048 S1). Экземпляров типа `hud-dropdown` не осталось: ключ — в `EXCLUDED_FROM_MATRIX` с причиной и датой; новое меню снова требует записи (скан экземпляров сообщает о меню без записи) | `hud-dropdown` | — | — |
 | `top-bar-interact`, `top-bar-auto-run`, `graph-navigator` | `top-hud-stack` | на экране всегда; навигатор — клик «Inspect graph» | внутри viewport |
 | `bottom-bar` | `bottom-hud-stack` | на экране всегда | внутри viewport |
-| `toast-success`, `toast-error` | `success-toast`, `error-toast` | клиринг с циклом; клиринг с отказом бэкенда | внутри viewport; Escape, фокус и клик вне не применяются |
+| `toast-success` | `success-toast` | клиринг с циклом | внутри viewport; Escape, фокус и клик вне не применяются (тоста ошибки нет с 048 S3: ошибка окна — блок самого окна) |
 | `interact-history` | `interact-history-overlay` | после первого выполненного действия | внутри viewport |
 | `edge-tooltip` | `edge-tooltip` | клик по узлу, затем наведение на его линию | внутри viewport |
 | `analytics-panel` | `real-metrics-panel` | адрес с `?debug=1`, кнопка «Analytics» в служебном ряду верхней панели (048 S2; в 048 S1 — в «Admin ▾») | внутри viewport |

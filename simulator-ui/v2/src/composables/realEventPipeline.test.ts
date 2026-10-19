@@ -496,7 +496,8 @@ describe('031 item 17: the tick step refusal reaches the run error line', () => 
     expect(apply(statusWith({ code: 'CLEARING_REFUSED', message: 'server hint', at: TS })))
       .toBe('Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.')
     expect(apply(statusWith({ code: 'CLEARING_ERROR', message: 'Internal error', at: TS }))).toBe('')
-    expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe('INTERNAL_ERROR: boom')
+    // 048 S3 (decision 3): a user-facing code of a run that goes on is a sentence with the code (was `CODE: message`).
+    expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe('Something failed during the run (INTERNAL_ERROR); the run goes on.')
   })
 
   it('BACKLOG 037-5 (a): the error a run STOPPED with is shown whatever its code; the same code on a live run is not', () => {

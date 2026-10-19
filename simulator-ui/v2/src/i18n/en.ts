@@ -33,9 +33,11 @@ export const en = {
     stepHint: '{eq} allows at most {precision} decimal places; the server will refuse this amount.',
     /** 026 `T2602`: a negative `available` is the debt's excess over a lowered limit. */
     overLimit: 'over limit by {amount}',
-    /** 034 S5a / AGENTS section 12: the server's correlation id after a text. */
-    requestRef: '{text} (ref: {id})',
-    requestRefOnly: '(ref: {id})',
+    /**
+     * 034 S5a / AGENTS section 12: the server's correlation id of a failure. 048 S3 (decision 3): a line of its own under
+     * the sentence (and `data-request-id`) - no longer glued into the sentence.
+     */
+    requestId: 'request id: {id}',
   },
 
   /** Participant statuses (`chk_participant_status`, plus the scenario's `frozen`); an unknown one is shown as it came. */
@@ -287,6 +289,8 @@ export const en = {
     NETWORK: 'No connection to the server — try again.',
     noRun: 'No active run_id',
     unknown: 'The action failed ({code}).',
+    /** 048 S3: an answer that named no code of its own (the client's `HTTP_<status>`): the status is not printed. */
+    httpFailed: 'The server did not carry out the action — try again later.',
   },
 
   /**
@@ -400,7 +404,6 @@ export const en = {
     /** The line of a start the global limit of runs refused (409 `conflict_kind: global_active_limit`): a new attempt. */
     retry: 'Try again',
     errorAria: 'Error',
-    errorLabel: 'Error',
     stopReasonAria: 'Stop reason',
     stopLabel: 'Stop',
     /**
@@ -574,17 +577,30 @@ export const en = {
     title: 'Recent actions',
   },
 
-  /** The notifications of the actions (`SuccessToast.vue`, `ErrorToast.vue`); their texts are the actions'. */
+  /** The notification of a successful action (`SuccessToast.vue`; 048 S3: the error toast is gone - a window's failure is its block). */
   toast: {
     successAria: 'Success notification',
-    errorAria: 'Error notification',
     dismiss: 'Dismiss',
   },
 
-  /** The scene's loading and error overlay of the root. */
+  /** The scene's loading overlay of the root (048 S3: its error is a sentence of `failure.*`, without an «Error» title). */
   scene: {
     loading: 'Loading…',
-    error: 'Error',
+  },
+
+  /**
+   * 048 S3 (decision 3, «одна форма ошибки»): a request that failed, told by the KIND of the failure - one sentence «what
+   * happened → what to do» (`failureRunErrorLine`). The HTTP status, the server's message and a class name are the
+   * technical detail (the `title`, the console); the request id is a line of its own.
+   */
+  failure: {
+    noAnswer: 'The server did not answer in time. Wait a moment and reload the page.',
+    noConnection: 'No connection to the server. Check the connection and reload the page.',
+    forbidden: 'The server refused access. Reload the page.',
+    notFound: 'The server did not find what was asked for. Reload the page.',
+    serverFailed: 'The server could not complete the request. Try again later or reload the page.',
+    viewFailed: 'The picture of the network could not be updated. Reload the page.',
+    streamFailed: 'The event stream broke off — the picture of the network may be behind. Reload the page.',
   },
 
   /**
@@ -629,6 +645,8 @@ export const en = {
      */
     stopped: 'The run was stopped. To start again, reload the page.',
     errorStopped: 'The run stopped with an error ({code}). To start again, reload the page.',
+    /** 048 S3: a user-facing code of a run that goes on - the code correlates; the server's `CODE: message` is the title. */
+    runningError: 'Something failed during the run ({code}); the run goes on.',
   },
 
   /**

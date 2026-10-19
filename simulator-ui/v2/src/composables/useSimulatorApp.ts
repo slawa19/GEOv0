@@ -22,10 +22,9 @@ import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
-import { extractErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
-import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
+import { failureRunErrorLine, isUserFacingRunErrorCode, writeRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
 import { resetFxRendererCaches, spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 import { getLinkTermination } from '../render/linkGeometry'
@@ -433,7 +432,7 @@ export function __selectNodeFromCanvasStep0(opts: {
 }
 
 export function __autoBootstrapMaybeFillUiError(opts: {
-  real: { lastError?: string | null }
+  real: { lastError: string; lastErrorLine?: RunErrorLine | null }
   state: { error?: string | null }
   err: unknown
 }): void {
@@ -441,7 +440,10 @@ export function __autoBootstrapMaybeFillUiError(opts: {
   const hasStateError = !!String(opts.state.error ?? '').trim()
   if (hasRealError || hasStateError) return
 
-  opts.state.error = `Auto-start failed: ${extractErrorMessage(opts.err)}`
+  // 048 S3 (decision 3; adversarial pass F4): a failed opening is a failure of the RUN - its place is the run's error line
+  // (it was put into the scene's `state.error`, the overlay over a preview that may be on screen). The sentence of the
+  // interface by the kind of the failure; "Auto-start failed" and the transport's text are the console line.
+  writeRunErrorLine(opts.real, failureRunErrorLine(opts.err, { logPrefix: 'Auto-start failed: ' }))
 }
 
 export function useSimulatorApp(opts?: {
@@ -587,6 +589,7 @@ export function useSimulatorApp(opts?: {
   const state = reactive<SimulatorAppState>({
     loading: true,
     error: '',
+    errorLine: null,
     sourcePath: '',
     snapshot: null,
     selectedNodeId: null,

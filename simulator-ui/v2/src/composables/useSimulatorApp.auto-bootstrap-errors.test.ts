@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { getScenarioPreview, getSnapshot } from '../api/simulatorApi'
 import { __autoBootstrapMaybeFillUiError, loadStrictRunRecoverySnapshot } from './useSimulatorApp'
+import { t } from '../i18n/t'
+import { runErrorLineLog, type RunErrorLine } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -13,9 +15,11 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
 })
 
 describe('__autoBootstrapMaybeFillUiError()', () => {
-  it('fills state.error when best-effort fails and both real.lastError/state.error are empty', () => {
+  // 048 S3 (adversarial pass F4): rewritten, not removed - a failed opening is a failure of the RUN: it fills the run's error
+  // line (was: the scene's `state.error`, the overlay over the canvas), as a sentence; "Auto-start failed: boom" is the console line.
+  it('fills the run error line when best-effort fails and both real.lastError/state.error are empty', () => {
     const state = { error: '' }
-    const real = { lastError: '' }
+    const real: { lastError: string; lastErrorLine?: RunErrorLine | null } = { lastError: '' }
 
     __autoBootstrapMaybeFillUiError({
       state,
@@ -23,7 +27,9 @@ describe('__autoBootstrapMaybeFillUiError()', () => {
       err: new Error('boom'),
     })
 
-    expect(state.error).toBe('Auto-start failed: boom')
+    expect(real.lastError).toBe(t('failure.viewFailed'))
+    expect(runErrorLineLog(real.lastErrorLine)).toBe('Auto-start failed: boom')
+    expect(state.error, 'not the scene overlay').toBe('')
   })
 
   it('does not overwrite when real.lastError is already set (lower level already populated error)', () => {

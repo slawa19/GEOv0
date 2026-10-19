@@ -290,7 +290,7 @@ const CASES: Case[] = [
     name: 'clearing: refused on a stopped equivalent',
     render: async () => {
       const refusal = { status: 409, code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }
-      mountWith(ClearingPanel, { phase: 'clearing-preview', state: state('clearing-preview', null, null, clearingRefusalText(refusal, 'UAH')), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
+      mountWith(ClearingPanel, { phase: 'clearing-preview', state: state('clearing-preview', null, null, clearingRefusalText(refusal, 'UAH').text), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
       await settle()
     },
     en: ['The equivalent is stopped — clearing is unavailable.'],

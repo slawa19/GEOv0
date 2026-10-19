@@ -1,6 +1,9 @@
 /**
  * 034 S5a, review round 1, item 2: the other message functions of the run lifecycle (`useSimulatorApp`,
  * `useSceneState`, `useCookieSessionBootstrap`) carry the server's request id as well.
+ *
+ * 048 S3 (decision 3), rewritten - not removed: on screen the id is carried APART from the sentence (the value's `ref`,
+ * shown as its own line); the console warning keeps the glued diagnostic form.
  */
 import { computed, reactive, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +14,8 @@ import type { GraphSnapshot } from '../types'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { useSceneState } from './useSceneState'
 import { __autoBootstrapMaybeFillUiError } from './useSimulatorApp'
+import { t } from '../i18n/t'
+import { runErrorLineRef, runErrorLineLog, type RunErrorLine } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -24,11 +29,14 @@ afterEach(() => {
 })
 
 describe('item 2: message functions outside useSimulatorRealMode', () => {
-  it('useSimulatorApp: the auto-start failure text carries the id', () => {
-    const state = { error: '' }
-    __autoBootstrapMaybeFillUiError({ state, real: { lastError: '' }, err: failure() })
+  it('useSimulatorApp: the auto-start failure carries the id - apart from the sentence', () => {
+    // 048 S3 (adversarial pass F4): the run's error line, not the scene state.
+    const real: { lastError: string; lastErrorLine?: RunErrorLine | null } = { lastError: '' }
+    __autoBootstrapMaybeFillUiError({ state: { error: '' }, real, err: failure() })
 
-    expect(state.error).toBe('Auto-start failed: HTTP 500  for /simulator/x (ref: req-ui)')
+    expect(real.lastError).toBe(t('failure.serverFailed'))
+    expect(runErrorLineRef(real.lastErrorLine)).toBe('req-ui')
+    expect(runErrorLineLog(real.lastErrorLine)).toBe('Auto-start failed: HTTP 500  for /simulator/x')
   })
 
   it('useSceneState: a failed scene load puts the id into state.error', async () => {
@@ -63,8 +71,9 @@ describe('item 2: message functions outside useSimulatorRealMode', () => {
 
     await s.loadScene()
 
-    expect(state.error).toContain('HTTP 500')
-    expect(state.error).toContain('(ref: req-ui)')
+    expect(state.error).toBe(t('failure.serverFailed'))
+    expect(state.error).not.toMatch(/HTTP|req-ui/)
+    expect(runErrorLineRef((state as { errorLine?: RunErrorLine | null }).errorLine)).toBe('req-ui')
   })
 
   it('useCookieSessionBootstrap: the warning that a developer greps in the console carries the id', async () => {

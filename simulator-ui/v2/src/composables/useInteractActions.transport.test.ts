@@ -54,7 +54,8 @@ afterEach(() => {
 })
 
 describe('item 1: the request id survives the Interact path', () => {
-  it('a 409 with X-Request-ID and a flat body: the mapped error carries it and the refusal texts show (ref: ...)', async () => {
+  // 048 S3 (decision 3): rewritten, not removed - the texts carry the id APART from the sentence (it was glued: "(ref: ...)").
+  it('a 409 with X-Request-ID and a flat body: the mapped error carries it and the refusal texts carry it apart', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => refusal409({ 'X-Request-ID': 'req-409' })))
 
     const call = rejection(actions().sendPayment('a', 'b', '1.00', 'UAH'))
@@ -63,10 +64,11 @@ describe('item 1: the request id survives the Interact path', () => {
 
     expect(error.code).toBe('NO_ROUTE')
     expect(error.requestId).toBe('req-409')
-    const text = paymentRefusalText(error, 'UAH', 'en')
-    expect(text).toContain('No payment route')
-    expect(text).toContain('(ref: req-409)')
-    expect(clearingRefusalText(error, 'UAH', 'en')).toContain('(ref: req-409)')
+    const shown = paymentRefusalText(error, 'UAH', 'en')
+    expect(shown.text).toContain('No payment route')
+    expect(shown.text).not.toContain('req-409')
+    expect(shown.ref).toBe('req-409')
+    expect(clearingRefusalText(error, 'UAH', 'en').ref).toBe('req-409')
   })
 
   // 046 wave 2 (decision 3): was "keeps the server message" - a code the client has no text for is told by the general
@@ -84,9 +86,9 @@ describe('item 1: the request id survives the Interact path', () => {
     const call = rejection(actions().createTrustline('a', 'b', '10', 'UAH'))
     await vi.advanceTimersByTimeAsync(0)
 
-    const text = paymentRefusalText(await call, 'UAH', 'en')
-    expect(text).toBe('The action failed (SOMETHING_NEW). (ref: req-new)')
-    expect(text).not.toContain('server words')
+    const shown = paymentRefusalText(await call, 'UAH', 'en')
+    expect(shown).toMatchObject({ text: 'The action failed (SOMETHING_NEW).', ref: 'req-new' })
+    expect(shown.text).not.toContain('server words')
   })
 
   it('counter-check: no id, no ref', async () => {
@@ -96,7 +98,7 @@ describe('item 1: the request id survives the Interact path', () => {
     const error = await call
 
     expect(error.requestId ?? null).toBeNull()
-    expect(paymentRefusalText(error, 'UAH', 'en')).not.toContain('(ref:')
+    expect(paymentRefusalText(error, 'UAH', 'en').ref).toBeNull()
   })
 })
 
@@ -112,7 +114,7 @@ describe('fix-delta item 5: a 2xx body that is not JSON is never read as a busin
     const error = await call
 
     expect(error.code, 'the transport failure was turned into the refusal the excerpt spells').toBe('INVALID_JSON')
-    expect(paymentRefusalText(error, 'UAH', 'en')).not.toContain('No payment route')
+    expect(paymentRefusalText(error, 'UAH', 'en').text).not.toContain('No payment route')
     expect(error.message, 'the message of the excerpt replaced the transport message').not.toBe('no route')
     expect(error.message).toMatch(/not valid JSON/)
     expect(error.requestId).toBe('req-trap')
@@ -156,12 +158,12 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     await vi.advanceTimersByTimeAsync(LONG_REQUEST_TIMEOUT_MS)
     const error = await call
 
-    const en = paymentRefusalText(error, 'UAH', 'en')
+    const en = paymentRefusalText(error, 'UAH', 'en').text
     expect(en).toMatch(/unknown/i)
     expect(en).not.toBe('The payment timed out.')
     expect(en).not.toBe('The payment was not accepted.')
     expect(en).not.toBe('The payment was refused.')
-    expect(clearingRefusalText(error, 'UAH', 'en')).toMatch(/unknown/i)
+    expect(clearingRefusalText(error, 'UAH', 'en').text).toMatch(/unknown/i)
   })
 
   it('the Russian locale gets the Russian text', async () => {
@@ -209,7 +211,7 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     await vi.advanceTimersByTimeAsync(0)
     const error = await call
 
-    expect(paymentRefusalText(error, 'UAH', 'en')).toBe('No payment route between these participants (available now: 3.00 UAH).')
+    expect(paymentRefusalText(error, 'UAH', 'en').text).toBe('No payment route between these participants (available now: 3.00 UAH).')
   })
 })
 
@@ -258,7 +260,7 @@ describe('046 fix-delta F2: a network failure is told in the language of the int
     const mode = im()
     mode.startClearingFlow()
     await mode.confirmClearing()
-    expect(mode.state.clearingFailure).toBe(t('actionError.NETWORK', {}, 'ru'))
+    expect(mode.state.clearingFailure?.text).toBe(t('actionError.NETWORK', {}, 'ru'))
     expect(mode.state.error).not.toContain('Failed to fetch')
   })
 
@@ -267,11 +269,11 @@ describe('046 fix-delta F2: a network failure is told in the language of the int
     vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted.', 'AbortError') }))
     const aborted = await rejection(a.createTrustline('a', 'b', '10', 'UAH'))
     expect(aborted.clientMessage).toBeUndefined()
-    expect(actionErrorText(aborted, 'ru')).toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
+    expect(actionErrorText(aborted, 'ru').text).toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
     // Counter-check: the text the client composed (a missing run id) is still its own.
     setUiLocale('ru')
     const own = await rejection(useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('') }).createTrustline('a', 'b', '10', 'UAH'))
     expect(own.clientMessage).toBe(true)
-    expect(actionErrorText(own, 'ru')).toBe(t('actionError.noRun', {}, 'ru'))
+    expect(actionErrorText(own, 'ru').text).toBe(t('actionError.noRun', {}, 'ru'))
   })
 })

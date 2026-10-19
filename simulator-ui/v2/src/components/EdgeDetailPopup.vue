@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { t } from '../i18n/t'
 import { interactText } from '../i18n/interactStrings'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
@@ -9,6 +10,7 @@ import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
+  trustlineFiguresNoticeRef,
   trustlineFrozenNotice,
   trustlineNoRowNotice,
   type TrustlineFiguresSource,
@@ -90,6 +92,9 @@ const figures = computed(() => {
 })
 /** Источник не ответил вовсе. */
 const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
+// 048 S3 (§15 Codex P2, AGENTS.md section 12): the request id of a failed trust-lines read - its own line, not glued in.
+// English, as the notice above and the rest of this popup until 046 wave 3.
+const sourceUnavailableRef = computed<string | null>(() => trustlineFiguresNoticeRef(props.figuresSource))
 /** Источник ответил, и линии у пары нет — другой факт, другие последствия, своё сообщение. */
 const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource))
 /**
@@ -233,8 +238,14 @@ function onCloseLine() {
     </div>
 
     <!-- Warnings: a line each, only when there is one. -->
-    <div v-if="sourceUnavailableText" class="ds-help popup__warn" data-testid="edge-source-unavailable">
+    <div
+      v-if="sourceUnavailableText"
+      class="ds-help popup__warn"
+      data-testid="edge-source-unavailable"
+      :data-request-id="sourceUnavailableRef || undefined"
+    >
       {{ sourceUnavailableText }} Closing the line is disabled until then.
+      <div v-if="sourceUnavailableRef" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }, 'en') }}</div>
     </div>
     <div v-if="noTrustlineText" class="ds-help popup__warn" data-testid="edge-no-trustline">
       {{ noTrustlineText }}

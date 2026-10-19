@@ -22,7 +22,7 @@ import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { keyEdge } from '../utils/edgeKey'
 import { autostartDecision } from './useInteractAutoBootstrapRun'
 import { useSimulatorApp } from './useSimulatorApp'
-import { startRetryOffered } from '../utils/runErrorClassification'
+import { runErrorLineLog, startRetryOffered } from '../utils/runErrorClassification'
 
 /** 046 wave 1: does the top bar offer "Try again" (the root's `startRetryable`, the same call)? */
 const offered = (app: { real: { lastErrorLine?: unknown; retryableStartLine?: unknown } }) =>
@@ -177,7 +177,50 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     const app = boot()
     await settle()
     expect(createRun).not.toHaveBeenCalled()
-    expect(app.real.lastError, 'the failed read is on screen').toContain('500')
+    expect(runErrorLineLog(app.real.lastErrorLine), 'the failed read is on screen').toContain('500')
+  })
+
+  // 048 S3 (044 closing review, advisor 2026-10-19): the anonymous cookie was lost or expired - the saved run is another
+  // session's, its status answers 403. Red before: only 404 cleared the saved id, so the kept id had no status, the opening
+  // answered `unknown` and started nothing - the visitor stayed stuck until the browser's storage was cleared.
+  it('a saved run whose status answers 403 (the cookie is gone): the saved id is cleared and the opening starts a new run', async () => {
+    storedRun('R_FOREIGN', 'running')
+    vi.mocked(getRun).mockImplementation(async (_cfg, runId) => {
+      if (runId === 'R_FOREIGN') throw new ApiError('HTTP 403 Forbidden for /simulator/runs/R_FOREIGN', { status: 403 })
+      return status(runId) as never
+    })
+    const app = boot()
+    await settle()
+    expect(createRun, 'the opening\'s autostart starts one new run').toHaveBeenCalledTimes(1)
+    expect(app.real.runId).toBe('R_NEW')
+    expect(window.localStorage.getItem('geo.sim.v2.runId'), 'the saved id is the new run, not the foreign one').toBe('R_NEW')
+    expect(app.real.lastError, 'the 403 of the foreign run is not left on the line').toBe('')
+  })
+
+  // 048 S3 (orchestrator 2026-10-19): the opening cannot tell the backend's 403s apart (one code E006, no details), so an
+  // inactive participant's 403 on the restored run clears it too. ACCEPTED: the start that follows answers with its own
+  // refusal, shown on the run line - here the mock's create succeeds; what is held is that the opening goes on.
+  it('opening + a 403 of an inactive participant (same code E006): cleared too - accepted, the next start answers for itself', async () => {
+    storedRun('R_MINE', 'running')
+    vi.mocked(getRun).mockImplementation(async (_cfg, runId) => {
+      if (runId === 'R_MINE') throw new ApiError('HTTP 403 Forbidden for /simulator/runs/R_MINE', {
+        status: 403, bodyText: JSON.stringify({ error: { code: 'E006', message: 'Participant account is not active' } }),
+      })
+      return status(runId) as never
+    })
+    boot()
+    await settle()
+    expect(createRun).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem('geo.sim.v2.runId')).toBe('R_NEW')
+  })
+
+  it('counter-check: a 500 on the same read still starts nothing (only "gone" clears the id: 404, and 403 at the opening)', async () => {
+    storedRun('R_MAYBE_LIVE', 'running')
+    vi.mocked(getRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs/R_MAYBE_LIVE', { status: 500 }))
+    const app = boot()
+    await settle()
+    expect(createRun).not.toHaveBeenCalled()
+    expect(app.real.runId).toBe('R_MAYBE_LIVE')
   })
 
   it('the stored intensity is used (55); a stale stored 0 (old Interact) becomes 30', async () => {
@@ -213,7 +256,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await settle()
     expect(createRun, 'not retried behind the person').toHaveBeenCalledTimes(1)
-    expect(app.real.lastError).toContain('503')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('503')
     expect(app.real.runId).toBeNull()
   })
 
@@ -268,7 +311,7 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     expect(offered(again)).toBe(true)
     await again.realActions.startRun()
     await settle()
-    expect(again.real.lastError).toBe('HTTP 503 for /simulator/runs')
+    expect(runErrorLineLog(again.real.lastErrorLine)).toBe('HTTP 503 for /simulator/runs')
     expect([again.real.retryableStartLine, offered(again)]).toEqual([null, false])
   })
 
@@ -307,7 +350,9 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
 
   // §15 Codex fix-delta P2 (2026-10-18): a refusal hidden behind a scene-load error came back in the language it was
   // shown in - the switch remade only the line on screen, and the displaced one was kept as its text.
-  it('046 wave 1: a refusal displaced by a scene-load error comes back in the language of the moment it comes back', async () => {
+  // 048 S3 (decision 3), rewritten - not removed: a scene-load error no longer takes the line (its one place is the overlay
+  // over the canvas), so the refusal is never hidden - it stays, follows the switch, and keeps its "Try again" throughout.
+  it('046 wave 1 -> 048 S3: a scene-load error does not hide the refusal; the refusal follows the language and keeps its offer', async () => {
     const ten = new ApiError('HTTP 409 Conflict for /simulator/runs', {
       status: 409,
       bodyText: JSON.stringify({ error: { code: 'E008', message: 'x', details: { conflict_kind: 'global_active_limit', max_active_runs: 10, active_runs: 10 } } }),
@@ -318,35 +363,38 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
       const app = boot()
       await settle()
       expect(app.real.lastError).toBe(tn('runStart.limitAll', 10, undefined, 'ru'))
-      // A scene that fails to load hides the refusal (its HUD copy takes the line)...
+      // A scene that fails to load does not take the line (048 S3: no HUD copy)...
       app.state.error = 'HTTP 500 for /simulator/scenarios/other/graph/preview'
       await settle()
-      expect(app.real.lastError).toBe('HTTP 500 for /simulator/scenarios/other/graph/preview')
-      // ...the language changes while it is hidden...
+      expect(app.real.lastError, 'the refusal stays on the line').toBe(tn('runStart.limitAll', 10, undefined, 'ru'))
+      expect(offered(app)).toBe(true)
+      // ...the language changes while the scene error is shown...
       setUiLocale('en')
       await settle()
-      // ...and the next load clears the scene error: the refusal comes back, in English.
+      expect(app.real.lastError).toBe('All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.')
+      // ...and the next load clears the scene error: the refusal is still there, with its "Try again".
       app.state.error = ''
       await settle()
       expect(app.real.lastError).toBe('All 10 places of the demo are taken right now: 10 people are watching it. Try again in a minute.')
-      expect(offered(app), 'the refusal comes back with its "Try again"').toBe(true)
+      expect(offered(app), 'the refusal keeps its "Try again"').toBe(true)
     } finally {
       setUiLocale('en')
     }
   })
 
+  // 048 S3: "their old text" is now the line's detail (title, console); the drawn line is the sentence of `failure.*`.
   it('counter-check: a 409 of another kind (owner_active_exists) and a non-409 error keep their old text', async () => {
     vi.mocked(createRun).mockRejectedValue(conflict('owner_active_exists'))
     const app = boot()
     await settle()
-    expect(app.real.lastError, 'another 409: the raw message as before').toBe('HTTP 409 Conflict for /simulator/runs')
+    expect(runErrorLineLog(app.real.lastErrorLine), 'another 409: the raw message as before').toBe('HTTP 409 Conflict for /simulator/runs')
     expect([app.real.retryableStartLine, offered(app)], '046 wave 1: another 409 offers no retry').toEqual([null, false])
     scope?.stop()
     window.localStorage.clear()
     vi.mocked(createRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs', { status: 500, bodyText: JSON.stringify({ error: { details: { conflict_kind: 'global_active_limit' } } }) }))
     const other = boot()
     await settle()
-    expect(other.real.lastError, 'a non-409 error, even with that kind in its body: as before').toBe('HTTP 500 for /simulator/runs')
+    expect(runErrorLineLog(other.real.lastErrorLine), 'a non-409 error, even with that kind in its body: as before').toBe('HTTP 500 for /simulator/runs')
   })
 
   it('an empty catalogue: no scenario, nothing started', async () => {
@@ -577,7 +625,7 @@ describe('043 S2 fix round (external review 2026-10-17): one create per start, a
     const app = boot()
     await settle()
     expect(app.state.loading, 'the opening is over').toBe(false)
-    expect(app.real.lastError).toContain('HTTP 503')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('HTTP 503')
     expect(createRun).not.toHaveBeenCalled()
   })
 

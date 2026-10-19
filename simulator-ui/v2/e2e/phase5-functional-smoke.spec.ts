@@ -573,7 +573,10 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await activateTestId(page, 'run-stop')
     mock.failOneCreate()
     await activateTestId(page, 'run-start')
-    await expect(page.getByTestId('top-error')).toContainText('HTTP 500 Internal Server Error for /simulator/runs')
+    // 048 S3 (decision 3): the line is a sentence of the interface - no «HTTP 500 … for /…»; the status is the title.
+    await expect(page.getByTestId('top-error')).toContainText('The server could not complete the request.')
+    await expect(page.getByTestId('top-error')).not.toContainText('HTTP')
+    await expect(page.getByTestId('top-error').getByTestId('error-text')).toHaveAttribute('title', 'HTTP 500')
     await expect(page.getByTestId('run-start')).toBeEnabled()
   })
 
@@ -624,7 +627,8 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 0.00 UAH)" part comes only from the answer's `details.max_available`, so this fails if the mock's `details` are lost
     // and the text would otherwise be reached through the code alone (029 T2990, finding 4).
     // 043 S2 (review B3, 2026-10-17): the refusal is in the language of the page - English here (`?lang=en`, 046 wave 2).
-    await expect(page.getByTestId('error-toast')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
+    // 048 S3: in the window's own block (the error toast is gone).
+    await expect(page.getByTestId('manual-payment-error')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 

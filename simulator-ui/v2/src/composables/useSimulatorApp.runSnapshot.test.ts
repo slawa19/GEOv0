@@ -12,6 +12,8 @@ import { getSnapshot } from '../api/simulatorApi'
 import type { GraphSnapshot } from '../types'
 import { useSceneState } from './useSceneState'
 import { loadActiveRunSnapshot } from './useSimulatorApp'
+import { t } from '../i18n/t'
+import { runErrorLineLog, type RunErrorLine } from '../utils/runErrorClassification'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -78,6 +80,7 @@ describe('the scene loader and a thrown timeout', () => {
     const state = reactive({
       loading: false,
       error: '',
+      errorLine: null as RunErrorLine | null,
       sourcePath: '',
       snapshot: null as GraphSnapshot | null,
       selectedNodeId: null as string | null,
@@ -112,6 +115,8 @@ describe('the scene loader and a thrown timeout', () => {
     await s.loadScene()
 
     expect(state.snapshot, 'the shown scene was dropped').toEqual(shown)
-    expect(state.error).toContain('timeout')
+    // 048 S3: the drawn text is the sentence of the failure's kind; the transport's «timeout» is its detail.
+    expect(state.error).toBe(t('failure.noAnswer'))
+    expect(runErrorLineLog(state.errorLine)).toContain('timeout')
   })
 })

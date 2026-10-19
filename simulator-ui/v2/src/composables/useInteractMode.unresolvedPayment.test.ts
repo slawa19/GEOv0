@@ -527,12 +527,16 @@ describe('a payment is not sent unless the record that lets a reload check it co
 })
 
 describe('an unknown outcome carries the correlation id of the request (AGENTS section 12)', () => {
-  it('REPRODUCER: the error of an unknown outcome ends with (ref: <id>)', async () => {
+  // 048 S3 (decision 3): rewritten, not removed - the id is carried apart from the sentence (`state.errorRef`, shown as the
+  // window's own line and `data-request-id`); it was glued into the sentence as "(ref: …)".
+  it('REPRODUCER: the error of an unknown outcome carries the request id - apart from the sentence', async () => {
     const send = vi.fn().mockRejectedValueOnce({ ...unknown(), requestId: 'req-7f3a' })
     const { im } = await atConfirm(send)
 
     await im.confirmPayment('10.00')
 
-    expect(im.state.error).toContain('(ref: req-7f3a)')
+    expect(im.state.errorRef).toBe('req-7f3a')
+    expect(im.state.error).not.toContain('req-7f3a')
+    expect(im.state.error).toBeTruthy()
   })
 })

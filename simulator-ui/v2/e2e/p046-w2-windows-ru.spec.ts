@@ -282,7 +282,10 @@ test('046 W2 [saas] a payment refused by the server reads in Russian under ?lang
   const expected = t('refusal.noRouteMax', { max: '0.00', eq: 'UAH' }, 'ru')
   expect(expected, 'the dictionary text is Russian').toMatch(/[Ѐ-ӿ]/)
   await expect(page.locator('[data-testid="manual-payment-error"]')).toContainText(expected)
-  await expect(page.locator('[data-testid="manual-payment-error"]')).toContainText(t('common.requestRefOnly', { id: 'req-ru-1' }, 'ru'))
+  // 048 S3 (decision 3): the id is a line of its own and `data-request-id` - rewritten, not removed (was: glued into the sentence).
+  await expect(page.locator('[data-testid="manual-payment-error"]')).toHaveAttribute('data-request-id', 'req-ru-1')
+  await expect(page.locator('[data-testid="manual-payment-error"] [data-testid="error-request-id"]')).toHaveText(t('common.requestId', { id: 'req-ru-1' }, 'ru'))
+  await expect(page.locator('[data-testid="manual-payment-error"] [data-testid="error-text"]')).not.toContainText('req-ru-1')
   await expect(page.locator('[data-testid="manual-payment-error"]')).not.toContainText('No route found')
   await frame(page, 'saas-ru-8-payment-refused')
 })

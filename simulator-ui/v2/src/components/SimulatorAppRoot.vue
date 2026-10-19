@@ -7,12 +7,12 @@ import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import WindowShell from './WindowShell.vue'
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
+import WindowErrorBlock from './WindowErrorBlock.vue'
 import ClearingPanel from './ClearingPanel.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
-import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import GraphNavigator from './GraphNavigator.vue'
@@ -37,6 +37,7 @@ import {
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { useUiTheme } from '../composables/useUiTheme'
  import { useUiLocale } from '../composables/useUiLocale'
+ import type { ShownError } from '../utils/errorMessage'
  import { toLower } from '../utils/stringHelpers'
  import { canonicalEquivalent } from '../config/equivalents'
  import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
@@ -44,7 +45,7 @@ import {
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
 // 046 wave 1: the texts the root draws itself (the onboarding hint, the scene's loading and error overlay).
-const { t } = useUiLocale()
+const { t, locale } = useUiLocale()
 const reducedMotion = useReducedMotionPreference()
 
 // 039 B3: which theme is shown, and what a switch writes back - `useUiTheme` (URL, stored choice, default).
@@ -104,7 +105,7 @@ import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
  import { keyEdge } from '../utils/edgeKey'
-import { runErrorLineTitle, startRetryOffered } from '../utils/runErrorClassification'
+import { renderRunErrorLine, runErrorLineRef, runErrorLineTitle, startRetryOffered } from '../utils/runErrorClassification'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
  import type { WindowInstance } from '../composables/windowManager/types'
  import { isInteractPanelWindow, isNodeCardWindow, isEdgeDetailWindow } from '../composables/windowManager/types'
@@ -471,6 +472,25 @@ const paymentToTargetIds = computed<Set<string> | undefined>(() =>
   routesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
 )
 const trustlines = computed(() => interact.mode.trustlines.value)
+/**
+ * 048 S3 (adversarial pass F1): the failure of the edge popup's own action ("Close line" -> `confirmTrustlineClose`) - the
+ * phase stays `editing-trustline` with the quick popup, and no other window of that phase draws `state.error`.
+ */
+const edgeDetailFailure = computed<ShownError | null>(() => {
+  const st = interact.mode.state
+  if (interactPhase.value !== 'editing-trustline' || useFullTrustlineEditor.value || !st.error) return null
+  return { text: st.error, ref: st.errorRef ?? null, detail: st.errorDetail ?? null }
+})
+/**
+ * 048 S3 (decision 3): the scene-load failure over the canvas - its one place, in both sources (the run's error line no
+ * longer carries a copy). Rendered from the value (`state.errorLine`) in the language of now.
+ */
+const sceneErrorShown = computed<ShownError | null>(() => {
+  if (!state.error) return null
+  const line = state.errorLine
+  if (!line) return { text: state.error, ref: null, detail: null }
+  return { text: renderRunErrorLine(line, locale.value), ref: runErrorLineRef(line), detail: runErrorLineTitle(line) }
+})
 const trustlinesLastError = computed(() => interact.mode.trustlinesLastError?.value ?? null)
 const paymentTargetsLastError = computed(() => interact.mode.paymentTargetsLastError?.value ?? null)
 const paymentTargetsMaxHops = computed(() => interact.mode.paymentTargetsMaxHops)
@@ -604,6 +624,7 @@ watch(
    sseState: computed(() => real.sseState),
    lastError: computed(() => real.lastError),
    lastErrorTitle: computed(() => runErrorLineTitle(real.lastErrorLine)),
+   lastErrorRef: computed(() => runErrorLineRef(real.lastErrorLine)),
    startRetryable: computed(() => startRetryOffered(real.lastErrorLine, real.retryableStartLine)),
 
    runStats: computed(() => real.runStats),
@@ -1274,8 +1295,8 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           wm.reclamp(win.id)
         }"
       >
+        <template v-if="win.type === 'edge-detail'">
         <EdgeDetailPopup
-          v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="wmEdgeDetailEffectiveState(win)"
           :unit="wmEdgeDetailEffectiveUnit"
@@ -1292,6 +1313,17 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           @close-line="onEdgeDetailCloseLine"
           @send-payment="onEdgeDetailSendPayment"
         />
+        <!-- 048 S3 (internal adversarial pass, F1): "Close line" from the popup fails in the popup's window - its one place
+             (until S3 only the error toast showed it; the popup does not draw `state.error`, 046 W3 owns it). -->
+        <WindowErrorBlock
+          v-if="edgeDetailFailure"
+          testid="edge-detail-error"
+          class="sar-edge-detail-error"
+          :text="edgeDetailFailure.text"
+          :request-id="edgeDetailFailure.ref"
+          :detail="edgeDetailFailure.detail"
+        />
+        </template>
 
         <NodeCardOverlay
           v-else-if="isNodeCardWindow(win) && getNodeById(String(win.data.nodeId))"
@@ -1462,10 +1494,20 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         <div class="ds-ov-message__title">{{ t('scene.loading') }}</div>
       </div>
     </div>
-    <div v-else-if="state.error" class="ds-ov-inset" role="alert" aria-atomic="true">
-      <div class="ds-ov-message">
-        <div class="ds-ov-message__title">{{ t('scene.error') }}</div>
-        <div class="ds-ov-message__text">{{ state.error }}</div>
+    <!-- 048 S3 (decision 3): the ONE place of a scene-load failure - here, in the place of the picture that did not come
+         (no longer copied to the run's error line as well). One sentence, without an «Error» title; the request id (if
+         any) on its own line, the identifiers (the HTTP status) in the title. -->
+    <div
+      v-else-if="sceneErrorShown"
+      class="ds-ov-inset"
+      role="alert"
+      aria-atomic="true"
+      data-testid="scene-error"
+      :data-request-id="sceneErrorShown.ref || undefined"
+    >
+      <div class="ds-ov-message" :title="sceneErrorShown.detail || undefined">
+        <div class="ds-ov-message__text" data-testid="error-text">{{ sceneErrorShown.text }}</div>
+        <div v-if="sceneErrorShown.ref" class="ds-ov-message__text" data-testid="error-request-id">{{ t('common.requestId', { id: sceneErrorShown.ref }) }}</div>
       </div>
     </div>
 
@@ -1481,18 +1523,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 
     <DevPerfOverlay :enabled="showPerfOverlay" :perf="perf" />
 
-    <!-- BUG-6: Error toast for Interact Mode (auto-dismiss 4s). -->
+    <!-- BUG-6: the success toast of the windows. 048 S3: the error toast is gone - a window's failure is its own block. -->
     <SuccessToast
       v-if="isLiveUi"
       :message="interact.mode.successMessage"
       @dismiss="interact.mode.successMessage.value = null"
     />
 
-    <ErrorToast
-      v-if="isLiveUi"
-      :message="interact.mode.state.error"
-      @dismiss="interact.mode.state.error = null"
-    />
 
     <!-- BUG-5: Interact Mode inline history log. -->
     <div

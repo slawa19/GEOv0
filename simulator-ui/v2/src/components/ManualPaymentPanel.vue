@@ -19,6 +19,7 @@ import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import OverlaySelect from './common/OverlaySelect.vue'
+import WindowErrorBlock from './WindowErrorBlock.vue'
 
 type Props = {
   phase: InteractPhase
@@ -859,7 +860,14 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
       </template>
 
-      <div v-if="state.error && !unknownOutcome" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
+      <!-- 048 S3: the one place of the window's failure - the sentence, the request id on its own line (no toast). -->
+      <WindowErrorBlock
+        v-if="state.error && !unknownOutcome"
+        testid="manual-payment-error"
+        :text="state.error"
+        :request-id="state.errorRef"
+        :detail="state.errorDetail"
+      />
 
       <div v-if="unknownOutcome" class="ds-alert ds-alert--warn ds-stack" data-testid="mp-outcome-unknown">
         <div class="ds-label">{{ t('payment.unknownTitle') }}</div>
@@ -869,6 +877,14 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         <!-- What the last attempt said (the error text) replaces the generic sentence, so the same thing is not shown twice. -->
         <template v-if="!confirmingDiscard">
           <div class="ds-help" data-testid="mp-outcome-unknown-message">{{ state.error || unknownOutcome.message }}</div>
+          <!-- 048 S3 (§12): the request id of that attempt, on its own line - it is no longer glued into the sentence. -->
+          <div
+            v-if="state.error && state.errorRef"
+            class="ds-help"
+            data-testid="mp-outcome-unknown-request-id"
+            :data-request-id="state.errorRef"
+            :title="state.errorDetail || undefined"
+          >{{ t('common.requestId', { id: state.errorRef }) }}</div>
           <div v-if="unknownOutcome.runMismatch" class="ds-help" data-testid="mp-outcome-other-run">
             {{ t('payment.unknownOtherRun') }}
           </div>

@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_TIMEOUT_CODE, ApiError } from '../api/http'
 import { createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
+import { runErrorLineLog } from '../utils/runErrorClassification'
 import { useSimulatorApp } from './useSimulatorApp'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
@@ -129,7 +130,7 @@ describe('unknown run status while the run scene is on screen (reproducers: red 
     await settle()
 
     expect(ids(app), 'the run scene was demoted to the scenario preview').toEqual(['R_NODE'])
-    expect(app.real.lastError).toContain('timeout')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('timeout')
   })
 
   it('Attach to the same run, status AND snapshot time out: the scene stays and the error is shown', async () => {
@@ -143,7 +144,7 @@ describe('unknown run status while the run scene is on screen (reproducers: red 
     await settle()
 
     expect(ids(app), 'the run scene was demoted to the scenario preview').toEqual(['R_NODE'])
-    expect(app.state.error).toContain('timeout')
+    expect(runErrorLineLog(app.state.errorLine)).toContain('timeout')
   })
 
   it('Manual refresh while the status is unknown (after such an Attach) keeps the run scene', async () => {
@@ -295,7 +296,7 @@ describe('unknown run status with NO scene of that run on screen (CONTRACT: the 
     await settle()
 
     expect(ids(app)).toEqual(['PREVIEW_NODE'])
-    expect(app.real.lastError).toContain('timeout')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('timeout')
   })
 
   it('Attach to ANOTHER run whose status times out: the scene of run R is not the scene of run R2', async () => {
@@ -308,7 +309,7 @@ describe('unknown run status with NO scene of that run on screen (CONTRACT: the 
     await settle()
 
     expect(ids(app)).toEqual(['PREVIEW_NODE'])
-    expect(app.real.lastError).toContain('timeout')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('timeout')
   })
 
   it('Start of a new run whose status times out: the old run scene is not the new run scene', async () => {
@@ -322,7 +323,7 @@ describe('unknown run status with NO scene of that run on screen (CONTRACT: the 
 
     expect(app.real.runId).toBe('R2')
     expect(ids(app)).toEqual(['PREVIEW_NODE'])
-    expect(app.real.lastError).toContain('timeout')
+    expect(runErrorLineLog(app.real.lastErrorLine)).toContain('timeout')
   })
 
   it('anti-vacuum: with a KNOWN status everything behaves normally (Attach RE-READS the run scene)', async () => {

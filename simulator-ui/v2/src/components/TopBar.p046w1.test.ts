@@ -73,7 +73,9 @@ describe('046 wave 1 (1) - the language switch in the service row', () => {
     const { host, done } = await mount(ctx)
     const reason = () => [...(host.querySelector('[data-testid="stop-reason"]')?.children ?? [])].map(text).join(' | ')
     expect(reason()).toBe('Stop | stopped with the Stop button')
-    const errLabel = () => text(host.querySelector('[data-testid="top-error"] .ds-label'))
+    // 048 S3: the visible «Error» label before the sentence is gone (decision 3); the line's accessible name still follows
+    // the language - the witness of the switch here.
+    const errLabel = () => host.querySelector('[data-testid="top-error"]')?.getAttribute('aria-label') ?? ''
     expect(errLabel()).toBe('Error')
 
     const switchBefore = sw0(host)

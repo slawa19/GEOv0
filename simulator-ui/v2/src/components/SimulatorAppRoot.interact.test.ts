@@ -2072,16 +2072,34 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     loadingHost.remove()
     clearGeoTestGlobals('__GEO_TEST_STATE_LOADING')
 
+    // 048 S3 (decision 3): ONE place of a scene-load error - the overlay over the canvas, in both sources; one sentence, no
+    // «Error» title. The run's error line carries no copy (the holder's side: `useSimulatorApp.sceneLoadFailure.p034.test.ts`).
     setGeoTestGlobal('__GEO_TEST_STATE_ERROR', 'Snapshot unavailable')
     const errorHost = document.createElement('div')
     document.body.appendChild(errorHost)
     const errorApp = mountSimulatorAppRoot(errorHost)
     await nextTick()
-    const error = errorHost.querySelector('.ds-ov-inset[role="alert"]')
+    const error = errorHost.querySelector('[data-testid="scene-error"]')
+    expect(error?.getAttribute('role')).toBe('alert')
     expect(error?.getAttribute('aria-atomic')).toBe('true')
     expect(error?.textContent).toContain('Snapshot unavailable')
+    expect(error?.textContent, 'no «Error» title over the sentence').not.toMatch(/\bError\b|Ошибка/)
     errorApp.unmount()
     errorHost.remove()
+
+    setUrl('/?mode=fixtures&ui=interact')
+    const offlineHost = document.createElement('div')
+    document.body.appendChild(offlineHost)
+    const offlineApp = mountSimulatorAppRoot(offlineHost)
+    await nextTick()
+    await nextTick()
+    const overlay = offlineHost.querySelector('[data-testid="scene-error"]')
+    expect(overlay?.getAttribute('role')).toBe('alert')
+    expect(overlay?.getAttribute('aria-atomic')).toBe('true')
+    expect(overlay?.textContent).toContain('Snapshot unavailable')
+    expect(overlay?.textContent, 'no «Error» title over the sentence').not.toMatch(/\bError\b|Ошибка/)
+    offlineApp.unmount()
+    offlineHost.remove()
     clearGeoTestGlobals('__GEO_TEST_STATE_ERROR')
     vi.unstubAllGlobals()
   })
@@ -2098,7 +2116,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     document.body.appendChild(failedHost)
     const failedApp = mountSimulatorAppRoot(failedHost)
     await nextTick()
-    expect(failedHost.querySelector('.ds-ov-inset[role="alert"]')?.textContent).toContain('HTTP 503')
+    // 048 S3: the drawn text is the scene state's text as it is (here a test global; the holder makes it a sentence).
+    expect(failedHost.querySelector('[data-testid="scene-error"]')?.textContent).toContain('HTTP 503')
     expect(failedHost.querySelector('.system-balance-bar'), 'a balance is shown for data that was never read').toBeNull()
     expect(failedHost.textContent).not.toContain('System is clean')
     failedApp.unmount()
@@ -6581,6 +6600,90 @@ describe('SimulatorAppRoot - 043 S1 review: the kept-alive edge popup and a scen
       getRequiredGeoTestGlobal('__GEO_TEST_SCENE_EQ_REF').value = 'UAH'
       getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_STATE', '__GEO_TEST_SNAPSHOT')
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+/**
+ * 048 S3 (decision 3; repro (а) of the spec's verification plan): a window's failure has ONE place - the window's own block.
+ * Until S3 an error toast showed the same `state.error` and, when it expired after 4-8 s, cleared it: the block in the
+ * window went out with it. Red before: an `error-toast` beside the block, and after the expiry no block.
+ */
+describe('048 S3: a window error is the window block alone - no toast, and it does not expire', () => {
+  it('the payment window\'s failure: no toast; after 10 s the block is still there, with its request id', async () => {
+    vi.useFakeTimers()
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const st = getInteractState() as TestInteractState & { errorRef?: string | null }
+      st.error = 'Not enough limit on the route.'
+      st.errorRef = 'req-win-1'
+      await nextTick()
+      await nextTick()
+      const block = () => host.querySelector('[data-testid="manual-payment-error"]')
+      expect(block(), 'anti-vacuum: the window shows the failure').not.toBeNull()
+      expect(block()!.getAttribute('data-request-id')).toBe('req-win-1')
+      expect(host.querySelector('[data-testid="error-toast"]'), 'no second place: the toast is gone').toBeNull()
+      expect(host.querySelector('.ds-ov-toast--error')).toBeNull()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      await nextTick()
+      expect(st.error, 'nothing cleared the failure after a few seconds').toBe('Not enough limit on the route.')
+      expect(block(), 'the block is still in the window').not.toBeNull()
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.useRealTimers()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_STATE')
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+/**
+ * 048 S3 (internal adversarial pass, F1): "Close line" from the edge popup fails - the phase stays `editing-trustline`
+ * with the quick popup, and the popup does not draw `state.error` (046 W3 owns it). Until S3 only the error toast showed
+ * it; after the toast's removal it was shown nowhere. Red before the fix: no `edge-detail-error`.
+ */
+describe('048 S3: a failure of the edge popup is shown in the popup\'s window', () => {
+  it('editing-trustline with the quick popup and a failure: the window block under the popup, with its request id', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const st = getInteractState() as TestInteractState & { errorRef?: string | null }
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
+      st.selectedEdgeKey = 'alice->bob'
+      await nextTick()
+      await nextTick()
+      const popup = host.querySelector('.ws-shell[data-win-type="edge-detail"]')
+      expect(popup, 'anti-vacuum: the quick popup is open').not.toBeNull()
+      expect(host.querySelector('[data-testid="edge-detail-error"]'), 'no failure, no block').toBeNull()
+
+      st.error = 'The trust line was not found.'
+      st.errorRef = 'req-edge-1'
+      await nextTick()
+      await nextTick()
+      const block = host.querySelector('[data-testid="edge-detail-error"]')
+      expect(block, 'the failure is shown').not.toBeNull()
+      expect(popup!.contains(block), 'in the popup\'s own window').toBe(true)
+      expect(block!.getAttribute('data-request-id')).toBe('req-edge-1')
+      expect(block!.querySelector('[data-testid="error-request-id"]')).not.toBeNull()
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_STATE')
       vi.unstubAllGlobals()
     }
   })

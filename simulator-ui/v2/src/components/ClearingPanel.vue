@@ -5,6 +5,7 @@ import type { ParticipantInfo, SimulatorActionClearingCycle } from '../api/simul
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { t } from '../i18n/t'
+import WindowErrorBlock from './WindowErrorBlock.vue'
 
 type Props = {
   phase: InteractPhase
@@ -54,10 +55,11 @@ const isRunning = computed(() => props.phase === 'clearing-running')
 // user closes it; an error (a refusal) leaves it open with the message. No timer ends it.
 const isPreview = computed(() => props.phase === 'clearing-preview')
 const isConfirm = computed(() => props.phase === 'confirm-clearing')
-// The refusal is a state of its own (`state.clearingFailure`), not the transient error toast: the application clears `state.error`
-// when the toast expires, and the explanation (with its request reference) must outlive that. "Running" is shown only while a
-// request is really in flight (`busy`) - never inferred from the absence of an answer.
-const errorText = computed(() => (isPreview.value ? (props.state.clearingFailure ?? props.state.error) : props.state.error))
+// The refusal is a state of its own (`state.clearingFailure`): the explanation (with its request id) outlives `state.error`.
+// 048 S3: the shown form - the sentence and, apart from it, the request id and the detail (the error toast is gone). "Running"
+// is shown only while a request is really in flight (`busy`) - never inferred from the absence of an answer.
+const errorText = computed(() => (isPreview.value && props.state.clearingFailure) ? props.state.clearingFailure
+  : props.state.error ? { text: props.state.error, ref: props.state.errorRef ?? null, detail: props.state.errorDetail ?? null } : null)
 const waiting = computed(() => isRunning.value || (isPreview.value && !last.value && !errorText.value && props.busy))
 const nothingCleared = computed(() => !!last.value && cyclesCount.value === 0 && cycles.value.length === 0)
 
@@ -117,7 +119,7 @@ const closeDisabled = computed(() => waiting.value)
 
     <div class="ds-panel__body ds-stack">
 
-      <div v-if="errorText" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ errorText }}</div>
+      <WindowErrorBlock v-if="errorText" testid="clearing-error" :text="errorText.text" :request-id="errorText.ref" :detail="errorText.detail" />
 
       <template v-if="isConfirm">
         <div
