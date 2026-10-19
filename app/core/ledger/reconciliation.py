@@ -101,7 +101,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, insert, or_, select, text, update
 
 from app.core.invariants import InvariantChecker
 from app.db.journal_tables import (
@@ -117,6 +117,7 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_baselines,
     debt_reconciliation_results,
 )
+from app.db.sqlstate import sqlstate
 from app.utils.exceptions import IntegrityViolationException
 
 __all__ = [
@@ -138,6 +139,7 @@ __all__ = [
     "ReconciliationReadError",
     "STRUCTURAL_ONLY",
     "UNVERIFIABLE",
+    "bound_the_waits",
     "record_outcome",
     "run_scheduled_reconciliation",
     "take_baseline",
@@ -1053,20 +1055,24 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
     * Within one process the runs are strictly sequential: `_integrity_loop` (`app/core/maintenance_jobs.py`)
       awaits the startup run and then each periodic run before scheduling the next, and it is started once
       (`_start_configured_background_tasks`). A task that dies is recorded (`_on_background_task_done` in
-      `app/utils/background_jobs.py`), not restarted concurrently.
+      `app/utils/background_jobs.py`), not restarted concurrently. The operator's `scripts/reconcile_debts.py`
+      (047 `T4702`) is a second process on the same database and takes no lock: a run of it that overlaps a
+      scheduled run is the case described here, accepted at a daily cadence (spec 047, decision B, item 3).
     * No launcher, compose file or Dockerfile starts more than one worker (no `--workers`,
       `WEB_CONCURRENCY` or gunicorn anywhere in them). Overlap needs two or more processes on one
       database WITHOUT Redis, which is not a configured deployment. With Redis the integrity loop's
       distributed lock serialises the runs; without it that lock is a no-op
       (`app/utils/distributed_lock.py`).
     * The damage is bounded, and the bound is the interval PLUS a run's duration, not the interval:
-      `_integrity_loop` waits `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS` (300 s by default) after the
+      `_integrity_loop` waits `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS` (86400 s by default since 047; 300 s
+      when this was decided) after the
       previous run COMPLETES, and the next run then takes as long as the checkpoints and this verifier
       over every equivalent take. A stale verdict is replaced when that next run publishes, because the
       persisting state recomputes a different fingerprint from the stale one and is stored as a
       transition; and step 5c re-verifies in one snapshot before it holds anything.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
-      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/core/maintenance_jobs.py`) and never
+      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default 300 s since 047 - `max(30, interval)` before -,
+      `app/core/maintenance_jobs.py`) and never
       extends it, so a run longer than the TTL could overlap a second Redis-backed process. Acceptable
       for the single-worker v0.1 deployment; a renewable lease is registered as a follow-up and is not
       built here.
@@ -1161,6 +1167,35 @@ async def open_verification_snapshot(session: Any) -> None:
 
     await session.connection(
         execution_options={"isolation_level": "REPEATABLE READ", "postgresql_readonly": True}
+    )
+
+
+async def bound_the_waits(session: Any) -> None:
+    """047 class-1 fix (2026-10-18): bound THIS transaction's lock waits and statements, so a wait fails, not hangs.
+
+    Before it a run waited without a bound: another open transaction holding the latest result row of one
+    equivalent (or its equivalent row) blocked `record_outcome` - or the reaction's hold - forever, the
+    equivalents after it were never verified, and the integrity job stayed `running` while money moved.
+    Now the wait ends with SQLSTATE 55P03 (`lock_timeout`) or 57014 (`statement_timeout`), which
+    `run_scheduled_reconciliation` counts as an error of that equivalent ONLY - no result row, the run is not
+    completed - and the next equivalent is still verified.
+
+    `set_config(..., true)` is `SET LOCAL`: it ends with this transaction and never reaches the pool's other
+    users, so the money writers' own timeouts are untouched. Called on every transaction the scheduled run
+    opens: the listing, the verification snapshot (after `open_verification_snapshot`, whose isolation must be
+    chosen before the first statement), the publication, and the reaction. The values and their measurements:
+    `INTEGRITY_DB_LOCK_TIMEOUT_MS` and `INTEGRITY_DB_STATEMENT_TIMEOUT_MS` in `app/config.py`.
+    """
+
+    from app.config import settings
+
+    await session.execute(
+        text("SELECT set_config('lock_timeout', :lock, true), set_config('statement_timeout', :statement, true)"),
+        {
+            # Never 0: PostgreSQL reads 0 as "no bound" - the very hang this exists against.
+            "lock": f"{max(1, int(settings.INTEGRITY_DB_LOCK_TIMEOUT_MS))}ms",
+            "statement": f"{max(1, int(settings.INTEGRITY_DB_STATEMENT_TIMEOUT_MS))}ms",
+        },
     )
 
 
@@ -1368,6 +1403,7 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
 
     async with session_factory() as work:
         await _open_reaction_transaction(work)
+        await bound_the_waits(work)
         decision = await _confirm_and_hold(work, equivalent_id)
         if decision.decision == HOLD_SET:
             await work.commit()
@@ -1386,8 +1422,9 @@ async def run_scheduled_reconciliation(
 ) -> dict[str, Any]:
     """Verify every equivalent in its own fresh session and transaction, persisting each result.
 
-    Called only from the scheduled integrity loop, after the checkpoints have committed
-    (`_run_debt_reconciliation_once` in `app/core/maintenance_jobs.py`). Inactive equivalents are verified too:
+    Called from the scheduled integrity loop, after the checkpoints have committed
+    (`_run_debt_reconciliation_once` in `app/core/maintenance_jobs.py`), and - since 047 `T4702` - by the operator's
+    `scripts/reconcile_debts.py`, one equivalent per call, without the checkpoints. Inactive equivalents are verified too:
     reading is not moving money, and a held equivalent keeps being verified - a later `PASSED` is what permits an admin to clear it.
 
     A failure while verifying ONE equivalent is logged as an error and leaves NO result row for it -
@@ -1403,6 +1440,7 @@ async def run_scheduled_reconciliation(
 
     if equivalent_ids is None:
         async with session_factory() as session:
+            await bound_the_waits(session)
             equivalent_ids = (
                 await session.execute(select(Equivalent.id).order_by(Equivalent.code))
             ).scalars().all()
@@ -1426,16 +1464,22 @@ async def run_scheduled_reconciliation(
             # ONE snapshot for every verification read, ended before anything is written.
             async with session_factory() as session:
                 await open_verification_snapshot(session)
+                await bound_the_waits(session)
                 outcome = await verify_journal_equals_change(session, equivalent_id)
                 await session.rollback()
             # The latest-row read and the write, in one transaction of their own.
             async with session_factory() as session:
+                await bound_the_waits(session)
                 stored = await record_outcome(session, outcome)
                 await session.commit()
-        except Exception:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
+        except Exception as error:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
+            # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
+            # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
             counts["error"] += 1
             counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
-            logger.exception("debt_reconciliation.error equivalent_id=%s", equivalent_id)
+            logger.exception(
+                "debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
+            )
             continue
         counts[outcome.status] += 1
         counts[f"rows_{stored}"] += 1
@@ -1444,10 +1488,12 @@ async def run_scheduled_reconciliation(
             continue
         try:
             decision = await react_to_failed(session_factory, equivalent_id)
-        except Exception:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
+        except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
             counts["hold_errors"] += 1
             counts["errored_equivalents"].append(str(equivalent_id))
-            logger.exception("debt_reconciliation.integrity_hold_error equivalent_id=%s", equivalent_id)
+            logger.exception(
+                "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
+            )
             continue
         counts[f"hold_{decision.decision}"] += 1
 

@@ -27,12 +27,18 @@ async def redis_distributed_lock(
     ttl_seconds: int = 15,
     wait_timeout_seconds: float = 2.0,
     poll_interval_seconds: float = 0.05,
+    call_timeout_seconds: float | None = None,
 ) -> AsyncIterator[None]:
     """Best-effort distributed lock.
 
     If redis_client is None, this becomes a no-op.
 
     Raises ConflictException if the lock can't be acquired within wait_timeout_seconds.
+
+    `call_timeout_seconds` (047 class-1 fix, 2026-10-18; None keeps the unbounded calls of the other callers): each
+    Redis round trip is bounded. A `SET` past it raises `TimeoutError` - NOT `ConflictException`, which a caller may
+    read as "another owner holds it" - after one bounded compare-and-delete of our token (the `SET` may have landed;
+    else the key's TTL expires it). A release past it is given up, as any release error is: the TTL expires the key.
     """
     if redis_client is None:
         yield
@@ -52,7 +58,13 @@ async def redis_distributed_lock(
     try:
         while True:
             # Redis-py: returns True if set, None/False otherwise.
-            ok = await redis_client.set(key, token, nx=True, ex=int(ttl_seconds))
+            try:
+                async with asyncio.timeout(call_timeout_seconds):  # None: no bound
+                    ok = await redis_client.set(key, token, nx=True, ex=int(ttl_seconds))
+            except TimeoutError:
+                _lease_logger.warning("event=lock.acquire_timeout key=%s", key)
+                await _release(redis_client, key, token, call_timeout_seconds)
+                raise
             if ok:
                 acquired = True
                 break
@@ -70,11 +82,18 @@ async def redis_distributed_lock(
         yield
     finally:
         if acquired:
-            try:
-                await redis_client.eval(_UNLOCK_LUA, 1, key, token)
-            except Exception:
-                # Best-effort: don't mask the original exception.
-                pass
+            await _release(redis_client, key, token, call_timeout_seconds)
+
+
+async def _release(redis_client: Any, key: str, token: str, call_timeout_seconds: float | None) -> None:
+    """Compare-and-delete our token. Best-effort: an error is not raised (it must not mask the block's own), and
+    a bounded call past its bound is given up - the key's TTL expires it."""
+
+    try:
+        async with asyncio.timeout(call_timeout_seconds):  # None: no bound
+            await redis_client.eval(_UNLOCK_LUA, 1, key, token)
+    except Exception as exc:  # noqa: BLE001 - the timeout included: the TTL decides
+        _lease_logger.warning("event=lock.release_uncertain key=%s error=%s", key, type(exc).__name__)
 
 
 # --------------------------------------------------------------------------------------------------------------

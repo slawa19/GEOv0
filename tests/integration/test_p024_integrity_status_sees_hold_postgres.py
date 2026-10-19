@@ -397,7 +397,8 @@ class _Stand:
 
         class _Session:
             async def __aenter__(self):
-                return object()
+                # 047: the job bounds the checkpoint transaction's waits (`bound_the_waits`) before the checkpoints.
+                return SimpleNamespace(execute=_no_op)
 
             async def __aexit__(self, *exc):
                 return None
@@ -430,6 +431,10 @@ class _Stand:
 
         await main_module._run_integrity_checkpoints_once(self.app, reason="periodic")
         return dict(self.app.state.background_jobs["integrity"])
+
+
+async def _no_op(*_args, **_kwargs) -> None:
+    return None
 
 
 async def _fail_skip_clean(stand: _Stand, first_failure: str) -> None:

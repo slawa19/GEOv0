@@ -3,7 +3,7 @@
 ```text
 Статус: Stable
 Область: core
-Последнее обновление: 2026-10-06
+Последнее обновление: 2026-10-18
 ```
 
 Решение владельца 2026-10-05 (В3, программа 030, `F-030-14`): «Ошибки в долгах на реальной работе проекта быть не
@@ -12,8 +12,9 @@
 
 ## 1. Что означает удержание
 
-Сверка долгов идёт по расписанию в цикле целостности (`app/core/maintenance_jobs.py`, интервал
-`INTEGRITY_CHECKPOINT_INTERVAL_SECONDS`); ошибка контрольных точек сверку не отменяет — обе записываются
+Сверка долгов идёт в цикле целостности (`app/core/maintenance_jobs.py`) при старте процесса и затем через
+`INTEGRITY_CHECKPOINT_INTERVAL_SECONDS`, по умолчанию раз в сутки (программа 047); по требованию — командой
+`scripts/reconcile_debts.py` (§3); ошибка контрольных точек сверку не отменяет — обе записываются
 (`app/core/maintenance_jobs.py:102`, 030 `F-030-7`). Сверка одного эквивалента
 (`verify_journal_equals_change`, `app/core/ledger/reconciliation.py:969`) проверяет:
 
@@ -35,10 +36,20 @@
 Чем удержание **не** является: ошибка самой сверки, отсутствие результата, `UNVERIFIABLE` и устаревший результат
 удержания не ставят — они видны как `warning` в `GET /api/v1/integrity/summary` и `GET /api/v1/integrity/status` с
 причиной в `alerts` (`_reconciliation_view`, `app/api/v1/integrity.py:110`; 030 `F-030-8`): нет результата; результат
-старше порога свежести (`result_freshness_threshold`, по умолчанию 15 мин); контрольная точка эквивалента новее его
+старше порога свежести (`result_freshness_threshold`, 2 × интервал + 5 мин, по умолчанию 48 ч 5 мин); контрольная точка эквивалента новее его
 результата больше чем на допуск прогона (последняя сверка не опубликовала результат). Известное окно: другой воркер
 или перезапущенный процесс может отвечать `healthy` до порога свежести ([`specs/BACKLOG.md`](../../specs/BACKLOG.md), раздел «Принято программой 031»,
 пункт 9). Деньги предупреждения не останавливают.
+
+**Прогон, который не может закончиться** (047, 2026-10-18): ожидание блокировки или запрос сверки дольше
+`INTEGRITY_DB_LOCK_TIMEOUT_MS` / `INTEGRITY_DB_STATEMENT_TIMEOUT_MS` — ошибка только этого эквивалента (SQLSTATE `55P03`
+/ `57014` в записи лога `debt_reconciliation.error`), следующие эквиваленты сверяются в том же прогоне; попытка целиком
+дольше `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS` или ВЗЯТИЕ замка Redis дольше `INTEGRITY_REDIS_CALL_TIMEOUT_SECONDS` — задание
+`integrity` в состоянии `failed` с событием `<reason>_timed_out` (`/health` — `degraded`). Ни то ни другое не
+результат и не удержание. Иначе с ОСВОБОЖДЕНИЕМ замка (исправлено 2026-10-19 по §15-ревью Codex): если освобождение
+не ответило в срок, завершённая проверка остаётся завершённой, в лог пишется `lock.release_uncertain`, а ключ
+истекает по TTL. Повторяющийся `_timed_out` на выросшей истории — поднять `INTEGRITY_ATTEMPT_TIMEOUT_SECONDS`
+по замеру длительности прогона (`app/config.py`), а не выключать цикл.
 
 Как увидеть: `summary` — `status: critical`, `hold: true`; `status` (админ) — alert `Integrity hold on <CODE>` с
 `hold_result_id` и находки последнего результата.
@@ -104,8 +115,18 @@ ORDER BY eq.code;
 ## 3. Чем подтверждается и как снимается удержание
 
 1. Новый baseline (если брался, п. 2.3) — вывод `take_reconciliation_baseline.py` с числом смещений.
-2. Следующий плановый прогон сверки даёт `PASSED`: в `GET /api/v1/integrity/status` у эквивалента нет alert о
-   `FAILED`, есть `Debt reconciliation PASSED … after the integrity hold; an admin may clear it`.
+2. Прогон сверки даёт `PASSED`. Плановый идёт раз в сутки (с 2026-10-18, программа 047), поэтому после правки его
+   не ждут, а запускают сразу — та же сверка с той же реакцией, на базе из `DATABASE_URL`:
+
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\reconcile_debts.py --equivalent <CODE>
+   ```
+
+   Exit `0` — `PASSED`; `1` — `FAILED`/`UNVERIFIABLE`, находки напечатаны (подтверждённый `FAILED` ставит
+   удержание, если его ещё нет); `2` — проверки не было (база недоступна, неизвестный код, ошибка сверки) — это не «всё хорошо».
+   В Compose — `docker compose exec app python scripts/reconcile_debts.py --equivalent <CODE>`. После `PASSED` в
+   `GET /api/v1/integrity/status` у эквивалента нет alert о `FAILED`, есть `Debt reconciliation PASSED … after the
+   integrity hold; an admin may clear it`.
 3. Явное снятие с причиной и записью аудита — на экране «Целостность» админки (с 2026-10-07, программа 032 S5):
    эквивалент на удержании отмечен, действие «Снять» спрашивает причину, отказ показан текстом. Тот же маршрут:
    `POST /api/v1/admin/equivalents/{code}/integrity-hold/clear` с `{"reason": "…"}`. Маршрут отказывает (`409`,
