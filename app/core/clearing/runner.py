@@ -580,7 +580,8 @@ async def run_awaited_clearing(
     `ConflictException` after `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
 
     The pass is hub-wide (no perimeter), so every snapshot it reads is guarded by `check_hub_wide_clearing_isolation`
-    (044 `T4406`), read on the snapshot's session before the snapshot - as the periodic pass guards its own: a refusal
+    (044 `T4406`), read on the snapshot's session before the snapshot (one READ COMMITTED transaction, two statement
+    snapshots) - as the periodic pass guards its own: a refusal
     on the first snapshot is a `ClearingPassError` with nothing committed whose cause is the 409; one on a re-plan's
     snapshot ends the pass with its committed progress (`reason: error`).
     """
@@ -608,7 +609,10 @@ async def check_periodic_isolation(session) -> None:
     """Decision 9, form (b): refuse where simulator use is detected - a real-mode run row, or run persistence
     off (see the spec's "Выбор формы"). Detection, not proof: a cleaned-up run leaves its debts behind.
 
-    Run inside the snapshot's transaction, so the check and the snapshot see one state.
+    Run inside the snapshot's transaction. Corrected 2026-10-19 (044 `T4406`, internal adversarial pass): that is
+    one transaction, not one state - the application runs READ COMMITTED (`app/config.py`,
+    `DB_POSTGRES_ISOLATION_LEVEL`), so the check and the snapshot are separate statement snapshots and a run row
+    committed between them is not seen by this check (the next snapshot's check sees it).
     """
 
     if not settings.SIMULATOR_DB_ENABLED:

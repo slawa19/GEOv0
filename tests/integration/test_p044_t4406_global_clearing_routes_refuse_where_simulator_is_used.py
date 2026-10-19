@@ -213,3 +213,35 @@ async def test_without_simulator_persistence_both_routes_are_refused(
         "simulator_persistence_disabled",
     )
     assert len(await _hub_debts(db_session)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_run_recorded_during_the_pass_ends_it_at_the_next_snapshot_with_its_progress(
+    client: AsyncClient, db_session, auth_user, monkeypatch
+) -> None:
+    """The guard reads every snapshot of the pass, not only the first: a run recorded after a cycle committed ends
+    the pass at the confirming re-plan - 200 `interrupted`, `reason: error`, the refusal in `error` (E008 with the
+    reason), the committed cycle reported. Found untested by the internal adversarial pass of 044 `T4406`."""
+
+    from app.core.clearing.service import ClearingService
+    from app.db.models.simulator_storage import SimulatorRun
+
+    await seed_graph(db_session, HUB_CODE, HUB)
+    real_execute = ClearingService.execute_occurrence
+
+    async def execute_then_a_run_is_recorded(self, occurrence, **kwargs):
+        amount = await real_execute(self, occurrence, **kwargs)
+        async with sessionmaker_of(db_session)() as s:
+            await s.merge(SimulatorRun(run_id="p4406-midpass", scenario_id="p4406", mode="real", state="running",
+                                       owner_id="test"))
+            await s.commit()
+        return amount
+
+    monkeypatch.setattr(ClearingService, "execute_occurrence", execute_then_a_run_is_recorded)
+    auto = await client.post("/api/v1/clearing/auto", params={"equivalent": HUB_CODE}, headers=auth_user["headers"])
+
+    assert auto.status_code == 200, auto.text
+    body = auto.json()
+    assert (body["status"], body["reason"], body["cleared_cycles"]) == ("interrupted", "error", 1), body
+    assert body["error"]["code"] == "E008" and body["error"]["details"] == {"reason": "simulator_real_runs_in_database"}
+    assert await _hub_debts(db_session) == {}  # the committed cycle is durable and reported

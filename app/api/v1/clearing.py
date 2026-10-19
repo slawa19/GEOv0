@@ -74,7 +74,8 @@ async def list_cycles(
 
     It is hub-wide - the plan of the whole equivalent, participant ids and debt amounts - so it refuses (409) where
     simulator use is detected (044 `T4406`, `check_hub_wide_clearing_isolation`): the check is read on this request's
-    session before the slot is taken and before the snapshot, in the transaction the snapshot then reads in.
+    session before the slot is taken and before the snapshot, in the transaction the snapshot then reads in - one
+    READ COMMITTED transaction, so two statement snapshots, not one state.
     """
 
     _refuse_execution_depth(request)
