@@ -155,6 +155,38 @@ test.describe('048 T4840: the sibling paths of the line window', () => {
     await expectIdle(page, 'after the card closed')
   })
 
+  test('"Close line" in flight: a participant from the navigator is ignored; the refusal shows in the line window; Escape then frees the bar', async ({ page }) => {
+    // §15 Codex, 2026-10-20 (P2): the request may take up to its 120 s timeout. Until this, the card replaced the line window
+    // and the refusal stayed in the closed window, the action open with no window - the T4840 dead end again.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    await open(page)
+    await page.route('**/simulator/runs/*/actions/trustline-close', async (r) => {
+      await held
+      // 409, not 404: an action's 404 also drops the run context (`useInteractActions.ts`), which is not this path.
+      await r.fulfill({ status: 409, contentType: 'application/json', headers: { 'X-Request-ID': 'req-t4840' },
+        body: JSON.stringify({ code: 'TRUSTLINE_CLOSED', message: 'Trustline already closed' }) })
+    })
+    const line = await lineFromNavigator(page)
+    const closeLine = line.getByTestId('edge-close-line-btn')
+    await closeLine.click() // arm
+    await closeLine.click() // confirm: the request is in flight
+    await expect(page.getByTestId('actionbar-busy-hint'), 'counter-check: the request is in flight').toBeVisible()
+
+    const openNode = page.getByTestId('graph-navigator').getByTestId('graph-navigator-open-node')
+    await openNode.focus()
+    await openNode.press('Enter')
+    await expect(page.locator(CARD), 'the participant card is not opened while the line\'s request is in flight').toHaveCount(0)
+    await expect(line.getByTestId('edge-detail-popup')).toBeVisible()
+
+    release()
+    await expect(line.getByTestId('edge-detail-error'), 'the refusal is in the line window').toBeVisible()
+    await expect(line.getByTestId('edge-detail-error')).toHaveAttribute('data-request-id', 'req-t4840')
+    await page.keyboard.press('Escape')
+    await expect(line).toHaveCount(0)
+    await expectIdle(page, 'after the refusal was read and the window closed')
+  })
+
   test('a line opened by a click on the canvas: the x closes it and the action bar is idle', async ({ page }) => {
     await open(page)
     await expectIdle(page, 'before')

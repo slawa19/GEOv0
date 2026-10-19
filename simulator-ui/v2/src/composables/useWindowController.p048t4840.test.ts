@@ -369,7 +369,10 @@ describe('048 T4840: a participant card that replaces the line window ends the "
     }
   })
 
-  it('while the line\'s request is in flight a card replacing the window cancels nothing (046 W3: the request finishes)', async () => {
+  // §15 Codex, 2026-10-20 (P2): "Close line" may be in flight up to its 120 s timeout - ample time to open a participant.
+  // The card replaced the line window, the request then failed, and its failure stayed in the closed window with the
+  // action open and no window: the T4840 dead end again. Opening a card is ignored while the line's request is in flight.
+  it('while the line\'s request is in flight a participant card is IGNORED: the line window stays; after it settles the card opens', async () => {
     const h = mountHarness()
     try {
       await openLineAsTheNavigatorDoes(h)
@@ -378,7 +381,32 @@ describe('048 T4840: a participant card that replaces the line window ends the "
       await nextTick()
       await nextTick()
 
-      expect(h.wm.windows.value.map((w) => w.type), 'counter-check: the card did replace the line window').toEqual(['node-card'])
+      expect(h.wm.windows.value.map((w) => w.type)).toEqual(['edge-detail'])
+      expect(h.phase.value).toBe('editing-trustline')
+      expect(h.cancel).not.toHaveBeenCalled()
+
+      // The request settles (a failure keeps the phase and the error, shown in the line window): the card opens again.
+      h.busy.value = false
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'carol', anchor: { x: 50, y: 50 } })
+      await nextTick()
+      await nextTick()
+      expect(h.wm.windows.value.map((w) => w.type), 'counter-check: the guard holds only while busy').toEqual(['node-card'])
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('while the line\'s request is in flight a close the window manager makes on its own cancels nothing (the listener\'s guard)', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      h.busy.value = true
+      // The last line of defence: any future opener that skipped `uiOpenOrUpdateNodeCard` would close the inspector group so.
+      h.wm.closeGroup('inspector', 'programmatic')
+      await nextTick()
+      await nextTick()
+
+      expect(openLineWindows(h), 'counter-check: the line window was closed').toHaveLength(0)
       expect(h.cancel).not.toHaveBeenCalled()
     } finally {
       h.unmount()

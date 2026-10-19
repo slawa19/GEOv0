@@ -466,8 +466,8 @@ export function useWindowController(opts: {
 	// participant card that replaces it (the window manager keeps one inspector) ends the action. Not the line-window
 	// machine's own programmatic close: "Change Limit" hands the action to the full editor, "Send Payment" keeps the window
 	// as the payment's context (the phase is the payment's then - it is not ended). A request in flight is never cancelled
-	// here: Escape and an outside click are ignored while busy (046 W3), and so is the x below; a card replacing the window
-	// mid-request leaves the action to finish on its own.
+	// here: Escape and an outside click are ignored while busy (046 W3), and so are the x and a participant card below (a
+	// card would replace the window mid-request; this guard stays as the last line if another opener ever skips them).
 	opts.wmEdgeDetail.setUserCloseListener(() => {
 		if (!lineWindowIsTheAction() || opts.interactMode.busy.value) return
 		opts.interactMode.cancel()
@@ -522,6 +522,13 @@ export function useWindowController(opts: {
 	function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
 		const reqNodeId = String(o.nodeId ?? '').trim()
 		if (!reqNodeId) return
+
+		// 048 `T4840` (§15 Codex, 2026-10-20): while the line's own request is in flight (Close line - up to the 120 s timeout,
+		// `api/simulatorApi.ts:261`) a participant card would REPLACE the line window (one inspector, `useWindowManager.ts`
+		// `closeGroup`); a failure would then stay in the closed window and the action open with no window - the T4840 dead
+		// end. Ignored, as Escape, an outside click and the x are while busy (046 W3); every route that opens a card comes
+		// here (the navigator's "Open participant", a double click on the canvas, a bottleneck row, the dev hook).
+		if (lineWindowIsTheAction() && opts.interactMode.busy.value) return
 
 		// UX-5: repeated dblclick on the SAME node while its NodeCard is already the
 		// WM topmost window must be a no-op to avoid a visible flicker / extra relayout.
