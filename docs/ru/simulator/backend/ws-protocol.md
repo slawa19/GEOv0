@@ -97,6 +97,8 @@ in-memory buffer на durable event log и добавить метрики recon
 Если значение `<= 0`, соответствующий лимит отключается.
 При превышении лимитов endpoint возвращает `HTTP 429`.
 
+Подписка — ещё и единственный признак того, что прогон кто-то смотрит (044, 2026-10-19): прогон без подписчика дольше `SIMULATOR_RUN_IDLE_STOP_SEC` останавливается сам с `stop_reason=idle_no_subscribers`. Счёт подписчиков ведёт `app/core/simulator/models.py:293-297` (`note_subscribers_locked`), вызывается на каждой подписке, отписке и закрытии по переполнению очереди (`app/core/simulator/sse_broadcast.py:192, 392, 419`); при остановке по простою поток уже без читателя, а следующий читатель увидит `run_status` с `state=stopped`. Правило и пределы — `real-mode-runbook.md`, раздел 6.6.
+
 ### 2.2 Важное замечание про pytest
 В integration-тестах (pytest + in-process ASGI transport) SSE stream намеренно **завершается рано** после минимального «первого кадра»
 (`run_status` + хотя бы одно доменное событие), чтобы тесты не зависали на бесконечном streaming response.
