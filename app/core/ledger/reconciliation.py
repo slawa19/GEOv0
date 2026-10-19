@@ -50,6 +50,16 @@ ALL ARITHMETIC IS IN INTEGER ATOMS (1e-8) IN PYTHON, never an SQL `SUM`: one exa
 whatever the database does with an aggregate (on SQLite, until 017, an aggregate over a `NUMERIC` column
 was a float sum, and a float sum is not money evidence).
 
+THE HISTORY IS STREAMED, NOT HELD (047 `T4703`, 2026-10-19). Every journal entry, every envelope and every
+`transactions` row of the equivalent is still read and checked one by one, by the same rules; what changed is
+only how they are read: through server-side cursors (`_streamed`), `_STREAM_BATCH_ROWS` at a time, inside the
+caller's one snapshot. Until then the journal and the envelopes with their decoded intents were materialised
+whole, ≈6.5 KB of peak memory per operation (044 stage 2), so one run's peak grew with the history without
+bound. What stays in memory now is O(edges): the per-edge sums, the debts, the offsets, and the findings
+themselves; criterion (b) holds one envelope and its entries at a time (`_criterion_b`, a merge of the envelopes
+ordered by id with the entries ordered by operation id). Rows READ still grow with the history - detection
+reads every entry - rows HELD do not.
+
 THE THREAT MODEL IS NARROW, AND THE WHOLE OF IT IS STATED. `docs/ru/02-protocol-spec.md` §11.2.1 names
 the comparison of `debts` with the history that produced them as the real detector, and §11.6 asks for
 periodic checks; this runs after commit, from the scheduled loop only, against independently stored
@@ -96,12 +106,13 @@ import json
 import logging
 import uuid
 from collections import Counter
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Iterable
+from typing import Any, AsyncIterator, Callable, Iterable
 
-from sqlalchemy import and_, insert, or_, select, text, update
+from sqlalchemy import and_, exists, insert, or_, select, text, update
 
 from app.core.invariants import InvariantChecker
 from app.db.journal_tables import (
@@ -353,61 +364,71 @@ class _Entry:
     delta: int
 
 
-async def _journal_sums(
-    session: Any, equivalent_id: uuid.UUID
-) -> tuple[dict[Edge, int], list[dict], int, dict[uuid.UUID, list[_Entry]]]:
-    """Per-edge sum of every recorded delta, the rows that contradict their own arithmetic, row count,
-    and the same rows grouped by operation for criterion (b). ONE read serves both criteria."""
+#: 047 `T4703`: rows per round trip of the verifier's streamed reads, and so the most rows of one read held at once.
+#: An envelope row carries its decoded intent (≈6.5 KB per operation measured in 044 stage 2, the journal and
+#: transaction rows far less), so a batch costs ≈1.7 MB at most; the round trips it adds are ≈1 per 256 rows.
+_STREAM_BATCH_ROWS = 256
+
+
+async def _streamed(session: Any, statement: Any) -> AsyncIterator[Any]:
+    """The rows of `statement`, one by one, through a server-side cursor - never the whole result at once.
+
+    It runs in the caller's transaction, so every streamed read of one verification sees the caller's one snapshot
+    (`open_verification_snapshot`, the reaction's REPEATABLE READ, or the clear's row lock), as the materialised
+    reads did; `bound_the_waits` applies to it as to any statement of the transaction. Callers use
+    `contextlib.aclosing`, so a cursor left unfinished is closed before the transaction goes on.
+    """
+
+    result = await session.stream(statement.execution_options(yield_per=_STREAM_BATCH_ROWS))
+    try:
+        async for partition in result.partitions():
+            for row in partition:
+                yield row
+    finally:
+        await result.close()
+
+
+async def _journal_sums(session: Any, equivalent_id: uuid.UUID) -> tuple[dict[Edge, int], list[dict], int]:
+    """Per-edge sum of every recorded delta, the rows that contradict their own arithmetic, and the row count.
+
+    Every row is read and checked, streamed (`_streamed`): what is held is one sum per edge and the
+    contradictions. Criterion (b) reads the same rows again, per operation, in the same snapshot (`_criterion_b`);
+    until 047 `T4703` this one read also grouped every row by operation for it, which held the whole journal."""
 
     entries = debt_journal_entries.c
-    rows = (
-        await session.execute(
-            select(
-                entries.id,
-                entries.operation_id,
-                entries.ordinal,
-                entries.debtor_id,
-                entries.creditor_id,
-                entries.effect,
-                entries.amount_before,
-                entries.amount_after,
-                entries.delta,
-            ).where(entries.equivalent_id == equivalent_id)
-        )
-    ).all()
+    statement = select(
+        entries.id,
+        entries.debtor_id,
+        entries.creditor_id,
+        entries.amount_before,
+        entries.amount_after,
+        entries.delta,
+    ).where(entries.equivalent_id == equivalent_id)
 
     sums: dict[Edge, int] = {}
     contradictions: list[dict[str, Any]] = []
-    by_operation: dict[uuid.UUID, list[_Entry]] = {}
-    for row in rows:
-        before = None if row.amount_before is None else _atoms(row.amount_before, what="amount_before")
-        after = None if row.amount_after is None else _atoms(row.amount_after, what="amount_after")
-        delta = _atoms(row.delta, what="delta")
-        if (after or 0) - (before or 0) != delta:
-            contradictions.append(
-                {
-                    "kind": "entry_arithmetic",
-                    "entry_id": str(row.id),
-                    "debtor_id": str(row.debtor_id),
-                    "creditor_id": str(row.creditor_id),
-                    "amount_before": _money_text(before),
-                    "amount_after": _money_text(after),
-                    "delta": _money_text(delta),
-                }
-            )
-        edge = (row.debtor_id, row.creditor_id)
-        sums[edge] = sums.get(edge, 0) + delta
-        by_operation.setdefault(row.operation_id, []).append(
-            _Entry(
-                ordinal=int(row.ordinal),
-                debtor_id=row.debtor_id,
-                creditor_id=row.creditor_id,
-                effect=str(row.effect),
-                amount_before=before,
-                delta=delta,
-            )
-        )
-    return sums, contradictions, len(rows), by_operation
+    count = 0
+    async with aclosing(_streamed(session, statement)) as rows:
+        async for row in rows:
+            count += 1
+            before = None if row.amount_before is None else _atoms(row.amount_before, what="amount_before")
+            after = None if row.amount_after is None else _atoms(row.amount_after, what="amount_after")
+            delta = _atoms(row.delta, what="delta")
+            if (after or 0) - (before or 0) != delta:
+                contradictions.append(
+                    {
+                        "kind": "entry_arithmetic",
+                        "entry_id": str(row.id),
+                        "debtor_id": str(row.debtor_id),
+                        "creditor_id": str(row.creditor_id),
+                        "amount_before": _money_text(before),
+                        "amount_after": _money_text(after),
+                        "delta": _money_text(delta),
+                    }
+                )
+            edge = (row.debtor_id, row.creditor_id)
+            sums[edge] = sums.get(edge, 0) + delta
+    return sums, contradictions, count
 
 
 async def _current_debts(session: Any, equivalent_id: uuid.UUID) -> dict[Edge, int]:
@@ -457,39 +478,72 @@ def _here(equivalent_id: uuid.UUID) -> Any:
     return or_(ops.id.in_(named), ops.id.in_(touched))
 
 
-async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
-    """Every envelope that is here (`_here`), in one read."""
+def _operations(equivalent_id: uuid.UUID) -> Any:
+    """Every envelope that is here (`_here`), in ONE statement, ordered by id - the order criterion (b) examines
+    them in (PostgreSQL orders `uuid` bytewise, as `uuid.UUID` compares) and the order `_criterion_b` merges on."""
 
     ops = debt_operations.c
     transactions = Transaction.__table__
-    return list(
-        (
-            await session.execute(
-                select(
-                    ops.id,
-                    ops.kind,
-                    ops.tx_id,
-                    ops.intent,
-                    ops.intent_digest,
-                    ops.intent_encoding_version,
-                    # What the transaction row says the operation was - read for CLEARING intent v2 only,
-                    # which checks it against the envelope; NULL for every other envelope, so the scheduled
-                    # run does not carry every payment's payload.
-                    transactions.c.payload.label("tx_payload"),
-                )
-                .select_from(
-                    debt_operations.outerjoin(
-                        transactions,
-                        and_(
-                            transactions.c.tx_id == ops.tx_id,
-                            ops.kind == "CLEARING",
-                            ops.intent_encoding_version == 2,
-                        ),
-                    )
-                )
-                .where(_here(equivalent_id))
+    return (
+        select(
+            ops.id,
+            ops.kind,
+            ops.tx_id,
+            ops.intent,
+            ops.intent_digest,
+            ops.intent_encoding_version,
+            # What the transaction row says the operation was - read for CLEARING intent v2 only,
+            # which checks it against the envelope; NULL for every other envelope, so the scheduled
+            # run does not carry every payment's payload.
+            transactions.c.payload.label("tx_payload"),
+        )
+        .select_from(
+            debt_operations.outerjoin(
+                transactions,
+                and_(
+                    transactions.c.tx_id == ops.tx_id,
+                    ops.kind == "CLEARING",
+                    ops.intent_encoding_version == 2,
+                ),
             )
-        ).all()
+        )
+        .where(_here(equivalent_id))
+        .order_by(ops.id)
+    )
+
+
+def _entries_by_operation(equivalent_id: uuid.UUID) -> Any:
+    """This equivalent's journal rows as criterion (b) reads them, ordered by operation id (`_criterion_b`).
+
+    A row without an operation id exists only if the column's NOT NULL was dropped; no envelope has that id, so the
+    grouping by operation never handed it to a rule, and it is left out here too (criterion (a) has read it)."""
+
+    entries = debt_journal_entries.c
+    return (
+        select(
+            entries.operation_id,
+            entries.ordinal,
+            entries.debtor_id,
+            entries.creditor_id,
+            entries.effect,
+            entries.amount_before,
+            entries.delta,
+        )
+        .where(entries.equivalent_id == equivalent_id, entries.operation_id.is_not(None))
+        .order_by(entries.operation_id)
+    )
+
+
+def _entry(row: Any) -> _Entry:
+    """One journal row in atoms, by the same `_atoms` rule as `_journal_sums` (which has already read it once)."""
+
+    return _Entry(
+        ordinal=int(row.ordinal),
+        debtor_id=row.debtor_id,
+        creditor_id=row.creditor_id,
+        effect=str(row.effect),
+        amount_before=None if row.amount_before is None else _atoms(row.amount_before, what="amount_before"),
+        delta=_atoms(row.delta, what="delta"),
     )
 
 
@@ -859,41 +913,75 @@ _RULES = {
 }
 
 
-def _criterion_b(
-    equivalent_id: uuid.UUID,
-    operations: list[Any],
-    entries_by_operation: dict[uuid.UUID, list[_Entry]],
+def _examine_operation(
+    op: Any, entries: list[_Entry], equivalent_id: uuid.UUID, coverage: Counter[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Criterion (b) for ONE envelope and its entries in this equivalent; counts its level into `coverage`."""
+
+    kind = str(op.kind)
+    if kind in _NOT_EXAMINED_KINDS:
+        coverage[(NOT_EXAMINED, kind)] += 1
+        return []
+    version = int(op.intent_encoding_version)
+    level = _READABLE_ENVELOPES.get((kind, version))
+    if level is None:
+        return [_finding("b_version_unsupported", op, intent_encoding_version=version)]
+    coverage[(level, kind)] += 1
+
+    intent = op.intent
+    if not isinstance(intent, dict):
+        return [_finding("b_intent_malformed", op, reason="intent_is_not_an_object")]
+    # NO DIGEST RECOMPUTATION HERE, by coordinator decision (step 5b review round, D1). The stored
+    # digest and the writer are unchanged. WHAT THAT GIVES UP, exactly: for CLEARING and PAYMENT v2 an
+    # intent rewrite is still caught, because their rules read every ledger-relevant field of the
+    # intent and recompute against the journal; what is lost there is only a rewrite of a field no
+    # rule reads (a lock id). For PAYMENT v1 (structural only), an independent
+    # rewrite of the intent is NOT detected - its rule cannot recompute what the intent says. That
+    # is accepted under the threat model: this is detection around the application, and a rewrite
+    # of the intent that also moved the ledger remains a coordinated rewrite, outside it.
+    try:
+        return list(_RULES[(kind, version)](op, intent, entries, equivalent_id))
+    except _Malformed as malformed:
+        return [_finding("b_intent_malformed", op, reason=malformed.reason)]
+
+
+async def _criterion_b(
+    session: Any, equivalent_id: uuid.UUID
 ) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
+    """Criterion (b) over every envelope that is here, ONE envelope and its entries in memory at a time.
+
+    A MERGE of two streams of the caller's snapshot: the envelopes ordered by id (`_operations`) and this
+    equivalent's journal rows ordered by operation id (`_entries_by_operation`). Each envelope receives exactly the
+    rows whose `operation_id` is its id - what the grouping by operation gave it until 047 `T4703` - and an envelope
+    without rows here receives none. A row whose operation is not among the envelopes (possible only with the
+    foreign key off) is passed over here, as the grouping left it unread; criterion (a) has counted and summed it
+    (`_journal_sums`). The envelopes are examined in id order, as the sort by `id.bytes` examined them.
+    """
+
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
-    for op in sorted(operations, key=lambda row: row.id.bytes):
-        kind = str(op.kind)
-        if kind in _NOT_EXAMINED_KINDS:
-            coverage[(NOT_EXAMINED, kind)] += 1
-            continue
-        version = int(op.intent_encoding_version)
-        level = _READABLE_ENVELOPES.get((kind, version))
-        if level is None:
-            findings.append(_finding("b_version_unsupported", op, intent_encoding_version=version))
-            continue
-        coverage[(level, kind)] += 1
-
-        intent = op.intent
-        if not isinstance(intent, dict):
-            findings.append(_finding("b_intent_malformed", op, reason="intent_is_not_an_object"))
-            continue
-        # NO DIGEST RECOMPUTATION HERE, by coordinator decision (step 5b review round, D1). The stored
-        # digest and the writer are unchanged. WHAT THAT GIVES UP, exactly: for CLEARING and PAYMENT v2 an
-        # intent rewrite is still caught, because their rules read every ledger-relevant field of the
-        # intent and recompute against the journal; what is lost there is only a rewrite of a field no
-        # rule reads (a lock id). For PAYMENT v1 (structural only), an independent
-        # rewrite of the intent is NOT detected - its rule cannot recompute what the intent says. That
-        # is accepted under the threat model: this is detection around the application, and a rewrite
-        # of the intent that also moved the ledger remains a coordinated rewrite, outside it.
-        try:
-            findings.extend(_RULES[(kind, version)](op, intent, entries_by_operation.get(op.id, []), equivalent_id))
-        except _Malformed as malformed:
-            findings.append(_finding("b_intent_malformed", op, reason=malformed.reason))
+    async with aclosing(_streamed(session, _operations(equivalent_id))) as operations, aclosing(
+        _streamed(session, _entries_by_operation(equivalent_id))
+    ) as journal:
+        previous_op: uuid.UUID | None = None
+        pending = await anext(journal, None)
+        async for op in operations:
+            # The merge is sound only over the order it assumes; a stream out of it is an error, never a verdict.
+            if previous_op is not None and not previous_op < op.id:
+                raise ReconciliationReadError(f"envelopes read out of id order: {op.id} after {previous_op}")
+            previous_op = op.id
+            entries: list[_Entry] = []
+            while pending is not None and pending.operation_id <= op.id:
+                if pending.operation_id == op.id:
+                    entries.append(_entry(pending))
+                following = await anext(journal, None)
+                if following is not None and following.operation_id < pending.operation_id:
+                    raise ReconciliationReadError(
+                        f"journal rows read out of operation order: {following.operation_id} after "
+                        f"{pending.operation_id}"
+                    )
+                pending = following
+            findings.extend(_examine_operation(op, entries, equivalent_id, coverage))
     return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
 
 
@@ -902,9 +990,7 @@ def _criterion_b(
 _TX_KINDS = ("PAYMENT", "CLEARING")
 
 
-async def _correspondence(
-    session: Any, equivalent_id: uuid.UUID, operations: list[Any]
-) -> tuple[list[dict[str, Any]], int, int]:
+async def _correspondence(session: Any, equivalent_id: uuid.UUID) -> tuple[list[dict[str, Any]], int, int]:
     """030 `F-030-5`: every `transactions` row of this equivalent against its operation, both directions.
 
     A row is this equivalent's when its payload names it (the code, or the id a clearing without a loaded
@@ -914,6 +1000,11 @@ async def _correspondence(
     (`chk_transaction_payment_terminal`) - `COMMITTED` with its envelope, or `ABORTED` as a stored refusal with
     none (`record_definitive_refusal`); a clearing row goes `NEW` -> `COMMITTED` inside one transaction
     (`ClearingService`), so only `COMMITTED` is ever durable; no writer leaves the other five types.
+
+    The rows are streamed (047 `T4703`). An envelope that is here meets a row of this read exactly when a
+    `transactions` row carries its `tx_id` - the outer join hands that row its envelope, and `here` selects it - so
+    the envelopes no row met are read by that predicate in a second statement of the same snapshot, `NOT EXISTS`,
+    instead of collecting every met envelope id (which held one id per operation of the history).
     """
 
     findings: list[dict[str, Any]] = []
@@ -922,30 +1013,38 @@ async def _correspondence(
         findings.append({"kind": "tx_operation_correspondence", "rule": rule, "tx_id": tx_id, "tx_type": tx_type,
                          "tx_state": tx_state, "operation_id": None if op_id is None else str(op_id)})
 
-    tx, ops, here = Transaction.__table__.c, debt_operations.c, _here(equivalent_id)
+    transactions = Transaction.__table__
+    tx, ops, here = transactions.c, debt_operations.c, _here(equivalent_id)
     names_it = tx.payload["equivalent"].as_string()
-    rows = (await session.execute(
+    statement = (
         select(tx.tx_id, tx.type, tx.state, ops.id.label("op_id"), ops.kind.label("op_kind"), here.label("op_here"))
-        .select_from(Transaction.__table__.outerjoin(debt_operations, ops.tx_id == tx.tx_id))
+        .select_from(transactions.outerjoin(debt_operations, ops.tx_id == tx.tx_id))
         .where(or_(names_it == str(equivalent_id),
                    names_it == select(Equivalent.code).where(Equivalent.id == equivalent_id).scalar_subquery(), here))
-    )).all()
-    pairs, met = 0, set()
-    for row in rows:
-        met.add(row.op_id)
-        committed = row.type in _TX_KINDS and row.state == "COMMITTED"
-        if committed and row.op_kind == row.type and row.op_here:
-            pairs += 1
-        elif committed:
-            _refute("committed_transaction_without_its_operation", row.tx_id, row.op_id, row.type, row.state)
-        elif row.op_id is not None:
-            _refute("operation_without_its_committed_transaction", row.tx_id, row.op_id, row.type, row.state)
-        elif not (row.type == "PAYMENT" and row.state == "ABORTED"):
-            _refute("transaction_in_a_shape_no_writer_leaves", row.tx_id, None, row.type, row.state)
-    for op in operations:  # the FK is RESTRICT, so a missing row is a write with the constraints off
-        if op.kind in _TX_KINDS and op.id not in met:
+    )
+    pairs = read = 0
+    async with aclosing(_streamed(session, statement)) as rows:
+        async for row in rows:
+            read += 1
+            committed = row.type in _TX_KINDS and row.state == "COMMITTED"
+            if committed and row.op_kind == row.type and row.op_here:
+                pairs += 1
+            elif committed:
+                _refute("committed_transaction_without_its_operation", row.tx_id, row.op_id, row.type, row.state)
+            elif row.op_id is not None:
+                _refute("operation_without_its_committed_transaction", row.tx_id, row.op_id, row.type, row.state)
+            elif not (row.type == "PAYMENT" and row.state == "ABORTED"):
+                _refute("transaction_in_a_shape_no_writer_leaves", row.tx_id, None, row.type, row.state)
+    # The FK is RESTRICT, so a missing row is a write with the constraints off. A NULL `tx_id` meets no row.
+    unmet = (
+        select(ops.id, ops.tx_id)
+        .where(here, ops.kind.in_(_TX_KINDS), ~exists().where(tx.tx_id == ops.tx_id))
+        .order_by(ops.id)
+    )
+    async with aclosing(_streamed(session, unmet)) as rows:
+        async for op in rows:
             _refute("operation_without_its_committed_transaction", op.tx_id, op.id)
-    return findings, len(rows), pairs
+    return findings, read, pairs
 
 
 async def _structure(session: Any, equivalent_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -973,14 +1072,13 @@ async def verify_journal_equals_change(
 ) -> ReconciliationOutcome:
     """Criteria (a) and (b), the correspondence and the structure for one equivalent: reads only, atoms."""
 
-    sums, findings, entries_read, entries_by_operation = await _journal_sums(session, equivalent_id)
+    sums, findings, entries_read = await _journal_sums(session, equivalent_id)
 
     # Criterion (b), the correspondence and the structure need no baseline: each contradiction is
     # conclusive on its own, like a row that contradicts its own arithmetic.
-    operations = await _operations(session, equivalent_id)
-    b_findings, coverage = _criterion_b(equivalent_id, operations, entries_by_operation)
+    b_findings, coverage = await _criterion_b(session, equivalent_id)
     findings.extend(b_findings)
-    correspondence, transactions_read, pairs = await _correspondence(session, equivalent_id, operations)
+    correspondence, transactions_read, pairs = await _correspondence(session, equivalent_id)
     findings.extend(correspondence)
     findings.extend(await _structure(session, equivalent_id))
     seen = {"transactions_read": transactions_read, "transaction_pairs": pairs}
@@ -1235,7 +1333,7 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
             f"per equivalent and nothing re-baselines"
         )
 
-    sums, contradictions, entries_read, _by_operation = await _journal_sums(session, equivalent_id)
+    sums, contradictions, entries_read = await _journal_sums(session, equivalent_id)
     debts = await _current_debts(session, equivalent_id)
     edges = set(debts) | set(sums)
     offsets = {
