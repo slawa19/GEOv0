@@ -562,6 +562,8 @@ export const en = {
     available: 'available {amount}',
     availableUnknown: 'available —',
     overLimit: 'over limit by {amount}',
+    /** A hovered line without any of the three figures: the bare amounts (internal adversarial pass, 2026-10-19). */
+    amounts: 'from: {from} / to: {to} {unit}',
   },
 
   /** The short history of the person's actions on the first view (`InteractHistoryLog.vue`). */
@@ -616,11 +618,14 @@ export const en = {
     idleStopped: 'The server stopped the run: nobody watched it for a long time. To start again, reload the page.',
     zeroIntensity: 'A tempo of 0 makes no payments: enter a tempo from 1 to 100. To stop the payments, pause.',
     /**
-     * 046 wave 1, full (048 S2 hand-over P2-2): a run the operator stopped (`admin_stop`, `admin_stop_all`) and a run the
-     * server ended with an error. A visitor has no Start since 048 S2: the way back is the reload, as for the idle stop.
-     * The error is named by its code only (046 decision 3: the server's English prose is not shown; the code correlates).
+     * 046 wave 1, full (048 S2 hand-over P2-2): a run stopped by anything but Stop of this screen (`user_stop`) and the idle
+     * stop - the operator's stop-all (`admin_stop_all`), a stop through the API with any reason or none (the runbook's
+     * one-run stop sends none) - and a run the server ended with an error. A visitor has no Start since 048 S2: the way
+     * back is the reload, as for the idle stop. Who stopped it is the stop reason behind "Details", not this line (a stop
+     * without a reason names nobody). The error is named by its code only (046 decision 3: the server's English prose is
+     * not shown; the code correlates).
      */
-    operatorStopped: 'The operator stopped the run. To start again, reload the page.',
+    stopped: 'The run was stopped. To start again, reload the page.',
     errorStopped: 'The run stopped with an error ({code}). To start again, reload the page.',
   },
 

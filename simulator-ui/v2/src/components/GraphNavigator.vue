@@ -35,7 +35,10 @@ const sortedLinks = computed(() =>
 
 const selectedNodeId = ref('')
 const selectedEdgeKey = ref('')
-const announcement = ref('')
+// 046 wave 1 (internal adversarial pass, 2026-10-19): what was opened, not its text - the live region speaks the
+// language of the interface after a switch too (a stored text kept the old one).
+const announced = ref<{ key: 'navigator.participantOpened' | 'navigator.lineOpened'; name: string } | null>(null)
+const announcement = computed(() => (announced.value ? t(announced.value.key, { name: announced.value.name }) : ''))
 
 // 044 `T4405`: the participant's name, not its id (an identity of the run); the shown id only when there is no name;
 // two participants that would read the same are numbered, as in the payment pickers (`participantLabelsOf`).
@@ -76,14 +79,14 @@ function inspectNode(): void {
   const node = sortedNodes.value.find((candidate) => candidate.id === selectedNodeId.value)
   if (!node) return
   emit('inspectNode', node.id)
-  announcement.value = t('navigator.participantOpened', { name: nodeLabel(node) })
+  announced.value = { key: 'navigator.participantOpened', name: nodeLabel(node) }
 }
 
 function inspectEdge(): void {
   const link = sortedLinks.value.find((candidate) => keyEdge(candidate.source, candidate.target) === selectedEdgeKey.value)
   if (!link || props.edgeInspectDisabled) return
   emit('inspectEdge', link)
-  announcement.value = t('navigator.lineOpened', { name: edgeLabel(link) })
+  announced.value = { key: 'navigator.lineOpened', name: edgeLabel(link) }
 }
 </script>
 

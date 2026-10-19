@@ -4,6 +4,7 @@ import type { GraphLink } from '../types'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { formatMoney, moneyText } from '../utils/money'
 import { placeOverlayNearAnchor } from '../utils/overlayPosition'
+import { t } from '../i18n/t'
 
 type HoveredEdgeLike = {
   key: string | null
@@ -38,7 +39,8 @@ export function useEdgeTooltip(deps: UseEdgeTooltipDeps): UseEdgeTooltipReturn {
     const fromTxt = used !== null ? fmt.format(used) : available !== null ? fmt.format(available) : '—'
     const toTxt = limit !== null ? fmt.format(limit) : available !== null && used !== null ? fmt.format(available) : '—'
 
-    return `from: ${fromTxt} / to: ${toTxt} ${unit}`
+    // 046 wave 1, full: through the dictionary (internal adversarial pass: the English literal under ?lang=ru).
+    return t('edgeTooltip.amounts', { from: fromTxt, to: toTxt, unit })
   }
 
   // §7.1 — Cached overlay size to avoid layout thrash on every pointermove.

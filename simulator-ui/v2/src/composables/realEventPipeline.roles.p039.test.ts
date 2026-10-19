@@ -61,7 +61,7 @@ function stand(equivalent = 'EUR') {
   /** What the canvas draws (layout copies) and what the legend says (the snapshot) - read after an event. */
   const seen = () => ({
     canvas: layoutNodes.map((n) => `${n.id}:${tokenOf(fillForNode(n, MAPPING))}:${classifyNode(n).sign}`),
-    legendTitle: `Overall balance · ${canonicalEquivalent(snapshot.equivalent)}`,
+    legendTitle: `Node colour — balance · ${canonicalEquivalent(snapshot.equivalent)}`,
     legend: legendEntriesFor(snapshot.nodes),
     sameObjects: layoutNodes.every((n, i) => n === identity[i]),
     positions: layoutNodes.map((n) => [n.__x, n.__y]),
@@ -79,7 +79,7 @@ const BEFORE = { canvas: ['A:--ds-data-creditor:+', 'B:--ds-data-debtor:−'], l
 describe('039 B1 - a patch of net_sign changes the picture without a relayout', () => {
   it('counter-check: the stand starts with a creditor and a debtor', () => {
     const s = stand()
-    expect(s.seen()).toMatchObject({ ...BEFORE, legendTitle: 'Overall balance · EUR' })
+    expect(s.seen()).toMatchObject({ ...BEFORE, legendTitle: 'Node colour — balance · EUR' })
   })
 
   for (const path of ['payment', 'clearing', 'topology'] as const) {
@@ -125,7 +125,7 @@ describe('039 B1 - a late event of another equivalent paints nothing under the s
       const s = stand('EUR')
       const flip: NodePatch[] = [{ id: 'A', net_sign: -1 }, { id: 'B', net_sign: 1 }]
       s[path]('UAH', flip)
-      expect(s.seen(), 'the old equivalent\'s event arrived after the switch').toMatchObject({ ...BEFORE, legendTitle: 'Overall balance · EUR' })
+      expect(s.seen(), 'the old equivalent\'s event arrived after the switch').toMatchObject({ ...BEFORE, legendTitle: 'Node colour — balance · EUR' })
       // Anti-vacuum: the very same patch is applied when it is of the shown equivalent (written with a space and in lower case).
       s[path](' eur', flip)
       expect(s.seen().canvas).toEqual(['A:--ds-data-debtor:−', 'B:--ds-data-creditor:+'])
@@ -136,7 +136,7 @@ describe('039 B1 - a late event of another equivalent paints nothing under the s
     const eur = stand('EUR')
     const uah = stand('UAH')
     uah.payment('UAH', [{ id: 'A', net_sign: 0 }])
-    expect(eur.seen()).toMatchObject({ legendTitle: 'Overall balance · EUR', legend: ['debtor', 'creditor', 'person'] })
-    expect(uah.seen()).toMatchObject({ legendTitle: 'Overall balance · UAH', legend: ['debtor', 'neutral', 'person'] })
+    expect(eur.seen()).toMatchObject({ legendTitle: 'Node colour — balance · EUR', legend: ['debtor', 'creditor', 'person'] })
+    expect(uah.seen()).toMatchObject({ legendTitle: 'Node colour — balance · UAH', legend: ['debtor', 'neutral', 'person'] })
   })
 })

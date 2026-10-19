@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { useEdgeTooltip } from './useEdgeTooltip'
+import { setUiLocale } from '../i18n/locale'
 
 describe('useEdgeTooltip', () => {
   it('formatEdgeAmountText uses used+trust_limit when present', () => {
@@ -27,6 +28,18 @@ describe('useEdgeTooltip', () => {
 
     const s = api.formatEdgeAmountText({ source: 'A', target: 'B', available: 7 })
     expect(s).toContain('7')
+  })
+
+  it('046 wave 1: the bare amount line (no figures) is from the dictionary, in the language of the interface', () => {
+    const api = useEdgeTooltip({ hostEl: ref(null), hoveredEdge: { key: null, screenX: 0, screenY: 0 }, clamp: (v) => v, getUnit: () => 'UAH' })
+    expect(api.formatEdgeAmountText({ source: 'A', target: 'B' })).toBe('from: — / to: — UAH')
+    setUiLocale('ru')
+    try {
+      expect(api.formatEdgeAmountText({ source: 'A', target: 'B' })).toBe('от: — / до: — UAH')
+    } finally {
+      setUiLocale('en')
+      window.localStorage.clear()
+    }
   })
 
   describe('edgeTooltipStyle — overlay size caching (§7.1 regression)', () => {

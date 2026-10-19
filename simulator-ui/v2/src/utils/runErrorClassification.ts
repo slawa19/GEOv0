@@ -72,10 +72,11 @@ export function writeRunErrorLine(
  * codes decides as before - its line is printed as sent (`CODE: message`). Null: no line.
  *
  * 046 wave 1, full (048 S2 hand-over P2-2): a visitor has no Start since 048 S2, so a run that ENDED says what to do -
- * reload the page (the opening then starts a new run, `useInteractAutoBootstrapRun.ts`): the idle stop (044), a stop by
- * the operator (`admin_stop`, `admin_stop_all` - `OPERATOR_STOP_REASONS`) and a run ended by an error (its code, not
- * the server's English prose: 046 decision 3). A stop with Stop of the run row (`user_stop`, the administrator's own
- * act) and any other reason write no line, as before (the stop reason behind "Details" says why).
+ * reload the page (the opening then starts a new run, `useInteractAutoBootstrapRun.ts`): the idle stop (044), any other
+ * stop that was not Stop of this screen's run row (`user_stop`, the administrator's own act - who has Start beside it):
+ * the operator's stop-all, a stop through the API with any reason or none (internal adversarial pass, 2026-10-19: the
+ * runbook's one-run stop sends no reason, and a list of the operator's reasons missed it) - and a run ended by an error
+ * (its code, not the server's English prose: 046 decision 3). Who stopped it is the stop reason behind "Details".
  */
 export function runStatusErrorLine(
   status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
@@ -84,17 +85,17 @@ export function runStatusErrorLine(
   const state = String(status.state ?? '').trim().toLowerCase()
   // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
   if (state === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return IDLE_STOP_LINE
-  if (state === 'stopped' && OPERATOR_STOP_REASONS.has(String(status.stop_reason ?? ''))) return OPERATOR_STOP_LINE
+  if (state === 'stopped' && status.stop_reason !== OWN_STOP_REASON) return STOPPED_LINE
   const error = status.last_error
   if (!error) return null
   if (state === 'error') return runEndedByErrorLine(error)
   return isUserFacing(error.code) ? runErrorLine(error) : null
 }
 
-/** The stop reasons of the operator (`app/api/v1/simulator.py`: stop one, stop all) - the run is not the viewer's to restart. */
-export const OPERATOR_STOP_REASONS: ReadonlySet<string> = new Set(['admin_stop', 'admin_stop_all'])
+/** The reason Stop of this screen's run row sends (`useSimulatorRealMode.ts` `stop`) - the one stop that writes no line. */
+export const OWN_STOP_REASON = 'user_stop'
 
-const OPERATOR_STOP_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.operatorStopped' })
+const STOPPED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.stopped' })
 
 /**
  * The line of a run the server ended with an error: the clearing step refusal keeps its own human text (it names the

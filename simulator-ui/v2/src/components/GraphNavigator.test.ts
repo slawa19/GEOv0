@@ -99,6 +99,10 @@ describe('GraphNavigator', () => {
     await nextTick()
     expect(inspectNode).toHaveBeenCalledWith('alice')
     expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toBe('Открыт участник: Alice')
+    // Internal adversarial pass (2026-10-19): the announcement made in one language follows a switch (it was a stored text).
+    setUiLocale('en')
+    await nextTick()
+    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toBe('Participant opened: Alice')
     app.unmount()
     host.remove()
   })

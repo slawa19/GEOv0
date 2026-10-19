@@ -136,12 +136,14 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
     ({ state, stop_reason, last_error })
   const always = () => true
 
-  it('a stop by the operator (one run, or all runs): the reload', () => {
-    for (const reason of ['admin_stop', 'admin_stop_all']) {
+  // Internal adversarial pass (2026-10-19, P2): the runbook's one-run stop (`POST /simulator/runs/{id}/stop`) sends NO
+  // reason, and a stop-all may carry its own - a list of the operator's reasons wrote no line for them.
+  it('a stop by anything but this screen\'s Stop - the operator\'s stop-all, a stop with no reason or another one: the reload', () => {
+    for (const reason of ['admin_stop', 'admin_stop_all', null, '', 'maintenance window']) {
       const line = runStatusErrorLine(status('stopped', reason), always)
-      expect(line, reason).toEqual({ kind: 'dict', key: 'runLine.operatorStopped' })
-      expect(renderRunErrorLine(line!, 'en')).toBe('The operator stopped the run. To start again, reload the page.')
-      expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановил оператор. Чтобы запустить снова, перезагрузите страницу.')
+      expect(line, String(reason)).toEqual({ kind: 'dict', key: 'runLine.stopped' })
+      expect(renderRunErrorLine(line!, 'en')).toBe('The run was stopped. To start again, reload the page.')
+      expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановлен. Чтобы запустить снова, перезагрузите страницу.')
     }
   })
 
@@ -155,9 +157,9 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
     expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })
   })
 
-  it('counter-checks: the idle stop keeps its line; the administrator\'s Stop, another reason and no reason write none; a live run keeps CODE: message', () => {
+  it('counter-checks: the idle stop keeps its line; the administrator\'s own Stop writes none; a live run keeps CODE: message', () => {
     expect(runStatusErrorLine(status('stopped', 'idle_no_subscribers'), always)).toEqual({ kind: 'dict', key: 'runLine.idleStopped' })
-    for (const reason of ['user_stop', 'something_else', null]) expect(runStatusErrorLine(status('stopped', reason), always), String(reason)).toBeNull()
+    expect(runStatusErrorLine(status('stopped', 'user_stop'), always), 'Stop of this screen: Start is beside it').toBeNull()
     expect(runStatusErrorLine(status('running', 'admin_stop'), always), 'the reason of a run that is not stopped says nothing').toBeNull()
     expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always)).toEqual(rawRunErrorLine('INTERNAL_ERROR: boom'))
   })
