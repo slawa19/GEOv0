@@ -1613,7 +1613,11 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 .sar-interact-history-overlay {
   right: var(--ds-sar-interact-history-right);
   left: auto;
-  bottom: var(--ds-sar-interact-history-bottom);
+  /* 039 D-fix: above the measured bottom bar (its inset + published height), not a fixed distance from the viewport. */
+  bottom: calc(
+    var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px) + var(--ds-hud-bottom-stack-height, 56px) +
+      var(--ds-sar-interact-history-clear, 4rem)
+  );
   padding: var(--ds-sar-interact-history-pad-y) var(--ds-sar-interact-history-pad-x);
   pointer-events: none;
 }

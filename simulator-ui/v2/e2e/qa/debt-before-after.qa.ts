@@ -159,8 +159,10 @@ for (const lang of ['ru', 'en'] as const) {
  * 039 D-fix (2026-10-19, closes §15 Codex P2 on slice D: "the stand checks the figure is visible, not that it fits").
  * The sentence and each of its two figures: whole inside the viewport, and overlapping NO neighbour - every other
  * panel, control, legend box and legend entry on the page that is not the sentence itself, inside it or around it.
- * Until the D-fix, in Russian at 1366x768 the sentence (absolute, just above the total's panel, right-aligned) lay over
- * the end of the legend ("организация") in both themes - the legend's row is taller than the total's panel.
+ * Until the D-fix the sentence (absolute, just above the total's panel, right-aligned) lay over the end of the legend
+ * ("организация") when the main row wraps (1024x640 here, both languages and themes; Russian at 1366x768 on the live
+ * demo). The "Recent actions" history (`.interact-history`, no panel class of its own) is a neighbour too: the
+ * internal adversarial pass of the D-fix found the sentence over it with "Подробнее" on once the sentence moved up.
  * Returns the offenders by a readable name, so a red run says what it lies on.
  */
 const pairFits = (page: Page) => page.evaluate(() => {
@@ -186,7 +188,7 @@ const pairFits = (page: Page) => page.evaluate(() => {
     const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
     return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ''}${role ? `[legend:${role}]` : ''}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''} "${text}"`
   }
-  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title')]
+  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title, .interact-history, .interact-history__item')]
     .filter((el) => el !== sentence && !sentence.contains(el) && !el.contains(sentence) && visible(el))
   const outside: string[] = []
   const overlaps: string[] = []
@@ -220,8 +222,19 @@ for (const lang of ['ru', 'en'] as const) {
     // The line with the largest debt: a clearing of it (the scene's total is about 88 thousand: a realistic magnitude).
     const l = snapshot.links.reduce((m, x) => (Number(x.used ?? 0) > Number(m.used ?? 0) ? x : m))
     expect(Number(l.used ?? 0), 'counter-check: the scene has a line with a debt to clear').toBeGreaterThan(0)
-    await boot(page, { snapshot, clock: false, query: `&lang=${lang}&theme=saas` })
+    await boot(page, { snapshot, clock: false, query: `&lang=${lang}&theme=saas`, beforeLoad: (p) => p.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, (r) => r.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, equivalent: EQ, cleared_cycles: 0, total_cleared_amount: '0.00', client_action_id: null, cycles: [] }),
+    })) })
     await expect(page.locator('[data-testid="legend"]').first(), 'counter-check: the full legend is on screen').toBeVisible()
+    // A manual clearing through the action bar: its answer puts a line in "Recent actions", the neighbour at the right
+    // edge above the bar. Its toast is waited out, its window closed: what is measured is the HUD at rest.
+    await page.locator('[data-testid="actionbar-clearing"]').click()
+    await page.locator('[data-testid="clearing-confirm"]').click()
+    await expect(page.locator('[data-testid="recent-actions"]'), 'counter-check: the history is on screen').toBeVisible()
+    await expect(page.locator('.ds-ov-toast')).toHaveCount(0, { timeout: 10_000 })
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.ws-shell')).toHaveCount(0)
     const settled = await barBox(page)
     expect((await pair(page)).beforeShown, 'counter-check: settled, no pair').toBe(false)
     await pushEvent(page, {
