@@ -52,9 +52,20 @@ async function pair(page: Page) {
     const b = root?.querySelector(before) ?? null
     const a = root?.querySelector(after) ?? null
     const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim()
-    const shown = (el: Element | null) => !!el && (el as HTMLElement).getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    // Seen by a person: a box with an area, and neither it nor an ancestor hidden, undisplayed or fully transparent by
+    // computed style (§15 Codex 2026-10-19: the first form of this file checked only "was"; R7 checked both fields).
+    const shown = (el: Element | null) => {
+      if (!el) return false
+      const r = el.getBoundingClientRect()
+      if (r.width <= 0 || r.height <= 0 || getComputedStyle(el).visibility === 'hidden') return false
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const cs = getComputedStyle(n)
+        if (cs.display === 'none' || Number(cs.opacity) === 0) return false
+      }
+      return true
+    }
     return {
-      before: b ? text(b) : null, after: a ? text(a) : null, beforeShown: shown(b),
+      before: b ? text(b) : null, after: a ? text(a) : null, beforeShown: shown(b), afterShown: shown(a),
       sentence: text(root?.querySelector('[data-testid="total-debt-change"]')),
       beforeComesFirst: !!a && !!b && !!(b.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING),
     }
@@ -116,7 +127,7 @@ for (const lang of ['ru', 'en'] as const) {
     const w = WORDS[lang]
     const stated = await pair(page)
     expect(stated, 'was 55.00 (just before the clearing\'s patches; not 48.00, not 25 + 10 = 35.00), now 25.00, with the equivalent')
-      .toEqual({ before: '55.00', after: `25.00 ${EQ}`, beforeShown: true, sentence: `${w.was} 55.00 ${EQ}`, beforeComesFirst: true })
+      .toEqual({ before: '55.00', after: `25.00 ${EQ}`, beforeShown: true, afterShown: true, sentence: `${w.was} 55.00 ${EQ}`, beforeComesFirst: true })
     expect(await barBox(page), 'the bottom bar keeps its place and size with a "was"').toEqual(settledBar)
     expect(await wasPlaced(page), 'the "was" is whole on screen, just above the total').toEqual({ inViewport: true, abovePanel: true, drawn: true })
 
