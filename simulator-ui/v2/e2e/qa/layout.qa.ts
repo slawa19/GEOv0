@@ -82,7 +82,8 @@ test('043 S1: Tab through the first view reaches the first view\'s controls only
   expect(distinct, 'the toggle is reachable by Tab').toContain('details-toggle')
   // 043 S2: "Поток" is a control of the first view (the stand's run is paused, so it reads ▶).
   expect(distinct, 'the flow button is reachable by Tab').toContain('flow-toggle')
-  const allowed = new Set([...ACTIONS, 'flow-toggle', 'details-toggle', 'Close hint', 'Reset view', 'body'])
+  // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
+  const allowed = new Set([...ACTIONS, 'flow-toggle', 'details-toggle', 'onboarding-close', 'reset-view', 'body'])
   expect(distinct.filter((d) => d !== 'body').length, 'at most seven controls on the first view (decision 1)').toBeLessThanOrEqual(7)
   expect(distinct.filter((d) => !allowed.has(d)), 'nothing else is in the tab order of the first view').toEqual([])
 })

@@ -4,6 +4,7 @@ import type { AcceptedSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import type { GraphSnapshot } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
+import { t } from '../i18n/t'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -500,7 +501,11 @@ describe('031 item 17: the tick step refusal reaches the run error line', () => 
 
   it('BACKLOG 037-5 (a): the error a run STOPPED with is shown whatever its code; the same code on a live run is not', () => {
     const stoppedBy = { code: 'SCENARIO_TRUSTLINE_REFUSED', message: 'trust line a->b UAH: refused (reason: trust_line_status_frozen)', at: TS }
-    expect(apply(statusWith(stoppedBy, 'error'))).toBe(`SCENARIO_TRUSTLINE_REFUSED: ${stoppedBy.message}`)
+    // 046 wave 1, full (2026-10-19; 048 S2 hand-over P2-2, 046 decision 3): the line of a run ENDED by an error is the
+    // interface's sentence with the code and the way back (reload); the server's English prose is not shown (was
+    // `CODE: message`). The code is still on the line - the correlation of AGENTS.md section 12.
+    expect(apply(statusWith(stoppedBy, 'error'))).toBe(t('runLine.errorStopped', { code: 'SCENARIO_TRUSTLINE_REFUSED' }, 'en'))
+    expect(apply(statusWith(stoppedBy, 'error'))).not.toContain(stoppedBy.message)
     // anti-vacuum: the list of user-facing codes still decides for a run that goes on
     expect(apply(statusWith(stoppedBy))).toBe('')
     // a stopped run without an error has nothing to show

@@ -11,6 +11,7 @@ import { plural, type Messages } from './messages'
  * «кредитор / должник» only in hints. No gendered or person-only forms for a participant (a participant may be an
  * organisation): no «он / ему / она»; a status agrees with the noun «участник». Labels of the 72 px rail are short
  * («От кого», «Кому», «Сумма»).
+ * Clarified 2026-10-19 (advisor, 046 W1): a pronoun agreeing with the noun «участник» (which may be an organisation) is allowed - «ему должны больше» of 048 §G; what the rule forbids is a form valid only for a person.
  */
 export const ru = {
   locale: {
@@ -361,6 +362,153 @@ export const ru = {
     stopReasonAria: 'Причина остановки',
     stopLabel: 'Остановка',
     noConnection: 'нет связи с сервером',
+
+    // 046 wave 1, full (after 048 S2): слова 048 §G, где §G их называет. Подлежащее состояния — «сеть» (ж. р.).
+    offlineDemo: 'офлайн-демо',
+    state: {
+      offline: 'снимок без сервера',
+      running: 'живёт',
+      paused: 'на паузе',
+      created: 'запускается',
+      stopping: 'останавливается',
+      stopped: 'остановлена',
+      error: 'ошибка',
+      pending: '…',
+      noRun: 'нет прогона',
+    },
+    flow: 'Поток',
+    flowPause: 'Поставить автоматические платежи на паузу',
+    flowResume: 'Возобновить автоматические платежи',
+    details: 'Подробнее',
+    network: 'Сеть',
+    detailsRowAria: 'Верхняя панель',
+    modeAria: 'Вид',
+    themeGroupAria: 'Тема',
+    themeLabel: 'Тема',
+    themeAria: 'Тема оформления',
+    themeSaas: 'Спокойная',
+    themeHud: 'Контрастная',
+    runControlsAria: 'Управление прогоном',
+    scenarioLabel: 'Сценарий',
+    scenarioAria: 'Сценарий',
+    scenarioPlaceholder: '— выберите —',
+    start: 'Старт',
+    stop: 'Стоп',
+    tempoGroupAria: 'Темп автоплатежей',
+    tempoLabel: 'Темп автоплатежей, %',
+    tempoAria: 'Темп автоплатежей, процентов',
+    apply: 'Применить',
+    noScenarios: 'Сценарии не загрузились — попробуйте позже',
+    statusAria: 'Состояние',
+    paymentsAria: 'Платежи',
+    payments: 'Платежи: {ok} из {total} прошли',
+    paymentsNone: 'Платежей ещё не было',
+    stallAria: 'Платежи стоят',
+    stall: 'Платежи не проходят: лимиты исчерпаны — проведите клиринг или увеличьте лимит',
+  },
+
+  actions: {
+    aria: 'Действия',
+    payment: 'Платёж',
+    trustline: 'Линия доверия',
+    clearing: 'Клиринг',
+    paymentHint: 'Сумма дойдёт до получателя по цепочке доверия.',
+    trustlineHint: 'Задаёт, сколько один участник может быть должен другому.',
+    clearingHint: 'Долги, идущие по кругу, взаимно гасятся — у каждого участника круга долг уменьшается.',
+    cancellingTitle: 'Отмена… дождитесь окончания операции.',
+    cancellingHint: 'Отмена… подождите.',
+    disabled: 'Действия отключены на сервере.',
+    noRun: 'Действиям нужен идущий прогон. Если прогон завершился, перезагрузите страницу — начнётся новый.',
+    busyHintAria: 'Подсказка: действие выполняется',
+    lockedHintAria: 'Подсказка: сначала завершите действие',
+  },
+
+  // 048 п. 13 (а): три действия словами протокола.
+  onboarding: {
+    protocol: 'Платёж идёт по цепочке доверия; линия доверия — лимит, до которого один верит другому; клиринг гасит долги по кругу.',
+    explore: 'Выберите участника и наведите на его линию: кто кому доверяет и кто кому должен.',
+    close: 'Закрыть подсказку',
+  },
+
+  bottomBar: {
+    rowAria: 'Нижняя панель',
+    viewAria: 'Настройки вида',
+    equivalent: 'Эквивалент',
+    layout: 'Раскладка',
+    layoutOption: {
+      'admin-force': 'облако',
+      'community-clusters': 'группы',
+      'balance-split': 'по балансу',
+      'type-split': 'по типу',
+      'status-split': 'по статусу',
+    },
+    toolsAria: 'Инструменты',
+    fitNetwork: 'Показать всю сеть',
+  },
+
+  systemBalance: {
+    balanceAria: 'Баланс сети',
+    metricsAria: 'Показатели сети',
+    totalDebt: 'Общий долг',
+    available: 'Доступно для платежей',
+    trustlines: 'Линии доверия',
+    participants: 'Участники',
+    utilization: 'Занято лимитов',
+  },
+
+  // 048 §G (советник): «ему должны больше» согласуется с существительным «участник», как статусы (запись 046 2026-10-18).
+  legend: {
+    title: 'Цвет участника — баланс',
+    titleWithEquivalent: 'Цвет участника — баланс · {eq}',
+    help: 'Баланс участника: сколько должны участнику минус сколько должен участник.',
+    entry: {
+      debtor: 'должен больше',
+      creditor: 'ему должны больше',
+      neutral: 'ровно',
+      unknown: 'неизвестно',
+      frozen: 'заморожен',
+      hub: 'хаб',
+      person: 'человек',
+      organisation: 'организация',
+    },
+  },
+
+  navigator: {
+    aria: 'Поиск на графе',
+    summary: 'Найти на графе',
+    participant: 'Участник',
+    line: 'Линия',
+    openParticipant: 'Открыть участника',
+    openLine: 'Открыть линию',
+    participantOpened: 'Открыт участник: {name}',
+    lineOpened: 'Открыта линия: {name}',
+    lineDisabled: 'Линия открывается на живой сети (источник — сервер), когда нет действия в работе.',
+  },
+
+  edgeTooltip: {
+    aria: 'Подсказка линии',
+    trust: '{from} доверяет {to} до {limit}',
+    debt: 'долг {to} перед {from} — {used} · {available}',
+    available: 'доступно {amount}',
+    availableUnknown: 'доступно —',
+    overLimit: 'сверх лимита на {amount}',
+    amounts: 'от: {from} / до: {to} {unit}',
+  },
+
+  recentActions: {
+    aria: 'История действий',
+    title: 'Последние действия',
+  },
+
+  toast: {
+    successAria: 'Уведомление об успехе',
+    errorAria: 'Уведомление об ошибке',
+    dismiss: 'Закрыть',
+  },
+
+  scene: {
+    loading: 'Загрузка…',
+    error: 'Ошибка',
   },
 
   // The subject is «прогон» (м. р.).
@@ -387,11 +535,14 @@ export const ru = {
   runLine: {
     idleStopped: 'Прогон остановлен сервером: его долго никто не смотрел. Чтобы запустить снова, перезагрузите страницу.',
     zeroIntensity: 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.',
+    stopped: 'Прогон остановлен. Чтобы запустить снова, перезагрузите страницу.',
+    errorStopped: 'Прогон остановился с ошибкой ({code}). Чтобы запустить снова, перезагрузите страницу.',
   },
 
   windowShell: {
     window: 'Окно',
     closeWindow: 'Закрыть окно',
     clearingTitle: 'Клиринг',
+    layer: 'Слой окон',
   },
 } as const satisfies Messages<typeof en>

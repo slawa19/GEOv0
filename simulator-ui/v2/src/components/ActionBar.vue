@@ -3,6 +3,7 @@ import { computed } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
 import { type ActivePanelKey, useActivePanelStateShared } from '../composables/useActivePanelState'
+import { useUiLocale } from '../composables/useUiLocale'
 import { toLower } from '../utils/stringHelpers'
 import HudBar from './common/HudBar.vue'
 
@@ -25,6 +26,7 @@ type Props = {
 }
 
 const props = defineProps<Props>()
+const { t } = useUiLocale()
 
 const isDisabled = computed(() => !!props.busy || !!props.actionsDisabled || !!props.runTerminal)
 
@@ -36,13 +38,18 @@ const isFlowActive = computed(() => !isIdle.value)
 
 const { activeKey } = useActivePanelStateShared(computed(() => props.phase))
 
+/**
+ * Why a button is disabled, else what its action results in (048 item 13 (a): the hint says the RESULT, not the name
+ * again). 046 wave 1: the dictionary's words. No run (048 S2 hand-over P2-2): a visitor has no Start, so the reason
+ * names the way back every viewer has - a reload makes the opening's one attempt again.
+ */
 function titleFor(_key: ActivePanelKey, idleTitle: string): string {
   // Prioritize in-flight operation hints over the generic "flow active" message.
-  if (props.busy && props.cancelling) return 'Cancelling… please wait for the operation to finish.'
-  if (props.busy) return 'Operation in progress… please wait.'
-  if (isFlowActive.value) return 'Cancel current action first (press ESC).'
-  if (props.actionsDisabled) return 'Actions are disabled by backend feature flags.'
-  if (props.runTerminal) return 'No run, or the run is stopped or in error state. Start a run first.'
+  if (props.busy && props.cancelling) return t('actions.cancellingTitle')
+  if (props.busy) return t('card.busyReason')
+  if (isFlowActive.value) return t('card.flowOpenReason')
+  if (props.actionsDisabled) return t('actions.disabled')
+  if (props.runTerminal) return t('actions.noRun')
   return idleTitle
 }
 
@@ -55,7 +62,7 @@ function guardedStart(fn: () => void) {
 </script>
 
 <template>
-  <div class="action-bar" aria-label="Interact actions">
+  <div class="action-bar" :aria-label="t('actions.aria')" data-testid="action-bar">
     <HudBar variant="ghost" layout="start" fit>
       <button
         class="ds-btn ds-btn--secondary"
@@ -64,10 +71,10 @@ function guardedStart(fn: () => void) {
         :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'payment' ? '1' : '0'"
         data-testid="actionbar-payment"
-        :title="titleFor('payment', 'Send a manual payment')"
+        :title="titleFor('payment', t('actions.paymentHint'))"
         @click="guardedStart(startPaymentFlow)"
       >
-        Send Payment
+        {{ t('actions.payment') }}
       </button>
 
       <button
@@ -77,10 +84,10 @@ function guardedStart(fn: () => void) {
         :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'trustline' ? '1' : '0'"
         data-testid="actionbar-trustline"
-        :title="titleFor('trustline', 'Create/update/close a trustline')"
+        :title="titleFor('trustline', t('actions.trustlineHint'))"
         @click="guardedStart(startTrustlineFlow)"
       >
-        Manage Trustline
+        {{ t('actions.trustline') }}
       </button>
 
       <button
@@ -90,31 +97,31 @@ function guardedStart(fn: () => void) {
         :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'clearing' ? '1' : '0'"
         data-testid="actionbar-clearing"
-        :title="titleFor('clearing', 'Run clearing')"
+        :title="titleFor('clearing', t('actions.clearingHint'))"
         @click="guardedStart(startClearingFlow)"
       >
-        Run Clearing
+        {{ t('actions.clearing') }}
       </button>
 
       <span
         v-if="busy"
         class="action-bar__hint"
         data-testid="actionbar-busy-hint"
-        aria-label="Action Bar busy hint"
+        :aria-label="t('actions.busyHintAria')"
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        {{ cancelling ? 'Cancelling… please wait.' : 'Operation in progress… please wait.' }}
+        {{ cancelling ? t('actions.cancellingHint') : t('card.busyReason') }}
       </span>
 
       <span
         v-else-if="isFlowActive"
         class="action-bar__hint"
         data-testid="actionbar-locked-hint"
-        aria-label="Action Bar locked hint"
+        :aria-label="t('actions.lockedHintAria')"
       >
-        Cancel current action first (press ESC).
+        {{ t('card.flowOpenReason') }}
       </span>
     </HudBar>
   </div>

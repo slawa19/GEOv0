@@ -92,7 +92,8 @@ function contents(page: Page) {
 const VISITOR = {
   top: ['theme-select', 'language-select'],
   figures: ['sbb-available', 'sbb-trustlines', 'sbb-participants', 'sbb-utilization'],
-  bottom: ['equivalent-text', 'layout-select', 'Inspect graph'],
+  // 046 wave 1, full (2026-10-19): the controls carry test ids (their words are the dictionary's).
+  bottom: ['equivalent-text', 'layout-select', 'graph-navigator-summary'],
 }
 
 test.describe('048 S2 (amendment 12): what "Подробнее" holds, by addressee', () => {
@@ -113,7 +114,7 @@ test.describe('048 S2 (amendment 12): what "Подробнее" holds, by addres
     await open(page, { visitor: false })
     await page.locator(DETAILS).click()
     await expect(page.getByTestId('own-run-row')).toBeVisible()
-    expect(await contents(page)).toEqual({ ...VISITOR, top: [...VISITOR.top, 'scenario-select', 'Stop', 'Intensity percent', 'Apply', 'run-payments'] })
+    expect(await contents(page)).toEqual({ ...VISITOR, top: [...VISITOR.top, 'scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', 'run-payments'] })
     for (const id of ['admin-summary', 'admin-menu', 'labels-select', 'analytics-toggle']) {
       await expect(page.getByTestId(id), `${id}: not rendered`).toHaveCount(0)
     }

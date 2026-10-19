@@ -4,7 +4,7 @@
  * stage 2 / PR #299), told in the language of the interface from the dictionary, without the old pointer to Start under
  * "Подробнее" (the line offers "Try again" itself).
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
 import {
@@ -14,6 +14,7 @@ import {
   rawRunErrorLine,
   renderRunErrorLine,
   runErrorLine,
+  runErrorLineTitle,
   runStatusErrorLine,
   startRetryOffered,
   startRunErrorLine,
@@ -121,5 +122,73 @@ describe('046 wave 1 (§15 Codex) - every line of the run error line is a value 
     expect(holder).toEqual({ lastError: 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.', lastErrorLine: ZERO_INTENSITY_LINE })
     writeRunErrorLine(holder, null, 'ru')
     expect(holder).toEqual({ lastError: '', lastErrorLine: null })
+  })
+})
+
+/**
+ * 046 wave 1, full (048 S2 hand-over P2-2, 2026-10-19): since 048 S2 a visitor has no Start, and a run that ENDED left them
+ * stuck without a word of what to do - only the idle stop said "reload the page". The line of the run now says it for a
+ * stop by the operator and for a run ended by an error (with its code, in the interface language; 046 decision 3). The
+ * administrator's own Stop (`user_stop`) and any other reason write no line, as before (no new state, no new control).
+ * Red before on `main` `efc12f62`: an operator stop had no line (`null`), a run in `error` showed `CODE: message`.
+ */
+describe('046 wave 1, full - a run that ended says what to do (the reload), in the interface language', () => {
+  const status = (state: string, stop_reason: string | null = null, last_error: { code: string; message: string; at: string } | null = null) =>
+    ({ state, stop_reason, last_error })
+  const always = () => true
+
+  // Internal adversarial pass (2026-10-19, P2): the runbook's one-run stop (`POST /simulator/runs/{id}/stop`) sends NO
+  // reason, and a stop-all may carry its own - a list of the operator's reasons wrote no line for them.
+  it('a stop by anything but this screen\'s Stop - the operator\'s stop-all, a stop with no reason or another one: the reload', () => {
+    for (const reason of ['admin_stop', 'admin_stop_all', null, '', 'maintenance window']) {
+      const line = runStatusErrorLine(status('stopped', reason), always)
+      expect(line, String(reason)).toEqual({ kind: 'dict', key: 'runLine.stopped' })
+      expect(renderRunErrorLine(line!, 'en')).toBe('The run was stopped. To start again, reload the page.')
+      expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановлен. Чтобы запустить снова, перезагрузите страницу.')
+    }
+  })
+
+  it('a run ended by an error: the code and the reload, not the server\'s English prose; the step refusal keeps its text', () => {
+    const line = runStatusErrorLine(status('error', null, { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }), always)
+    expect(line).toEqual({ kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED', detail: 'REAL_MODE_TICK_FAILED: tick failed' })
+    expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed')
+    expect(renderRunErrorLine(line!, 'en')).toBe('The run stopped with an error (REAL_MODE_TICK_FAILED). To start again, reload the page.')
+    expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановился с ошибкой (REAL_MODE_TICK_FAILED). Чтобы запустить снова, перезагрузите страницу.')
+    expect(renderRunErrorLine(line!, 'ru')).not.toContain('tick failed')
+    const step = runStatusErrorLine(status('error', null, { code: 'CLEARING_REFUSED', message: 'x', at: 't' }), always)
+    expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })
+  })
+
+  it('counter-checks: the idle stop keeps its line; the administrator\'s own Stop writes none; a live run keeps CODE: message', () => {
+    expect(runStatusErrorLine(status('stopped', 'idle_no_subscribers'), always)).toEqual({ kind: 'dict', key: 'runLine.idleStopped' })
+    expect(runStatusErrorLine(status('stopped', 'user_stop'), always), 'Stop of this screen: Start is beside it').toBeNull()
+    expect(runStatusErrorLine(status('running', 'admin_stop'), always), 'the reason of a run that is not stopped says nothing').toBeNull()
+    expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always)).toEqual(rawRunErrorLine('INTERNAL_ERROR: boom'))
+  })
+})
+
+/**
+ * §15 Codex round (advisor's condition, 2026-10-19; 048 decision 3, AGENTS.md section 12): the server's full text of a run
+ * ended by an error goes to the console once - not on each status that repeats it, nor on a re-render after a switch of
+ * the language; another error is logged again. No token or payload is logged: the code and the server's message only.
+ */
+describe('046 wave 1 - the server text of an ended run: one console line', () => {
+  it('logged once with the code and the message; repeats and re-renders are silent; a new error logs again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const holder: { lastError: string; lastErrorLine: RunErrorLine | null } = { lastError: '', lastErrorLine: null }
+      const ended = (message: string) => runStatusErrorLine({ state: 'error', last_error: { code: 'REAL_MODE_TICK_FAILED', message, at: 't' } }, () => true)
+      writeRunErrorLine(holder, ended('tick failed'), 'en')
+      writeRunErrorLine(holder, ended('tick failed'), 'en') // the REST refresh repeats the status
+      writeRunErrorLine(holder, holder.lastErrorLine, 'ru') // a switch of the language re-renders the same value
+      expect(warn.mock.calls).toEqual([['[run] stopped with an error:', 'REAL_MODE_TICK_FAILED: tick failed']])
+      writeRunErrorLine(holder, ended('another'), 'en')
+      expect(warn).toHaveBeenCalledTimes(2)
+      // Counter-check: a line without a server text logs nothing.
+      writeRunErrorLine(holder, ZERO_INTENSITY_LINE, 'en')
+      expect(warn).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

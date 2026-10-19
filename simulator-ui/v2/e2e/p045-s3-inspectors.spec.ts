@@ -54,9 +54,10 @@ async function openCard(page: Page, nodeId = 'alice'): Promise<Locator> {
 /** The line Bob -> Alice, through the DOM graph navigator (as `p037-c-edge-entry`): the window then holds the line's figures. */
 async function openLine(page: Page): Promise<Locator> {
   await page.locator('[data-testid="details-toggle"]').click()
-  const nav = page.getByRole('region', { name: 'Graph navigator' })
-  await nav.getByText('Inspect graph', { exact: true }).click()
-  await nav.getByRole('button', { name: 'Inspect edge' }).click()
+  // 046 wave 1, full (2026-10-19): first-screen controls by test id - their names are the dictionary's (language of the page).
+  const nav = page.getByTestId('graph-navigator')
+  await nav.getByTestId('graph-navigator-summary').click()
+  await nav.getByTestId('graph-navigator-open-edge').click()
   const edge = page.locator(EDGE)
   await expect(edge.locator('[data-testid="edge-detail-popup"]')).toBeVisible()
   await page.locator('[data-testid="details-toggle"]').click()

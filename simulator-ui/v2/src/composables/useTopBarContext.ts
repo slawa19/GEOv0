@@ -35,6 +35,11 @@ export type TopBarContext = {
   sseState: Readonly<Ref<string>>
   lastError: Readonly<Ref<string | null>>
   /**
+   * 046 wave 1 (048 decision 3): the `title` of the error line when it differs from the line - the server's full text of
+   * a run ended by an error (`runErrorLineTitle`). Optional: without it the title is the line itself.
+   */
+  lastErrorTitle?: Readonly<Ref<string | null>>
+  /**
    * 046 wave 1: the error line is a start the global limit of runs refused, and may be tried again ("Try again" beside
    * it). Optional: a context without it offers no retry.
    */

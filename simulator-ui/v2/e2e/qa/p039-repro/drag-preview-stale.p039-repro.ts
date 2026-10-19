@@ -78,7 +78,7 @@ test('039 B1 review, class 1 (b) - a scene replaced during a drag: the preview o
   await beginDrag(page, await freeNode(page), () => frames(page, 1))
   expect((await shown(page)).display, 'counter-check: the drag began and its preview is on screen').not.toBe('none')
 
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim: { layoutNodes: Array<{ id: string }> } }).__geoSim.layoutNodes.some((n) => n.id.startsWith('x'))), { message: 'the other scenario is loaded', timeout: 15_000 }).toBe(true)
   await frames(page, 4)
   expect((await shown(page)).display, 'the preview of a node of the replaced scene is not shown over the new one').toBe('none')

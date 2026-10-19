@@ -50,7 +50,6 @@ from app.core.clearing.service import ClearingService
 from app.core.ledger import reconciliation
 from app.core.ledger.reconciliation import (
     FAILED,
-    HOLD_NOT_CONFIRMED,
     HOLD_SET,
     PASSED,
     run_scheduled_reconciliation,
@@ -374,70 +373,73 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
         _forget_the_route_cache(world)
 
 
+async def _publish_a_failed_without_its_hold(factory, equivalent_id) -> uuid.UUID:
+    """STAND: the latest result is a real FAILED and nothing holds it - the state a run before 047 `T4704` left when its
+    separate reaction did not commit. Verified in a snapshot and published by `record_outcome`, exactly as before."""
+
+    async with factory() as session:
+        await reconciliation.open_verification_snapshot(session)
+        outcome = await reconciliation.verify_journal_equals_change(session, equivalent_id)
+        await session.rollback()
+    assert outcome.status == FAILED, f"premise: {outcome.status}"
+    async with factory() as session:
+        await reconciliation.record_outcome(session, outcome)
+        await session.commit()
+    async with factory() as session:
+        return (
+            await session.execute(
+                select(debt_reconciliation_results.c.id).where(
+                    debt_reconciliation_results.c.equivalent_id == equivalent_id,
+                    debt_reconciliation_results.c.is_latest.is_(True),
+                )
+            )
+        ).scalar_one()
+
+
 @pytest.mark.asyncio
-async def test_step5c_p_the_reaction_confirms_in_its_own_snapshot_taken_after_the_verdict(
+async def test_step5c_p_two_runners_holding_one_stored_failed_hold_it_once_under_the_row_lock(
     factory, monkeypatch
 ) -> None:
-    """The scheduled verdict is FAILED and published; the fault is repaired and committed before the
-    reaction's transaction has run its first statement; the reaction's re-run must see the repair and NOT
-    hold (`HOLD_NOT_CONFIRMED`).
+    """047 `T4704` (fail-closed): two runners - the scheduled loop and the operator's command take no common Redis lock
+    - hold the same stored, unheld FAILED. The first locks the equivalent row (`_lock_the_hold`) and writes the hold;
+    the second queues on that ROW lock behind the first's backend, then reads the committed hold: `already_held`. One
+    hold, pointing at the latest FAILED row, one `set`.
 
-    UNTIL 019 STAGE 5 this was `test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot`: the
-    reaction waited on the equivalent owner lock on a session of its own, and its snapshot had to be
-    taken AFTER that wait. `T1909` removed the reaction's lock, and with it the wait this schedule parked
-    in; what survives of the contract is its point - the confirmation is a FULL RE-RUN in the reaction's
-    own snapshot (`react_to_failed` step 3), never the scheduled verdict re-used. The stand parks the
-    reaction at the opening of its transaction, before any statement of it (`_open_reaction_transaction`),
-    commits the repair there, and then lets it run.
+    REPLACES `test_step5c_p_the_reaction_confirms_in_its_own_snapshot_taken_after_the_verdict` (2026-10-19): the
+    confirmation re-run it pinned was removed by the advisor's stop condition; what a reaction must now get right is the
+    lock discipline of the hold itself.
 
-    RED if the reaction held on the scheduled verdict without re-running, or took its snapshot before the
-    park (it would re-verify the stale state and hold an equivalent whose ledger is already consistent).
+    MUTATION: read the hold without the row lock (drop `with_for_update` in `_lock_the_hold`) - both runners read "not
+    held", the second's UPDATE matches nothing after the first commits, and both report `set`, red.
     """
     world = await _seed(factory)
-    reconcile = None
-    opened, release_open = asyncio.Event(), asyncio.Event()
-    in_transaction_at_park: list[bool] = []
-    original_open = reconciliation._open_reaction_transaction
-
-    async def _park_then_open(session):
-        in_transaction_at_park.append(bool(session.in_transaction()))
-        opened.set()
-        await release_open.wait()
-        await original_open(session)
-
-    monkeypatch.setattr(reconciliation, "_open_reaction_transaction", _park_then_open)
+    first = second = None
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
-
-        reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id]))
-        await asyncio.wait_for(opened.wait(), timeout=30)
-        assert in_transaction_at_park == [False], (
-            "premise: the reaction's work session had already begun (and so taken a snapshot) at the park"
-        )
-        assert not reconcile.done()
-        async with factory() as observer:
-            statuses = (
-                await observer.execute(
-                    select(debt_reconciliation_results.c.status).where(
-                        debt_reconciliation_results.c.equivalent_id == world.equivalent.id
-                    )
-                )
-            ).scalars().all()
-        assert statuses == [FAILED], f"premise: the scheduled verdict was not recorded FAILED first: {statuses}"
-
-        await _around_the_application(
-            factory,
-            f"UPDATE debts SET amount = amount - 0.00000001 WHERE equivalent_id = '{world.equivalent.id}'",
-        )
-        assert not reconcile.done(), "premise: the repair did not land while the reaction was parked"
-
-        release_open.set()
-        counts = await asyncio.wait_for(reconcile, timeout=30)
-        assert counts[f"hold_{HOLD_NOT_CONFIRMED}"] == 1, counts
+        failed_row = await _publish_a_failed_without_its_hold(factory, world.equivalent.id)
         assert await _hold_of(factory, world.equivalent.id) is None
+
+        reached, release, pid = _pause_after_the_hold_is_written(monkeypatch)
+        first = asyncio.create_task(reconciliation.react_to_failed(factory, world.equivalent.id))
+        await asyncio.wait_for(reached.wait(), timeout=30)
+        second = asyncio.create_task(reconciliation.react_to_failed(factory, world.equivalent.id))
+        _assert_row_wait(
+            await _waiters_behind(pid[0], timeout=30.0),
+            what="the second runner's hold decision",
+            behind="the first runner's uncommitted hold",
+        )
+        release.set()
+        decisions = [
+            (await asyncio.wait_for(first, timeout=30)).decision,
+            (await asyncio.wait_for(second, timeout=30)).decision,
+        ]
+        assert decisions == [HOLD_SET, reconciliation.HOLD_ALREADY_HELD], decisions
+        assert await _hold_of(factory, world.equivalent.id) == failed_row
     finally:
-        release_open.set()
-        await _finish(reconcile)
+        release_event = locals().get("release")
+        if release_event is not None:
+            release_event.set()
+        await _finish(first, second)
         _forget_the_route_cache(world)
 
 

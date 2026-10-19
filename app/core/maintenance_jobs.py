@@ -223,7 +223,7 @@ async def _integrity_loop(app: FastAPI) -> None:
     phase: `RETRY_FAST_SECONDS x ceil((TTL + margin) / RETRY_FAST_SECONDS)` of waiting, plus the time the attempts
     take), then every lock TTL, with no limit and no giving up. Past the fast phase the job reads `failed` -
     `pending_not_checked` after skips, the run's own error event after an error - so `/health` is degraded until a
-    run completes; money is not held (only a confirmed FAILED holds). Every wait honours the stop event.
+    run completes; money is not held (only a published FAILED holds). Every wait honours the stop event.
 
     COST OF THE RULE: a lasting verifier error makes the loop run the whole reconciliation every TTL (300 s by
     default), the cadence and memory peak before 047, until the error is gone."""

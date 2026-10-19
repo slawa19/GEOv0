@@ -2,10 +2,10 @@
 
 WHAT IS UNDER TEST.
 
-* `app/core/ledger/reconciliation.py` `react_to_failed`, called by `run_scheduled_reconciliation` after a
-  scheduled `FAILED`: a fresh transaction per equivalent, the owner lock before the authoritative
-  snapshot, the full verifier re-run, the evidence and the hold in one transaction, the commit - and only
-  then the structured log and the metric.
+* `app/core/ledger/reconciliation.py` `run_scheduled_reconciliation` on a scheduled `FAILED`: FAIL-CLOSED since 047
+  `T4704` (2026-10-19) - the evidence and the hold in ONE transaction per equivalent (`_publish`), with no confirmation
+  re-run, the commit, and only then the structured log and the metric. Until `T4704` a separate reaction re-ran the
+  full verifier as the confirmation; the tests that pinned that re-run were rewritten to the new rule, each saying so.
 * The hold at the T1544 refusal points: payment prepare, payment commit (before the envelope), clearing,
   and the `clearing-real` simulator route's declared 409. One reason per refusal; `equivalent_inactive`
   wins.
@@ -230,7 +230,7 @@ async def test_step5c_one_atom_around_the_application_holds_the_equivalent_throu
     the FAILED row that carries the evidence; the structured log and the metric are emitted once, and
     AFTER the hold's transaction committed.
 
-    MUTATIONS: (1) remove the `react_to_failed` call from `run_scheduled_reconciliation` - no hold, red;
+    MUTATIONS: (1) remove the hold from `_publish` (047 `T4704`; before, the `react_to_failed` call) - no hold, red;
     (2) call `_announce_hold` inside the work transaction before its commit - `announced` precedes
     `committed`, red.
     """
@@ -283,41 +283,31 @@ async def test_step5c_a_hold_whose_commit_fails_persists_nothing_and_emits_no_lo
 ) -> None:
     """The evidence and the hold are ONE transaction, and nothing is announced for one that rolled back.
 
-    The fault changes between the scheduled verdict and the reaction (a second atom), so the reaction's
-    re-run is a DIFFERENT FAILED and its `record_outcome` inserts a row - which must go down with the hold.
+    REWRITTEN 2026-10-19 (047 `T4704`, fail-closed): the transaction is now the publication itself (`_publish`) - the
+    FAILED row and the hold commit together or not at all. Before, the reaction's own re-run inserted a second row that
+    had to go down with the hold; there is no re-run any more, so the rule is stated on the publication: when its commit
+    fails, NO result row and no hold survive, and the run counts this run's FAILED verdict and a `hold_errors`.
 
-    MUTATIONS: (1) emit the log and the metric before `work.commit()` - a log and a metric for a hold that
-    does not exist, red; (2) commit the evidence in its own transaction before setting the hold - the
-    reaction's row survives, red.
+    MUTATIONS: (1) emit the log and the metric before the commit - a log and a metric for a hold that does not exist,
+    red; (2) commit the evidence in its own transaction before setting the hold - the FAILED row survives, red.
     """
     from tests.conftest import TestingSessionLocal
 
-    triangle, debt = await _faulty_triangle(TestingSessionLocal)
+    triangle, _debt = await _faulty_triangle(TestingSessionLocal)
     factory = _Factory(TestingSessionLocal, fail_for={triangle.equivalent.id})
     _tag_the_hold(monkeypatch, factory)
-    original_react = reconciliation.react_to_failed
-
-    async def _second_atom_then_react(session_factory, equivalent_id):
-        await _set_debt(TestingSessionLocal, debt, "10.00000002")
-        return await original_react(session_factory, equivalent_id)
-
-    monkeypatch.setattr(reconciliation, "react_to_failed", _second_atom_then_react)
     metric_before = _hold_metric()
     with caplog.at_level(logging.INFO):
         counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
 
     assert factory.events == [("commit_failed", triangle.equivalent.id)], (
-        f"premise: the reaction did not reach its commit with the hold written: {factory.events}"
+        f"premise: the publication did not reach its commit with the hold written: {factory.events}"
     )
     assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (1, 1, 0), counts
+    assert (counts["rows_inserted"], counts["rows_unchanged"]) == (0, 0), counts
     assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
     rows = await _result_rows(TestingSessionLocal, triangle.equivalent.id)
-    unexplained = [
-        [f["unexplained"] for f in row.detail["findings"] if f["kind"] == "edge_residual"] for row in rows
-    ]
-    assert unexplained == [["0.00000001"]], (
-        f"the reaction's evidence outlived its failed hold transaction: {unexplained}"
-    )
+    assert rows == [], f"the evidence outlived its failed hold transaction: {rows}"
     assert _hold_logs(caplog) == []
     assert _hold_metric() == metric_before
 
@@ -353,35 +343,53 @@ async def test_step5c_one_equivalent_failing_to_hold_does_not_roll_back_anothers
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
-async def test_step5c_the_re_run_is_the_confirmation_a_fault_gone_by_the_reaction_is_not_held(
+async def test_step5c_a_fault_repaired_after_the_snapshot_is_held_fail_closed_and_released_after_a_later_passed(
     db_session, monkeypatch, caplog
 ) -> None:
-    """The scheduled verdict is FAILED; the fault is repaired before the reaction re-verifies; no hold.
+    """The scheduled verdict is FAILED; the fault is repaired after the verifier's snapshot and before the publication.
+    The FAILED is published AND held (fail-closed) - and the existing release path clears that false hold: the next
+    run publishes PASSED, the admin's clear re-verifies under the row lock and lifts it.
 
-    This is the property the stale-publication bound in `record_outcome` leans on.
+    REWRITTEN 2026-10-19 (047 `T4704`): this was `..._the_re_run_is_the_confirmation_a_fault_gone_by_the_reaction_is_not_held`,
+    which pinned the confirmation re-run ("no hold" on a repaired fault). The advisor's stop condition removed the
+    re-run: a published FAILED holds. The new rule - a false hold is possible only after a change around the
+    application and is released by the existing clear - is what this asserts.
 
-    MUTATION: hold on the scheduled outcome instead of re-running the verifier in `_confirm_and_hold` -
-    held on a fault that no longer exists, red.
+    MUTATION: bring the confirmation re-run back (verify again in the publication and hold only if still FAILED) - no
+    hold, red.
     """
+    from app.core.equivalents import clear_integrity_hold
     from tests.conftest import TestingSessionLocal
 
     triangle, debt = await _faulty_triangle(TestingSessionLocal)
-    original_react = reconciliation.react_to_failed
+    original_verify = reconciliation.verify_journal_equals_change
+    passes = {"n": 0}
 
-    async def _repair_then_react(session_factory, equivalent_id):
-        await _set_debt(TestingSessionLocal, debt, "10")
-        return await original_react(session_factory, equivalent_id)
+    async def _verify_then_repair(session, equivalent_id):
+        outcome = await original_verify(session, equivalent_id)
+        passes["n"] += 1
+        if passes["n"] == 1:  # committed after the snapshot's reads, before the publication
+            await _set_debt(TestingSessionLocal, debt, "10")
+        return outcome
 
-    monkeypatch.setattr(reconciliation, "react_to_failed", _repair_then_react)
+    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _verify_then_repair)
     metric_before = _hold_metric()
     with caplog.at_level(logging.INFO):
-        counts = await run_scheduled_reconciliation(
-            TestingSessionLocal, equivalent_ids=[triangle.equivalent.id]
-        )
-    assert counts[FAILED] == 1, f"premise: the scheduled verdict was not FAILED: {counts}"
-    assert counts[f"hold_{HOLD_NOT_CONFIRMED}"] == 1, counts
-    assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
-    assert _hold_logs(caplog) == [] and _hold_metric() == metric_before
+        counts = await run_scheduled_reconciliation(TestingSessionLocal, equivalent_ids=[triangle.equivalent.id])
+    hold = await _hold_of(TestingSessionLocal, triangle.equivalent.id)
+    assert (counts[FAILED], counts[f"hold_{HOLD_SET}"], passes["n"]) == (1, 1, 1), (counts, passes)
+    assert hold is not None, "a published FAILED did not hold (fail-closed)"
+    assert len(_hold_logs(caplog)) == 1 and _hold_metric() == metric_before + 1
+
+    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", original_verify)
+    later = await run_scheduled_reconciliation(TestingSessionLocal, equivalent_ids=[triangle.equivalent.id])
+    assert later[PASSED] == 1 and later["rows_inserted"] == 1, f"premise: the repair does not verify: {later}"
+    assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) == hold, "a PASSED cleared the hold by itself"
+    async with TestingSessionLocal() as session:
+        _eq, cleared_hold, cleared_on = await clear_integrity_hold(session, triangle.equivalent.code)
+        await session.commit()
+    assert cleared_hold == hold and cleared_on != hold
+    assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None, "the release did not clear the false hold"
 
 
 @pytest.mark.asyncio
@@ -390,7 +398,7 @@ async def test_step5c_a_repeated_failed_is_idempotent(db_session, caplog) -> Non
     """Three scheduled runs over a persisting fault, the third with a DIFFERENT fault: one hold, never
     re-pointed; one log, one metric; the result rows are only the verdict transitions.
 
-    MUTATION: drop the `already held` return in `_confirm_and_hold` - the second run announces again, red.
+    MUTATION: drop the `already held` return in `_hold_latest_failed` (before 047 `T4704`: `_confirm_and_hold`) - the second run announces again, red.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -418,8 +426,9 @@ async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
     """No baseline: the same one-atom change is UNVERIFIABLE. No reaction runs, and one called directly
     does not hold either - both gates.
 
-    MUTATIONS: (1) react on `status != PASSED` in the loop - the reaction runs, red; (2) hold on
-    `status != PASSED` in `_confirm_and_hold` - the direct call holds, red.
+    MUTATIONS: (1) hold on `status != PASSED` in `_publish` - a hold decision is counted (the reaction spy is idle on
+    the ordinary path since 047 `T4704`), red; (2) hold on
+    `status != PASSED` in `_hold_latest_failed` (before 047 `T4704`: `_confirm_and_hold`) - the direct call holds, red.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -431,6 +440,9 @@ async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
     counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
     assert counts[UNVERIFIABLE] == 1, f"premise: {counts}"
     assert reactions == []
+    holds = {key: value for key, value in counts.items() if key.startswith("hold_")}
+    assert set(holds.values()) == {0}, f"an UNVERIFIABLE took a hold decision: {holds}"
+    assert await _hold_of(factory, triangle.equivalent.id) is None
 
     decision = await reconciliation.react_to_failed(factory, triangle.equivalent.id)
     assert decision.decision == HOLD_NOT_CONFIRMED, decision
@@ -439,40 +451,41 @@ async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
-async def test_step5c_no_hold_on_a_verifier_error_either_before_or_inside_the_reaction(
+async def test_step5c_no_hold_on_a_verifier_error_and_a_failing_hold_leaves_no_hold(
     db_session, monkeypatch, caplog
 ) -> None:
-    """An error is not a verdict. (1) The scheduled verification raises: no result, no reaction, no
-    hold. (2) The scheduled verdict is FAILED and the RE-RUN raises: `hold_errors`, no hold, no log.
+    """An error is not a verdict. (1) The scheduled verification raises: no result, no reaction, no hold.
+    (2) The verdict is FAILED and the HOLD write raises inside the publication: `hold_errors` next to this run's FAILED,
+    no hold, no log, and no result row (one transaction).
 
-    MUTATION: swallow an exception of `_confirm_and_hold` in `react_to_failed` and report `set` - the
-    reaction is counted as a hold and announced, red.
+    REWRITTEN 2026-10-19 (047 `T4704`): part (2) raised in the confirmation RE-RUN, which no longer exists; the error is
+    now raised where the hold is written.
+    MUTATION: swallow an exception of the hold in `_publish` and report `set` - counted as a hold and announced, red.
     """
     from tests.conftest import TestingSessionLocal as factory
 
     triangle, _debt = await _faulty_triangle(factory)
-    original_verify = reconciliation.verify_journal_equals_change
-    calls = {"n": 0}
+
     async def _always_raises(session, equivalent_id):
         raise RuntimeError("stand: the verifier failed")
 
-    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _always_raises)
-    reactions = _spy_reactions(monkeypatch)
-    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    with monkeypatch.context() as scoped:
+        scoped.setattr(reconciliation, "verify_journal_equals_change", _always_raises)
+        reactions = _spy_reactions(scoped)
+        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
     assert counts["error"] == 1 and reactions == [], (counts, reactions)
+    assert counts[FAILED] == 0 and counts[f"hold_{HOLD_SET}"] == 0, counts
     assert await _hold_of(factory, triangle.equivalent.id) is None
 
-    async def _raises_on_the_re_run(session, equivalent_id):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return await original_verify(session, equivalent_id)
-        raise RuntimeError("stand: the verifier failed inside the reaction")
+    async def _hold_raises(session, equivalent_id, result_id):
+        raise RuntimeError("stand: the hold failed")
 
-    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _raises_on_the_re_run)
+    monkeypatch.setattr(reconciliation, "_set_integrity_hold", _hold_raises)
     with caplog.at_level(logging.INFO):
         counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-    assert (counts[FAILED], counts["hold_errors"], calls["n"]) == (1, 1, 2), (counts, calls)
+    assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (1, 1, 0), counts
     assert await _hold_of(factory, triangle.equivalent.id) is None
+    assert await _result_rows(factory, triangle.equivalent.id) == []
     assert _hold_logs(caplog) == []
 
 

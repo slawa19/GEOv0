@@ -86,10 +86,12 @@ tables.
 
 It is DETECTION, not tamper protection, and nothing downstream may call it more.
 
-THE REACTION (step 5c, `T1516`/`T1546`, `react_to_failed`): a scheduled `FAILED`, confirmed by a full
-re-run in one snapshot (until 019 stage 5 under the equivalent's owner lock), sets the equivalent's integrity hold, which stops money at the
-T1544 boundary. Nothing else: no notification subsystem, no checkpoint search, no report, no repair, and
-never an automatic clear - an admin clears it after a later `PASSED`.
+THE REACTION (step 5c, `T1516`/`T1546`): a scheduled `FAILED` sets the equivalent's integrity hold, which stops money
+at the T1544 boundary - FAIL-CLOSED since 047 `T4704` (2026-10-19): published and held in one transaction, and a
+stored `FAILED` left unheld is held without a further pass (`_publish`, `react_to_failed`). Until then the hold waited
+for a full confirmation re-run, which one attempt deadline could cut every time. Nothing else: no notification
+subsystem, no checkpoint search, no report, no repair, and never an automatic clear - an admin clears it after a later
+`PASSED`, re-verifying under the row lock.
 
 THE RESULT IS THREE-VALUED. `FAILED` - the evidence exists and an exact predicate is false.
 `UNVERIFIABLE` - required evidence is absent (today: no baseline). `FAILED` dominates when at least one
@@ -1211,7 +1213,9 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
       previous run COMPLETES, and the next run then takes as long as the checkpoints and this verifier
       over every equivalent take. A stale verdict is replaced when that next run publishes, because the
       persisting state recomputes a different fingerprint from the stale one and is stored as a
-      transition; and step 5c re-verifies in one snapshot before it holds anything.
+      transition. Since 047 `T4704` a FAILED holds when it is published, with no re-verification, so a stale FAILED
+      published after a newer PASSED also holds - a false hold, released the existing way (a later PASSED, then the
+      admin's clear, which re-verifies under the row lock); before, step 5c re-verified before it held.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
       (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default 300 s since 047 - `max(30, interval)` before -,
       `app/core/maintenance_jobs.py`) and never
@@ -1415,12 +1419,15 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
 
 
 # ==================================================================================================
-# Step 5c: the reaction to a confirmed FAILED (`T1516`) - the integrity hold (`T1546`)
+# Step 5c: the reaction to a FAILED (`T1516`) - the integrity hold (`T1546`); FAIL-CLOSED since 047 `T4704`
 # ==================================================================================================
 
 #: What one reaction did. `held` is the only decision that changed state.
 HOLD_SET = "set"
 HOLD_ALREADY_HELD = "already_held"
+#: Since 047 `T4704` (fail-closed) there is no confirmation re-run: this decision now means "the latest result is not
+#: FAILED when the hold is about to be set - nothing to hold". The value is kept: it is a counter key
+#: (`hold_not_confirmed`) that the logs and the operator's command read.
 HOLD_NOT_CONFIRMED = "not_confirmed"
 HOLD_EQUIVALENT_GONE = "equivalent_gone"
 
@@ -1432,21 +1439,33 @@ HOLD_METRIC_EVENT = "debt_reconciliation_integrity_hold"
 class HoldDecision:
     decision: str
     result_id: uuid.UUID | None = None
-    outcome: ReconciliationOutcome | None = None
+    #: `findings_total` of the result row the hold points at, for the announcement; set with `HOLD_SET`.
+    findings_total: int | None = None
 
 
-async def _open_reaction_transaction(session: Any) -> None:
-    """Begin the reaction's ONE transaction: every verifier read in one snapshot, and the writes in it.
+async def _lock_the_hold(session: Any, equivalent_id: uuid.UUID) -> Any:
+    """The equivalent row `FOR NO KEY UPDATE`, read for its hold: every hold decision is taken under this lock.
 
-    Unlike `open_verification_snapshot` this transaction writes (the evidence and the hold), so it is
-    not read-only. PostgreSQL: REPEATABLE READ asked for here rather than leaned on from configuration,
-    for the reason recorded on `open_verification_snapshot`; a concurrent update of the equivalent row
-    then fails this transaction with 40001, which is an error of this reaction and is retried by the next
-    scheduled run. (Until programme 017 stage 3 a SQLite arm used the transaction control's deferred
-    `BEGIN` and anything else was refused; that dispatch left with SQLite.)
+    WHAT BINDS THE HOLD: every money writer - payment, tick, inject, clearing in every attempt - reads the equivalent
+    row `FOR SHARE` through its commit. This lock conflicts with it, so it waits for a writer that already read "not
+    held" to commit, and a writer reading after this transaction committed reads the committed hold and refuses (READ
+    COMMITTED, 027 stage 2). It also serialises two runners deciding the same hold (the scheduled loop and the
+    operator's `scripts/reconcile_debts.py`, which takes no Redis lock): the second reads the first's committed hold.
+    And it is taken BEFORE the result row is touched - the order of the admin's clear (`clear_integrity_hold`: the
+    equivalent, then its latest result), so a FAILED publication (which takes this lock first) and a clear cannot
+    deadlock. A publication that is not FAILED takes no lock here and keeps its old exposure: its new row's foreign
+    key may wait on a clear's equivalent lock while the clear waits on the old latest row - PostgreSQL ends that with
+    40P01 on one side; no money is involved. Bounded by `bound_the_waits`.
+    Returns the row `(integrity_hold_result_id,)`, or None when the equivalent is gone.
     """
 
-    await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    return (
+        await session.execute(
+            select(Equivalent.integrity_hold_result_id)
+            .where(Equivalent.id == equivalent_id)
+            .with_for_update(key_share=True)
+        )
+    ).first()
 
 
 async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id: uuid.UUID) -> None:
@@ -1459,49 +1478,48 @@ async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id:
     )
 
 
-async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecision:
-    """Inside the reaction's transaction: re-verify, and hold only on FAILED."""
+def _findings_total(detail: Any) -> int:
+    if not isinstance(detail, dict):
+        detail = json.loads(detail or "{}")
+    return int(detail.get("findings_total") or 0)
 
-    row = (
+
+async def _hold_latest_failed(session: Any, equivalent_id: uuid.UUID, locked: Any) -> HoldDecision:
+    """Under `_lock_the_hold` (`locked` is what it returned): point the hold at the latest result row - only if that row
+    is FAILED. NO VERIFICATION HERE (047 `T4704`, fail-closed): a published FAILED holds.
+
+    IDEMPOTENT: an equivalent already held is not re-pointed or re-announced. The latest row is read `FOR SHARE` (as the
+    admin's clear reads it): a concurrent publication cannot clear its latest marker before this commits, and one that
+    did so first is seen (READ COMMITTED re-checks the row), so the hold never points at a row that is not the latest
+    FAILED at commit.
+    """
+
+    if locked is None:
+        return HoldDecision(HOLD_EQUIVALENT_GONE)
+    if locked[0] is not None:
+        return HoldDecision(HOLD_ALREADY_HELD, result_id=locked[0])
+    results = debt_reconciliation_results.c
+    latest = (
         await session.execute(
-            select(Equivalent.integrity_hold_result_id).where(Equivalent.id == equivalent_id)
+            select(results.id, results.status, results.detail)
+            .where(results.equivalent_id == equivalent_id, results.is_latest.is_(True))
+            .with_for_update(read=True)
         )
     ).first()
-    if row is None:
-        return HoldDecision(HOLD_EQUIVALENT_GONE)
-    if row[0] is not None:
-        # IDEMPOTENT: an equivalent already held is not re-verified, re-pointed or re-announced.
-        return HoldDecision(HOLD_ALREADY_HELD, result_id=row[0])
-
-    # THE RE-RUN IS THE CONFIRMATION, not a formality: the verdict that triggered this reaction was
-    # computed in another transaction and published there, and `record_outcome` leaves
-    # a stale publication open on the grounds that this re-run happens. Full criteria (a) and (b).
-    outcome = await verify_journal_equals_change(session, equivalent_id)
-    if outcome.status != FAILED:
-        return HoldDecision(HOLD_NOT_CONFIRMED, outcome=outcome)
-
-    await record_outcome(session, outcome)
-    results = debt_reconciliation_results.c
-    result_id = (
-        await session.execute(
-            select(results.id).where(
-                results.equivalent_id == equivalent_id, results.is_latest.is_(True)
-            )
-        )
-    ).scalar_one()
-    await _set_integrity_hold(session, equivalent_id, result_id)
-    return HoldDecision(HOLD_SET, result_id=result_id, outcome=outcome)
+    if latest is None or latest.status != FAILED:
+        return HoldDecision(HOLD_NOT_CONFIRMED)
+    await _set_integrity_hold(session, equivalent_id, latest.id)
+    return HoldDecision(HOLD_SET, result_id=latest.id, findings_total=_findings_total(latest.detail))
 
 
 def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
     """The structured log and the metric. Called ONLY after the hold's transaction has committed."""
 
-    outcome = decision.outcome
     logger.error(
         "debt_reconciliation.integrity_hold_set equivalent_id=%s result_id=%s findings_total=%d",
         equivalent_id,
         decision.result_id,
-        len(outcome.findings) if outcome is not None else 0,
+        decision.findings_total or 0,
     )
     try:
         from app.utils.metrics import RECOVERY_EVENTS_TOTAL
@@ -1511,42 +1529,53 @@ def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
         logger.debug("debt_reconciliation.integrity_hold_metric_failed", exc_info=True)
 
 
+async def _publish(session_factory: Callable[[], Any], outcome: ReconciliationOutcome) -> tuple[str, HoldDecision | None]:
+    """The publication of one verdict - and, for a FAILED, its hold - in ONE transaction (047 `T4704`, fail-closed).
+
+    For a FAILED the equivalent row is locked first (`_lock_the_hold`), then `record_outcome` writes the evidence and
+    `_hold_latest_failed` points the hold at it; one commit, or neither. Only then the log and the metric. Any
+    exception propagates; the caller records it. A verdict that is not FAILED is published exactly as before.
+    """
+
+    decision = None
+    async with session_factory() as session:
+        await bound_the_waits(session)
+        failed = outcome.status == FAILED
+        locked = await _lock_the_hold(session, outcome.equivalent_id) if failed else None
+        stored = await record_outcome(session, outcome)
+        if failed:
+            decision = await _hold_latest_failed(session, outcome.equivalent_id, locked)
+        await session.commit()
+    if decision is not None and decision.decision == HOLD_SET:
+        _announce_hold(outcome.equivalent_id, decision)
+    return stored, decision
+
+
 async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> HoldDecision:
-    """React to ONE scheduled `FAILED`: confirm it in one snapshot and hold the equivalent.
+    """Hold an equivalent whose latest STORED result is FAILED - WITHOUT a verification pass (047 `T4704`, fail-closed).
 
-    Decisions: step 5c brief and spec.md "Ключевое ревью шага 5", reaction paragraph. The order is the
-    point, and each step is load-bearing:
+    A fresh transaction for this equivalent alone (a hold that fails to commit cannot roll back a neighbour's), the
+    equivalent row locked (`_lock_the_hold`), the hold pointed at the latest row if it is FAILED
+    (`_hold_latest_failed`), COMMIT, and only then the log and the metric (emitted before the commit they would report a
+    hold that rolled back). Any exception propagates to the caller, which records it as an error of this reaction.
 
-    1. A FRESH TRANSACTION FOR THIS EQUIVALENT ALONE, so a hold that fails to commit cannot roll back a
-       neighbour's.
-    2. ONE SNAPSHOT (REPEATABLE READ, `_open_reaction_transaction`), and no advisory lock (019 stage 5,
-       `T1909`: the equivalent owner lock this took on a session of its own, before the snapshot, is
-       gone). Every money operation changes debts and writes its journal entries in one commit, so the
-       snapshot holds each operation wholly or not at all, and a corruption it finds does not disappear
-       with a later commit.
-    3. THE FULL VERIFIER RE-RUN inside it (`_confirm_and_hold`).
-    4. IF STILL FAILED: the evidence (`record_outcome`) and the hold, in that one transaction; COMMIT.
-    5. ONLY THEN the structured log and the metric. Emitted before the commit they would report a hold
-       that rolled back.
+    HISTORY. Until 047 `T4704` (2026-10-19) this re-ran the FULL verifier in its own REPEATABLE READ snapshot as the
+    confirmation and held only if the re-run was FAILED too. Under one attempt deadline that was a second full pass,
+    and a deadline shorter than the passes the attempt needed cut the confirmation every time, leaving the FAILED unheld
+    while money moved (spec 047, `T4704`). The confirmation is removed by the advisor's stop condition: a published
+    FAILED holds. Its cost - a hold on an equivalent repaired after its FAILED was published (possible only after a
+    change to the database around the application) - is released the existing way: a later PASSED (the next run, or
+    `scripts/reconcile_debts.py`) and the admin's clear, which re-verifies under the row lock.
 
-    WHAT BINDS THE HOLD: every money writer - payment, tick, inject, clearing in every attempt - reads
-    the equivalent row `FOR SHARE` through its commit, so the hold's `UPDATE` waits for a writer that
-    already read "not held", and a writer reading after the hold committed reads the committed hold and
-    refuses (READ COMMITTED, 027 stage 2; the 40001 of this reaction's own REPEATABLE READ is another
-    matter). Either it commits before this hold or it refuses.
-
-    Any exception propagates to the caller, which records it as an error of this reaction; nothing is
-    announced.
-
-    KNOWN EDGE, recorded and not built (step 5c review): a cancellation during the work `commit()` can
-    leave its outcome ambiguous - the hold may be durable while the log and metric are never emitted, and
-    later runs then return `already_held` without announcing it; no money moves and no false hold results.
+    KNOWN EDGE, recorded and not built (step 5c review): a cancellation during the `commit()` can leave its outcome
+    ambiguous - the hold may be durable while the log and metric are never emitted, and later runs then return
+    `already_held` without announcing it; no money moves and no false hold results from it.
     """
 
     async with session_factory() as work:
-        await _open_reaction_transaction(work)
         await bound_the_waits(work)
-        decision = await _confirm_and_hold(work, equivalent_id)
+        locked = await _lock_the_hold(work, equivalent_id)
+        decision = await _hold_latest_failed(work, equivalent_id, locked)
         if decision.decision == HOLD_SET:
             await work.commit()
         else:
@@ -1555,6 +1584,32 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     if decision.decision == HOLD_SET:
         _announce_hold(equivalent_id, decision)
     return decision
+
+
+async def _stored_failed_unheld(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> bool:
+    """047 `T4704`: is the latest stored result of this equivalent `FAILED` while the equivalent is not held?
+
+    The same two reads the code makes elsewhere - the hold column, the latest result row - in one short transaction of
+    their own, bounded like every other, without locks. It only ROUTES: `react_to_failed` re-reads both under the
+    equivalent's row lock and holds only if the latest row is still FAILED and the equivalent still unheld; otherwise
+    the ordinary path follows. A missing equivalent row is `False` (ordinary path).
+    """
+
+    results = debt_reconciliation_results.c
+    async with session_factory() as session:
+        await bound_the_waits(session)
+        hold = (
+            await session.execute(
+                select(Equivalent.integrity_hold_result_id).where(Equivalent.id == equivalent_id)
+            )
+        ).first()
+        latest = (
+            await session.execute(
+                select(results.status).where(results.equivalent_id == equivalent_id, results.is_latest.is_(True))
+            )
+        ).first()
+        await session.rollback()
+    return hold is not None and hold[0] is None and latest is not None and latest.status == FAILED
 
 
 async def run_scheduled_reconciliation(
@@ -1574,10 +1629,14 @@ async def run_scheduled_reconciliation(
     verified, because they share no state. Listing the equivalents is not caught: without the list
     there is nothing to verify, and the caller logs it.
 
-    STEP 5c: a `FAILED` - and only a `FAILED`; never `UNVERIFIABLE`, never an error - is followed by
-    `react_to_failed` for that equivalent, before the next equivalent is verified. A reaction that fails
-    is counted in `hold_errors` and logged; it does not change the recorded verdict and does not stop
-    the loop. The next scheduled run reacts again.
+    STEP 5c, FAIL-CLOSED SINCE 047 `T4704` (2026-10-19, the advisor's stop condition). A `FAILED` - and only a `FAILED`;
+    never `UNVERIFIABLE`, never an error - is published AND holds the equivalent in ONE transaction (`_publish`), with no
+    confirmation re-run: one verification pass per equivalent. An equivalent whose latest STORED result is already
+    `FAILED` and which is not held (a run cut before its hold committed, or a hold that failed) is held first, WITHOUT a
+    verification pass (`react_to_failed`), and is verified by the next run. A FAILED whose publication-and-hold
+    transaction fails counts as a `FAILED` verdict of this run and a `hold_errors` (neither the evidence nor the hold
+    stands); a stored FAILED whose hold fails counts as `hold_errors` alone. Neither stops the loop; the next run reacts
+    again.
     """
 
     if equivalent_ids is None:
@@ -1601,7 +1660,40 @@ async def run_scheduled_reconciliation(
         "hold_errors": 0,
         "errored_equivalents": [],
     }
+
+    def _erred(equivalent_id: uuid.UUID, error: Exception) -> None:
+        # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
+        # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
+        counts["error"] += 1
+        counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
+        logger.exception("debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error))
+
+    def _hold_erred(equivalent_id: uuid.UUID, error: Exception) -> None:
+        counts["hold_errors"] += 1
+        counts["errored_equivalents"].append(str(equivalent_id))
+        logger.exception(
+            "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
+        )
+
     for equivalent_id in list(equivalent_ids):
+        # 047 `T4704`: a STORED FAILED that holds nothing yet is held first, with no verification pass - so a deadline
+        # spent on equivalents before it (or on its own pass) can no longer leave it unheld while money moves.
+        try:
+            stored_failed_unheld = await _stored_failed_unheld(session_factory, equivalent_id)
+        except Exception as error:  # noqa: BLE001 - classified: an error of this equivalent, as below
+            _erred(equivalent_id, error)
+            continue
+        if stored_failed_unheld:
+            try:
+                decision = await react_to_failed(session_factory, equivalent_id)
+            except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
+                _hold_erred(equivalent_id, error)
+                continue
+            if decision.decision == HOLD_SET:
+                counts[f"hold_{HOLD_SET}"] += 1  # no verdict: nothing was verified; the next run verifies it
+                continue
+            # Not held by this call (held meanwhile by another runner, gone, or the latest is no longer FAILED): the
+            # equivalent takes the ordinary path below; the empty reaction is not counted.
         try:
             # ONE snapshot for every verification read, ended before anything is written.
             async with session_factory() as session:
@@ -1609,35 +1701,24 @@ async def run_scheduled_reconciliation(
                 await bound_the_waits(session)
                 outcome = await verify_journal_equals_change(session, equivalent_id)
                 await session.rollback()
-            # The latest-row read and the write, in one transaction of their own.
-            async with session_factory() as session:
-                await bound_the_waits(session)
-                stored = await record_outcome(session, outcome)
-                await session.commit()
         except Exception as error:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
-            # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
-            # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
-            counts["error"] += 1
-            counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
-            logger.exception(
-                "debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
-            )
+            _erred(equivalent_id, error)
+            continue
+        try:
+            # The latest-row read and the write - and for a FAILED the hold - in one transaction of their own.
+            stored, decision = await _publish(session_factory, outcome)
+        except Exception as error:  # noqa: BLE001 - classified below; no result substituted
+            if outcome.status == FAILED:
+                # This run's verdict is FAILED; its evidence and its hold were one transaction and neither stands.
+                counts[FAILED] += 1
+                _hold_erred(equivalent_id, error)
+            else:
+                _erred(equivalent_id, error)
             continue
         counts[outcome.status] += 1
         counts[f"rows_{stored}"] += 1
-
-        if outcome.status != FAILED:
-            continue
-        try:
-            decision = await react_to_failed(session_factory, equivalent_id)
-        except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
-            counts["hold_errors"] += 1
-            counts["errored_equivalents"].append(str(equivalent_id))
-            logger.exception(
-                "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
-            )
-            continue
-        counts[f"hold_{decision.decision}"] += 1
+        if decision is not None:
+            counts[f"hold_{decision.decision}"] += 1
 
     logger.info(
         "debt_reconciliation.completed passed=%d failed=%d unverifiable=%d errors=%d "

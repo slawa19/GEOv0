@@ -361,7 +361,8 @@ export const NATIVE_SELECTS = [
   // 048 S1: the developer's selects (`?debug=1`); the stand's viewer has no `?debug=1`. "Scene" was removed (no reader).
   'bottom bar (?debug=1): "Quality"', 'bottom bar (?debug=1): "Источник"',
   'bottom bar (offline, ?debug=1): "Плейлист"', // 042 T4205; the stand runs the server source, where the workbench is not shown
-  'graph navigator: "Node"', 'graph navigator: "Edge"',
+  // 046 wave 1, full (2026-10-19): the English names of 048 §G ("Find on graph · Participant / Line"); Russian under ?lang=ru.
+  'graph navigator: "Participant"', 'graph navigator: "Line"',
 ]
 
 /**

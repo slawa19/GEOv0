@@ -76,7 +76,7 @@ test('a change of scene in the middle of a flight ends the beam: no leg, no burs
   await frames(page, 13)
   expect(await aliveSparks(page), 'counter-check: the beam is on its first edge when the scene changes').toEqual([g.edges[0]!.name])
 
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await page.getByTestId('scenario-select').selectOption(OTHER_SCENARIO)
   await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim: { layoutNodes: Array<{ id: string }> } }).__geoSim.layoutNodes.some((n) => n.id.startsWith('x'))), { message: 'the other scenario is on screen', timeout: 15_000 }).toBe(true)
 
   let maxSparksInState = 0

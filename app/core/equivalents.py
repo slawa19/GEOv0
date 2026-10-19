@@ -199,7 +199,7 @@ async def clear_integrity_hold(session: AsyncSession, code: str) -> tuple[Equiva
 
     The two predicate reads take row locks - `FOR UPDATE` on the equivalent (the stop takes `FOR NO KEY UPDATE`;
     both conflict with a money writer's `FOR SHARE`), `FOR SHARE` on the latest result - held through the caller's
-    commit, so a scheduled reaction confirming a new FAILED is serialised with this clear; at READ COMMITTED
+    commit, so a scheduled hold of a new FAILED (`_lock_the_hold`, the same order) is serialised with this clear; at READ COMMITTED
     (027 stage 2) a read after the wait sees the committed row. The equivalent is read ONCE, by the locking
     statement (032 A-11): before 032 an unlocked read by code came first and the lock re-read the hold by id."""
 

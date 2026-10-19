@@ -137,11 +137,14 @@ async def test_r024_4_a_verifier_error_on_one_equivalent_is_not_a_success(monkey
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_r024_4_a_failed_reaction_is_not_a_success(monkeypatch) -> None:
-    """A FAILED verdict whose hold reaction raises (`hold_errors`): the job is failed, not a success.
+    """A FAILED verdict whose hold raises (`hold_errors`): the job is failed, not a success.
 
-    The verdict is a fabricated FAILED outcome (the subject is what the host does with a reaction error,
+    The verdict is a fabricated FAILED outcome (the subject is what the host does with a hold error,
     not how a FAILED arises - that is step 5a/5c's). MUTATION: count only `error` and not `hold_errors` in
     `app/main.py` - red.
+    REWRITTEN 2026-10-19 (047 `T4704`, fail-closed): the hold is written in the publication's own transaction, no
+    longer by a separate `react_to_failed`; the error is raised where the hold is written, and since the evidence and
+    the hold are one transaction, no result row of this verdict stands (it did before, published apart).
     """
 
     from tests.conftest import TestingSessionLocal as factory
@@ -161,17 +164,17 @@ async def test_r024_4_a_failed_reaction_is_not_a_success(monkeypatch) -> None:
             )
         return await original(session, equivalent_id)
 
-    async def react(session_factory, equivalent_id):
+    async def hold(session, equivalent_id, result_id):
         reactions.append(equivalent_id)
-        raise RuntimeError("p024 R-024-4: the hold reaction fails")
+        raise RuntimeError("p024 R-024-4: the hold fails")
 
     monkeypatch.setattr(reconciliation, "verify_journal_equals_change", verify)
-    monkeypatch.setattr(reconciliation, "react_to_failed", react)
+    monkeypatch.setattr(reconciliation, "_set_integrity_hold", hold)
 
     app = await _run_the_host(monkeypatch, factory)
 
     assert reactions == [target], reactions
-    assert await _latest_status(factory, target) == FAILED
+    assert await _latest_status(factory, target) is None, "the FAILED stood without its hold (one transaction)"
 
     _require_failed_job(app)
 

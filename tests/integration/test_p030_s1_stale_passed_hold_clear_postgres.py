@@ -2,7 +2,7 @@
 
 SCHEDULE, real and barrier-driven (no synthetic verdict): verifier A verifies a sound equivalent and is parked
 before it publishes; a criterion (b) defect is introduced (a re-digested PAYMENT intent, journal untouched);
-verifier B finds FAILED, the reaction confirms it and commits a hold; A publishes its older PASSED; the admin
+verifier B finds FAILED and commits a hold (since 047 `T4704` with its publication; before, after a confirmation); A publishes its older PASSED; the admin
 clears the hold through the real route. Two overlapping verifier runs need two processes on one database
 without the integrity lock (no Redis, or an expired non-renewed TTL) - here two tasks of one process.
 

@@ -48,15 +48,13 @@ async function waitReady(page: Page) {
   await page.waitForTimeout(250)
 }
 
-async function readMetricValue(page: Page, label: string): Promise<string> {
-  const bar = page.locator('[aria-label="System balance"]')
+// 046 wave 1, full (2026-10-19): first-screen controls by test id - their names are the dictionary's (language of the page).
+async function readMetricValue(page: Page, testId: string): Promise<string> {
+  const bar = page.getByTestId('system-balance')
   await expect(bar).toBeVisible()
 
-  const labelEl = bar.getByText(label, { exact: true })
-  await expect(labelEl).toBeVisible()
-
   // In SystemBalanceBar each metric panel is: <span label> <span value>
-  const valueEl = labelEl.locator('xpath=following-sibling::*[1]')
+  const valueEl = bar.locator(`[data-testid="${testId}"] .ds-value`)
   await expect(valueEl).toBeVisible()
   const v = await valueEl.innerText()
   return String(v || '').trim()
@@ -155,7 +153,7 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
   // 043 S1: the scenario selector lives behind "Подробнее".
   await page.locator('[data-testid="details-toggle"]').click()
 
-  const scenarioSelect = page.getByRole('combobox', { name: 'Scenario' })
+  const scenarioSelect = page.getByTestId('scenario-select')
   await expect(scenarioSelect).toBeVisible()
 
   // Select S1 and observe stable metric.
@@ -163,14 +161,14 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
   await expect.poll(() => lastPreviewScenario).toBe('S1')
   await waitReady(page)
 
-  const debt1 = await readMetricValue(page, 'Общий долг')
+  const debt1 = await readMetricValue(page, 'sbb-total-debt')
 
   // Select S2 and metric must change (same nodes, different link topology).
   await scenarioSelect.selectOption('S2')
   await expect.poll(() => lastPreviewScenario).toBe('S2')
   await waitReady(page)
 
-  const debt2 = await readMetricValue(page, 'Общий долг')
+  const debt2 = await readMetricValue(page, 'sbb-total-debt')
 
   expect(debt2).not.toBe(debt1)
 })

@@ -28,9 +28,10 @@ async function viaLine(page: Page) {
   await ready(page, true)
   // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее".
   await page.locator('[data-testid="details-toggle"]').tap()
-  const nav = page.getByRole('region', { name: 'Graph navigator' })
-  await nav.getByText('Inspect graph', { exact: true }).tap()
-  await nav.getByRole('button', { name: 'Inspect edge' }).tap()
+  // 046 wave 1, full (2026-10-19): first-screen controls by test id - their names are the dictionary's (language of the page).
+  const nav = page.getByTestId('graph-navigator')
+  await nav.getByTestId('graph-navigator-summary').tap()
+  await nav.getByTestId('graph-navigator-open-edge').tap()
   await expect(page.locator('[data-testid="edge-send-payment"]')).toBeVisible()
   // The navigator is an entry for this test only (see the header): undo the scroll its focus caused in the overflow:hidden app root.
   return await page.evaluate(() => { const root = document.querySelector('.root') as HTMLElement; const was = root.scrollTop; root.scrollTop = 0; return was })

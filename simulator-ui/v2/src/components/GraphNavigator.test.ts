@@ -1,9 +1,21 @@
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { GraphLink, GraphNode } from '../types'
 import { keyEdge } from '../utils/edgeKey'
 import GraphNavigator from './GraphNavigator.vue'
+import { setUiLocale } from '../i18n/locale'
+
+// 046 wave 1, full (2026-10-19): the controls are found by test id, not by their words (which are the dictionary's, in
+// the language of the interface - 048 §G "Find on graph · Participant / Line"); the words are asserted where they are
+// the subject (the English and Russian labels and announcements below).
+const openNode = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('[data-testid="graph-navigator-open-node"]')!
+const openEdge = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('[data-testid="graph-navigator-open-edge"]')!
+
+afterEach(() => {
+  setUiLocale('en')
+  window.localStorage.clear()
+})
 
 const nodes: GraphNode[] = [
   { id: 'bob', name: 'Bob' },
@@ -35,16 +47,18 @@ describe('GraphNavigator', () => {
     const { app, host, inspectNode, inspectEdge } = mountNavigator()
     await nextTick()
 
-    const region = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLElement | null
+    const region = host.querySelector('[role="region"][data-testid="graph-navigator"]') as HTMLElement | null
     expect(region).toBeTruthy()
+    expect(region!.getAttribute('aria-label')).toBe('Graph navigator')
+    expect(region!.querySelector('summary')?.textContent?.trim()).toBe('Find on graph')
     const disclosure = region?.querySelector('details') as HTMLDetailsElement | null
     expect(disclosure).toBeTruthy()
     disclosure!.open = true
 
     const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
     const edgeSelect = host.querySelector('#graph-navigator-edge') as HTMLSelectElement
-    expect(host.querySelector('label[for="graph-navigator-node"]')?.textContent).toBe('Node')
-    expect(host.querySelector('label[for="graph-navigator-edge"]')?.textContent).toBe('Edge')
+    expect(host.querySelector('label[for="graph-navigator-node"]')?.textContent).toBe('Participant')
+    expect(host.querySelector('label[for="graph-navigator-edge"]')?.textContent).toBe('Line')
     expect(nodeSelect.tagName).toBe('SELECT')
     expect(edgeSelect.tagName).toBe('SELECT')
     expect(nodeSelect.options[0]?.textContent).toContain('Alice')
@@ -52,22 +66,43 @@ describe('GraphNavigator', () => {
     nodeSelect.value = 'bob'
     nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
-    const inspectNodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node')
-    ;(inspectNodeButton as HTMLButtonElement).click()
+    expect(openNode(host).textContent?.trim()).toBe('Open participant')
+    openNode(host).click()
     await nextTick()
     expect(inspectNode).toHaveBeenCalledWith('bob')
-    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Node details opened: Bob')
+    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Participant opened: Bob')
 
-    const inspectEdgeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect edge')
-    ;(inspectEdgeButton as HTMLButtonElement).click()
+    expect(openEdge(host).textContent?.trim()).toBe('Open line')
+    openEdge(host).click()
     await nextTick()
     expect(inspectEdge).toHaveBeenCalledWith(links[0])
     const status = host.querySelector('[data-testid="graph-navigator-status"]')
     expect(status?.getAttribute('role')).toBe('status')
     expect(status?.getAttribute('aria-live')).toBe('polite')
     // 044 `T4405`: the participants' names, not their ids.
-    expect(status?.textContent).toContain('Trustline details opened: Alice → Bob')
+    expect(status?.textContent).toContain('Line opened: Alice → Bob')
 
+    app.unmount()
+    host.remove()
+  })
+
+  it('046 wave 1: in Russian the summary, labels, buttons and announcement are the words of 048 §G; names stay as they are', async () => {
+    setUiLocale('ru')
+    const { app, host, inspectNode } = mountNavigator()
+    await nextTick()
+    expect(host.querySelector('summary')?.textContent?.trim()).toBe('Найти на графе')
+    expect(host.querySelector('[data-testid="graph-navigator"]')?.getAttribute('aria-label')).toBe('Поиск на графе')
+    expect(host.querySelector('label[for="graph-navigator-node"]')?.textContent).toBe('Участник')
+    expect(host.querySelector('label[for="graph-navigator-edge"]')?.textContent).toBe('Линия')
+    expect([openNode(host).textContent?.trim(), openEdge(host).textContent?.trim()]).toEqual(['Открыть участника', 'Открыть линию'])
+    openNode(host).click()
+    await nextTick()
+    expect(inspectNode).toHaveBeenCalledWith('alice')
+    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toBe('Открыт участник: Alice')
+    // Internal adversarial pass (2026-10-19): the announcement made in one language follows a switch (it was a stored text).
+    setUiLocale('en')
+    await nextTick()
+    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toBe('Participant opened: Alice')
     app.unmount()
     host.remove()
   })
@@ -101,9 +136,7 @@ describe('GraphNavigator', () => {
     const { app, host, inspectEdge } = mountNavigator(true)
     await nextTick()
 
-    const button = Array.from(host.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === 'Inspect edge') as
-      | HTMLButtonElement
-      | undefined
+    const button = openEdge(host)
     expect(button?.disabled).toBe(true)
     expect(button?.title).toContain('live network')
     button?.click()
@@ -128,10 +161,7 @@ describe('GraphNavigator', () => {
     await nextTick()
     expect(edgeSelect.value).toBe(keyEdge(selected.source, selected.target))
 
-    const inspectEdgeButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Inspect edge',
-    )
-    ;(inspectEdgeButton as HTMLButtonElement).click()
+    openEdge(host).click()
     expect(inspectEdge).toHaveBeenCalledWith(selected)
 
     app.unmount()

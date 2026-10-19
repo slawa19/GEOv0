@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PlaylistWorkbenchOption } from '../composables/usePlaylistWorkbench'
+import { useUiLocale } from '../composables/useUiLocale'
+import type { MessageKey } from '../i18n/t'
 import HudBar from './common/HudBar.vue'
 
 type PlaylistWorkbenchProps = {
@@ -59,6 +61,14 @@ type Props = {
 }
 
 const props = withDefaults(defineProps<Props>(), { detailsOpen: false, debug: false })
+const { t } = useUiLocale()
+
+/**
+ * 046 wave 1 (048 §G): the layouts as words of the dictionary, in the order of the select. The developer's controls
+ * below (`debug`: "Источник", Quality, the playlist) are not translated - a developer surface, not the visitor's screen.
+ */
+const LAYOUT_MODES = ['admin-force', 'community-clusters', 'balance-split', 'type-split', 'status-split'] as const
+const layoutOptions = computed(() => LAYOUT_MODES.map((m) => ({ value: m, text: t(`bottomBar.layoutOption.${m}` as MessageKey) })))
 
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
@@ -80,24 +90,20 @@ const playlistPosition = computed(() => {
 <template>
   <div class="ds-ov-bottom">
     <!-- 043 S1: the service row, while Details is on; above the main row, which therefore never moves. -->
-    <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="bb-details-row" aria-label="Bottom bar" data-testid="bottom-details-row">
-      <div class="hud-bar__left" aria-label="View settings">
-        <div class="ds-row bb-row" aria-label="Equivalent">
-        <span class="ds-label">EQ</span>
-        <select v-if="props.equivalentOptions.length > 1" v-model="eq" class="ds-select" aria-label="Equivalent" data-testid="equivalent-select">
+    <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="bb-details-row" :aria-label="t('bottomBar.rowAria')" data-testid="bottom-details-row">
+      <div class="hud-bar__left" :aria-label="t('bottomBar.viewAria')">
+        <div class="ds-row bb-row" :aria-label="t('bottomBar.equivalent')" data-testid="equivalent-row">
+        <span class="ds-label">{{ t('bottomBar.equivalent') }}</span>
+        <select v-if="props.equivalentOptions.length > 1" v-model="eq" class="ds-select" :aria-label="t('bottomBar.equivalent')" data-testid="equivalent-select">
           <option v-for="code in props.equivalentOptions" :key="code" :value="code">{{ code }}</option>
         </select>
         <span v-else class="ds-value ds-mono" data-testid="equivalent-text">{{ props.equivalentOptions[0] ?? eq }}</span>
       </div>
 
-      <div class="ds-row bb-row" aria-label="Layout">
-        <span class="ds-label">Layout</span>
-        <select v-model="layoutMode" class="ds-select" aria-label="Layout" data-testid="layout-select">
-          <option value="admin-force">Organic cloud</option>
-          <option value="community-clusters">Clusters</option>
-          <option value="balance-split">Balance</option>
-          <option value="type-split">Type</option>
-          <option value="status-split">Status</option>
+      <div class="ds-row bb-row" :aria-label="t('bottomBar.layout')" data-testid="layout-row">
+        <span class="ds-label">{{ t('bottomBar.layout') }}</span>
+        <select v-model="layoutMode" class="ds-select" :aria-label="t('bottomBar.layout')" data-testid="layout-select">
+          <option v-for="o in layoutOptions" :key="o.value" :value="o.value">{{ o.text }}</option>
         </select>
       </div>
 
@@ -125,7 +131,7 @@ const playlistPosition = computed(() => {
       </div>
     </div>
 
-    <div class="hud-bar__right bb-tools" aria-label="Tools">
+    <div class="hud-bar__right bb-tools" :aria-label="t('bottomBar.toolsAria')">
       <div
         v-if="props.playlists && offeredPlaylists.length"
         class="ds-row bb-row"
@@ -171,9 +177,10 @@ const playlistPosition = computed(() => {
           v-if="showResetView"
           class="ds-btn ds-btn--secondary ds-btn--sm"
           type="button"
+          data-testid="reset-view"
           @click="resetView"
         >
-          Reset view
+          {{ t('bottomBar.fitNetwork') }}
         </button>
       </div>
     </HudBar>
