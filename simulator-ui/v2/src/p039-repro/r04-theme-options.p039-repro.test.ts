@@ -29,8 +29,7 @@ function context(): TopBarContext {
     loadingScenarios: ref(false), scenarios: ref([{ scenario_id: 'scenario-1', label: 'Scenario 1' }]), selectedScenarioId: ref('scenario-1'),
     intensityPercent: ref(50), runId: ref('run-1'), runStatus: ref(null), sseState: ref('open'), lastError: ref(null),
     runStats: ref({ startedAtMs: 0, attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} }),
-    accessToken: ref(null), adminRuns: ref(null), adminRunsLoading: ref(false), adminLastError: ref(undefined),
-    adminCanGetRuns: ref(false), adminCanStopRuns: ref(false), adminCanAttachRun: ref(false), adminCanStopRun: ref(false),
+    accessToken: ref(null), // 048 S2: the admin fields of the context are gone with "Admin ▾"
   } as TopBarContext
 }
 

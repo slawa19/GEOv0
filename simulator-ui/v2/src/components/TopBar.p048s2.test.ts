@@ -94,6 +94,26 @@ describe('048 S2 - the service row of the top bar, by addressee (amendment 12)',
     }
   })
 
+  // Internal adversarial pass (2026-10-19): a visitor's running run without `debug` leaves the status cluster empty, and
+  // an empty element with a name is an axe violation (aria-prohibited-attr). Red before the fix: the cluster was
+  // always named "Status".
+  it('the status cluster is named only while it holds something (an empty named div is an axe violation)', async () => {
+    for (const [why, over, props, named] of [
+      ['a visitor, running, no debug', { accessToken: ref(null) }, {}, false],
+      ['the offline source', { apiMode: ref('fixtures') }, {}, false],
+      ['a visitor, stopped with a reason', { accessToken: ref(null), runStatus: ref(stopped) }, {}, true],
+      ['a visitor with debug', { accessToken: ref(null) }, { debug: true }, true],
+      ['the administrator (the payments badge)', { accessToken: ref('admin-token') }, {}, true],
+    ] as const) {
+      const { host, done } = mountTopBar(context(over as Partial<TopBarContext>), props)
+      await nextTick()
+      const cluster = host.querySelector<HTMLElement>('[data-testid="top-details-row"] > .hud-bar__right')!
+      expect(cluster.getAttribute('aria-label'), `${why}: the name`).toBe(named ? 'Status' : null)
+      expect((cluster.textContent ?? '').trim().length > 0, `${why}: the cluster holds text exactly when named`).toBe(named)
+      done()
+    }
+  })
+
   it('the offline source: no run row and no payments badge, whatever the token (there is no run to control)', async () => {
     const { host, done } = mountTopBar(context({ accessToken: ref('admin-token'), apiMode: ref('fixtures') }))
     await nextTick()

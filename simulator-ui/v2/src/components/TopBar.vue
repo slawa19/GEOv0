@@ -273,6 +273,18 @@ const showAdminControls = computed(() => isAdminViewer(ctx.accessToken.value, ct
  */
 const showOwnRunRow = computed(() => showRunControls.value && showAdminControls.value)
 
+/**
+ * 048 S2 (internal adversarial pass, 2026-10-19): the status cluster is named "Status" only while it holds something -
+ * the SSE badge or the analytics toggle (`debug`), the stop reason, the payments badge (admin token). An empty div with
+ * a name is an axe violation (aria-prohibited-attr), the rule the middle already follows; since S2 a visitor's running
+ * run without `?debug=1` leaves the cluster empty (the payments badge was its one constant item).
+ */
+const showStopReason = computed(() => ctx.runStatus.value?.state === 'stopped' && !!stopSummary.value)
+const showRunPayments = computed(() => !!ctx.runId.value && showAdminControls.value)
+const statusHasContent = computed(
+  () => ctx.apiMode.value === 'real' && (props.debug || showStopReason.value || showRunPayments.value),
+)
+
 function onStartRun() {
   emit('start-run')
 }
@@ -445,7 +457,7 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="hud-bar__right" aria-label="Status">
+        <div class="hud-bar__right" :aria-label="statusHasContent ? 'Status' : undefined">
           <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
             <!-- 048 S1 (decision 5): the raw SSE badge is the developer's (`?debug=1`). -->
             <span v-if="props.debug" :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE" data-testid="sse-badge">
@@ -453,7 +465,7 @@ function onApplyIntensity() {
             </span>
 
             <div
-              v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary"
+              v-if="showStopReason"
               class="ds-panel ds-ov-metric tb-fade-92"
               :aria-label="t('topBar.stopReasonAria')"
               data-testid="stop-reason"
@@ -464,7 +476,7 @@ function onApplyIntensity() {
             </div>
 
             <!-- 048 S2 (amendments 8 and 12): the payments of the run ("Платежи: a из b") are the administrator's, with the run row. -->
-            <span v-if="ctx.runId.value && showAdminControls" class="ds-badge ds-badge--info" aria-label="TX" data-testid="run-payments">
+            <span v-if="showRunPayments" class="ds-badge ds-badge--info" aria-label="TX" data-testid="run-payments">
               TX {{ txCompact }}
             </span>
 

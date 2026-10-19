@@ -211,7 +211,7 @@ export type SimulatorAppApi = {
    * 048 S2 (amendment 9): "Admin ▾" is gone from the UI - the run list, Stop and Stop all are the API's
    * (`real-mode-runbook.md`, "где и что смотреть"). What is left is the attach to a run by its id: no control of the UI
    * calls it since S2; the composable tests enter the attach of `useSimulatorRealMode.ts` through it (the rules of the
-   * shown run's scene that start and boot share). Whether that mechanism goes too is a cleanup of its own (BACKLOG).
+   * shown run's scene that start and boot share). Whether that mechanism goes too is a cleanup of its own (BACKLOG 048-3).
    */
   admin: {
     attachRun: (runId: string) => Promise<void>

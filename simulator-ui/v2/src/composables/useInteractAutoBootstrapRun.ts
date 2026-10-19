@@ -45,7 +45,8 @@ export function autostartDecision(runId: string | null | undefined, status: RunS
  * 043 S2: opening the demo is a live run. ONE attempt per page load, made when the opening is over (the caller calls
  * `onOpened` once): a run the person stops afterwards is not restarted behind their back, and a failed start leaves its
  * error on screen (`startRun` records it); a refusal by the global limit of runs offers "Try again" in that line (046
- * wave 1), and Start under "Подробнее" remains the way to try again after any other failure.
+ * wave 1); after any other failure the way back is Start under "Подробнее" for the administrator (048 S2: the run row
+ * is behind the admin token) and a reload of the page for a visitor (a reload makes this one attempt again).
  *
  * The run is started with the existing `startRun` - not paused, at the person's stored intensity (when none is stored,
  * the screen's default: 15 for a visitor, 30 for the operator - `defaultIntensityPercentFor`, 044 stage 2; a stored 0 is

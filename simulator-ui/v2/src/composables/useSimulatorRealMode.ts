@@ -1184,8 +1184,9 @@ export function useSimulatorRealMode(opts: {
 
   /**
    * 043 S2 (external review 2026-10-17): admission is serialised. A start asked for while another is in flight JOINS it
-   * (returns the same promise) and never issues a second create: the callers - the opening's autostart and Start under
-   * "Подробнее" (the Demo UI's paused bootstrap went with Demo UI, 043 S3) - could otherwise put two runs side by side
+   * (returns the same promise) and never issues a second create: the callers - the opening's autostart, "Try again" of
+   * the error line and Start under "Подробнее" (the administrator's since 048 S2; the Demo UI's paused bootstrap went
+   * with Demo UI, 043 S3) - could otherwise put two runs side by side
    * (with a global limit >= 2) or a redundant create and a 409 recovery (with the default 1). The joining call's own
    * options are not applied: the run in flight is the one being started.
    */

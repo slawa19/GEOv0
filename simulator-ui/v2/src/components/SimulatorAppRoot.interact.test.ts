@@ -5990,7 +5990,8 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
  * or an ancestor, not `tabindex="-1"`, and not inside a closed `<details>` (its own summary excepted).
  *
  * LIMITS: happy-dom has no layout, so "visible" is read from attributes and computed style, not from a box; the mocked
- * app has no admin token, so `Admin ▾` is not among the counted controls (the stand counts it, reproducer (d)).
+ * app has no admin token; the first view has no control of the administrator (048 S2: "Admin ▾" is gone, the run row
+ * is behind "Подробнее").
  */
 describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', () => {
   const CONTROL = 'button, select, input, summary, [role="button"]'
@@ -6213,7 +6214,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
   it('048 S2 (amendment 12): the whole of «Подробнее» - the visitor\'s, and the administrator\'s (the same plus the own run)', async () => {
     const contents = (host: HTMLElement) => {
       const list = (root: Element | null) => (root ? [...root.querySelectorAll<HTMLElement>(
-        'select, button, input, summary, [data-testid="stop-reason"], [data-testid="run-payments"], [data-testid="sse-badge"], [data-testid="equivalent-text"]',
+        'select, button, input, summary, a[href], [role="button"], [tabindex]:not([tabindex="-1"]), [data-testid="stop-reason"], [data-testid="run-payments"], [data-testid="sse-badge"], [data-testid="equivalent-text"]',
       )] : []).filter((el) => {
         // A control inside a closed menu is not on screen (its summary is): the navigator's own fields.
         const closed = el.closest('details:not([open])')

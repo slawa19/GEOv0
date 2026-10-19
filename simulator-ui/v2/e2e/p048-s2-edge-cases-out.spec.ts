@@ -68,7 +68,7 @@ async function open(page: Page, o: { visitor: boolean; query?: string }): Promis
 /** What "Подробнее" holds: each part as a list (a control by test id, aria-label or text; a passive item by test id). */
 function contents(page: Page) {
   return page.evaluate(() => {
-    const sel = 'select, button, input, summary, [data-testid="stop-reason"], [data-testid="run-payments"], [data-testid="sse-badge"], [data-testid="equivalent-text"]'
+    const sel = 'select, button, input, summary, a[href], [role="button"], [tabindex]:not([tabindex="-1"]), [data-testid="stop-reason"], [data-testid="run-payments"], [data-testid="sse-badge"], [data-testid="equivalent-text"]'
     const list = (root: Element | null) => (root ? [...root.querySelectorAll<HTMLElement>(sel)] : [])
       .filter((el) => {
         const closed = el.closest('details:not([open])')
