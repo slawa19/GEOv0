@@ -13,7 +13,8 @@
  *       its title, in the language of the page;
  *   (г) a switch of the language on the open page re-renders both open windows (no reload, no reopen).
  *
- * `P046_FRAMES=1` writes the owner's frames (`.local-run/owner-review/2026-10-19-046-w3/`); the default run writes none.
+ * `P046_FRAMES=1` writes the owner's frames (`.local-run/owner-review/2026-10-19-046-w3/`, or `P046_FRAMES_DIR`), taken as
+ * soon as the window is open; the default run writes none.
  * What this does NOT see: the wording (the parity guard and a human); the history and the notification after a switch (the
  * mount test `inspectors.p046w3.test.ts` holds those on the real `useInteractMode`).
  */
@@ -33,7 +34,7 @@ type Lang = (typeof LANGS)[number]
 const CARD = '.ws-shell[data-win-type="node-card"]'
 const EDGE = '.ws-shell[data-win-type="edge-detail"]'
 const FRAMES = process.env.P046_FRAMES === '1'
-const FRAMES_DIR = fileURLToPath(new URL('../../../.local-run/owner-review/2026-10-19-046-w3/', import.meta.url))
+const FRAMES_DIR = process.env.P046_FRAMES_DIR ?? fileURLToPath(new URL('../../../.local-run/owner-review/2026-10-19-046-w3/', import.meta.url))
 
 /** Data in either language: the mock's names and ids, the equivalent code, the key `Esc`. */
 const DATA_WORDS = new Set(['Alice', 'Bob', 'Carol', 'alice', 'bob', 'carol', 'Extra', 'x', 'UAH', 'Esc'])
@@ -119,6 +120,7 @@ for (const theme of THEMES) {
       test('(а)(б) the participant card: one language, the head and the statistics one line each, nothing sticks out', async ({ page }, info) => {
         await open(page, theme, lang, { aliceLines: 2 })
         const card = await openCard(page)
+        await frame(page, `${theme}-${lang}-1-card`)
         await expect(card.locator('.nco-trustline-row'), 'counter-check: the rows of both groups are there').toHaveCount(3)
         await expect(card.getByTestId('node-card-group-out')).toHaveText(t('card.trustsGroup', { count: 2 }, lang))
         await expect(card.getByTestId('node-card-group-in')).toHaveText(t('card.trustedByGroup', { count: 1 }, lang))
@@ -130,12 +132,12 @@ for (const theme of THEMES) {
         expect(spread(head), 'name and role one line').toBeLessThan(4)
         expect(spread(stats), 'the statistics one line').toBeLessThan(4)
         expect(await overflowing(card)).toEqual([])
-        await frame(page, `${theme}-${lang}-1-card`)
       })
 
       test('(а)(б)(в) the line window: one language, 320 wide, the figures one line, the buttons one row, the explaining line', async ({ page }, info) => {
         await open(page, theme, lang)
         const edge = await openLine(page)
+        await frame(page, `${theme}-${lang}-2-line-window`)
         expect(await foreignWords(edge, lang)).toEqual([])
         await expect(edge.getByTestId('edge-trust-explanation')).toHaveText(t('edgeWindow.trustExplanation', { from: 'Bob', to: 'Alice' }, lang))
         const w = (await edge.boundingBox())!.width
@@ -159,7 +161,6 @@ for (const theme of THEMES) {
         expect(buttons.length, 'counter-check: Pay, Change limit, Close line').toBe(3)
         expect(spread(buttons.map((b) => b.c)), `every button on one row: ${JSON.stringify(buttons)}`).toBeLessThan(4)
         expect(await overflowing(edge)).toEqual([])
-        await frame(page, `${theme}-${lang}-2-line-window`)
       })
     })
   }
