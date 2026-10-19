@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { useEdgeTooltip } from './useEdgeTooltip'
+import { setUiLocale } from '../i18n/locale'
 
 describe('useEdgeTooltip', () => {
   it('formatEdgeAmountText uses used+trust_limit when present', () => {
@@ -29,12 +30,25 @@ describe('useEdgeTooltip', () => {
     expect(s).toContain('7')
   })
 
+  it('046 wave 1: the bare amount line (no figures) is from the dictionary, in the language of the interface', () => {
+    const api = useEdgeTooltip({ hostEl: ref(null), hoveredEdge: { key: null, screenX: 0, screenY: 0 }, clamp: (v) => v, getUnit: () => 'UAH' })
+    expect(api.formatEdgeAmountText({ source: 'A', target: 'B' })).toBe('from: — / to: — UAH')
+    setUiLocale('ru')
+    try {
+      expect(api.formatEdgeAmountText({ source: 'A', target: 'B' })).toBe('от: — / до: — UAH')
+    } finally {
+      setUiLocale('en')
+      window.localStorage.clear()
+    }
+  })
+
   describe('edgeTooltipStyle — overlay size caching (§7.1 regression)', () => {
     it('getBoundingClientRect on tooltip element is called only once per null→key show transition, not on every pointermove', () => {
-      // Build a minimal host DOM tree: host > tooltipEl[aria-label="Edge tooltip"]
+      // Build a minimal host DOM tree: host > tooltipEl[data-testid="edge-tooltip"] (046 wave 1: the product finds the
+      // tooltip by its test id; its accessible name is in the language of the interface).
       const host = document.createElement('div')
       const tooltipEl = document.createElement('div')
-      tooltipEl.setAttribute('aria-label', 'Edge tooltip')
+      tooltipEl.setAttribute('data-testid', 'edge-tooltip')
       host.appendChild(tooltipEl)
 
       // Spy on the tooltip element's getBoundingClientRect (the DOM measurement we cache).

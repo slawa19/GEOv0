@@ -89,7 +89,9 @@ describe('TopBar dropdown focus contract', () => {
     await nextTick()
 
     expect(lifecycle?.textContent, 'the region says something else for a running run').not.toBe(before)
-    const error = host.querySelector('[aria-label="Error"]')
+    // 046 wave 1, full (2026-10-19): by test id - the accessible name is the dictionary's (`topBar.errorAria`).
+    const error = host.querySelector('[data-testid="top-error"]')
+    expect(error?.getAttribute('aria-label')).toBe('Error')
     expect(error?.getAttribute('role')).toBe('alert')
     expect(error?.getAttribute('aria-atomic')).toBe('true')
     expect(error?.textContent).toContain('Run failed to reconnect')
@@ -105,7 +107,7 @@ describe('TopBar dropdown focus contract', () => {
       lastError: ref<string | null>(full),
     })
 
-    const error = host.querySelector('[aria-label="Error"]')
+    const error = host.querySelector('[data-testid="top-error"]')
     expect(error?.textContent).toContain('SCENARIO_TRUSTLINE_REFUSED')
     // the visible line is shortened, so the end of the text is not in it...
     expect(error?.textContent).not.toContain('trust_line_status_frozen')
@@ -129,7 +131,8 @@ describe('TopBar dropdown focus contract', () => {
     // 043 S3 (decision 5): the "Advanced ⚙" menu, which held only the tempo, is gone; the tempo is in the row itself.
     expect(host.querySelector('details[aria-label="Advanced"]')).toBeNull()
     // anti-vacuum: the bar is the real one, with its service row, and still carries the intensity control that stays
-    const intensity = host.querySelector('[aria-label="Intensity"] input[aria-label="Intensity percent"]')
+    // 046 wave 1, full (2026-10-19): by test id (the tempo's accessible names are the dictionary's).
+    const intensity = host.querySelector('.tb-adv-row input[data-testid="intensity-input"]')
     expect(intensity).toBeTruthy()
     expect(intensity!.closest('details'), 'the tempo is not inside a menu').toBeNull()
 

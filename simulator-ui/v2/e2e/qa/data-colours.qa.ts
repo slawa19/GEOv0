@@ -62,7 +62,8 @@ function rolesSnapshot(): QaSnapshot {
   }
 }
 
-const switcher = (page: Page) => page.getByRole('combobox', { name: 'UI theme' })
+// 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
+const switcher = (page: Page) => page.getByTestId('theme-select')
 
 async function switchTheme(page: Page, theme: string): Promise<void> {
   await openDetails(page) // 043 S1: the theme switcher is behind "Подробнее"
@@ -156,14 +157,14 @@ test('039 B1: the legend names what the scene contains, in the fixed order, each
   await boot(page, { snapshot: rolesSnapshot(), clock: false })
   const legend = page.locator('[data-testid="legend"]')
   await expect(legend).toBeVisible()
-  await expect(legend.locator('[data-testid="legend-title"]')).toHaveText('Overall balance · UAH')
+  await expect(legend.locator('[data-testid="legend-title"]')).toHaveText('Node colour — balance · UAH') // 046 wave 1 (048 §G): the words of the legend
   await expect(legend, 'the explanation in plain words is the accessible description').toHaveAccessibleDescription('Net position: what others owe minus what this participant owes.')
   const rows = await legend.locator('[data-legend-role]').evaluateAll((els) => els.map((el) => {
     const s = el.querySelector<HTMLElement>('[data-legend-swatch]')!
     const cs = getComputedStyle(s)
     return { id: el.getAttribute('data-legend-role'), sign: s.textContent, text: el.querySelector('.ds-legend__text')!.textContent, bg: cs.backgroundColor, border: cs.borderTopColor, dashed: cs.borderTopStyle === 'dashed', visible: el.getBoundingClientRect().width > 0 }
   }))
-  expect(rows.map((r) => `${r.sign}|${r.text}`)).toEqual(['−|Owes more', '+|Is owed more', '0|Even overall', '?|Balance unknown', '|Frozen', '|Hub', '|Person', '|Organisation'])
+  expect(rows.map((r) => `${r.sign}|${r.text}`)).toEqual(['−|owes more', '+|is owed more', '0|even', '?|unknown', '|frozen', '|hub', '|person', '|organisation'])
   expect(rows.every((r) => r.visible), 'every entry is on screen').toBe(true)
   const by = Object.fromEntries(rows.map((r) => [r.id, r]))
   expect(by.debtor!.bg).toBe(await resolved(page, '--ds-data-debtor'))

@@ -42,7 +42,7 @@ const note = (id: string, row: unknown) => {
   test.info().annotations.push({ type: `039-${id}`, description: JSON.stringify(row) })
 }
 
-const switcher = (page: Page) => page.getByRole(THEME.switcher.role, { name: THEME.switcher.name })
+const switcher = (page: Page) => page.getByTestId(THEME.switcher.testId)
 
 /** The themes the switcher of the running app really offers - read from the UI, never assumed. */
 async function offeredThemes(page: Page): Promise<string[]> {

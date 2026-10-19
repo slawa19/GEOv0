@@ -47,11 +47,12 @@ export const COLOURED_ROLES: readonly LegendRole[] = ['debtor', 'creditor', 'fro
 export const ALL_THEME_IDS = ['hud', 'saas', 'library', 'shadcn'] as const
 
 /** The theme switcher of the running app and where the theme is applied. */
-export const THEME = { switcher: { role: 'combobox' as const, name: 'UI theme' }, root: '.root', attribute: 'data-theme' } as const
+// 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page).
+export const THEME = { switcher: { testId: 'theme-select' }, root: '.root', attribute: 'data-theme' } as const
 
 /** The total debt "was -> now" after a clearing (spec 039, P-5): the bar it is shown in, and the two values, in this order. */
 export const DEBT = {
-  bar: '[aria-label="System balance"]',
+  bar: '[data-testid="system-balance"]',
   before: '[data-testid="total-debt-before"]',
   after: '[data-testid="total-debt-after"]',
 } as const

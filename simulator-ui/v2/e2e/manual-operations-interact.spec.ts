@@ -442,7 +442,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
       edgeStatus: 'active',
     })
 
-    const tooltip = page.locator('[aria-label="Edge tooltip"]')
+    const tooltip = page.getByTestId('edge-tooltip')
     await expect(tooltip).toBeVisible()
     const tooltipBox = await tooltip.boundingBox()
     expect(tooltipBox).not.toBeNull()
@@ -587,9 +587,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('[data-testid="manual-payment-confirm"]').click()
 
     // Success toast visible; no ErrorToast with NO_ROUTE.
-    await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
-    await expect(page.getByLabel('Error notification')).toBeHidden()
-    await expect(page.getByLabel('Success notification')).not.toContainText('NO_ROUTE')
+    await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
+    await expect(page.getByTestId('error-toast')).toBeHidden()
+    await expect(page.getByTestId('success-toast')).not.toContainText('NO_ROUTE')
   })
 
   // 026 (owner В1/F-026-1, `T2602`): a limit below the debt is a trust change, not a debt change, and is
@@ -774,8 +774,8 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await closeBtn.click()
     await closeBtn.click()
 
-    await expect(page.getByLabel('Error notification')).toBeVisible()
-    await expect(page.getByLabel('Error notification')).toContainText('Trustline not found')
+    await expect(page.getByTestId('error-toast')).toBeVisible()
+    await expect(page.getByTestId('error-toast')).toContainText('Trustline not found')
   })
 })
 

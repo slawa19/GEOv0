@@ -235,7 +235,10 @@ export function resolveVizColors(mapping: VizMapping, scope: Element | null | un
 
 export type LegendEntryId = 'debtor' | 'creditor' | 'neutral' | 'unknown' | 'frozen' | 'hub' | 'person' | 'organisation'
 
-/** Words of a role - English (the language of the interface), plain. The legend and the node card say the same. */
+/**
+ * Words of a role, plain - the node card's (English as a whole until wave 3 of 046 moves the card). The legend says the
+ * roles in the language of the interface from the dictionary (`legend.entry.*`, 046 wave 1, words of 048 §G).
+ */
 export const ROLE_TEXT: Record<NodeRole, string> = {
   debtor: 'Owes more',
   creditor: 'Is owed more',
@@ -245,20 +248,20 @@ export const ROLE_TEXT: Record<NodeRole, string> = {
 export const FROZEN_TEXT = 'Frozen'
 export const HUB_TEXT = 'Hub'
 
-/** The fixed vocabulary of the legend. The ORDER of this list is the order on screen. */
-export const LEGEND_VOCABULARY: ReadonlyArray<{ id: LegendEntryId; text: string }> = [
-  { id: 'debtor', text: ROLE_TEXT.debtor },
-  { id: 'creditor', text: ROLE_TEXT.creditor },
-  { id: 'neutral', text: ROLE_TEXT.neutral },
-  { id: 'unknown', text: ROLE_TEXT.unknown },
-  { id: 'frozen', text: FROZEN_TEXT },
-  { id: 'hub', text: HUB_TEXT },
-  { id: 'person', text: 'Person' },
-  { id: 'organisation', text: 'Organisation' },
+/**
+ * The fixed vocabulary of the legend. The ORDER of this list is the order on screen. 046 wave 1: the words of an entry
+ * are the dictionary's (`legend.entry.<id>`, `legend.title`, `legend.help`), in the language of the interface.
+ */
+export const LEGEND_VOCABULARY: ReadonlyArray<{ id: LegendEntryId }> = [
+  { id: 'debtor' },
+  { id: 'creditor' },
+  { id: 'neutral' },
+  { id: 'unknown' },
+  { id: 'frozen' },
+  { id: 'hub' },
+  { id: 'person' },
+  { id: 'organisation' },
 ]
-
-export const LEGEND_TITLE = 'Overall balance'
-export const LEGEND_HELP = 'Net position: what others owe minus what this participant owes.'
 
 /**
  * The entries a legend of these nodes shows: only features PRESENT in the snapshot, decided by `classifyNode` - the

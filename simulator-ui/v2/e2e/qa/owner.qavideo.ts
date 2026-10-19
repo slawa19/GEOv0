@@ -113,7 +113,7 @@ test('frames - the empty screen with the error after a scene that cannot be load
   await pushEvent(page, { type: 'run_status', run_id: RUN_ID, scenario_id: SCENARIO_ID, state: 'stopped', sim_time_ms: 0, intensity_percent: 0, ops_sec: 0, queue_depth: 0 })
   await realFrames(page, 20)
   await openDetails(page) // 043 S1: the scenario selector is behind "Подробнее"
-  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER)
+  await page.getByTestId('scenario-select').selectOption(OTHER)
   await expect(page.locator('.ds-ov-inset[role="alert"]')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim: { hasSnapshot: boolean } }).__geoSim.hasSnapshot)).toBe(false)
   await realFrames(page, 30)

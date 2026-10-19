@@ -461,6 +461,14 @@ async function activateButton(page: Page, name: string) {
   await button.press('Enter')
 }
 
+// 046 wave 1, full (2026-10-19): first-screen controls by test id - their names are the dictionary's (language of the page).
+async function activateTestId(page: Page, testId: string) {
+  const button = page.getByTestId(testId)
+  await expect(button).toBeVisible()
+  await button.focus()
+  await button.press('Enter')
+}
+
 /**
  * 043 S2 (decision 2, 2026-10-17): opening the demo starts a run by itself, so a page of this matrix opens with the run
  * of the opening already living. Where a test needs the state the person had before S2 (no live run, Start offered),
@@ -468,7 +476,7 @@ async function activateButton(page: Page, name: string) {
  */
 async function stopTheOpeningsRun(page: Page) {
   await expect(runState(page), 'the opening started its run').toHaveAttribute('data-run-state', 'running')
-  await activateButton(page, 'Stop')
+  await activateTestId(page, 'run-stop')
   await expect(runState(page)).toHaveAttribute('data-run-state', 'stopped')
 }
 
@@ -541,13 +549,13 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await waitReady(page)
     // 043 S2: the stale run fell back (the opening then started a new run, which this test stops to look at the preview).
     await stopTheOpeningsRun(page)
-    const navigator = page.getByRole('region', { name: 'Graph navigator' })
-    await navigator.getByText('Inspect graph', { exact: true }).click()
-    await expect(navigator.getByLabel('Node').locator('option')).toHaveCount(2)
+    const navigator = page.getByTestId('graph-navigator')
+    await navigator.getByTestId('graph-navigator-summary').click()
+    await expect(navigator.locator('#graph-navigator-node').locator('option')).toHaveCount(2)
 
-    const scenarioSelect = page.getByRole('combobox', { name: 'Scenario' })
+    const scenarioSelect = page.getByTestId('scenario-select')
     await scenarioSelect.selectOption('S2')
-    await expect(navigator.getByLabel('Node').locator('option')).toHaveCount(3)
+    await expect(navigator.locator('#graph-navigator-node').locator('option')).toHaveCount(3)
   })
 
   test('terminal run supports Start to Stop to Start and exposes a later start error', async ({ page }) => {
@@ -558,15 +566,15 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 043 S2: the first Start of this test is the opening's own (decision 2); then Stop -> Start as before.
     await stopTheOpeningsRun(page)
 
-    await activateButton(page, 'Start')
+    await activateTestId(page, 'run-start')
     await expect(runState(page)).toHaveAttribute('data-run-state', 'running')
     expect(mock.createRequests).toHaveLength(2)
 
-    await activateButton(page, 'Stop')
+    await activateTestId(page, 'run-stop')
     mock.failOneCreate()
-    await activateButton(page, 'Start')
-    await expect(page.getByLabel('Error')).toContainText('HTTP 500 Internal Server Error for /simulator/runs')
-    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled()
+    await activateTestId(page, 'run-start')
+    await expect(page.getByTestId('top-error')).toContainText('HTTP 500 Internal Server Error for /simulator/runs')
+    await expect(page.getByTestId('run-start')).toBeEnabled()
   })
 
   test('keyboard operations and DOM graph navigator cover the supported interaction paths', async ({ page }) => {
@@ -591,14 +599,14 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
       unhandledPaths: [],
     })
 
-    await activateButton(page, 'Send Payment')
+    await activateTestId(page, 'actionbar-payment')
     await chooseOverlayOption(page, 'From', 'alice', /Alice/)
     await expect.poll(() => mock.paymentTargetRequests).toContain('alice')
     await chooseOverlayOption(page, 'To', 'bob', /Bob/)
     const amount = page.getByLabel('Amount')
     await amount.fill('1.00')
     await amount.press('Enter')
-    await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+    await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
     // 037 A2: a committed payment stays on screen, with the focus on its result; closing it returns the focus to the opener.
     await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText('payment-1')
     await expect(page.locator('[data-testid="mp-result"]')).toBeFocused()
@@ -607,7 +615,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     expect(mock.paymentRequests).toHaveLength(1)
 
     mock.rejectOnePayment()
-    await activateButton(page, 'Send Payment')
+    await activateTestId(page, 'actionbar-payment')
     await chooseOverlayOption(page, 'From', 'alice', /Alice/)
     await chooseOverlayOption(page, 'To', 'bob', /Bob/)
     await page.getByLabel('Amount').fill('2.00')
@@ -616,29 +624,29 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 0.00 UAH)" part comes only from the answer's `details.max_available`, so this fails if the mock's `details` are lost
     // and the text would otherwise be reached through the code alone (029 T2990, finding 4).
     // 043 S2 (review B3, 2026-10-17): the refusal is in the language of the page - English here (`?lang=en`, 046 wave 2).
-    await expect(page.getByLabel('Error notification')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
+    await expect(page.getByTestId('error-toast')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 
-    await activateButton(page, 'Manage Trustline')
+    await activateTestId(page, 'actionbar-trustline')
     await chooseTrustlineFromWhenRequested(page)
     await chooseOverlayOption(page, 'To', 'carol', /Carol/, true)
     await page.getByLabel('Limit').fill('15.00')
     await activateButton(page, 'Create')
-    await expect(page.getByLabel('Success notification')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
+    await expect(page.getByTestId('success-toast')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineCreateRequests).toHaveLength(1)
 
-    await activateButton(page, 'Manage Trustline')
+    await activateTestId(page, 'actionbar-trustline')
     await chooseTrustlineFromWhenRequested(page)
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
     await page.getByLabel('New limit').fill('20.00')
     await activateButton(page, 'Update')
-    await expect(page.getByLabel('Success notification')).toContainText('Limit updated: 20.00 UAH')
+    await expect(page.getByTestId('success-toast')).toContainText('Limit updated: 20.00 UAH')
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineUpdateRequests).toHaveLength(1)
 
-    await activateButton(page, 'Manage Trustline')
+    await activateTestId(page, 'actionbar-trustline')
     await chooseTrustlineFromWhenRequested(page)
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
     // INTENTIONAL, 026 `T2603.2` (owner В1): a close with debt is a request - announced, not blocked.
@@ -647,35 +655,35 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await expect(page.getByRole('button', { name: 'Request close' })).toBeEnabled()
     await activateButton(page, 'Cancel')
 
-    await activateButton(page, 'Run Clearing')
+    await activateTestId(page, 'actionbar-clearing')
     await activateButton(page, 'Confirm')
     // 037 C: the result stays until the user closes it (it used to be a "preview" that left on a timer).
     await expect(page.getByTestId('clearing-panel')).toContainText('Clearing result')
     // 046 (advisor, 2026-10-18): "{creditor} → {debtor}: debt reduced by ..." (was "{debtor}’s debt to {creditor} ...").
     await expect(page.getByTestId('clearing-panel')).toContainText('debt reduced by')
-    await expect(page.getByLabel('Success notification')).toContainText('Clearing done: 1/1 cycles')
+    await expect(page.getByTestId('success-toast')).toContainText('Clearing done: 1/1 cycles')
     expect(mock.clearingRequests).toHaveLength(1)
     await activateButton(page, 'Close')
     await expect(page.getByTestId('clearing-panel')).toBeHidden()
 
-    const navigator = page.getByRole('region', { name: 'Graph navigator' })
+    const navigator = page.getByTestId('graph-navigator')
     await expect(navigator).toBeVisible()
-    const navigatorSummary = navigator.getByText('Inspect graph', { exact: true })
+    const navigatorSummary = navigator.getByTestId('graph-navigator-summary')
     await navigatorSummary.focus()
     await navigatorSummary.press('Enter')
-    const nodeSelect = navigator.getByLabel('Node')
+    const nodeSelect = navigator.locator('#graph-navigator-node')
     await expect(nodeSelect).toBeVisible()
     await nodeSelect.focus()
     await nodeSelect.press('End')
     await expect(nodeSelect).toHaveValue('bob')
-    const inspectNode = navigator.getByRole('button', { name: 'Inspect node' })
+    const inspectNode = navigator.getByTestId('graph-navigator-open-node')
     await inspectNode.focus()
     await inspectNode.press('Enter')
-    await expect(navigator.locator('[data-testid="graph-navigator-status"]')).toContainText('Node details opened: Bob')
+    await expect(navigator.locator('[data-testid="graph-navigator-status"]')).toContainText('Participant opened: Bob')
     await expect(page.getByRole('region', { name: 'Node details: Bob' })).toBeVisible()
 
-    await chooseFirstNativeOptionByKeyboard(navigator.getByLabel('Edge'))
-    const inspectEdge = navigator.getByRole('button', { name: 'Inspect edge' })
+    await chooseFirstNativeOptionByKeyboard(navigator.locator('#graph-navigator-edge'))
+    const inspectEdge = navigator.getByTestId('graph-navigator-open-edge')
     await inspectEdge.focus()
     await inspectEdge.press('Enter')
     await expect(page.getByRole('region', { name: 'Trustline details: alice to bob' })).toBeVisible()
@@ -714,7 +722,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
       await expect(runState(page)).toHaveAttribute('data-run-state', 'running')
       await page.goto('/?mode=real&ui=interact&e2eReal=1')
       await waitReady(page)
-      await activateButton(page, 'Run Clearing')
+      await activateTestId(page, 'actionbar-clearing')
       await activateButton(page, 'Confirm')
       const spinner = page.locator('[data-testid="clearing-panel"] .cp-spinner')
       await expect(spinner).toBeVisible()

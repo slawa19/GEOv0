@@ -44,7 +44,8 @@ describe('SystemBalanceBar', () => {
 
     expect(shownIds(host)).toEqual(['sbb-total-debt'])
     expect(host.querySelector('[data-testid="sbb-total-debt"] .ds-value')?.textContent, 'its amount, at the precision of UAH').toContain('1234.00')
-    expect(host.querySelector('[aria-label="System balance"]')).not.toBeNull()
+    // 046 wave 1, full (2026-10-19): by test id; its accessible name is the dictionary's ("System balance" in English).
+    expect(host.querySelector('[data-testid="system-balance"]')?.getAttribute('aria-label')).toBe('System balance')
 
     app.unmount()
     host.remove()
@@ -55,8 +56,8 @@ describe('SystemBalanceBar', () => {
     await nextTick()
     expect(shownIds(metrics.host)).toEqual([...METRICS])
     // Its own accessible name: the bottom row's total debt stays the one "System balance" on the page.
-    expect(metrics.host.querySelector('[aria-label="System metrics"]')).not.toBeNull()
-    expect(metrics.host.querySelector('[aria-label="System balance"]')).toBeNull()
+    expect(metrics.host.querySelector('[data-testid="system-metrics"]')?.getAttribute('aria-label')).toBe('System metrics')
+    expect(metrics.host.querySelector('[data-testid="system-balance"]')).toBeNull()
     metrics.app.unmount()
     metrics.host.remove()
 

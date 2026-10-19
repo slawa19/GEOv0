@@ -21,7 +21,11 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  * that carries its cause, not as the text of one language:
  *   - `dict`  - a dictionary key whose text needs no data;
  *   - `count` - a plural key and its count (the server's number of places);
- *   - `raw`   - a text kept as it came (the server's own `CODE: message`, a transport error, a scene-load error).
+ *   - `raw`   - a text kept as it came (the server's own `CODE: message`, a transport error, a scene-load error);
+ *   - `code`  - a dictionary key whose text names a server code (`{code}`): the sentence is in the interface language,
+ *               the code stays as it came, for correlation (046 wave 1, full: the line of a run ended by an error);
+ *               `detail` is the server's own `CODE: message` - not drawn, but the line's `title` and one console line
+ *               (048 decision 3, AGENTS.md section 12: the full text stays reachable for correlation).
  * `renderRunErrorLine` gives the text in a language. The holder (`useSimulatorRealMode.ts`) keeps the VALUE in
  * `lastErrorLine` and the text of the current language in `lastError` (for every reader that wants a string: the top
  * bar, its title, tests), and renders again on a switch. A line put aside and brought back (a scene-load error over it)
@@ -33,6 +37,7 @@ export type RunErrorLine =
   | { readonly kind: 'dict'; readonly key: MessageKey }
   | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number }
   | { readonly kind: 'raw'; readonly text: string }
+  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string }
 
 export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLocale()): string {
   switch (line.kind) {
@@ -42,10 +47,17 @@ export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLoca
       return tn(line.key, line.count, undefined, locale)
     case 'raw':
       return line.text
+    case 'code':
+      return t(line.key, { code: line.code }, locale)
   }
 }
 
 export const rawRunErrorLine = (text: string): RunErrorLine => ({ kind: 'raw', text })
+
+/** The server's full text behind a line (the `title` of the error line), when the line keeps one; else null. */
+export function runErrorLineTitle(line: RunErrorLine | null | undefined): string | null {
+  return line?.kind === 'code' && line.detail ? line.detail : null
+}
 
 /**
  * Write a line into a holder: the text (current language) FIRST, then the value. The holder's own watcher of `lastError`
@@ -57,6 +69,12 @@ export function writeRunErrorLine(
   line: RunErrorLine | null,
   locale: UiLocale = uiLocale(),
 ): void {
+  // 048 decision 3 (§12): the server's full text of a run ended by an error goes to the console ONCE - when this line
+  // first replaces another, not on each status that repeats it, nor on a re-render after a switch of the language.
+  const previous = target.lastErrorLine
+  if (line?.kind === 'code' && line.detail && !(previous?.kind === 'code' && previous.detail === line.detail)) {
+    console.warn('[run] stopped with an error:', line.detail)
+  }
   target.lastError = line ? renderRunErrorLine(line, locale) : ''
   target.lastErrorLine = line
 }
@@ -64,19 +82,41 @@ export function writeRunErrorLine(
 /**
  * The error line of a run status (BACKLOG 037-5 (a)). A run in `error` was stopped by `last_error`: it is shown whatever
  * its code, because it is the only answer to "why did the run stop". For a run that goes on, the list of user-facing
- * codes decides as before. Not judged here: whether the server's message is fit for a person - it is printed as sent.
- * Null: no line.
+ * codes decides as before - its line is printed as sent (`CODE: message`). Null: no line.
+ *
+ * 046 wave 1, full (048 S2 hand-over P2-2): a visitor has no Start since 048 S2, so a run that ENDED says what to do -
+ * reload the page (the opening then starts a new run, `useInteractAutoBootstrapRun.ts`): the idle stop (044), any other
+ * stop that was not Stop of this screen's run row (`user_stop`, the administrator's own act - who has Start beside it):
+ * the operator's stop-all, a stop through the API with any reason or none (internal adversarial pass, 2026-10-19: the
+ * runbook's one-run stop sends no reason, and a list of the operator's reasons missed it) - and a run ended by an error
+ * (its code, not the server's English prose: 046 decision 3). Who stopped it is the stop reason behind "Details".
  */
 export function runStatusErrorLine(
   status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
   isUserFacing: (code: string) => boolean,
 ): RunErrorLine | null {
+  const state = String(status.state ?? '').trim().toLowerCase()
   // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
-  if (String(status.state ?? '').trim().toLowerCase() === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return IDLE_STOP_LINE
+  if (state === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return IDLE_STOP_LINE
+  if (state === 'stopped' && status.stop_reason !== OWN_STOP_REASON) return STOPPED_LINE
   const error = status.last_error
   if (!error) return null
-  const stopped = String(status.state ?? '').trim().toLowerCase() === 'error'
-  return stopped || isUserFacing(error.code) ? runErrorLine(error) : null
+  if (state === 'error') return runEndedByErrorLine(error)
+  return isUserFacing(error.code) ? runErrorLine(error) : null
+}
+
+/** The reason Stop of this screen's run row sends (`useSimulatorRealMode.ts` `stop`) - the one stop that writes no line. */
+export const OWN_STOP_REASON = 'user_stop'
+
+const STOPPED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.stopped' })
+
+/**
+ * The line of a run the server ended with an error: the clearing step refusal keeps its own human text (it names the
+ * cause and the operator's action); any other code is told in the interface language with the code itself.
+ */
+export function runEndedByErrorLine(error: RunError): RunErrorLine {
+  if (error.code.toUpperCase() === 'CLEARING_REFUSED') return runErrorLine(error)
+  return { kind: 'code', key: 'runLine.errorStopped', code: error.code, detail: `${error.code}: ${error.message}` }
 }
 
 export function runStatusErrorText(
