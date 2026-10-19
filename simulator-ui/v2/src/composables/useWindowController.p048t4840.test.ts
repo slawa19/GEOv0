@@ -315,3 +315,47 @@ describe('048 T4840 (sibling): a closed participant card stays closed while its 
   })
 })
 
+/**
+ * Internal adversarial pass, 2026-10-19 (finding 1, P1): the window manager keeps ONE inspector, so a participant card
+ * opened while a line is open (the navigator's "Open participant", a double click on the canvas) closes the line window
+ * with the reason `programmatic`. The first T4840 fix told the controller only about closes by a person, so the action
+ * stayed `editing-trustline` behind the card - and once the card was closed, with no window at all: the same dead end.
+ */
+describe('048 T4840: a participant card that replaces the line window ends the "trust line" action', () => {
+  it('line open -> participant card: the line window goes, the action ends; Escape then closes the card', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'carol', anchor: { x: 50, y: 50 } })
+      await nextTick()
+      await nextTick()
+
+      expect(h.wm.windows.value.map((w) => w.type)).toEqual(['node-card'])
+      expect(h.cancel).toHaveBeenCalledTimes(1)
+      expect(h.phase.value).toBe('idle')
+
+      escape(h)
+      await nextTick()
+      expect(h.wm.windows.value).toHaveLength(0)
+      expect(h.cancel).toHaveBeenCalledTimes(1)
+    } finally {
+      h.unmount()
+    }
+  })
+
+  it('while the line\'s request is in flight a card replacing the window cancels nothing (046 W3: the request finishes)', async () => {
+    const h = mountHarness()
+    try {
+      await openLineAsTheNavigatorDoes(h)
+      h.busy.value = true
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'carol', anchor: { x: 50, y: 50 } })
+      await nextTick()
+      await nextTick()
+
+      expect(h.wm.windows.value.map((w) => w.type), 'counter-check: the card did replace the line window').toEqual(['node-card'])
+      expect(h.cancel).not.toHaveBeenCalled()
+    } finally {
+      h.unmount()
+    }
+  })
+})

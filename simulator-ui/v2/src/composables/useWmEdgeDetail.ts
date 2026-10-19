@@ -102,8 +102,9 @@ export function useWmEdgeDetail(): {
   applyToWindowManager: (wm: EdgeDetailWmPort, o?: { closeReason?: EdgeDetailCloseReason }) => void
 
   /**
-   * 048 `T4840`: who is told when a person closed the line window - Escape, its x, a click outside it (never a
-   * programmatic close). One listener; the window controller owns what such a close means for the action.
+   * 048 `T4840`: who is told when the line window closed other than by this machine's own programmatic close - Escape,
+   * its x, a click outside it, a participant card replacing it. One listener; the window controller owns what such a close
+   * means for the action.
    */
   setUserCloseListener: (listener: ((reason: WindowCloseReason) => void) | null) => void
 } {
@@ -146,7 +147,11 @@ export function useWmEdgeDetail(): {
       appliedOpenKey.value = ''
       close({ suppress: true })
     }
-    if (reason !== 'programmatic') userCloseListener?.(reason)
+    // Told: every close a person made (Escape, x, outside click) and every close the window manager made on its own - a
+    // participant card that replaces the line window (one inspector at a time: `closeGroup(..., 'programmatic')`) leaves
+    // the action as windowless as Escape does (internal adversarial pass, 2026-10-19). Not told: this machine's own
+    // programmatic closes ("Change Limit" into the full editor, a kept-alive window released, the action already over).
+    if (reason !== 'programmatic' || !closingFromMachine) userCloseListener?.(reason)
   }
 
   function buildOpenArgs(req: EdgeDetailOpenRequest): EdgeDetailWmOpenArgs {

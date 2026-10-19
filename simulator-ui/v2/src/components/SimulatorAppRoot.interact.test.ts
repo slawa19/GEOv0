@@ -2962,12 +2962,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(getPhaseRef().value).toBe('idle')
       expect(host.querySelector('[data-testid="actionbar-locked-hint"]')).toBeNull()
 
-      // The same line chosen again opens the window again (until T4840 an Escape-closed window left the line-window state
-      // machine holding its id, and the same line did not reopen).
+      // The same line at the same anchor chosen again opens the window again. What this does NOT hold: the stale window id
+      // an Escape left in the line-window state machine - here the window was opened by the phase (driver `auto`), and
+      // the cancel heals that path by itself; the navigator's manual open is held by `useWindowController.p048t4840.test.ts`
+      // ("after Escape the same line opens again") and the e2e (internal adversarial pass, 2026-10-19).
       const st = getInteractState()
       st.fromPid = 'alice'
       st.toPid = 'bob'
-      st.edgeAnchor = { x: 20, y: 20 }
+      st.edgeAnchor = { x: 10, y: 10 }
       getPhaseRef().value = 'editing-trustline'
       await nextTick()
       await nextTick()

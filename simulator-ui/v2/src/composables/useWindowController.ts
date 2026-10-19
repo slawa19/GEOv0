@@ -462,10 +462,12 @@ export function useWindowController(opts: {
 	}
 
 	// Every route a person closes the line window by - Escape (the window manager), the x (`uiCloseEdgeDetailWindow`), a
-	// click outside it (`uiCloseTopmostInspectorWindow`; step 0 has already cancelled, so the phase is idle here) - ends
-	// the action. Not a programmatic close: "Change Limit" hands the action to the full editor, "Send Payment" keeps the
-	// window as the payment's context (the phase is the payment's then - it is not ended). A request in flight is never
-	// cancelled here: Escape and an outside click are ignored while busy (046 W3), and so is the x below.
+	// click outside it (`uiCloseTopmostInspectorWindow`; step 0 has already cancelled, so the phase is idle here) - and a
+	// participant card that replaces it (the window manager keeps one inspector) ends the action. Not the line-window
+	// machine's own programmatic close: "Change Limit" hands the action to the full editor, "Send Payment" keeps the window
+	// as the payment's context (the phase is the payment's then - it is not ended). A request in flight is never cancelled
+	// here: Escape and an outside click are ignored while busy (046 W3), and so is the x below; a card replacing the window
+	// mid-request leaves the action to finish on its own.
 	opts.wmEdgeDetail.setUserCloseListener(() => {
 		if (!lineWindowIsTheAction() || opts.interactMode.busy.value) return
 		opts.interactMode.cancel()

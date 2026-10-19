@@ -12,7 +12,8 @@
  * Alice, Bob, Carol; the line Bob -> Alice; the run is `paused`, so the three actions are enabled when nothing is open -
  * asserted before every path, so an idle bar at the end is not a bar that was never locked).
  *
- * The sibling paths of the same window: a participant opened from the navigator and its card closed; a line opened by a
+ * The sibling paths of the same window: a participant opened from the navigator and its card closed; a participant
+ * opened while a line is open (the card replaces the line window - one inspector at a time); a line opened by a
  * click on the canvas and closed; a line opened from the navigator, "Pay" pressed inside it - the payment goes on when the
  * line window (kept as its context) is closed, and the bar is idle once the payment is cancelled.
  *
@@ -129,6 +130,25 @@ test.describe('048 T4840: the sibling paths of the line window', () => {
     const card = page.locator(CARD)
     await expect(card.locator('.ds-ov-node-card')).toBeVisible()
     await expectIdle(page, 'with the card open')
+
+    await page.keyboard.press('Escape')
+    await expect(card).toHaveCount(0)
+    await expectIdle(page, 'after the card closed')
+  })
+
+  test('a line from the navigator, then a participant from it: the card replaces the line window, the action ends', async ({ page }) => {
+    // Internal adversarial pass, 2026-10-19 (finding 1): one inspector at a time - the card closes the line window, and
+    // until this the action stayed open behind the card and, once the card closed, with no window at all.
+    await open(page)
+    await lineFromNavigator(page)
+    await expectLockedByLine(page)
+    const openNode = page.getByTestId('graph-navigator').getByTestId('graph-navigator-open-node')
+    await openNode.focus()
+    await openNode.press('Enter')
+    const card = page.locator(CARD)
+    await expect(card.locator('.ds-ov-node-card')).toBeVisible()
+    await expect(page.locator(LINE)).toHaveCount(0)
+    await expectIdle(page, 'with the card in place of the line window')
 
     await page.keyboard.press('Escape')
     await expect(card).toHaveCount(0)
