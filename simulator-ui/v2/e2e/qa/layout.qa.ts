@@ -16,7 +16,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { boot, DETAILS_TOGGLE, ringSnapshot } from './stand.js'
-import { THEMES, VIEWPORT_MAIN } from './surfaceMatrix.js'
+import { THEMES, VIEWPORT_MAIN, VIEWPORT_RESIZED } from './surfaceMatrix.js'
 
 // 048 S1 (decisions 1, 4 and 5; Verification plan, forbidden item 4 - by test id, not by the words 046 translates):
 // what "Подробнее" shows the stand's viewer (an admin token is set). Gone from this list: the "Run <state>" badge
@@ -85,6 +85,50 @@ test('043 S1: Tab through the first view reaches the first view\'s controls only
   expect(distinct.filter((d) => !allowed.has(d)), 'nothing else is in the tab order of the first view').toEqual([])
 })
 
+/**
+ * 048 S1 (the owner's frame, 2026-10-19): "Inspect graph" in the bottom service row must not lie over another control and
+ * must stay at the right edge of that row, also when the row wraps - with `?debug=1` (more controls; on the offline
+ * source the playlist workbench) it did: the button, anchored absolutely, overlapped the playlist ("Шаг 0/20"). Read
+ * from the DOM: the rectangle of its summary against every other interactive element of the row, and its right edge
+ * against the row's.
+ */
+async function navigatorPlace(page: Page) {
+  return page.evaluate(() => {
+    const row = document.querySelector('[data-testid="bottom-details-row"]')!
+    // The visible button is the navigator's panel (its frame), the summary inside it is the hit target.
+    const nav = row.querySelector('.graph-navigator')!.getBoundingClientRect()
+    const rr = row.getBoundingClientRect()
+    const name = (el: Element) => `${el.tagName.toLowerCase()} "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 24)}"`
+    const overlaps: string[] = []
+    let controls = 0
+    // Controls, and the texts that read them (the playlist's position "0 / 20" is what the owner saw covered).
+    for (const el of row.querySelectorAll('button, select, input, summary, a[href], .ds-value, .ds-label')) {
+      if (el.closest('.graph-navigator')) continue
+      const r = el.getBoundingClientRect()
+      if (r.width === 0 || r.height === 0) continue
+      controls += 1
+      const ix = Math.min(r.right, nav.right) - Math.max(r.left, nav.left)
+      const iy = Math.min(r.bottom, nav.bottom) - Math.max(r.top, nav.top)
+      if (ix > 0.5 && iy > 0.5) overlaps.push(`${name(el)} ${Math.round(ix)}x${Math.round(iy)}`)
+    }
+    const pad = parseFloat(getComputedStyle(row).paddingRight) || 0
+    return { overlaps, controls, rightGap: Math.round(rr.right - pad - nav.right), nav: [Math.round(nav.left), Math.round(nav.top), Math.round(nav.width)] }
+  })
+}
+
+async function expectNavigatorPlaced(page: Page, what: string) {
+  for (const vp of [VIEWPORT_MAIN, VIEWPORT_RESIZED]) {
+    await page.setViewportSize(vp)
+    await page.waitForTimeout(50)
+    const p = await navigatorPlace(page)
+    console.log('[048 S1 navigator]', what, `${vp.width}x${vp.height}`, JSON.stringify(p))
+    expect(p.controls, `${what} ${vp.width}x${vp.height}: anti-vacuum - the row has other controls to compare with`).toBeGreaterThanOrEqual(4)
+    expect.soft(p.overlaps, `${what} ${vp.width}x${vp.height}: "Inspect graph" lies over no other control or text of the row`).toEqual([])
+    expect.soft(Math.abs(p.rightGap), `${what} ${vp.width}x${vp.height}: "Inspect graph" stays at the right edge of its row (gap ${p.rightGap} px)`).toBeLessThanOrEqual(2)
+  }
+  await page.setViewportSize(VIEWPORT_MAIN)
+}
+
 /** The bars' rectangles against the viewport, and the hit-tested share of 039 R9 (the element under a point is a canvas). */
 async function canvasShare(page: Page) {
   return page.evaluate(() => {
@@ -125,6 +169,15 @@ for (const theme of THEMES) {
     expect(on.bottomH, 'Details adds to the bottom bar').toBeGreaterThan(off.bottomH)
 
     expect(off.heightSharePct, 'Details off (the first view): the canvas share of the height').toBeGreaterThanOrEqual(85)
+
+    // 048 S1 (the owner's frame, 2026-10-19): "Inspect graph" keeps its place - the visitor's row, then the developer's
+    // (`?debug=1`) on the offline source, where the playlist workbench makes the row wrap. 1366x768 and 1024x640.
+    await expectNavigatorPlaced(page, `[${theme}] visitor`)
+    await page.goto(`/?mode=fixtures&debug=1&theme=${theme}`)
+    await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
+    if ((await page.locator(DETAILS_TOGGLE).getAttribute('aria-expanded')) !== 'true') await page.locator(DETAILS_TOGGLE).click()
+    await expect(page.locator('[data-testid="playlist-workbench"]'), 'anti-vacuum: the developer\'s row has the playlist').toBeVisible()
+    await expectNavigatorPlaced(page, `[${theme}] ?debug=1 offline`)
     // Details on: MEASURED, NOT ASSERTED (2026-10-16). Spec 043 (Verification plan 2) asks for 85 % in both states;
     // the approved mock-up (`mockup-s2.png`: two rows and a metrics row on top, a row of settings and tools above the
     // legend) gives about 69 % here, and no arrangement of those rows reaches 85 % at 1366x768 (four rows of 38-42 px

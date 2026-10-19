@@ -134,7 +134,7 @@ const playlistPosition = computed(() => {
       </div>
     </div>
 
-    <div class="hud-bar__right" aria-label="Tools">
+    <div class="hud-bar__right bb-tools" aria-label="Tools">
       <div
         v-if="props.playlists && offeredPlaylists.length"
         class="ds-row bb-row"
@@ -206,6 +206,17 @@ const playlistPosition = computed(() => {
 }
 
 .bb-main-right {
+  margin-left: auto;
+}
+
+/*
+  048 S1 (the owner's frame, 2026-10-19): with `?debug=1` the service row wraps (Источник, Quality and, offline, the
+  playlist), and its tools group then started the second line at the LEFT - "Inspect graph", the last item, landed in
+  the middle of the screen next to the playlist ("Шаг 0/20"), while without debug it sits at the bottom right. The tools
+  group takes the free space before it (`margin-left: auto`), so whatever line it lands on, it ends at the right edge,
+  and "Inspect graph", its last item, with it.
+*/
+.bb-tools {
   margin-left: auto;
 }
 
