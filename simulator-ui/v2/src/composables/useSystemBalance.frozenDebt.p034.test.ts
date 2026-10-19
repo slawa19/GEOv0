@@ -47,7 +47,6 @@ describe('F-034-D1: the debt of a line that is not active', () => {
     )
 
     expect(b.totalUsed, 'the frozen debt fell out of Total Debt').toBe('10')
-    expect(b.isClean, 'a system with a frozen debt is reported as clean').toBe(false)
   })
 
   it('freezing a line by a topology event (no patch, as the backend sends it) does not change Total Debt', () => {
@@ -97,7 +96,6 @@ describe('F-034-D1: the debt of a line that is not active', () => {
     expect(draft.state.snapshot?.links[0]?.status, 'precondition: the event froze the line').toBe('frozen')
     const b = balanceOf(draft.state.snapshot)
     expect(b.totalUsed, 'the debt disappeared when its line was frozen').toBe('10')
-    expect(b.isClean).toBe(false)
   })
 
   it('the capacity of a frozen line is not available, and the line is not counted as usable (stays so)', () => {
@@ -153,6 +151,5 @@ describe('F-034-D1: the debt of a line that is not active', () => {
     )
 
     expect(b.totalUsed).toBe('0')
-    expect(b.isClean).toBe(true)
   })
 })

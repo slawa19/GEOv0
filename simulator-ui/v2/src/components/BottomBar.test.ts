@@ -1,6 +1,5 @@
 import { createApp, h, nextTick, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import type { SceneId } from '../scenes'
 
 const { default: BottomBar } = await import('./BottomBar.vue')
 
@@ -12,26 +11,13 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
   const layoutMode = ref('admin-force')
   const quality = ref('med')
   const labelsLod = ref('off')
-  const scene = ref<SceneId>('A')
 
   const defaultProps = {
     apiMode: 'real' as const,
-    isDemoFixtures: false,
     equivalentOptions: ['UAH', 'EUR'],
 
     showResetView: false,
     resetView: vi.fn(),
-
-    runId: 'r1',
-    refreshSnapshot: vi.fn(),
-
-    artifacts: [],
-    artifactsLoading: false,
-    refreshArtifacts: vi.fn(),
-    downloadArtifact: vi.fn(),
-
-    analyticsPanelOpen: false,
-    toggleAnalyticsPanel: vi.fn(),
 
     // 043 S1: the controls these tests are about live behind "Подробнее".
     detailsOpen: true,
@@ -46,12 +32,10 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
         'onUpdate:layoutMode': (v: string) => (layoutMode.value = v),
         'onUpdate:quality': (v: string) => (quality.value = v),
         'onUpdate:labelsLod': (v: string) => (labelsLod.value = v),
-        'onUpdate:scene': (v: SceneId) => (scene.value = v),
         eq: eq.value,
         layoutMode: layoutMode.value,
         quality: quality.value,
         labelsLod: labelsLod.value,
-        scene: scene.value,
       }),
   })
 
@@ -64,106 +48,66 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
   }
 }
 
-describe('BottomBar — Artifacts menu (<details>)', () => {
-  it('moves keyboard-opened focus inside Artifacts and restores summary focus on Escape', async () => {
-    const downloadArtifact = vi.fn()
-    const { app, host } = await mountBottomBar({
-      propOverrides: {
-        artifacts: [{ name: 'run-report.csv' }],
-        downloadArtifact,
-      },
-    })
-    await nextTick()
+/**
+ * 048 S1 (decisions 4 and 5). What the service row of "Подробнее" holds for a visitor, and what only `?debug=1` adds.
+ * The Analytics toggle and the Artifacts menu left this bar for "Admin ▾" of the top bar (their tests moved with them:
+ * `TopBar.admin.p048.test.ts`); "Refresh" of the snapshot is gone (its function stays the recovery pipeline's).
+ */
+describe('BottomBar — the visitor, the developer (048 S1)', () => {
+  const controls = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>('[data-testid="bottom-details-row"] select, [data-testid="bottom-details-row"] button'))
+      .map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '')
 
-    const details = host.querySelector('details[aria-label="Artifacts"]') as HTMLDetailsElement
-    const summary = details.querySelector('summary') as HTMLElement
-    const refreshButton = Array.from(details.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent?.trim() === 'Refresh',
-    ) as HTMLButtonElement | undefined
-    const downloadButton = Array.from(details.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent?.trim() === 'run-report.csv',
-    ) as HTMLButtonElement | undefined
-
-    expect(details).toBeTruthy()
-    expect(summary).toBeTruthy()
-    expect(refreshButton).toBeTruthy()
-    expect(downloadButton).toBeTruthy()
-
-    summary.focus()
-    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    details.open = true
-    details.dispatchEvent(new Event('toggle'))
-    await nextTick()
-
-    expect(document.activeElement).toBe(refreshButton)
-
-    downloadButton?.focus()
-    downloadButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(refreshButton)
-
-    refreshButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    await nextTick()
-
-    expect(details.open).toBe(false)
-    expect(document.activeElement).toBe(summary)
-    expect(downloadArtifact).toHaveBeenCalledTimes(0)
-
-    app.unmount()
-    host.remove()
-  })
-})
-
-
-describe('BottomBar — analytics surface toggle (spec 007, T705)', () => {
-  it('reports the surface state to assistive tech and flips it on click', async () => {
-    const toggleAnalyticsPanel = vi.fn()
-    const { app, host } = await mountBottomBar({
-      propOverrides: { analyticsPanelOpen: false, toggleAnalyticsPanel },
-    })
-    await nextTick()
-
-    const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]') as HTMLButtonElement
-    expect(btn).toBeTruthy()
-    // A toggle, not a link: its state has to be readable, not merely inferable from the screen.
-    expect(btn.getAttribute('aria-pressed')).toBe('false')
-
-    btn.click()
-    await nextTick()
-
-    // The bar does not own the flag — it asks the owner to flip it.
-    expect(toggleAnalyticsPanel).toHaveBeenCalledTimes(1)
-
-    app.unmount()
-    host.remove()
+  it('reproducer (б): no Scene select - offline or on the server, with or without ?debug=1', async () => {
+    for (const apiMode of ['fixtures', 'real'] as const) {
+      for (const debug of [false, true]) {
+        const { app, host } = await mountBottomBar({ propOverrides: { apiMode, debug, setSource: vi.fn() } })
+        await nextTick()
+        // Counter-check: the row is rendered and its selects are found by the same query.
+        expect(host.querySelector('[data-testid="bottom-details-row"] select[aria-label="Layout"]'), `${apiMode}/${debug}: the row is there`).not.toBeNull()
+        expect(host.querySelector('[aria-label="Scene"]'), `${apiMode}/${debug}: no Scene`).toBeNull()
+        app.unmount()
+        host.remove()
+      }
+    }
   })
 
-  it('reflects an already-open surface', async () => {
-    const { app, host } = await mountBottomBar({
-      propOverrides: { analyticsPanelOpen: true, toggleAnalyticsPanel: vi.fn() },
-    })
+  it('a visitor: EQ, Layout, Labels - no source, no quality, no Refresh, Analytics or Artifacts; ?debug=1 adds the source and the quality', async () => {
+    const visitor = await mountBottomBar({ propOverrides: { setSource: vi.fn() } })
     await nextTick()
+    expect(controls(visitor.host)).toEqual(['Equivalent', 'Layout', 'Labels'])
+    expect(visitor.host.querySelector('details'), 'no menu in the bar').toBeNull()
+    visitor.app.unmount()
+    visitor.host.remove()
 
-    const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]') as HTMLButtonElement
-    expect(btn.getAttribute('aria-pressed')).toBe('true')
-
-    app.unmount()
-    host.remove()
+    const developer = await mountBottomBar({ propOverrides: { setSource: vi.fn(), debug: true } })
+    await nextTick()
+    expect(controls(developer.host)).toEqual(['Equivalent', 'Layout', 'Источник', 'Quality', 'Labels'])
+    expect(developer.host.querySelector('[data-testid="source-select"]')).not.toBeNull()
+    expect(developer.host.querySelector('[data-testid="quality-select"]')).not.toBeNull()
+    developer.app.unmount()
+    developer.host.remove()
   })
 
-  it('is absent outside real mode, where there is no metric store to show', async () => {
-    const { app, host } = await mountBottomBar({
-      propOverrides: {
-        apiMode: 'fixtures' as const,
-        analyticsPanelOpen: false,
-        toggleAnalyticsPanel: vi.fn(),
-      },
-    })
+  it('EQ: one equivalent is its code as text, more are a select (no fixed "UAH" branch)', async () => {
+    const one = await mountBottomBar({ propOverrides: { equivalentOptions: ['HOUR'] } })
     await nextTick()
+    expect(one.host.querySelector('[data-testid="equivalent-select"]')).toBeNull()
+    expect(one.host.querySelector('[data-testid="equivalent-text"]')?.textContent).toBe('HOUR')
+    one.app.unmount()
+    one.host.remove()
 
-    expect(host.querySelector('[data-testid="bottombar-analytics-toggle"]')).toBeNull()
-
-    app.unmount()
-    host.remove()
+    const two = await mountBottomBar({ propOverrides: { equivalentOptions: ['UAH', 'EUR'] } })
+    await nextTick()
+    expect(two.host.querySelector('[data-testid="equivalent-text"]')).toBeNull()
+    const sel = two.host.querySelector<HTMLSelectElement>('[data-testid="equivalent-select"]')!
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(['UAH', 'EUR'])
+    sel.value = 'EUR'
+    sel.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(two.eq.value, 'the choice reaches the owner').toBe('EUR')
+    two.app.unmount()
+    two.host.remove()
   })
 })
 
@@ -194,7 +138,7 @@ describe('BottomBar — the offline effects workbench (042 T4205)', () => {
 
   it('offline: offers the playable playlists; "Проиграть" and "Шаг" act on the chosen one', async () => {
     const wb = workbench()
-    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: wb } })
+    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, debug: true, playlists: wb } })
     await nextTick()
 
     const select = host.querySelector('select[aria-label="Плейлист"]') as HTMLSelectElement
@@ -217,7 +161,7 @@ describe('BottomBar — the offline effects workbench (042 T4205)', () => {
 
   it('while a playlist plays: "Стоп" only, and the position of the played playlist', async () => {
     const wb = workbench({ playingId: 'demo-tx', cursorId: 'demo-tx', position: 3, total: 20 })
-    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: wb } })
+    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, debug: true, playlists: wb } })
     await nextTick()
 
     expect(buttons(host)).toEqual(['Стоп'])
@@ -230,22 +174,33 @@ describe('BottomBar — the offline effects workbench (042 T4205)', () => {
   })
 
   it('is absent on the server source, and offline when no playlist can be played (no control that does nothing)', async () => {
-    const real = await mountBottomBar({ propOverrides: { apiMode: 'real' as const, playlists: workbench() } })
+    const real = await mountBottomBar({ propOverrides: { apiMode: 'real' as const, debug: true, playlists: workbench() } })
     await nextTick()
     expect(real.host.querySelector('[data-testid="playlist-workbench"]')).toBeNull()
     real.app.unmount()
     real.host.remove()
 
-    const none = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: workbench({ offered: [] }) } })
+    const none = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, debug: true, playlists: workbench({ offered: [] }) } })
     await nextTick()
     expect(none.host.querySelector('[data-testid="playlist-workbench"]')).toBeNull()
     // Counter-check: the same mount with an offered playlist shows it (the absence above is not a broken selector).
     none.app.unmount()
     none.host.remove()
-    const some = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: workbench() } })
+    const some = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, debug: true, playlists: workbench() } })
     await nextTick()
     expect(some.host.querySelector('[data-testid="playlist-workbench"]')).not.toBeNull()
     some.app.unmount()
     some.host.remove()
+  })
+
+  // 048 S1 (decision 5): the workbench is the developer's - offline AND `?debug=1`. Red before S1: it was shown on the
+  // offline source alone. The counter-check is the test above: the same mount with `debug` shows it.
+  it('is absent offline without ?debug=1, a playable playlist notwithstanding', async () => {
+    const { app, host } = await mountBottomBar({ propOverrides: { apiMode: 'fixtures' as const, playlists: workbench() } })
+    await nextTick()
+    expect(host.querySelector('[data-testid="bottom-details-row"]'), 'the row is there').not.toBeNull()
+    expect(host.querySelector('[data-testid="playlist-workbench"]')).toBeNull()
+    app.unmount()
+    host.remove()
   })
 })

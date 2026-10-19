@@ -74,21 +74,25 @@ async function mountTopBar(overrides: Partial<TopBarContext> = {}) {
 }
 
 describe('TopBar dropdown focus contract', () => {
+  // 048 S1 (decision 4): the "Run <state>" badge of the service row is gone (the state of the first row says the same);
+  // its live region moved to that state, so a change of the run is still announced - and from the first view.
   it('announces run lifecycle changes and exposes the current run error as an alert', async () => {
     const runStatus = ref<RunStatus | null>(null)
     const lastError = ref<string | null>(null)
     const { app, host } = await mountTopBar({ runStatus, lastError })
 
-    const lifecycle = host.querySelector('[aria-label="Run state"]')
+    expect(host.querySelector('[aria-label="Run state"]'), 'no Run badge').toBeNull()
+    const lifecycle = host.querySelector('[data-testid="network-state"]')
     expect(lifecycle?.getAttribute('role')).toBe('status')
     expect(lifecycle?.getAttribute('aria-live')).toBe('polite')
     expect(lifecycle?.getAttribute('aria-atomic')).toBe('true')
+    const before = lifecycle?.textContent
 
     runStatus.value = { run_id: 'run-1', scenario_id: 'scenario-1', state: 'running' }
     lastError.value = 'Run failed to reconnect'
     await nextTick()
 
-    expect(lifecycle?.textContent).toContain('running')
+    expect(lifecycle?.textContent, 'the region says something else for a running run').not.toBe(before)
     const error = host.querySelector('[aria-label="Error"]')
     expect(error?.getAttribute('role')).toBe('alert')
     expect(error?.getAttribute('aria-atomic')).toBe('true')
@@ -120,8 +124,11 @@ describe('TopBar dropdown focus contract', () => {
     const { app, host } = await mountTopBar()
 
     expect(host.querySelector('[aria-label="Run pipeline"]')).toBeNull()
-    expect(host.textContent).not.toContain('Pipeline')
-    expect(host.textContent).not.toContain('topology-only')
+    // 048 S1 (Verification plan, forbidden item 4): by structure, not by words - the selects of the bar are the theme,
+    // the language and the scenario, and none of them offers a pipeline (a sandbox option).
+    const selects = [...host.querySelectorAll<HTMLSelectElement>('select')]
+    expect(selects.map((s) => s.dataset.testid)).toEqual(['theme-select', 'language-select', 'scenario-select'])
+    for (const s of selects) expect([...s.options].map((o) => o.value), s.dataset.testid).not.toContain('fixtures')
     // 043 S3 (decision 5): the "Advanced ⚙" menu, which held only the tempo, is gone; the tempo is in the row itself.
     expect(host.querySelector('details[aria-label="Advanced"]')).toBeNull()
     // anti-vacuum: the bar is the real one, with its service row, and still carries the intensity control that stays

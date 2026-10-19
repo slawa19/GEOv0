@@ -65,7 +65,6 @@ describe('useSystemBalance', () => {
       activeTrustlines: 0,
       activeParticipants: 0,
       utilization: 0,
-      isClean: true,
     })
 
     scope.stop()
@@ -86,7 +85,6 @@ describe('useSystemBalance', () => {
     expect(b.activeTrustlines).toBe(0)
     expect(b.activeParticipants).toBe(0)
     expect(b.utilization).toBe(0)
-    expect(b.isClean).toBe(true)
 
     scope.stop()
   })
@@ -111,7 +109,6 @@ describe('useSystemBalance', () => {
     expect(Number(b.totalAvailable)).toBeCloseTo(1550, 5)
     expect(b.activeTrustlines).toBe(2)
     expect(b.activeParticipants).toBe(3)
-    expect(b.isClean).toBe(false)
     // utilization = 450 / (450 + 1550) = 450/2000 = 0.225
     expect(b.utilization).toBeCloseTo(0.225, 5)
 
@@ -127,23 +124,6 @@ describe('useSystemBalance', () => {
       balance = useSystemBalance(ref<GraphSnapshot | null>(makeSnapshot(links, []))).balance
     })
     expect(Number(balance!.value.totalAvailable)).toBe(10)
-    scope.stop()
-  })
-
-  it('isClean = true when no debt (totalUsed == 0)', () => {
-    const links = [makeLink('alice', 'shop', { used: '0', available: '1000' })]
-    const snapshot = ref<GraphSnapshot | null>(makeSnapshot(links, [makeNode('alice'), makeNode('shop')]))
-
-    const scope = effectScope()
-    let balance: ReturnType<typeof useSystemBalance>['balance'] | undefined
-
-    scope.run(() => {
-      balance = useSystemBalance(snapshot).balance
-    })
-
-    expect(balance!.value.isClean).toBe(true)
-    expect(Number(balance!.value.totalUsed)).toBe(0)
-
     scope.stop()
   })
 
@@ -268,7 +248,9 @@ describe('useSystemBalance', () => {
     scope.stop()
   })
 
-  it('after full clearing — totalUsed = 0, isClean = true', () => {
+  // 048 S1: `isClean` is gone with its badge; the test "isClean = true when no debt" was this one's input and its
+  // `totalUsed` check, and was removed as a duplicate.
+  it('after full clearing — totalUsed = 0', () => {
     const links = [makeLink('alice', 'shop', { used: '0', available: '1000' })]
     const snapshot = ref<GraphSnapshot | null>(
       makeSnapshot(links, [makeNode('alice'), makeNode('shop')]),
@@ -281,7 +263,6 @@ describe('useSystemBalance', () => {
       balance = useSystemBalance(snapshot).balance
     })
 
-    expect(balance!.value.isClean).toBe(true)
     expect(Number(balance!.value.totalUsed)).toBe(0)
     expect(balance!.value.utilization).toBe(0)
 

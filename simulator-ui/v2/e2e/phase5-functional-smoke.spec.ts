@@ -467,9 +467,17 @@ async function activateButton(page: Page, name: string) {
  * it stops that run the way a person does - Stop under "Подробнее" - instead of a test-only switch in the product.
  */
 async function stopTheOpeningsRun(page: Page) {
-  await expect(page.getByLabel('Run state'), 'the opening started its run').toContainText('running')
+  await expect(runState(page), 'the opening started its run').toHaveAttribute('data-run-state', 'running')
   await activateButton(page, 'Stop')
-  await expect(page.getByLabel('Run state')).toContainText('stopped')
+  await expect(runState(page)).toHaveAttribute('data-run-state', 'stopped')
+}
+
+/**
+ * 048 S1 (decision 4): the "Run <state>" badge of the service row is gone; the state of the run is the first row's
+ * (`network-state`), which names it for a machine in `data-run-state` - the words are the interface language's.
+ */
+function runState(page: Page) {
+  return page.getByTestId('network-state')
 }
 
 async function chooseOverlayOption(
@@ -508,15 +516,19 @@ async function chooseFirstNativeOptionByKeyboard(select: ReturnType<Page['getByL
 }
 
 test.describe('Phase 5 frozen non-visual functional matrix', () => {
-  test('fixture bootstrap and visible scene switch', async ({ page }) => {
-    await page.goto('/?mode=fixtures&scene=A&e2eReal=1')
+  // 048 S1 (decision 4): the A/B/C "scene" had no reader but its own select (the offline snapshot is loaded by the
+  // equivalent alone); the select, `?scene=` and `data-scene` are gone. Rewritten from "visible scene switch": an old
+  // link with `?scene=` still boots the offline snapshot, and even the developer's "Подробнее" has no Scene select
+  // (the counter-check: `?debug=1` is in force - "Источник" is there).
+  test('fixture bootstrap; an old ?scene= link boots, and no Scene select is offered', async ({ page }) => {
+    await page.goto('/?mode=fixtures&scene=B&debug=1&e2eReal=1')
     await waitReady(page)
 
-    await expect(page.locator('[data-scene="A"]')).toBeVisible()
-    const sceneSelect = page.getByRole('combobox', { name: 'Scene' })
-    await expect(sceneSelect).toBeVisible()
-    await sceneSelect.selectOption('B')
-    await expect(page.locator('[data-scene="B"]')).toBeVisible()
+    expect(await page.locator('.root').getAttribute('data-scene'), 'no data-scene on the root').toBeNull()
+    const details = page.locator('[data-testid="details-toggle"]')
+    if ((await details.getAttribute('aria-expanded')) !== 'true') await details.click() // this matrix may store it open
+    await expect(page.locator('[data-testid="source-select"]'), 'the developer\'s row is there').toBeVisible()
+    await expect(page.locator('[aria-label="Scene"]')).toHaveCount(0)
   })
 
   test('stale run falls back to real preview and scenario switch remains live', async ({ page }) => {
@@ -547,7 +559,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await stopTheOpeningsRun(page)
 
     await activateButton(page, 'Start')
-    await expect(page.getByLabel('Run state')).toContainText('running')
+    await expect(runState(page)).toHaveAttribute('data-run-state', 'running')
     expect(mock.createRequests).toHaveLength(2)
 
     await activateButton(page, 'Stop')
@@ -563,7 +575,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await page.goto('/?mode=real&e2eReal=1')
     await waitReady(page)
     // 043 S2: the run is the opening's own (decision 2), not a Start press.
-    await expect(page.getByLabel('Run state')).toContainText('running')
+    await expect(runState(page)).toHaveAttribute('data-run-state', 'running')
     await expect.poll(() => page.evaluate(() => window.localStorage.getItem('geo.sim.v2.runId'))).toBe('phase5-run-1')
     // 046 wave 0: the texts below are asserted in an explicitly chosen language, not the browser's. 046 wave 2: that
     // language is English - the action windows now speak the page's language, and this matrix holds their English texts
@@ -699,7 +711,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
         .toBe('none')
 
       // 043 S2: the run is the opening's own (decision 2), not a Start press.
-      await expect(page.getByLabel('Run state')).toContainText('running')
+      await expect(runState(page)).toHaveAttribute('data-run-state', 'running')
       await page.goto('/?mode=real&ui=interact&e2eReal=1')
       await waitReady(page)
       await activateButton(page, 'Run Clearing')

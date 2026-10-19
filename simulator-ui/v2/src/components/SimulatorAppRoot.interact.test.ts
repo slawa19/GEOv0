@@ -140,6 +140,10 @@ type GeoTestGlobals = {
   __GEO_TEST_RESOLVE_VIZ_COLORS?: TestFnMock
   /** 043 S1 (review): the equivalent of the scene on screen, as the real app's `sceneEq` (the mock lacked the field). */
   __GEO_TEST_SCENE_EQ_REF?: Ref<string>
+  /** 048 S1: the access token of the mocked app at mount (an admin token: the administrator's tools and the dock). */
+  __GEO_TEST_ACCESS_TOKEN?: string
+  /** 048 S1: `?debug=1` of the mocked app at mount. */
+  __GEO_TEST_DEBUG_UI?: boolean
 
   // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
   // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).
@@ -523,6 +527,8 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // flags
         isDemoFixtures: computed(() => false),
         isLiveUi,
+        // 048 S1: `?debug=1` (the real app reads it once per page; a test sets the global before the mount).
+        isDebugUi: Boolean(getGeoTestGlobal('__GEO_TEST_DEBUG_UI') ?? false),
         isTestMode,
         isWebDriver: computed(() => false),
         isE2eScreenshots: computed(() => false),
@@ -542,13 +548,13 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           runStats: {},
           artifacts: [],
           artifactsLoading: false,
+          accessToken: String(getGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN') ?? ''),
         }),
         realActions: {
           setApiBase: vi.fn(),
           setAccessToken: vi.fn(),
           setSelectedScenarioId: vi.fn(),
           setIntensityPercent: vi.fn(),
-          refreshScenarios: vi.fn(),
           startRun: vi.fn(),
           pause: vi.fn(),
           pauseForManualAction: vi.fn(),
@@ -587,7 +593,8 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         }),
         eq: ref('UAH'),
         sceneEq: computed(() => sceneEqRef.value),
-        scene: ref('A'),
+        // 048 S1: a field of the real `SimulatorAppApi` the mock lacked; the bottom bar now reads it in the root.
+        equivalentOptions: computed(() => ['UAH']),
         layoutMode: ref('admin-force'),
         quality: ref('med'),
         labelsLod: ref('off'),
@@ -659,7 +666,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
               history: reactive<Array<Record<string, unknown>>>(getGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY') ?? []),
             },
           systemBalance: computed(() => ({
-            isClean: true,
             totalUsed: 0,
             totalAvailable: 0,
             activeTrustlines: 0,
@@ -5256,8 +5262,9 @@ function analyticsDock(host: HTMLElement): HTMLElement | null {
   return host.querySelector('[data-surface="real-metrics-panel"]')
 }
 
+/** 048 S1: the toggle is in "Admin ▾" of the top bar (an admin token; was the bottom bar's). */
 function analyticsToggle(host: HTMLElement): HTMLButtonElement {
-  const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]')
+  const btn = host.querySelector('[data-testid="analytics-toggle"]')
   expect(btn).toBeTruthy()
   return btn as HTMLButtonElement
 }
@@ -5295,10 +5302,15 @@ function makeAnalyticsBottlenecks(target: AnalyticsTestTarget): BottlenecksRespo
 
 describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => {
   // 043 S1: the Analytics toggle and its dock live behind "Подробнее" (the off case: its own test below).
-  afterEach(() => storedDetails(null))
+  // 048 S1 (decision 1): and they are the administrator's - every test here but the visitor's runs with an admin token.
+  afterEach(() => {
+    storedDetails(null)
+    clearGeoTestGlobals('__GEO_TEST_ACCESS_TOKEN')
+  })
 
   beforeEach(() => {
     storedDetails(true)
+    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token')
     const simStorage = getSimStorage()
     simStorage.readAnalyticsPanelOpen.mockReturnValue(null)
     simStorage.writeAnalyticsPanelOpen.mockClear()
@@ -5324,7 +5336,34 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     )
   })
 
-  it('the bottom-bar toggle shows and hides the surface, and persists the choice', async () => {
+  /**
+   * 048 S1 (decision 1), reproducer (в), the root's half: a visitor has no toggle, and a dock a browser remembers open
+   * is neither mounted nor polled (the gate the root feeds `useSimulatorApp` is false). Red before S1: the toggle was in
+   * the bottom bar for everyone and the remembered dock was on screen. The counter-check is the test below: the same
+   * mount with an admin token has both.
+   */
+  it('a visitor (no admin token): no analytics toggle, and a remembered open dock is neither shown nor polled', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+    for (const token of ['', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl']) {
+      setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', token)
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const app = mountSimulatorAppRoot(host)
+      try {
+        await nextTick()
+        expect(host.querySelector('[data-testid="top-details-row"]'), 'Details is on').not.toBeNull()
+        expect(host.querySelector('[data-testid="analytics-toggle"]'), `token "${token.slice(0, 6)}": no toggle`).toBeNull()
+        expect(analyticsDock(host), 'no dock').toBeNull()
+        expect(getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_IS_VISIBLE')(), 'the poll gate is closed').toBe(false)
+      } finally {
+        app.unmount()
+        host.remove()
+      }
+    }
+  })
+
+  it('the toggle (in Admin) shows and hides the surface, and persists the choice', async () => {
     setUrl('/?mode=real')
     const simStorage = getSimStorage()
 
@@ -5892,10 +5931,10 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
     const { host, done } = mount()
     await nextTick()
     expect(host.querySelector('[data-testid="legend-title"]')?.textContent).toBe('Overall balance · EUR')
-    // Counter-check: the selector (the mocked app's `eq` is UAH, with no option list here) does not say EUR.
-    const selector = host.querySelector<HTMLSelectElement>('select[aria-label="Equivalent"]')
+    // Counter-check: the selector (the mocked app's `eq` is UAH, with one option here - 048 S1: then shown as text) does not say EUR.
+    const selector = host.querySelector<HTMLElement>('[data-testid="equivalent-select"], [data-testid="equivalent-text"]')
     expect(selector, 'the equivalent selector is on screen').not.toBeNull()
-    expect(selector!.value).not.toBe('EUR')
+    expect(selector instanceof HTMLSelectElement ? selector.value : selector!.textContent).not.toBe('EUR')
     done()
   })
 
@@ -6016,17 +6055,20 @@ describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', (
  * Hidden means NOT RENDERED: every check below looks for the element in the DOM, not at its style.
  */
 describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces', () => {
+  // 048 S1 (decisions 4 and 5): a visitor's service controls. The source and the quality are `?debug=1`'s, the analytics
+  // toggle is in "Admin ▾" (an admin token), the "Run <state>" badge is gone - each has its own test below.
   const SERVICE = [
-    ['source select', 'select[aria-label="Источник"]'],
-    ['theme switcher', 'select[aria-label="UI theme"]'],
-    ['equivalent', 'select[aria-label="Equivalent"]'],
-    ['layout', 'select[aria-label="Layout"]'],
-    ['quality', 'select[aria-label="Quality"]'],
-    ['labels', 'select[aria-label="Labels"]'],
-    ['analytics toggle', '[data-testid="bottombar-analytics-toggle"]'],
+    ['theme switcher', '[data-testid="theme-select"]'],
+    ['equivalent', '[data-testid="equivalent-select"], [data-testid="equivalent-text"]'],
+    ['layout', '[data-testid="layout-select"]'],
+    ['labels', '[data-testid="labels-select"]'],
     ['graph navigator', '[role="region"][aria-label="Graph navigator"]'],
-    ['run state badge', '[aria-label="Run state"]'],
     ['full metrics', '[aria-label="System metrics"]'],
+  ] as const
+  const DEVELOPER = [
+    ['source select', '[data-testid="source-select"]'],
+    ['quality', '[data-testid="quality-select"]'],
+    ['SSE badge', '[data-testid="sse-badge"]'],
   ] as const
 
   const SNAPSHOT = {
@@ -6050,7 +6092,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         app.unmount()
         host.remove()
         storedDetails(null)
-        clearGeoTestGlobals('__GEO_TEST_SNAPSHOT', '__GEO_TEST_INTERACT_HISTORY', '__GEO_TEST_INTERACT_PHASE')
+        clearGeoTestGlobals('__GEO_TEST_SNAPSHOT', '__GEO_TEST_INTERACT_HISTORY', '__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_DEBUG_UI', '__GEO_TEST_ACCESS_TOKEN')
         vi.unstubAllGlobals()
       },
     }
@@ -6121,11 +6163,49 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     }
   })
 
+  /**
+   * 048 S1 (decision 5): the source, the render quality and the SSE badge are the developer's - rendered with `?debug=1`
+   * only, never by "Подробнее" alone. Red before S1: all three were in every visitor's "Подробнее". Hidden means not
+   * rendered (the counter-check: the same query finds all three with `debug`).
+   */
+  it('?debug=1 alone adds the source, the quality and the SSE badge to "Подробнее"', async () => {
+    const devPresent = (host: HTMLElement) => DEVELOPER.filter(([, sel]) => host.querySelector(sel)).map(([name]) => name)
+    for (const debug of [false, true]) {
+      storedDetails(true)
+      setGeoTestGlobal('__GEO_TEST_DEBUG_UI', debug)
+      const { host, done } = mount('/?mode=real')
+      try {
+        await nextTick()
+        expect(present(host), `debug ${debug}: the visitor's controls`).toEqual(SERVICE.map(([name]) => name))
+        expect(devPresent(host), `debug ${debug}`).toEqual(debug ? DEVELOPER.map(([name]) => name) : [])
+      } finally {
+        done()
+      }
+    }
+  })
+
+  // 048 S1 (decision 4): no "Run <state>" badge anywhere (the state of the first row says it), with or without Details.
+  it('no "Run <state>" badge: the state is said once, in the first row', async () => {
+    storedDetails(true)
+    const { host, done } = mount('/?mode=real')
+    try {
+      await nextTick()
+      expect(host.querySelector('[data-testid="top-details-row"]'), 'Details is on').not.toBeNull()
+      expect(host.querySelector('[aria-label="Run state"]')).toBeNull()
+      expect(host.querySelectorAll('[role="status"][aria-live="polite"]').length, 'one live region for the run: the first row\'s state')
+        .toBeGreaterThanOrEqual(1)
+      expect(host.querySelector('[data-testid="network-state"]')?.getAttribute('role')).toBe('status')
+    } finally {
+      done()
+    }
+  })
+
   // The polling half is the real composable's (`useSimulatorApp.analyticsGate.test.ts`: `analytics.isVisible`, which
   // gates the poll, follows the getter the root feeds); here the analytics are mocked and only the DOM is observed.
   it('a remembered open analytics dock is not shown while Details is off, and comes back with it', async () => {
     storedDetails(null)
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+    setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', 'admin-token') // 048 S1: the dock is the administrator's
     const { host, done } = mount()
     try {
       await nextTick()
@@ -6219,7 +6299,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
    */
   it('wiring (was a source-text guard): the controls of the top bar reach the actions of the app', async () => {
     storedDetails(true)
-    const { host, app, done } = mount('/?mode=real')
+    setGeoTestGlobal('__GEO_TEST_DEBUG_UI', true) // 048 S1: "Источник" is `?debug=1`'s
+    const { host, app, done } = mount('/?mode=real&debug=1')
     try {
       await nextTick()
       const setup = rootSetup(app)
@@ -6237,31 +6318,25 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       intensity.dispatchEvent(new Event('input', { bubbles: true }))
       expect(actions.setIntensityPercent, 'clamped to 0..100 on the way').toHaveBeenCalledWith(100)
 
-      host.querySelector<HTMLButtonElement>('button[aria-label="Refresh scenarios"]')!.click()
-      expect(actions.refreshScenarios).toHaveBeenCalledTimes(1)
-
       const byText = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('.ds-ov-top button')].find((b) => (b.textContent ?? '').trim() === t)
       real.runId = 'run-1'
       real.runStatus = { run_id: 'run-1', state: 'running' }
       await nextTick()
-      byText('Pause')!.click()
-      expect(actions.pause).toHaveBeenCalledTimes(1)
-      // 043 S2: "Поток" in the first row - pause on a living run, resume on a paused one.
+      // 043 S2: "Поток" in the first row - pause on a living run, resume on a paused one. 048 S1: the service row's own
+      // Pause/Resume are gone; "Поток" is the one path.
       const flow = () => host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')
       expect(flow()?.getAttribute('aria-pressed'), 'the flow is on').toBe('true')
       flow()!.click()
-      expect(actions.pause, 'the flow button on a living run reaches pause').toHaveBeenCalledTimes(2)
+      expect(actions.pause, 'the flow button on a living run reaches pause').toHaveBeenCalledTimes(1)
       byText('Stop')!.click()
       expect(actions.stop).toHaveBeenCalledTimes(1)
       byText('Apply')!.click()
       expect(actions.applyIntensity).toHaveBeenCalledTimes(1)
       real.runStatus = { run_id: 'run-1', state: 'paused' }
       await nextTick()
-      byText('Resume')!.click()
-      expect(actions.resume).toHaveBeenCalledTimes(1)
       expect(flow()?.getAttribute('aria-pressed'), 'the flow is off').toBe('false')
       flow()!.click()
-      expect(actions.resume, 'the flow button on a paused run reaches resume').toHaveBeenCalledTimes(2)
+      expect(actions.resume, 'the flow button on a paused run reaches resume').toHaveBeenCalledTimes(1)
       real.runId = null
       real.runStatus = null
       real.selectedScenarioId = 'sc1'
@@ -6303,7 +6378,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       // source navigates nowhere; the other one reloads with `?mode=` and without `?ui=`.
       const nav = stubLocationHrefSetter()
       try {
-        const source = host.querySelector<HTMLSelectElement>('select[aria-label="Источник"]')!
+        const source = host.querySelector<HTMLSelectElement>('[data-testid="source-select"]')!
         expect(source.value, 'the select shows the source on screen').toBe('real')
         const before = nav.hrefSet.mock.calls.length
         source.value = 'real'
@@ -6313,7 +6388,10 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         source.dispatchEvent(new Event('change', { bubbles: true }))
         expect(nav.hrefSet.mock.calls.length, 'the other source: one navigation').toBe(before + 1)
         const to = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
-        expect([to.searchParams.get('mode'), to.searchParams.get('ui')], 'offline snapshot, no ?ui=').toEqual(['fixtures', null])
+        // 048 S1 (decision 5), reproducer (д), the root's half: `?debug=1` is carried across the switch (it was dropped
+        // until S1: the switch then left the developer on a page without the switch).
+        expect([to.searchParams.get('mode'), to.searchParams.get('ui'), to.searchParams.get('debug')], 'offline snapshot, no ?ui=, ?debug=1 kept')
+          .toEqual(['fixtures', null, '1'])
       } finally {
         nav.restore()
       }

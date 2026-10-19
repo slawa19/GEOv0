@@ -6,7 +6,10 @@ import EdgeTooltip from './EdgeTooltip.vue'
 const edgeTooltipComponent: Component = EdgeTooltip
 
 describe('EdgeTooltip', () => {
-  it('renders interact detail rows using the shared tooltip contract', async () => {
+  // 048 S1 (decision 4): the raw `Status: active` row under the sentence is gone - an English word under a Russian
+  // sentence. Red before S1: with a status and the old `interactMode` the row (and its divider) was drawn. By structure,
+  // not by the word: no detail row, no divider; the sentence stays.
+  it('the line in words, and no raw status row under it (even when the edge carries a status)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -24,6 +27,7 @@ describe('EdgeTooltip', () => {
             edgeStatus: 'active',
           },
           style: { left: '10px', top: '20px' },
+          // What the root passed until S1 (the prop is gone; an unknown attribute changes nothing).
           interactMode: true,
           getNodeName: (id: string) => id,
         }),
@@ -39,7 +43,9 @@ describe('EdgeTooltip', () => {
       // 043 S1: the line in words - creditor `from` trusts debtor `to` up to the limit; `to` owes `from` the used amount.
       expect(text).toContain('A доверяет B до 20')
       expect(text).toContain('долг B перед A — 10 · доступно 10')
-      expect(text).toContain('Status')
+      expect(tooltip!.querySelector('.ds-ov-tooltip__row'), 'no detail row').toBeNull()
+      expect(tooltip!.querySelector('.ds-ov-tooltip__divider'), 'no divider').toBeNull()
+      expect(tooltip!.querySelectorAll('.ds-ov-tooltip__amount'), 'the two lines of the sentence').toHaveLength(2)
     } finally {
       app.unmount()
       host.remove()

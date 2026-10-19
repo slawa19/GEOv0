@@ -304,7 +304,9 @@ test('046 W2 frames: the analytics panel and its bottlenecks, both themes and la
       await page.unrouteAll({ behavior: 'ignoreErrors' })
       await open(page, theme, lang, { running: true })
       await page.locator('[data-testid="details-toggle"]').click()
-      await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+      // 048 S1 (decision 1): the analytics toggle is in "Admin ▾" (the dev build carries the admin token).
+      await page.locator('[data-testid="admin-summary"]').click()
+      await page.locator('[data-testid="analytics-toggle"]').click()
       await expect(page.locator('.rmp')).toBeVisible()
       // Wait for the measurements and the bottlenecks to arrive (a frame of the loading state is still a frame).
       await expect(page.locator('.rmp .bnl__item').first()).toBeVisible({ timeout: 10_000 }).catch(() => undefined)
@@ -326,10 +328,12 @@ test('046 W2 frames: a failed analytics request and a clearing refused on a stop
       status: 409, contentType: 'application/json', headers: { 'X-Request-ID': 'req-409-c' },
       body: JSON.stringify({ code: 'CONFLICT', message: 'Equivalent UAH is not active', details: { reason: 'equivalent_inactive' } }) }))
     await page.locator('[data-testid="details-toggle"]').click()
-    await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+    await page.locator('[data-testid="admin-summary"]').click() // 048 S1: the toggle is in "Admin ▾"
+    await page.locator('[data-testid="analytics-toggle"]').click()
     await expect(page.locator('.rmp [data-state="error"]').first()).toBeVisible({ timeout: 10_000 })
     await frame(page, `saas-${lang}-9-analytics-error`)
-    await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+    await page.locator('[data-testid="analytics-toggle"]').click()
+    await page.keyboard.press('Escape') // close "Admin ▾" before the action
     await page.locator('[data-testid="actionbar-clearing"]').click()
     await page.locator('[data-testid="clearing-confirm"]').click()
     await expect(page.locator('[data-testid="clearing-error"]')).toContainText(t('clearing.equivalentInactive', {}, lang))

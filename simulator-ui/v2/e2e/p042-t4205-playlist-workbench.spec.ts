@@ -3,9 +3,10 @@
  * (`public/simulator-fixtures/v1/<EQ>/events/`) are played through the same event path as the server's SSE events, and
  * the effect is DRAWN, with no server.
  *
- * The page is opened as a person opens it (`?mode=fixtures`, the "Источник" choice "Снимок без сервера"); the
- * workbench is reached under "Подробнее". Every request to `/api/` is answered with an abort and counted: the test
- * holds that none is made (no server, no hidden fallback).
+ * The page is opened as the developer opens it (`?mode=fixtures&debug=1`: the "Источник" choice "Снимок без сервера"
+ * under `?debug=1`, which the source switch carries - 048 S1, decision 5); the workbench is reached under "Подробнее",
+ * and only with `?debug=1` (the last test holds its absence without it). Every request to `/api/` is answered with an
+ * abort and counted: the test holds that none is made (no server, no hidden fallback).
  *
  * What is read: the FX state of the dev hook (`window.__geoSim.fxState`: sparks of a payment, edge pulses of a clearing)
  * and the PIXELS of the FX canvas along the segments of those sparks and pulses, away from the nodes (the method of
@@ -106,7 +107,7 @@ async function openWorkbench(page: Page) {
     apiCalls.push(route.request().url())
     return route.abort()
   })
-  await page.goto('/?mode=fixtures')
+  await page.goto('/?mode=fixtures&debug=1')
   await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
   await page.locator('[data-testid="details-toggle"]').click()
   const select = page.getByRole('combobox', { name: 'Плейлист' })
@@ -208,5 +209,23 @@ test.describe('042 T4205: the offline effects workbench plays the recorded playl
     await expect.poll(async () => (await fxPointsLit(page, 'sparks')).live, { timeout: 4_000, intervals: [50] }).toBeGreaterThan(0)
     await step.click()
     await expect(page.getByLabel('Позиция плейлиста')).toHaveText('2 / 20')
+  })
+
+  // 048 S1 (decision 5), reproducer (д): the workbench is the developer's - the offline source AND `?debug=1`. A
+  // visitor's "Подробнее" on the offline source has no playlist (red before S1: it had). The counter-check is in the test
+  // itself (merged with 039 T3935, which offers a playlist only with its own start snapshot): the same page with
+  // `?debug=1`, in the same test, does offer the row - so the absence is the gate's, not "nothing to offer".
+  test('048 S1: without ?debug=1 the offline "Подробнее" has no playlist workbench', async ({ page }) => {
+    await page.goto('/?mode=fixtures')
+    await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
+    await page.locator('[data-testid="details-toggle"]').click()
+    await expect(page.locator('[data-testid="bottom-details-row"]'), 'the service row is open').toBeVisible()
+    await expect(page.locator('[data-testid="playlist-workbench"]')).toHaveCount(0)
+
+    await page.goto('/?mode=fixtures&debug=1')
+    await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
+    const details = page.locator('[data-testid="details-toggle"]')
+    if ((await details.getAttribute('aria-expanded')) !== 'true') await details.click()
+    await expect(page.locator('[data-testid="playlist-workbench"]'), 'counter-check: with ?debug=1 the same page offers it').toBeVisible()
   })
 })

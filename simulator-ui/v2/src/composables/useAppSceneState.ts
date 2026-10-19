@@ -1,12 +1,10 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
-import type { SceneId } from '../scenes'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { useSceneState } from './useSceneState'
 
 export function useAppSceneState(opts: {
   eq: Ref<string>
-  scene: Ref<SceneId>
   layoutMode: Ref<LayoutMode>
   isTestMode: () => boolean
   isEqAllowed: (eq: string) => boolean
@@ -33,7 +31,6 @@ export function useAppSceneState(opts: {
 }) {
   return useSceneState({
     eq: opts.eq,
-    scene: opts.scene,
     layoutMode: opts.layoutMode,
     allowEqDeepLink: () => !opts.isTestMode(),
     isEqAllowed: opts.isEqAllowed,

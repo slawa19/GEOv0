@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
+import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { toLower } from '../utils/stringHelpers'
-import { isJwtLike } from '../utils/isJwtLike'
 
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
-import { useTopBarContext } from '../composables/useTopBarContext'
+import { isAdminViewer, useTopBarContext } from '../composables/useTopBarContext'
 import { useUiLocale } from '../composables/useUiLocale'
 import { runStopText } from '../i18n/statusText'
 import HudBar from './common/HudBar.vue'
@@ -17,20 +17,47 @@ const { t } = useUiLocale()
 /**
  * 043 S1: `detailsOpen` is the one "Подробнее" toggle (owned and remembered by the root). Off: the first row only -
  * the network's name and state as text, the protocol actions (slot `actions`) and the toggle itself. On: the row of
- * service controls below it (mode, theme, scenario and run controls, statuses, Admin) and the capacity-stall alert.
+ * service controls below it (theme, language, scenario and run controls, statuses, Admin). The capacity-stall alert
+ * is not behind it since 048 S1 (below).
  * Hidden means NOT RENDERED (`v-if`), never hidden by CSS: a hidden control must not stay in the tab order.
+ *
+ * 048 S1 (decisions 1, 2, 4, 5): three addressees, three existing entries. The visitor: the first view and
+ * "Подробнее". The administrator (an admin token): "Admin ▾" holds the runs, the run files (`runFiles`, moved from the
+ * bottom bar), the refresh of the scenario catalogue and the analytics dock's toggle. The developer (`debug`, the
+ * `?debug=1` of the root): the SSE badge. The capacity-stall alert is on the first view.
  */
-const props = withDefaults(defineProps<{ detailsOpen?: boolean }>(), { detailsOpen: false })
+type RunFiles = {
+  runId: string | null
+  /** The run's file index as last read (`real.artifacts`); a read replaces the array, a failed read leaves it. */
+  items: readonly ArtifactIndexItem[]
+  loading: boolean
+  /** Resolves with the index array a successful read of the current attachment installed, or `null`. */
+  refresh: () => Promise<readonly ArtifactIndexItem[] | null>
+  download: (name: string) => void
+}
+
+const props = withDefaults(
+  defineProps<{
+    detailsOpen?: boolean
+    /** 048 S1: `?debug=1` (read by `useSimulatorApp`). Off: no SSE badge. */
+    debug?: boolean
+    /** 048 S1: the analytics dock (spec 007) is the administrator's: its toggle is in "Admin ▾". */
+    analyticsOpen?: boolean
+    /** 048 S1: the run files ("Artifacts") in "Admin ▾". Absent: no such section. */
+    runFiles?: RunFiles
+  }>(),
+  { detailsOpen: false, debug: false, analyticsOpen: false, runFiles: undefined },
+)
 
 const emit = defineEmits<{
   (e: 'toggle-details'): void
+  (e: 'toggle-analytics'): void
 
   (e: 'update:selected-scenario-id', v: string): void
   (e: 'update:intensity-percent', v: number): void
 
   (e: 'set-ui-theme', v: UiThemeId): void
 
-  (e: 'refresh-scenarios'): void
   (e: 'start-run'): void
   (e: 'pause'): void
   (e: 'resume'): void
@@ -58,6 +85,9 @@ const flowState = computed<'running' | 'paused' | null>(() => {
   const s = toLower(ctx.runStatus.value?.state)
   return s === 'running' || s === 'paused' ? s : null
 })
+/** 048 S1: the run's state as the server names it, on the state of the first row (`data-run-state`) - for a machine. */
+const flowRunState = computed(() => (ctx.apiMode.value === 'real' ? toLower(ctx.runStatus.value?.state) : ''))
+
 function onFlowToggle() {
   if (flowState.value === 'running') emit('pause')
   else if (flowState.value === 'paused') emit('resume')
@@ -119,10 +149,23 @@ onBeforeUnmount(() => {
 })
 watch(networkName, () => void nextTick(measureNetworkName))
 
+/**
+ * 048 S1 (decision 5; §15 Codex P2, 2026-10-18): a living run (running or paused) whose event stream is lost - SSE
+ * `reconnecting` or `closed`; a stream that ends normally is followed by `reconnecting` while REST still says
+ * `running`, and no error line is written (`useSimulatorRealMode.ts`, `runSseLoop`) - is "no connection" in the state
+ * of the network: the raw SSE badge is the developer's (`?debug=1`), and a green "живёт" over a dead stream hid the
+ * loss from the visitor. `connecting` (the first connection of a run) is not a loss.
+ */
+const streamLost = computed(() => {
+  const sse = toLower(ctx.sseState.value)
+  return sse === 'reconnecting' || sse === 'closed'
+})
+
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
 const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
   if (ctx.apiMode.value !== 'real') return { text: 'снимок без сервера', tone: 'info' }
   const s = toLower(ctx.runStatus.value?.state)
+  if ((s === 'running' || s === 'paused') && streamLost.value) return { text: t('topBar.noConnection'), tone: 'err' }
   if (s === 'running') return { text: 'живёт', tone: 'ok' }
   if (s === 'paused') return { text: 'на паузе', tone: 'warn' }
   if (s === 'created') return { text: 'запускается', tone: 'info' }
@@ -136,12 +179,6 @@ function onToggleDetails() {
   emit('toggle-details')
 }
 
-const showTestModeBadge = computed(() => {
-  // Show only for humans; Playwright/WebDriver runs shouldn't change screenshots.
-  const isWebDriver = typeof navigator !== 'undefined' && navigator.webdriver === true
-  return !!ctx.isTestMode.value && !isWebDriver
-})
-
 const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
   const s = toLower(ctx.sseState.value)
   if (s === 'open') return 'ok'
@@ -150,16 +187,8 @@ const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
   return 'info'
 })
 
-const runTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
-  const s = toLower(ctx.runStatus.value?.state)
-  if (s === 'running') return 'ok'
-  if (s === 'paused') return 'warn'
-  if (s === 'error') return 'err'
-  return 'info'
-})
-
-const canPause = computed(() => ctx.runStatus.value?.state === 'running')
-const canResume = computed(() => ctx.runStatus.value?.state === 'paused')
+// 048 S1 (decision 4): no "Run <state>" badge (the state dot of the first row says the same) and no Pause/Resume of the
+// service row ("Поток" pauses and resumes; the `pause`/`resume` events are its).
 const canStop = computed(() => {
   const s = ctx.runStatus.value?.state
   return s === 'running' || s === 'paused' || s === 'created'
@@ -248,10 +277,29 @@ const startRetryable = computed(() => !!ctx.startRetryable?.value)
  * Admin controls are only visible when the token is an admin token (non-JWT).
  * Participant JWTs should not show admin panel.
  */
-const showAdminControls = computed(() => {
-  const t = String(ctx.accessToken.value ?? '').trim()
-  return !!t && !isJwtLike(t) && ctx.apiMode.value === 'real'
+const showAdminControls = computed(() => isAdminViewer(ctx.accessToken.value, ctx.apiMode.value))
+
+/**
+ * 048 S1 (decision 5): the run files under "Admin ▾". Their number is shown only once the index ON SCREEN has been
+ * read: "not read yet" is not "no files". The marker is the index array a SUCCESSFUL read of the current attachment
+ * installed - the owner says which (`useSimulatorRealMode.ts` `refreshArtifacts` resolves with it, or with `null` for a
+ * failed read, no run, or a read whose attachment was reset while it was in flight). Every reset of the index (a start,
+ * an attach - also of the same run again -, a stale run) puts a new empty array, which is not the remembered one.
+ * §15 Codex (2026-10-18): the marker was the run id (attaching A again showed "0 / No artifacts"), then "the same run,
+ * a different array after the await" - which a failed read across an Attach of the same run also satisfied. Nothing is
+ * inferred across the await now.
+ */
+const runFilesReadIndex = shallowRef<readonly ArtifactIndexItem[] | null>(null)
+const runFilesRead = computed(() => {
+  const f = props.runFiles
+  return !!f?.runId && ((runFilesReadIndex.value !== null && toRaw(f.items) === runFilesReadIndex.value) || f.items.length > 0)
 })
+async function onRefreshRunFiles() {
+  const f = props.runFiles
+  if (!f?.runId || f.loading) return
+  const installed = await f.refresh()
+  if (installed) runFilesReadIndex.value = toRaw(installed)
+}
 
 const adminRunsCountLabel = computed(() => {
   if (ctx.adminRunsLoading.value) return '…'
@@ -328,20 +376,8 @@ async function onAdminStopRun(runId: string) {
   emit('admin-stop-run', runId)
 }
 
-function onRefreshScenarios() {
-  emit('refresh-scenarios')
-}
-
 function onStartRun() {
   emit('start-run')
-}
-
-function onPause() {
-  emit('pause')
-}
-
-function onResume() {
-  emit('resume')
 }
 
 function onStop() {
@@ -363,7 +399,15 @@ function onApplyIntensity() {
             <span class="ds-label">GEO</span>
             <span ref="networkNameEl" class="ds-value tb-network-name__value" :title="networkName || undefined">{{ networkName }}</span>
           </span>
-          <span class="ds-panel ds-ov-metric tb-network-state" data-testid="network-state">
+          <!-- 048 S1: the live region of the removed "Run <state>" badge - the state is announced from here. -->
+          <span
+            class="ds-panel ds-ov-metric tb-network-state"
+            data-testid="network-state"
+            :data-run-state="flowRunState || undefined"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
             <span class="ds-value">{{ networkState.text }}</span>
           </span>
@@ -419,6 +463,7 @@ function onApplyIntensity() {
                 class="ds-select tb-select-28"
                 :value="ctx.uiTheme.value"
                 aria-label="UI theme"
+                data-testid="theme-select"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
               >
                 <!-- 039 B3 (owner's decision R1): two themes; shadcn and library are frozen (tokens kept, not offered). -->
@@ -428,8 +473,7 @@ function onApplyIntensity() {
             </div>
             <!-- 046 (decision 2): the language, beside the theme - behind "Подробнее", not on the first view (043: <= 7 stops). -->
             <LanguageSwitch />
-
-            <span v-if="showTestModeBadge" class="ds-badge ds-badge--warn">TEST MODE</span>
+            <!-- 048 S1 (decision 4): no TEST MODE badge (the flag `isTestMode` stays: it shapes the stand). -->
           </div>
         </div>
 
@@ -452,15 +496,7 @@ function onApplyIntensity() {
                 {{ scenarioOptionText(s) }}
               </option>
             </select>
-            <button
-              class="ds-btn ds-btn--icon tb-icon-28"
-              type="button"
-              :disabled="ctx.loadingScenarios.value"
-              aria-label="Refresh scenarios"
-              @click="onRefreshScenarios"
-            >
-              ↻
-            </button>
+            <!-- 048 S1 (decision 5): the refresh of the scenario catalogue (↻) is in "Admin ▾". -->
             <span v-if="scenarioLocked" id="tb-scenario-locked" class="tb-visually-hidden" data-testid="scenario-locked">{{ t('topBar.scenarioLocked') }}</span>
 
             <button
@@ -471,22 +507,6 @@ function onApplyIntensity() {
               @click="onStartRun"
             >
               Start
-            </button>
-            <button
-              v-if="canPause"
-              class="ds-btn ds-btn--sm"
-              type="button"
-              @click="onPause"
-            >
-              Pause
-            </button>
-            <button
-              v-if="canResume"
-              class="ds-btn ds-btn--sm"
-              type="button"
-              @click="onResume"
-            >
-              Resume
             </button>
             <button
               v-if="canStop"
@@ -529,17 +549,9 @@ function onApplyIntensity() {
 
         <div class="hud-bar__right" aria-label="Status">
           <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
-            <span :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE">
+            <!-- 048 S1 (decision 5): the raw SSE badge is the developer's (`?debug=1`). -->
+            <span v-if="props.debug" :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE" data-testid="sse-badge">
               <span class="ds-dot" aria-hidden="true" /> SSE
-            </span>
-            <span
-              :class="['ds-badge', `ds-badge--${runTone}`]"
-              aria-label="Run state"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              <span class="ds-dot" aria-hidden="true" /> Run {{ ctx.runStatus.value?.state ?? (ctx.runId.value ? '…' : '—') }}
             </span>
 
             <div
@@ -562,6 +574,7 @@ function onApplyIntensity() {
               v-if="showAdminControls"
               ref="adminDetailsRef"
               class="ds-ov-details"
+              data-testid="admin-menu"
               aria-label="Admin controls"
               :open="adminPanelOpen"
               @keydown.capture="onAdminDetailsKeydown"
@@ -570,6 +583,7 @@ function onApplyIntensity() {
               <summary
                 ref="adminSummaryRef"
                 class="ds-panel ds-ov-metric tb-admin-summary"
+                data-testid="admin-summary"
                 aria-label="Admin"
               >
                 <span class="ds-badge ds-badge--warn">Admin</span>
@@ -610,6 +624,52 @@ function onApplyIntensity() {
                     >
                       {{ short(ctx.adminLastError.value, 40) }}
                     </span>
+                  </div>
+
+                  <!-- 048 S1 (decision 1): the analytics dock's toggle (from the bottom bar). No refresh of the scenario
+                       catalogue anywhere in the UI (the owner's word, 2026-10-19: an edge case the interface ignores): the
+                       catalogue is read when the page loads; after an admin uploads a scenario, a reload picks it up. -->
+                  <div class="ds-row tb-admin-actions" data-testid="admin-tools">
+                    <button
+                      class="ds-btn ds-btn--ghost ds-btn--sm"
+                      type="button"
+                      data-testid="analytics-toggle"
+                      :aria-pressed="props.analyticsOpen ? 'true' : 'false'"
+                      @click="emit('toggle-analytics')"
+                    >
+                      Analytics
+                    </button>
+                  </div>
+
+                  <!-- 048 S1 (decision 5): the run files ("Artifacts", from the bottom bar). -->
+                  <div v-if="props.runFiles" class="ds-stack tb-admin-files" role="group" aria-label="Artifacts" data-testid="admin-run-files">
+                    <div class="ds-row tb-admin-actions">
+                      <span class="ds-badge ds-badge--info">Artifacts</span>
+                      <span v-if="runFilesRead" class="ds-value tb-fade-75" data-testid="admin-run-files-count">{{ props.runFiles.items.length }}</span>
+                      <button
+                        class="ds-btn ds-btn--secondary ds-btn--sm"
+                        type="button"
+                        aria-label="Refresh artifacts"
+                        :disabled="!props.runFiles.runId || props.runFiles.loading"
+                        :title="!props.runFiles.runId ? 'Start a run first' : 'Refresh artifacts'"
+                        @click="onRefreshRunFiles"
+                      >
+                        {{ props.runFiles.loading ? 'Loading…' : 'Refresh' }}
+                      </button>
+                      <span v-if="!props.runFiles.runId" class="ds-label tb-fade-75">Start a run first</span>
+                      <span v-else-if="runFilesRead && !props.runFiles.items.length" class="ds-label tb-fade-75">No artifacts</span>
+                    </div>
+                    <div v-if="props.runFiles.items.length" class="ds-row tb-admin-actions">
+                      <button
+                        v-for="a in props.runFiles.items"
+                        :key="a.name"
+                        class="ds-btn ds-btn--secondary ds-btn--sm"
+                        type="button"
+                        @click="props.runFiles.download(a.name)"
+                      >
+                        {{ a.name }}
+                      </button>
+                    </div>
                   </div>
 
                   <div v-if="ctx.adminRunsLoading.value" class="ds-label tb-fade-75" aria-label="Runs loading">
@@ -691,7 +751,9 @@ function onApplyIntensity() {
         </button>
       </div>
 
-      <div v-if="props.detailsOpen && isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">
+      <!-- 048 S1 (decision 2): the one diagnosis a visitor gets - on the first view, not behind "Подробнее" (its words come
+           from the dictionary with 046 wave 1). Shown only while payments stall: `consec_all_rejected_ticks` >= threshold. -->
+      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall" data-testid="capacity-stall">
         <span class="ds-alert__icon">!</span>
         <span class="ds-label">Stall</span>
         <span class="ds-value ds-mono tb-fade-92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
@@ -874,11 +936,6 @@ function onApplyIntensity() {
 .tb-run-controls {
   gap: var(--ds-space-2, 8px);
   flex-wrap: wrap;
-}
-
-.tb-icon-28 {
-  height: var(--ds-tb-icon-size);
-  width: var(--ds-tb-icon-size);
 }
 
 .tb-adv-row {

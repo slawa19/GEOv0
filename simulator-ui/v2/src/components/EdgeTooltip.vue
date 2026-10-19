@@ -14,7 +14,6 @@ type HoveredEdge = {
   trustLimit?: string | number | null
   used?: string | number | null
   available?: string | number | null
-  edgeStatus?: string | null
   /** 043 S1 (review finding 1): the equivalent captured with the figures; the only unit this tooltip prints. */
   equivalent?: string | null
 }
@@ -23,8 +22,6 @@ type Props = {
   edge: HoveredEdge
   style: CSSProperties
   getNodeName: (id: string) => string | null
-  /** When true, also show the line's status row (Interact). */
-  interactMode?: boolean
 }
 
 const props = defineProps<Props>()
@@ -76,15 +73,7 @@ const edgeTooltipSurface = getOverlaySurfaceDescriptor('edge-tooltip')
       </div>
     </template>
     <div v-else class="ds-ov-tooltip__amount">{{ edge.amountText }}</div>
-
-    <!-- BUG-2: Interact Mode extra info (the figures are in the sentence above since 043 S1). -->
-    <template v-if="interactMode && hasFigures && edge.edgeStatus">
-      <div class="ds-ov-tooltip__divider" />
-      <div class="ds-ov-tooltip__row">
-        <span class="ds-ov-tooltip__label">Status</span>
-        <span class="ds-ov-tooltip__val">{{ edge.edgeStatus }}</span>
-      </div>
-    </template>
+    <!-- 048 S1 (decision 4): the line's raw `Status` row is gone - an English word under a Russian sentence. -->
   </div>
 </template>
 

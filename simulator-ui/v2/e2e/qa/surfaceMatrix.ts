@@ -267,15 +267,14 @@ export const MATRIX: Entry[] = [
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
-  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" and "Dev Tools" removed by 043 S3)
+  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" and "Dev Tools" removed by 043 S3).
+  // 048 S1 (decision 5): one menu is left - "Admin ▾". The bottom bar's "Artifacts" menu moved INTO it (the run files),
+  // with the analytics toggle and the catalogue refresh; its entry `menu-artifacts` went with it - the surface is this
+  // one. Selectors by test id (Verification plan of 048, forbidden item 4).
   { id: 'menu-admin', catalogue: 'hud-dropdown', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
-    beforeLoad: routeToolbars, details: { hiddenByDefault: 'summary[aria-label="Admin"]' },
-    root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Admin"]'),
-    policies: hudDropdown('summary[aria-label="Admin"]') },
-  { id: 'menu-artifacts', catalogue: 'hud-dropdown', gesture: 'click "Artifacts" in the bottom bar ("Подробнее" on)',
-    beforeLoad: routeToolbars, details: { hiddenByDefault: 'details[aria-label="Artifacts"] > summary' },
-    root: 'details[aria-label="Artifacts"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Artifacts"] > summary'),
-    policies: hudDropdown('details[aria-label="Artifacts"] > summary') },
+    beforeLoad: routeToolbars, details: { hiddenByDefault: '[data-testid="admin-summary"]' },
+    root: '[data-testid="admin-menu"] > .ds-ov-dropdown', open: openMenu('[data-testid="admin-summary"]'),
+    policies: hudDropdown('[data-testid="admin-summary"]') },
 
   // the two bars and what expands inside them
   { id: 'top-bar-interact', catalogue: 'top-hud-stack', gesture: 'always on screen (the first view)',
@@ -284,7 +283,7 @@ export const MATRIX: Entry[] = [
     details: { hiddenByDefault: '[data-testid="top-details-row"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
   { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (scenario and run controls; since 043 S2 the same screen as the entry above, kept for its own anti-vacuum: the scenario selector is not rendered on the first view)',
-    details: { hiddenByDefault: 'select[aria-label="Scenario"]' },
+    details: { hiddenByDefault: '[data-testid="scenario-select"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
   { id: 'graph-navigator', catalogue: 'bottom-hud-stack', gesture: 'click "Inspect graph" in the bottom bar ("Подробнее" on)',
     details: { hiddenByDefault: '.graph-navigator' },
@@ -321,10 +320,17 @@ export const MATRIX: Entry[] = [
       await page.mouse.move(e.at.x, e.at.y, { steps: 4 })
     },
     policies: { inside: 'viewport' } },
-  { id: 'analytics-panel', catalogue: 'real-metrics-panel', gesture: 'click "Analytics" in the bottom bar ("Подробнее" on)',
-    beforeLoad: routeAnalytics, root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="bottombar-analytics-toggle"]' },
+  // 048 S1 (decision 1): the toggle is in "Admin ▾" (the administrator's dock); the menu is closed again (Escape) once
+  // the dock is open, so the dock is what is judged.
+  { id: 'analytics-panel', catalogue: 'real-metrics-panel', gesture: 'click "Analytics" in "Admin ▾" (admin token, "Подробнее" on)',
+    beforeLoad: (p) => Promise.all([routeAnalytics(p), routeToolbars(p)]).then(() => undefined),
+    root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="admin-summary"]' },
     open: async (page) => {
-      if (!(await page.locator('[data-surface="real-metrics-panel"]').isVisible())) await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
+      if (await page.locator('[data-surface="real-metrics-panel"]').isVisible()) return
+      await openMenu('[data-testid="admin-summary"]')(page)
+      await page.locator('[data-testid="analytics-toggle"]').click()
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-testid="admin-menu"] > .ds-ov-dropdown'), 'the menu is closed again').toBeHidden()
     },
     policies: { inside: 'viewport' } },
 
@@ -365,8 +371,10 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
  */
 export const NATIVE_SELECTS = [
   'top bar: "UI theme"', 'top bar: "Scenario"',
-  'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar: "Источник"', 'bottom bar (offline): "Scene"',
-  'bottom bar (offline): "Плейлист"', // 042 T4205; the stand runs the server source, where the workbench is not shown
+  'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Labels"',
+  // 048 S1: the developer's selects (`?debug=1`); the stand's viewer has no `?debug=1`. "Scene" was removed (no reader).
+  'bottom bar (?debug=1): "Quality"', 'bottom bar (?debug=1): "Источник"',
+  'bottom bar (offline, ?debug=1): "Плейлист"', // 042 T4205; the stand runs the server source, where the workbench is not shown
   'graph navigator: "Node"', 'graph navigator: "Edge"',
 ]
 

@@ -44,7 +44,6 @@ function deferred<T>() {
 describe('useSceneState', () => {
   it('loadScene loads snapshot and updates state', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -71,7 +70,6 @@ describe('useSceneState', () => {
 
     const s = useSceneState({
       eq,
-      scene,
       layoutMode,
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -102,7 +100,6 @@ describe('useSceneState', () => {
 
   it('treats scenario preview -> preview (different scenario id) as a full scene change even if node IDs match', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -148,7 +145,6 @@ describe('useSceneState', () => {
 
     const s = useSceneState({
       eq,
-      scene,
       layoutMode,
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -183,7 +179,6 @@ describe('useSceneState', () => {
 
   it('non-incremental loadScene clears ALL timers (including critical) because node context changed', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -211,7 +206,6 @@ describe('useSceneState', () => {
 
     const s = useSceneState({
       eq,
-      scene,
       layoutMode,
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -259,7 +253,6 @@ describe('useSceneState', () => {
 
   it('loadScene skips expensive resets for incremental update (same node IDs)', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -286,7 +279,6 @@ describe('useSceneState', () => {
 
     const s = useSceneState({
       eq,
-      scene,
       layoutMode,
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -328,7 +320,6 @@ describe('useSceneState', () => {
 
   it('incremental update does not relayout when only links change', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -360,7 +351,6 @@ describe('useSceneState', () => {
 
     const s = useSceneState({
       eq,
-      scene,
       layoutMode,
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -392,7 +382,6 @@ describe('useSceneState', () => {
     'does not let a direct watcher load that %s late overwrite a newer recovery load',
     async (oldOutcome) => {
       const eq = ref('UAH')
-      const scene = ref<'A' | 'B' | 'C'>('A')
       const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>(
         'admin-force',
       )
@@ -423,7 +412,6 @@ describe('useSceneState', () => {
       const ensureRenderLoop = vi.fn()
       const s = useSceneState({
         eq,
-        scene,
         layoutMode,
         allowEqDeepLink: () => true,
         isEqAllowed: () => true,
@@ -473,7 +461,6 @@ describe('useSceneState', () => {
 
   it('lets a newer scene watcher supersede an in-flight strict recovery load', async () => {
     const eq = ref('EUR')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const recovery = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
     const watcher = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
     const recoverySnapshot = {
@@ -500,7 +487,6 @@ describe('useSceneState', () => {
     const loadSnapshot = vi.fn(() => watcher.promise)
     s = useSceneState({
       eq,
-      scene,
       layoutMode: ref<'admin-force'>('admin-force'),
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -522,7 +508,9 @@ describe('useSceneState', () => {
 
     const recoveryLoad = s.loadRecoveryScene({ runId: 'run-1', equivalent: 'EUR', isCurrent: () => true })
     await Promise.resolve()
-    scene.value = 'B'
+    // The scene watcher fires on a change of the equivalent ref (048 S1: the A/B/C `scene` it also watched is gone);
+    // the same equivalent in another spelling is a change of the ref, not of the scene's equivalent.
+    eq.value = 'eur'
     await vi.waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(1))
     expect(onSceneContextChange).toHaveBeenCalledTimes(1)
 
@@ -550,7 +538,6 @@ describe('useSceneState', () => {
     const resetCamera = vi.fn()
     const s = useSceneState({
       eq,
-      scene: ref<'A' | 'B' | 'C'>('A'),
       layoutMode: ref<'admin-force'>('admin-force'),
       allowEqDeepLink: () => true,
       isEqAllowed: () => true,
@@ -582,7 +569,6 @@ describe('useSceneState', () => {
 
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -598,6 +584,7 @@ describe('useSceneState', () => {
     const prevWindow = globalThis.window
     setMockWindow({
       ...globalThis,
+      // 048 S1: an old link may still carry `?scene=` - it is not read, and the rest of the link works.
       location: { ...globalThis.location, search: '?scene=B&layout=type-split&eq=eur&focus=A' },
     } as unknown as Window & typeof globalThis)
 
@@ -607,7 +594,6 @@ describe('useSceneState', () => {
     try {
       const s = useSceneState({
         eq,
-        scene,
         layoutMode,
         allowEqDeepLink: () => true,
         isEqAllowed: (v) => v === 'EUR' || v === 'UAH',
@@ -628,7 +614,6 @@ describe('useSceneState', () => {
       s.setup()
       await s.loadScene()
 
-      expect(scene.value).toBe('B')
       expect(layoutMode.value).toBe('type-split')
       expect(eq.value).toBe('EUR')
       expect(loadSnapshot).toHaveBeenCalled()

@@ -64,13 +64,13 @@
 | `node-card` | `wm-inspector-window` | двойной клик по узлу | внутри viewport с отступом; Escape закрывает; клик по пустой канве закрывает; фокус — на открывший элемент (с канвы — на `body`, из навигатора — на «Inspect node») |
 | `edge-popup` | `wm-inspector-window` | клик по линии доверия | то же |
 | `payment-from-list`, `trustline-from-list` | `interact-select-dropdown` | клик по списку «From» | внутри viewport; Escape закрывает **список, а не панель**, фокус — на триггер; Tab не покидает список |
-| `menu-artifacts`, `menu-admin` (оба — после «Подробнее») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
+| `menu-admin` (после «Подробнее»; `menu-artifacts` снята 048 S1 — файлы прогона теперь внутри «Admin ▾») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
 | `top-bar-interact`, `top-bar-auto-run`, `graph-navigator` | `top-hud-stack` | на экране всегда; навигатор — клик «Inspect graph» | внутри viewport |
 | `bottom-bar` | `bottom-hud-stack` | на экране всегда | внутри viewport |
 | `toast-success`, `toast-error` | `success-toast`, `error-toast` | клиринг с циклом; клиринг с отказом бэкенда | внутри viewport; Escape, фокус и клик вне не применяются |
 | `interact-history` | `interact-history-overlay` | после первого выполненного действия | внутри viewport |
 | `edge-tooltip` | `edge-tooltip` | клик по узлу, затем наведение на его линию | внутри viewport |
-| `analytics-panel` | `real-metrics-panel` | кнопка «Analytics» | внутри viewport |
+| `analytics-panel` | `real-metrics-panel` | кнопка «Analytics» в «Admin ▾» (048 S1), затем Escape закрывает меню | внутри viewport |
 | `node-labels`, `event-labels` | `canvas-labels-overlay`, `canvas-floating-labels-overlay` | клик по узлу; событие платежа из потока (не жест пользователя) | кадр; слой растянут на сцену, политик нет |
 | `loading-message`, `error-message` | `loading-message-overlay`, `error-message-overlay` | загрузка страницы, пока сцена не ответила; сцена не загрузилась | внутри viewport |
 | `dev-perf-overlay` | `dev-perf-overlay` | адрес с `?perf=1` | внутри viewport |
@@ -223,6 +223,7 @@
 ## 7. CI
 
 - **Обязательный гейт.** Job `ui-smoke` (ubuntu, каждый PR), шаг «Run the Simulator UI QA stand, required subset»: `npm --prefix simulator-ui/v2 run test:e2e:qa:gate`, `timeout-minutes: 15`. Порогов по настенным часам в нём нет; дискретные бюджеты (счётчики на подменённых часах) в нём есть. HTML-отчёт шага загружается всегда (`if: always()` стоит только на шаге загрузки и результата шага гейта не меняет).
+- **2026-10-18:** прогноз времени стенда берётся только из CI (шаг стенда в `ui-smoke` и длительности тестов из его отчёта), не из локальных прогонов: 2026-10-18 локальный прогноз 039 C занизил прирост вдвое.
 - **По расписанию и вручную.** Job `simulator-qa-stand`: `test:e2e:qa:report`, затем `test:e2e:qa:video` (шаг идёт и после красного стенда, а его собственный отказ делает job красным); HTML-отчёт стенда с галереей, отчёт видео и сами ролики — одним артефактом `simulator-qa-stand-report-all-themes`. На PR видео не пишутся. Запуск на CI с роликами в артефакте на дату правки (2026-10-12) не исполнен — нужен `workflow_dispatch` на слитом SHA.
 - Вне обязательного подмножества (метка `@extended`): галерея кадров и axe в двух темах (`saas`, `hud`); viewport 1920×1080 и 1024×640 для окон менеджера и поверхностей, поставленных одним CSS; измерение доли экрана под HUD; репродьюсер дефекта попапа линии (BACKLOG 037-4).
 - Поимённый список `NOT_IN_GATE` в `e2e/qa/run-stand.mjs` (тест вне подмножества без метки, с причиной и датой) сейчас пуст.

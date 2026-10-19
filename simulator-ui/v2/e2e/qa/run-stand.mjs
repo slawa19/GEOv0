@@ -156,8 +156,32 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   their titles and now pass `?lang=en`. Forecast before the run: +4 x about 0.55 s (the four English ones measured
  *   0.49-0.61 s in a gate run of 2026-10-18) - about +2 s on a gate of 479-493 s locally; on CI, over 039 C's forecast of 532-586 s, about +3-4 s
  *   (589-590 s at the slower runner) - under 600 s with a thin margin; no further `@extended` move (R3 rule) made.
+ * - 2026-10-18 (048 S1, the stand over its CI time again): gate 141 -> 139, full unchanged at 235. The required step took
+ *   599 s of its 600 s budget in CI (run 39149083576, head `2849685d`, 141 tests, 591.3 s summed in its stand report).
+ *   By the R3 rule the two longest R3 tests left in the gate are tagged `@extended`: "R3 - the five properties hold at
+ *   quality "med" / "high" too" - 19.0 and 18.8 s in that report (18.4 and 18.2 s in run 39135012070), 37.8 s in all.
+ *   Forecast of the step from those CI numbers: 599 - 38 = about 561 s. What leaves the gate and what stays is named at
+ *   the tests (`motion.qa.ts`).
+ * - 2026-10-18 (rule of the stand's time, by the orchestrator): прогноз времени стенда берётся только из CI (шаг стенда
+ *   в `ui-smoke` и длительности тестов из его отчёта), не из локальных прогонов: 2026-10-18 локальный прогноз 039 C
+ *   занизил прирост вдвое.
+ * - 2026-10-18 (048 S1, the three addressees of the screen): gate 139 -> 137, full 235 -> 231. The bottom bar's
+ *   "Artifacts" menu moved INTO "Admin ▾" (the run files), so the matrix entry `menu-artifacts` is gone with its surface:
+ *   -2 in the gate (`matrix [saas|hud] menu-artifacts`, 2.69 and 2.67 s in the stand report of CI run 39149083576),
+ *   -2 under `@extended` (its gallery frames). `analytics-panel` opens its toggle in "Admin ▾" now (one menu click and
+ *   Escape more, well under a second); `layout.qa.ts` reads its service list by test id and also holds that the
+ *   developer's controls (`?debug=1`) are absent - no test added. Forecast from CI numbers: 599 - 37.8 (the R3 move
+ *   above) - 5.4 = about 556 s.
+ * - 2026-10-18 (048 S1, §15 Codex P2 on the R3 moves): gate 137 -> 138, full 231 -> 232. One test of `motion.qa.ts`
+ *   in the gate, "R3 short - a 2-edge payment: the intermediate leg goes forward, and the later leg is seen on the
+ *   composed page (quality low)": what only the full multi-leg oracles (now `@extended`) held - direction on an
+ *   intermediate (`linear`) leg, composition of a later leg on the page. A short watch (4 frames a step, probes only
+ *   while a leg is alive, at most three screenshots). Cost from CI numbers: the one-edge oracle took 13.4 s in CI
+ *   (run 39149083576; 13.1 s in 39135012070); locally, side by side, the new test takes 0.40 of it (4.3-4.4 s
+ *   against 10.8 s) - about 5.4 s in CI. Forecast of the step: 592 s on main (run 39154847251) - 43.0 s moved out
+ *   (R3 med/high 18.81 + 18.98 s, menu-artifacts 2.61 + 2.61 s in its report) + 5.4 s = about 554 s.
  */
-export const EXPECTED = { gate: 141, full: 235 }
+export const EXPECTED = { gate: 138, full: 232 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

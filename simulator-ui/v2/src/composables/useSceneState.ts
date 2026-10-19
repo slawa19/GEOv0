@@ -5,8 +5,6 @@ import { extractErrorMessage } from '../utils/errorMessage'
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
-type SceneId = 'A' | 'B' | 'C'
-
 type LoadSnapshotFn = (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
 type RecoverySceneContext = {
   runId: string
@@ -28,7 +26,6 @@ type SceneState = {
 
 type UseSceneStateDeps = {
   eq: Ref<string>
-  scene: Ref<SceneId>
   layoutMode: Ref<LayoutMode>
 
   allowEqDeepLink: () => boolean
@@ -264,7 +261,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
     })
   }
 
-  watch([deps.eq, deps.scene], () => {
+  watch(deps.eq, () => {
     if (deps.onSceneContextChange) {
       void deps.onSceneContextChange()
       return
@@ -285,10 +282,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         }
       }
 
-      const s = String(params.get('scene') ?? '')
-      if (s === 'A' || s === 'B' || s === 'C') {
-        deps.scene.value = s
-      }
+      // 048 S1 (decision 4): `?scene=` is not read any more - the A/B/C "scene" had no reader but its own selector
+      // (the snapshot is loaded by equivalent alone, `fixtures.ts` `loadSnapshot(eq)`); an old link with it opens the same.
 
       const lm = String(params.get('layout') ?? '')
       if (

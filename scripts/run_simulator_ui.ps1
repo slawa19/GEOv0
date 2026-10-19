@@ -14,7 +14,9 @@ param(
   # UI API mode (the data source the page opens with):
   # - fixtures: the OFFLINE snapshot (default) - no backend needed. Since 043 S2 the client's own default is the
   #   server, so this mode states the choice explicitly: `?mode=fixtures` in the printed URL and VITE_API_MODE=fixtures
-  #   for the dev server (useSimulatorApp.ts `apiMode`).
+  #   for the dev server (useSimulatorApp.ts `apiMode`). Since 048 S1 the printed URL also carries `&debug=1`: the
+  #   source switch, the render quality and the offline effects workbench (playlist) are shown only with it, and this
+  #   mode is the developer's measuring stand (039 C).
   # - real: real backend integration (fetch-stream SSE + REST)
   [ValidateSet('fixtures', 'real')]
   [string]$Mode = 'fixtures',
@@ -207,7 +209,7 @@ if (Test-TcpOpen $HostName $selectedPort) {
         Write-Host 'GEO Simulator UI already running.'
         Write-Host "Open in browser: $url"
         Write-Host ''
-        Write-Host "Offline snapshot link: ${url}?mode=fixtures" -ForegroundColor Cyan
+        Write-Host "Offline snapshot link: ${url}?mode=fixtures&debug=1" -ForegroundColor Cyan
         Write-Host ''
         exit 0
       }
@@ -271,7 +273,7 @@ Write-Host 'Starting GEO Simulator UI (Vite dev server)...'
 if ($Mode -eq 'real') {
   Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=real"
 } else {
-  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=fixtures"
+  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=fixtures&debug=1"
 }
 Write-Host "If the port is unavailable, Vite will pick another and print the actual URL." -ForegroundColor DarkGray
 Write-Host ''
