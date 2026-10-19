@@ -57,12 +57,13 @@ async function waitReady(page: Page) {
   await page.waitForTimeout(250)
 }
 
-async function readMetricValue(page: Page, label: string): Promise<string> {
-  const bar = page.locator('[aria-label="System balance"]')
+// 046 wave 1, full (2026-10-19): first-screen controls by test id - their names are the dictionary's (language of the page).
+async function readMetricValue(page: Page, testId: string): Promise<string> {
+  const bar = page.getByTestId('system-balance')
   await expect(bar).toBeVisible()
-  const labelEl = bar.getByText(label, { exact: true })
-  await expect(labelEl).toBeVisible()
-  return String(await labelEl.locator('xpath=following-sibling::*[1]').innerText()).trim()
+  const valueEl = bar.locator(`[data-testid="${testId}"] .ds-value`)
+  await expect(valueEl).toBeVisible()
+  return String(await valueEl.innerText()).trim()
 }
 
 test('real mode: stale persisted runId does not block first preview load', async ({ page }) => {
@@ -129,10 +130,11 @@ test('real mode: stale persisted runId does not block first preview load', async
 
   await expect.poll(() => previewRequestCount).toBeGreaterThan(0)
   await expect(page.locator('[data-ready="1"]')).toBeVisible()
-  await expect(page.getByText('Loading…', { exact: true })).toBeHidden()
+  // 046 wave 1, full: the loading overlay by its structure (role=status), not by its words (the dictionary's).
+  await expect(page.locator('.ds-ov-inset[role="status"] .ds-ov-message__title')).toBeHidden()
   // The empty product fallback is also "ready"; this proves our sentinel snapshot
   // was applied rather than merely observing the fallback state.
   // 028 F-028-48 (T2882): the totals are exact money text shown at the equivalent's precision (UAH: 2), no longer
   // rounded to whole units - the sentinel used 7 and now reads 7.00.
-  expect(await readMetricValue(page, 'Общий долг')).toBe('7.00 UAH')
+  expect(await readMetricValue(page, 'sbb-total-debt')).toBe('7.00 UAH')
 })

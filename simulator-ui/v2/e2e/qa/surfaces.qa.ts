@@ -410,7 +410,7 @@ test('matrix [hud] node-card opened from the graph navigator: Escape returns the
   await boot(page, { snapshot: ringSnapshot(), clock: false, query: '&theme=hud' })
   await openDetails(page) // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее"
   await page.locator('.graph-navigator summary').click()
-  const opener = page.locator('.graph-navigator button', { hasText: 'Inspect node' })
+  const opener = page.getByTestId('graph-navigator-open-node')
   await opener.focus()
   await page.keyboard.press('Enter')
   const card = page.locator('.ws-shell[data-win-type="node-card"]')

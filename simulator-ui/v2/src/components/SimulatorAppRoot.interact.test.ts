@@ -15,6 +15,9 @@ import { useOverlayState } from '../composables/useOverlayState'
 import { keyEdge } from '../utils/edgeKey'
 import type { TrustlinesFetchState } from '../composables/interact/trustlinesSourceState'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
+import { t } from '../i18n/t'
+import { setUiLocale } from '../i18n/locale'
+import { renderRunErrorLine, runStatusErrorLine } from '../utils/runErrorClassification'
 
 /**
  * Layout fixture behind the mocked app: a 1000x600 viewport, two placed participants, and by
@@ -1011,7 +1014,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       // Ensure deterministic geometry in happy-dom.
       stubRect(root!, { left: 0, top: 0, width: 1400, height: 800 })
 
-      const actionBar = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
+      // 046 wave 1, full (2026-10-19): by test id - the accessible name is the dictionary's, in the interface language.
+      const actionBar = host.querySelector('[data-testid="action-bar"]') as HTMLElement | null
       expect(actionBar).toBeTruthy()
 
       const hudBar = (actionBar!.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar!
@@ -1066,7 +1070,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       const root = host.querySelector('.root') as HTMLElement
       stubRect(root, { left: 0, top: 0, width: 1400, height: 800 })
-      const actionBar = host.querySelector('[aria-label="Interact actions"]') as HTMLElement
+      const actionBar = host.querySelector('[data-testid="action-bar"]') as HTMLElement
       stubRect((actionBar.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar, { left: 400, top: 14, width: 404, height: 40 })
       const stack = host.querySelector('.ds-ov-top-stack') as HTMLElement
       expect(stack.contains(actionBar), 'counter-check: the ActionBar is a row of the stack').toBe(true)
@@ -1084,6 +1088,46 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       app.unmount()
       host.remove()
       storedDetails(null)
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  /**
+   * 046 wave 1, full (2026-10-19): the root finds the ActionBar to anchor a window by its test id, not by its accessible
+   * name - in Russian that name is «Действия», and a lookup by the English «Interact actions» found nothing and fell
+   * back to the stack's published height. Observed by the anchor: the bar is stubbed BELOW the stack, so only a found bar
+   * gives its bottom (300). Mutation (the lookup by the English name) - red here, green in the English tests above.
+   */
+  it('046 wave 1: in Russian the window is anchored under the ActionBar the root found (by test id, not by its name)', async () => {
+    setUiLocale('ru')
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+      stubRect(host.querySelector('.root') as HTMLElement, { left: 0, top: 0, width: 1400, height: 800 })
+      const actionBar = host.querySelector('[data-testid="action-bar"]') as HTMLElement
+      expect(actionBar.getAttribute('aria-label'), 'precondition: the name is Russian').toBe('Действия')
+      stubRect((actionBar.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar, { left: 400, top: 260, width: 404, height: 40 })
+      stubRect(host.querySelector('.ds-ov-top-stack') as HTMLElement, { left: 14, top: 14, width: 1372, height: 132 })
+      host.querySelector<HTMLButtonElement>('[data-testid="actionbar-payment"]')!.click()
+      await nextTick()
+      await nextTick()
+      const calls = getGeoTestGlobal('__GEO_TEST_WM_OPEN')!.mock.calls.map((c) => c[0] as { type?: string; anchor?: { x: number; y: number } })
+      const anchor = [...calls].reverse().find((c) => c?.type === 'interact-panel')?.anchor
+      expect(anchor, 'the panel was opened with an anchor').toBeTruthy()
+      expect(anchor!.y, 'under the ActionBar the root found (its bottom 300), not the fallback').toBe(300)
+    } finally {
+      app.unmount()
+      host.remove()
+      setUiLocale('en')
+      window.localStorage.clear()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
@@ -1634,7 +1678,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(root).toBeTruthy()
       expect(historyOverlay).toBeTruthy()
       expect(bottomStack).toBeTruthy()
-      expect(historyOverlay?.textContent).toContain('Recent actions')
+      expect(historyOverlay?.querySelector('[data-testid="recent-actions"] .interact-history__header')?.textContent).toBe('Recent actions')
 
       expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('72px')
 
@@ -1677,8 +1721,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
     // The Interact contract "intensity forced to 0, no intensity control" is gone (decision 3 replaces it with the pause
     // on a manual action): the run controls and the intensity are under Details on the one screen.
-    expect(host.querySelector('[aria-label="Intensity percent"]'), 'the intensity control is under Details').toBeTruthy()
-    expect(host.querySelector('select[aria-label="Scenario"]'), 'the scenario selector is under Details').toBeTruthy()
+    expect(host.querySelector('[data-testid="intensity-input"]'), 'the intensity control is under Details').toBeTruthy()
+    expect(host.querySelector('select[data-testid="scenario-select"]'), 'the scenario selector is under Details').toBeTruthy()
 
     app.unmount()
     host.remove()
@@ -1953,7 +1997,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      const navigator = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLElement | null
+      // 046 wave 1, full (2026-10-19): by test id - the accessible name is the dictionary's, in the interface language.
+      const navigator = host.querySelector('[role="region"][data-testid="graph-navigator"]') as HTMLElement | null
       expect(navigator).toBeTruthy()
       const disclosure = navigator?.querySelector('details') as HTMLDetailsElement | null
       expect(disclosure).toBeTruthy()
@@ -1963,19 +2008,17 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       nodeSelect.value = 'bob'
       nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
       await nextTick()
-      const nodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node') as
-        | HTMLButtonElement
-        | undefined
+      const nodeButton = host.querySelector<HTMLButtonElement>('[data-testid="graph-navigator-open-node"]') ?? undefined
+      expect(nodeButton, 'counter-check: the button is found').toBeTruthy()
       nodeButton?.focus()
       nodeButton?.click()
       await nextTick()
       await nextTick()
       expect(host.querySelector('.ws-shell[data-win-type="node-card"]')).toBeTruthy()
-      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Node details opened: Bob')
+      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Participant opened: Bob')
 
-      const edgeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect edge') as
-        | HTMLButtonElement
-        | undefined
+      const edgeButton = host.querySelector<HTMLButtonElement>('[data-testid="graph-navigator-open-edge"]') ?? undefined
+      expect(edgeButton, 'counter-check: the button is found').toBeTruthy()
       expect(edgeButton?.disabled).toBe(false)
       edgeButton?.focus()
       edgeButton?.click()
@@ -1983,7 +2026,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       expect(host.querySelector('.ws-shell[data-win-type="edge-detail"]')).toBeTruthy()
       expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain(
-        'Trustline details opened: Alice → Bob', // 044 `T4405`: names, not ids
+        'Line opened: Alice → Bob', // 044 `T4405`: names, not ids
       )
 
       const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
@@ -2271,9 +2314,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Run Clearing')) as
-        | HTMLButtonElement
-        | undefined
+      // 046 wave 1, full (2026-10-19): by test id - the accessible name is the dictionary's, in the interface language.
+      const btn = host.querySelector<HTMLButtonElement>('[data-testid="actionbar-clearing"]') ?? undefined
       expect(btn).toBeTruthy()
 
       btn?.click()
@@ -2414,7 +2456,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       real.runId = null
       await nextTick()
       expect(buttons().map((b) => b.disabled), 'no run: disabled').toEqual([true, true, true])
-      expect(buttons()[0]!.title).toContain('No run')
+      // 048 S2 hand-over P2-2 (046 wave 1, full): the reason names the way back every viewer has (a reload), not Start.
+      expect(buttons()[0]!.title).toBe(t('actions.noRun'))
+      expect(buttons()[0]!.title).not.toMatch(/\bStart\b/)
     } finally {
       app.unmount()
       host.remove()
@@ -4950,7 +4994,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     const successMessage = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE')
     expect(successMessage.value).toContain('Clearing done')
 
-    const btnDismiss = toast?.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+    const btnDismiss = toast?.querySelector('button.ds-ov-toast__close') as HTMLButtonElement | null
     expect(btnDismiss).toBeTruthy()
     btnDismiss?.click()
     await nextTick()
@@ -5930,7 +5974,7 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
     setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf(' eur ', [role({ id: 'a', net_sign: 1 })]))
     const { host, done } = mount()
     await nextTick()
-    expect(host.querySelector('[data-testid="legend-title"]')?.textContent).toBe('Overall balance · EUR')
+    expect(host.querySelector('[data-testid="legend-title"]')?.textContent).toBe(t('legend.titleWithEquivalent', { eq: 'EUR' }))
     // Counter-check: the selector (the mocked app's `eq` is UAH, with one option here - 048 S1: then shown as text) does not say EUR.
     const selector = host.querySelector<HTMLElement>('[data-testid="equivalent-select"], [data-testid="equivalent-text"]')
     expect(selector, 'the equivalent selector is on screen').not.toBeNull()
@@ -5970,7 +6014,7 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
 
     let themeAtResolve: string | null = null
     resolve.mockImplementation(() => { themeAtResolve = root.getAttribute('data-theme') })
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+    const select = host.querySelector<HTMLSelectElement>('select[data-testid="theme-select"]')!
     select.value = 'hud'
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
@@ -6063,8 +6107,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     ['theme switcher', '[data-testid="theme-select"]'],
     ['equivalent', '[data-testid="equivalent-select"], [data-testid="equivalent-text"]'],
     ['layout', '[data-testid="layout-select"]'],
-    ['graph navigator', '[role="region"][aria-label="Graph navigator"]'],
-    ['full metrics', '[aria-label="System metrics"]'],
+    ['graph navigator', '[role="region"][data-testid="graph-navigator"]'],
+    ['full metrics', '[data-testid="system-metrics"]'],
   ] as const
   const DEVELOPER = [
     ['source select', '[data-testid="source-select"]'],
@@ -6123,8 +6167,9 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(host.querySelector('[data-testid="network-state"]')?.tagName, 'the state is text, not a control').toBe('SPAN')
       // The total debt is in the bottom row, compact.
       const bottom = [...host.querySelectorAll('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
-      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Общий долг')
-      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).not.toContain('Utilization')
+      // 046 wave 1, full (2026-10-19): by test id; the label is the dictionary's ("Total debt" / "Общий долг").
+      expect(bottom.querySelector('[data-testid="system-balance"] [data-testid="sbb-total-debt"]')).not.toBeNull()
+      expect(bottom.querySelector('[data-testid="system-balance"] [data-testid="sbb-utilization"]')).toBeNull()
     } finally {
       done()
     }
@@ -6211,6 +6256,32 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
    * and differ exactly by the administrator's row. Red before S2: the visitor's top had the scenario, Stop, the tempo,
    * Apply and the badge, and the bottom had Labels.
    */
+  /**
+   * 046 wave 1, §15 Codex round (advisor's condition, 2026-10-19; 048 decision 3, AGENTS.md section 12): the line of a run
+   * ended by an error is the interface's sentence with the code, and the server's FULL text stays reachable - the
+   * `title` of the line. Red before: the title repeated the sentence (`String(lastError)`).
+   */
+  it('046 wave 1: the error line of a run ended by an error says the sentence; its title is the server full text', async () => {
+    const { host, app, done } = mount('/?mode=real')
+    try {
+      const real = rootSetup(app).real as Record<string, unknown>
+      const line = runStatusErrorLine({ state: 'error', last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed at step 12', at: 't' } }, () => true)!
+      real.lastErrorLine = line
+      real.lastError = renderRunErrorLine(line, 'en')
+      await nextTick()
+      const value = host.querySelector('[data-testid="top-error"] .ds-value')!
+      expect(value.textContent, 'the sentence with the code').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }))
+      expect(value.getAttribute('title'), 'the server full text').toBe('REAL_MODE_TICK_FAILED: tick failed at step 12')
+      // Counter-check: a line without a server text (the idle stop) keeps its own text as the title.
+      real.lastErrorLine = { kind: 'dict', key: 'runLine.idleStopped' }
+      real.lastError = t('runLine.idleStopped')
+      await nextTick()
+      expect(host.querySelector('[data-testid="top-error"] .ds-value')!.getAttribute('title')).toBe(t('runLine.idleStopped'))
+    } finally {
+      done()
+    }
+  })
+
   it('048 S2 (amendment 12): the whole of «Подробнее» - the visitor\'s, and the administrator\'s (the same plus the own run)', async () => {
     const contents = (host: HTMLElement) => {
       const list = (root: Element | null) => (root ? [...root.querySelectorAll<HTMLElement>(
@@ -6220,7 +6291,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         const closed = el.closest('details:not([open])')
         return !closed || (el.tagName === 'SUMMARY' && el.parentElement === closed)
       }).map((el) => el.dataset.testid ?? el.getAttribute('aria-label') ?? (el.textContent ?? '').replace(/\s+/g, ' ').trim())
-      const figures = [...host.querySelectorAll<HTMLElement>('[aria-label="System metrics"] [data-testid^="sbb-"]')].map((el) => el.dataset.testid)
+      const figures = [...host.querySelectorAll<HTMLElement>('[data-testid="system-metrics"] [data-testid^="sbb-"]')].map((el) => el.dataset.testid)
       return {
         top: list(host.querySelector('[data-testid="top-details-row"]')),
         figures,
@@ -6230,12 +6301,13 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     const VISITOR = {
       top: ['theme-select', 'language-select'],
       figures: ['sbb-available', 'sbb-trustlines', 'sbb-participants', 'sbb-utilization'],
-      bottom: ['equivalent-text', 'layout-select', 'Inspect graph'],
+      // 046 wave 1, full (2026-10-19): the controls carry test ids (their words are the dictionary's).
+      bottom: ['equivalent-text', 'layout-select', 'graph-navigator-summary'],
     }
     for (const [who, token, ownRun] of [
       ['a visitor (no token)', '', [] as string[]],
       ['a visitor (a participant JWT)', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl', [] as string[]],
-      ['the administrator (an admin token)', 'admin-token', ['scenario-select', 'Stop', 'Intensity percent', 'Apply', 'run-payments']],
+      ['the administrator (an admin token)', 'admin-token', ['scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', 'run-payments']],
     ] as const) {
       storedDetails(true)
       setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', token)
@@ -6248,7 +6320,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         // A stopped run with a reason: the reason is passive text for everyone (044); Start replaces Stop in the row.
         real.runStatus = { run_id: 'run-mock', scenario_id: 'sc1', state: 'stopped', stop_source: 'server', stop_reason: 'idle_no_subscribers' }
         await nextTick()
-        const stoppedRow = ownRun.length ? ['scenario-select', 'Start', 'Intensity percent', 'Apply', 'stop-reason', 'run-payments'] : ['stop-reason']
+        const stoppedRow = ownRun.length ? ['scenario-select', 'run-start', 'intensity-input', 'intensity-apply', 'stop-reason', 'run-payments'] : ['stop-reason']
         expect(contents(host).top, `${who}, a stopped run`).toEqual([...VISITOR.top, ...stoppedRow])
       } finally {
         done()
@@ -6298,9 +6370,13 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       const hints = first.host.querySelectorAll('[data-testid="onboarding-hint"]')
       expect(hints).toHaveLength(1)
-      expect(hints[0]!.textContent).toContain('Send Payment')
+      // 048 item 13 (a), 046 wave 1: the three actions in the words of the protocol (no longer "press Send Payment").
+      expect(hints[0]!.querySelector('[data-testid="onboarding-protocol"]')?.textContent).toBe(t('onboarding.protocol'))
+      expect(hints[0]!.textContent).not.toContain('Send Payment')
+      expect(hints[0]!.querySelector('.sar-onboarding-hint__text')!.textContent!.replace(/\s+/g, ' ').trim(), 'two sentences, a space between')
+        .toBe(`${t('onboarding.protocol')} ${t('onboarding.explore')}`)
       expect(hints[0]!.closest('.ds-ov-top'), 'it hangs under the top bar').not.toBeNull()
-      hints[0]!.querySelector<HTMLButtonElement>('button')!.click()
+      hints[0]!.querySelector<HTMLButtonElement>('[data-testid="onboarding-close"]')!.click()
       await nextTick()
       expect(first.host.querySelector('[data-testid="onboarding-hint"]')).toBeNull()
     } finally {
@@ -6319,13 +6395,13 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       getSimStorage().readOnboardingDismissed.mockImplementation(() => null)
     }
 
-    // The old Auto-Run address is the same screen: the hint names "Send Payment", which is on it (decision 2).
+    // The old Auto-Run address is the same screen: the hint names the three actions, which are on it (decision 2).
     const second = mount('/?mode=real')
     try {
       await nextTick()
       const hint = second.host.querySelector('[data-testid="onboarding-hint"]')
       expect(hint, 'shown on the old Auto-Run address too').not.toBeNull()
-      expect(hint!.textContent, 'the action it names is on this screen').toContain('Send Payment')
+      expect(hint!.querySelector('[data-testid="onboarding-protocol"]'), 'the actions it names are on this screen').not.toBeNull()
       expect(second.host.querySelector('[data-testid="actionbar-payment"]')).not.toBeNull()
       toggle(second.host).click()
       await nextTick()
@@ -6368,16 +6444,17 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       const actions = setup.realActions as Record<string, Mock>
       for (const fn of Object.values(actions)) fn.mockClear?.()
 
-      const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
+      // 046 wave 1, full (2026-10-19): by test id - the accessible name is the dictionary's, in the interface language.
+      const scenario = host.querySelector<HTMLSelectElement>('select[data-testid="scenario-select"]')!
       scenario.dispatchEvent(new Event('change', { bubbles: true }))
       expect(actions.setSelectedScenarioId).toHaveBeenCalledWith('')
 
-      const intensity = host.querySelector<HTMLInputElement>('input[aria-label="Intensity percent"]')!
+      const intensity = host.querySelector<HTMLInputElement>('input[data-testid="intensity-input"]')!
       intensity.value = '140'
       intensity.dispatchEvent(new Event('input', { bubbles: true }))
       expect(actions.setIntensityPercent, 'clamped to 0..100 on the way').toHaveBeenCalledWith(100)
 
-      const byText = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('.ds-ov-top button')].find((b) => (b.textContent ?? '').trim() === t)
+      const byId = (id: string) => host.querySelector<HTMLButtonElement>(`.ds-ov-top button[data-testid="${id}"]`)
       real.runId = 'run-1'
       real.runStatus = { run_id: 'run-1', state: 'running' }
       await nextTick()
@@ -6387,9 +6464,9 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(flow()?.getAttribute('aria-pressed'), 'the flow is on').toBe('true')
       flow()!.click()
       expect(actions.pause, 'the flow button on a living run reaches pause').toHaveBeenCalledTimes(1)
-      byText('Stop')!.click()
+      byId('run-stop')!.click()
       expect(actions.stop).toHaveBeenCalledTimes(1)
-      byText('Apply')!.click()
+      byId('intensity-apply')!.click()
       expect(actions.applyIntensity).toHaveBeenCalledTimes(1)
       real.runStatus = { run_id: 'run-1', state: 'paused' }
       await nextTick()
@@ -6401,12 +6478,12 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       real.selectedScenarioId = 'sc1'
       await nextTick()
       expect(flow(), 'no run: no flow button (Start is under Details)').toBeNull()
-      byText('Start')!.click()
+      byId('run-start')!.click()
       expect(actions.startRun).toHaveBeenCalledTimes(1)
 
       // 048 S2 (amendment 9): "Admin ▾" and its four bindings (runs, stop all, attach, stop one) are gone - nothing to walk.
 
-      const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+      const theme = host.querySelector<HTMLSelectElement>('select[data-testid="theme-select"]')!
       theme.value = 'hud'
       theme.dispatchEvent(new Event('change', { bubbles: true }))
       await nextTick()

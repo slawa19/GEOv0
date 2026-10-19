@@ -14,6 +14,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { t } from '../../src/i18n/t'
+import { expectNetworkState } from '../helpers/networkState.js'
 import { RING, boot, fxCounts, mockLiveRun, pushEvent, ringSnapshot, screenNodes, txUpdated, type LiveRunLog } from './stand.js'
 
 const STATE = '[data-testid="network-state"]'
@@ -35,7 +36,9 @@ test('(b) the first visit starts a live run by itself: intensity 30, not paused,
   const log = await firstVisit(page)
   await expect.poll(() => log.calls, { timeout: 15_000, message: 'a run is created without a click on Start' }).toContain('POST /runs')
   expect(log.createBodies[0], 'the create asks for the default intensity').toMatchObject({ intensity_percent: 30 })
-  await expect(page.locator(STATE), 'the state of the network reads as living').toContainText('живёт', { timeout: 15_000 })
+  // 046 wave 1, full (2026-10-19): the state by its attribute AND its word in the page's language (`expectNetworkState`,
+  // §15 Codex round: the attribute alone let "paused" pass under the running word).
+  await expectNetworkState(page, 'running', { timeout: 15_000, message: 'the state of the network reads as living' })
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 15_000 })
     .toBeGreaterThan(0)
@@ -47,41 +50,41 @@ test('(b) the first visit starts a live run by itself: intensity 30, not paused,
 
 test('(c) "Send Payment" pauses the run until "Поток": cancel does not resume it, the button does', async ({ page }) => {
   const log = await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   await expect(page.locator(FLOW), 'the flow button offers a pause while the run lives').toHaveAttribute('aria-pressed', 'true')
 
   await page.locator(SEND).click()
   await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
   await expect.poll(() => log.calls, { timeout: 5_000 }).toContain('POST /pause')
-  await expect(page.locator(STATE)).toContainText('на паузе')
+  await expectNetworkState(page, 'paused')
 
   // Cancel: the panel goes, the pause stays (decision 3 names only the button as the way back).
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeHidden()
-  await expect(page.locator(STATE)).toContainText('на паузе')
+  await expectNetworkState(page, 'paused')
   expect(log.calls, 'nothing resumed the run on cancel').not.toContain('POST /resume')
 
   await expect(page.locator(FLOW)).toHaveAttribute('aria-pressed', 'false')
   await page.locator(FLOW).click()
   await expect.poll(() => log.calls, { timeout: 5_000 }).toContain('POST /resume')
-  await expect(page.locator(STATE)).toContainText('живёт')
+  await expectNetworkState(page, 'running')
 })
 
 test('(c) choosing a participant in the living flow pauses it', async ({ page }) => {
   const log = await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   const nodes = await screenNodes(page)
   const at = nodes.get(RING[0]!)!
   await page.mouse.click(at.x, at.y)
   await expect.poll(() => log.calls, { timeout: 5_000, message: 'a click on a participant asks for a pause' }).toContain('POST /pause')
-  await expect(page.locator(STATE)).toContainText('на паузе')
+  await expectNetworkState(page, 'paused')
 })
 
 test('(c) a run somebody paused is attached and left paused: no create, no resume', async ({ page }) => {
   let log: LiveRunLog | null = null
   // A returning visitor: the stand seeds the stored run, which the backend says is paused.
   await boot(page, { snapshot: ringSnapshot(), clock: false, beforeLoad: async (p) => { log = await mockLiveRun(p, { initial: 'paused' }) } })
-  await expect(page.locator(STATE)).toContainText('на паузе')
+  await expectNetworkState(page, 'paused')
   // The opening is over: the stream is connected, and the product decides on a start BEFORE it connects (the decision
   // is taken when the scene is up; the stream follows the run's snapshot). A start or a resume would be in the log by now.
   await expect
@@ -138,7 +141,7 @@ test('(b) a start refused by the global limit of runs: a Russian line from the r
 test('B2: Send Payment opens its window in the right rail under the top bar; the action row does not shift; focus goes into the window', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   const xs = () => page.evaluate(() => ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']
     .map((id) => Math.round(document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().left)))
   const before = await xs()
@@ -164,12 +167,12 @@ test('B2: Send Payment opens its window in the right rail under the top bar; the
 
 test('fix-delta 1: the SAME participant clicked again after "Поток" pauses again', async ({ page }) => {
   const log = await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   const at = (await screenNodes(page)).get(RING[0]!)!
   await page.mouse.click(at.x, at.y)
   await expect.poll(() => log.calls.filter((c) => c === 'POST /pause').length, { timeout: 5_000 }).toBe(1)
   await page.locator(FLOW).click()
-  await expect(page.locator(STATE)).toContainText('живёт')
+  await expectNetworkState(page, 'running')
   await page.mouse.click(at.x, at.y)
   await expect.poll(() => log.calls.filter((c) => c === 'POST /pause').length, { timeout: 5_000, message: 'the second click on the same participant paused' }).toBe(2)
 })
@@ -177,7 +180,7 @@ test('fix-delta 1: the SAME participant clicked again after "Поток" pauses 
 test('fix-delta 2a: a deep link `?focus=` on a running stored run selects the participant and pauses nothing', async ({ page }) => {
   let log: LiveRunLog | null = null
   await boot(page, { snapshot: ringSnapshot(), clock: false, query: `&focus=${RING[1]!}`, beforeLoad: async (p) => { log = await mockLiveRun(p, { initial: 'running' }) } })
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   await expect.poll(() => page.evaluate(() => document.querySelectorAll('.node-label-inner').length), { message: 'precondition: the deep link selected a participant (its labels are shown)' }).toBeGreaterThan(0)
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 15_000 })
@@ -191,14 +194,14 @@ test('fix-delta 2b: a deep link `?focus=` with no run - the opening starts its r
     beforeLoad: async (p) => { log = await mockLiveRun(p) } })
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => log!.calls, { timeout: 15_000 }).toContain('POST /runs')
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   expect(log!.calls, 'not started paused').not.toContain('POST /pause')
 })
 
 test('fix-delta 3: a right-rail window stays under the top stack when "Подробнее" opens after it', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   await page.locator(SEND).click()
   const panel = page.locator('[data-testid="manual-payment-panel"]')
   await expect(panel).toBeVisible()
@@ -217,12 +220,12 @@ test('fix-delta 3: a right-rail window stays under the top stack when "Подр�
 // fires after a drag is suppressed, so the canvas click entry never runs for it).
 test('adversarial 1-A: dragging a participant in the living flow pauses it', async ({ page }) => {
   const log = await firstVisit(page)
-  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expectNetworkState(page, 'running', { timeout: 15_000 })
   const at = (await screenNodes(page)).get(RING[2]!)!
   await page.mouse.move(at.x, at.y)
   await page.mouse.down()
   for (let i = 1; i <= 8; i += 1) await page.mouse.move(at.x + i * 6, at.y + i * 4)
   await page.mouse.up()
   await expect.poll(() => log.calls, { timeout: 5_000, message: 'the drag asked for a pause' }).toContain('POST /pause')
-  await expect(page.locator(STATE)).toContainText('на паузе')
+  await expectNetworkState(page, 'paused')
 })

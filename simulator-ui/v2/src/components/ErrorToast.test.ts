@@ -127,7 +127,7 @@ describe('ErrorToast', () => {
       app.mount(host)
       await nextTick()
 
-      const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+      const btn = host.querySelector('button.ds-ov-toast__close') as HTMLButtonElement | null
       expect(btn).toBeTruthy()
 
       await vi.advanceTimersByTimeAsync(1000)

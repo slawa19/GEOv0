@@ -7,6 +7,7 @@ import { connectSse, type SseConnectOpts } from '../api/sse'
 import { createRun, getActiveRun, getRun, listArtifacts, stopRun } from '../api/simulatorApi'
 import type { ActiveRunResponse } from '../api/simulatorTypes'
 import { isUserFacingRunErrorCode, runErrorText } from '../utils/runErrorClassification'
+import { t } from '../i18n/t'
 
 function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -2194,10 +2195,11 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       expect(real.lastError).toBe(runErrorText(refused))
       expect(real.lastError).not.toContain(refused.message)
 
-      // anti-vacuum: another user-facing code still keeps CODE: message on the same path
+      // anti-vacuum: another user-facing code still keeps CODE: message on the same path. 046 wave 1, full (2026-10-19):
+      // on a run that goes on - a run ENDED by an error has its own sentence since (below).
       getRunMock.mockImplementation(async () => ({
         ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
-        state: 'error',
+        state: 'running',
         last_error: { code: 'INTERNAL_ERROR', message: 'boom', at: 't' },
       }))
       await h.refreshRunStatus()
@@ -2210,7 +2212,9 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' },
       }))
       await h.refreshRunStatus()
-      expect(real.lastError).toBe('REAL_MODE_TICK_FAILED: tick failed')
+      // 046 wave 1, full (2026-10-19; 048 S2 hand-over P2-2, 046 decision 3): the code and the way back, in the language of
+      // the interface - not the server's prose.
+      expect(real.lastError).toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
       // anti-vacuum: the same code on a run that is not stopped stays hidden
       getRunMock.mockImplementation(async () => ({
         ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),

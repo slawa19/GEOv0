@@ -7,14 +7,16 @@
  * NOT seen here: pixels, and what a browser computes for the swatch (`e2e/qa/data-colours.qa.ts`).
  */
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import Legend from './Legend.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import { drawNodeShape } from '../render/nodePainter'
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
-import { createVizMapping, LEGEND_HELP, type DataPalette, type VizMapping } from '../vizMapping'
+import { createVizMapping, type DataPalette, type VizMapping } from '../vizMapping'
+import { setUiLocale } from '../i18n/locale'
+import { t } from '../i18n/t'
 
 vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
@@ -53,11 +55,31 @@ const SCENE: GraphNode[] = [
 const entry = (host: HTMLElement, id: string) => host.querySelector<HTMLElement>(`[data-legend-role="${id}"]`)
 const swatch = (host: HTMLElement, id: string) => entry(host, id)!.querySelector<HTMLElement>('[data-legend-swatch]')!
 
+afterEach(() => {
+  setUiLocale('en')
+  window.localStorage.clear()
+})
+
+const rowsOf = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('[data-legend-role]')].map((el) => `${el.querySelector('[data-legend-swatch]')!.textContent}|${el.querySelector('.ds-legend__text')!.textContent}`)
+
 describe('Legend', () => {
+  // 046 wave 1, full (2026-10-19): the words are the dictionary's (`legend.*`), those of 048 §G - in English they changed
+  // with §G (was "Owes more", "Is owed more", "Even overall", "Balance unknown", "Frozen", "Hub", "Person", "Organisation").
   it('says each present feature in the fixed words and order, with the sign the canvas draws', () => {
     const { host, done } = mount(Legend, { nodes: SCENE, equivalent: 'UAH', palette: PALETTE })
-    const rows = [...host.querySelectorAll<HTMLElement>('[data-legend-role]')].map((el) => `${el.querySelector('[data-legend-swatch]')!.textContent}|${el.querySelector('.ds-legend__text')!.textContent}`)
-    expect(rows).toEqual(['−|Owes more', '+|Is owed more', '0|Even overall', '?|Balance unknown', '|Frozen', '|Hub', '|Person', '|Organisation'])
+    expect(rowsOf(host)).toEqual(['−|owes more', '+|is owed more', '0|even', '?|unknown', '|frozen', '|hub', '|person', '|organisation'])
+    done()
+  })
+
+  it('046 wave 1: in Russian the same entries and order in the words of 048 §G; a switch re-renders without a remount', async () => {
+    const { host, done } = mount(Legend, { nodes: SCENE, equivalent: 'UAH', palette: PALETTE })
+    setUiLocale('ru')
+    await nextTick()
+    expect(rowsOf(host)).toEqual([
+      '−|должен больше', '+|ему должны больше', '0|ровно', '?|неизвестно', '|заморожен', '|хаб', '|человек', '|организация',
+    ])
+    expect(host.querySelector('[data-testid="legend-title"]')!.textContent).toBe('Цвет участника — баланс · UAH')
+    expect(document.getElementById(host.querySelector('[data-testid="legend"]')!.getAttribute('aria-describedby')!)!.textContent).toBe(t('legend.help', undefined, 'ru'))
     done()
   })
 
@@ -65,18 +87,18 @@ describe('Legend', () => {
     const { host, done } = mount(Legend, { nodes: SCENE, equivalent: 'HOUR', palette: PALETTE })
     const legend = host.querySelector<HTMLElement>('[data-testid="legend"]')!
     const title = host.querySelector<HTMLElement>('[data-testid="legend-title"]')!
-    expect(title.textContent).toBe('Overall balance · HOUR')
+    expect(title.textContent).toBe('Node colour — balance · HOUR')
     expect(legend.getAttribute('role')).toBe('group')
     expect(legend.getAttribute('aria-labelledby')).toBe(title.id)
     const help = document.getElementById(legend.getAttribute('aria-describedby')!)!
     expect(help.textContent).toBe('Net position: what others owe minus what this participant owes.')
-    expect(LEGEND_HELP).toBe(help.textContent)
+    expect(title.getAttribute('title')).toBe(help.textContent)
     done()
   })
 
   it('without an equivalent the title names none (it does not borrow one)', () => {
     const { host, done } = mount(Legend, { nodes: SCENE, equivalent: '', palette: PALETTE })
-    expect(host.querySelector('[data-testid="legend-title"]')!.textContent).toBe('Overall balance')
+    expect(host.querySelector('[data-testid="legend-title"]')!.textContent).toBe('Node colour — balance')
     done()
   })
 
@@ -175,7 +197,9 @@ describe('the canvas, the legend and the node card agree', () => {
     expect(new Set(SCENE.map(canvasFill)).size).toBe(4)
   })
 
-  it('the card says the role in the legend\'s words; a freeze and a hub are added, the role is not replaced', () => {
+  // 046 wave 1 (2026-10-19): the card keeps its own English words (`ROLE_TEXT`) until wave 3 moves it; the legend's are
+  // the dictionary's since. What is held here is the card: the role first, a freeze and a hub added, never replacing it.
+  it('the card says the role in its words; a freeze and a hub are added, the role is not replaced', () => {
     const words = (node: GraphNode) => {
       const c = mount(NodeCardOverlay, { node, edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined })
       const el = c.host.querySelector<HTMLElement>('[data-testid="node-card-role"]')!

@@ -15,7 +15,9 @@
  *      text ONLY through a placeholder (`{unit}`, `{eq}`). Advisor's choice 2026-10-18, between "allow-list the codes"
  *      and "placeholders only": a literal `UAH` in a dictionary is wrong the moment the equivalent is `EUR`, and an
  *      allow-listed code would let exactly that through rule 3; a placeholder is also what spec 046 decision 1 asks.
- *      The list is the codes of `seeds/` (and `USD`); a new equivalent code is added to it, not to `RU_LATIN_ALLOWED`.
+ *      The list is the codes of `seeds/` (and `USD`); a new equivalent code is added to it, not to `RU_LATIN_ALLOWED`;
+ *   7. no empty text (046 wave 1, full, 2026-10-19): a leaf that is empty or only spaces would show nothing where the
+ *      interface promised a word - in either language, and in every form of a plural.
  *
  * What it does NOT see: whether a translation is right, reads well or fits its control (ru is 20-35 % longer: the
  * width probes of 045 / `top-bar-long.qa.ts` decide that); a literal left in a component instead of a key (waves 1-3
@@ -71,6 +73,7 @@ function dictionaryProblems(enTree: unknown, ruTree: unknown, allowed: ReadonlyS
   for (const key of r.keys()) if (!e.has(key)) problems.push(`ru has ${key}, en does not`)
   for (const [lang, tree] of [['en', e], ['ru', r]] as const) {
     for (const [key, leaf] of tree) {
+      for (const text of leaf.texts) if (text.trim() === '') problems.push(`${lang} ${key}: empty text`)
       for (const text of leaf.texts) {
         const codes = (withoutPlaceholders(text).match(LATIN_WORD) ?? []).filter((w) => EQUIVALENT_CODES.has(w.toUpperCase()))
         if (codes.length > 0) problems.push(`${lang} ${key}: equivalent code ${JSON.stringify(codes)} as a literal in "${text}" - use a placeholder`)
@@ -128,6 +131,32 @@ describe('046 policy guard - every rule fails on a mutated copy', () => {
     const r = clone(ru) as { locale: Record<string, string> }
     delete r.locale.switcherAria
     expect(dictionaryProblems(en, r)).toEqual(['ru lacks locale.switcherAria'])
+  })
+
+  it('a key removed from en (the reference): ru then carries a key en does not', () => {
+    const e = clone(en) as { locale: Record<string, string> }
+    delete e.locale.switcherAria
+    expect(dictionaryProblems(e, ru)).toEqual(['ru has locale.switcherAria, en does not'])
+  })
+
+  it('046 wave 1, full: a key of the first screen removed from either file is named', () => {
+    const r = clone(ru) as { actions: Record<string, string> }
+    delete r.actions.noRun
+    expect(dictionaryProblems(en, r)).toEqual(['ru lacks actions.noRun'])
+    const e = clone(en) as { topBar: { state: Record<string, string> } }
+    delete e.topBar.state.running
+    expect(dictionaryProblems(e, ru)).toEqual(['ru has topBar.state.running, en does not'])
+  })
+
+  it('an empty text, in either language and in a form of a plural', () => {
+    const r = clone(ru) as { onboarding: Record<string, string> }
+    r.onboarding.protocol = '  '
+    expect(dictionaryProblems(en, r)).toEqual(['ru onboarding.protocol: empty text'])
+    const e = clone(en) as unknown as { topBar: Record<string, string> }
+    e.topBar.details = ''
+    expect(dictionaryProblems(e, ru)).toEqual(['en topBar.details: empty text'])
+    expect(dictionaryProblems({ a: plural({ one: '{count} step', other: '' }) }, { a: plural({ one: '{count} шаг', few: '{count} шага', many: '{count} шагов', other: '{count} шага' }) }))
+      .toEqual(['en a: empty text'])
   })
 
   it('a key only ru has', () => {

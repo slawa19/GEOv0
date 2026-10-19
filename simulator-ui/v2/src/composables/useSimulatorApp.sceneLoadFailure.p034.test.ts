@@ -20,6 +20,7 @@ import { createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listS
 import { connectSse } from '../api/sse'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
+import { t } from '../i18n/t'
 
 vi.mock('../api/simulatorApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulatorApi')>()
@@ -373,7 +374,8 @@ describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
     stopped = true
     await app.admin.attachRun('R')
     await settle()
-    expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe('REAL_MODE_TICK_FAILED: tick failed')
+    // 046 wave 1, full (2026-10-19): the line of a run ended by an error is the interface's sentence with the code.
+    expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
 
     vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
     await app.realActions.refreshSnapshot()
@@ -383,7 +385,7 @@ describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
     await app.realActions.refreshSnapshot()
     await settle()
 
-    expect(app.real.lastError, 'the error of the run was lost with the scene error').toBe('REAL_MODE_TICK_FAILED: tick failed')
+    expect(app.real.lastError, 'the error of the run was lost with the scene error').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
   })
 })
 

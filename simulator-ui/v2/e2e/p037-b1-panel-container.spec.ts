@@ -126,7 +126,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
       await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
       // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
-      await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
+      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
       steps.push(await measure(page, 'result', ['[data-testid="mp-result-another"]', '[data-testid="mp-result-close"]']))
 
       const report = { viewport: vp, steps: steps.map((s) => ({ step: s.step, shell: s.shell, body: s.body, problems: problems(s) })), surfaces, keyboard }
@@ -159,7 +159,7 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-result-route-3"]')).toBeVisible()
-      await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
+      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
 
       // Scroll the body to its end and look at the LAST step of the LAST route: it must lie wholly above the sticky button row
       // (not under it) and wholly inside the visible body. Measured before any click.
@@ -239,7 +239,7 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
-      await expect(page.getByLabel('Error notification')).toBeHidden({ timeout: 15_000 })
+      await expect(page.getByTestId('error-toast')).toBeHidden({ timeout: 15_000 })
 
       const banner = await measure(page, 'unresolved', ['[data-testid="mp-retry"]', '[data-testid="mp-discard"]', '[data-testid="manual-payment-cancel"]'])
       await c.press('Discard', '[data-testid="mp-discard"]')

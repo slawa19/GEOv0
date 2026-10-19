@@ -51,9 +51,11 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
  * `TopBar.admin.p048.test.ts`); "Refresh" of the snapshot is gone (its function stays the recovery pipeline's).
  */
 describe('BottomBar — the visitor, the developer (048 S1)', () => {
+  // 046 wave 1, full (2026-10-19): a control by its test id first - the visitor's names are the dictionary's (the
+  // developer's controls have test ids too).
   const controls = (host: HTMLElement) =>
     Array.from(host.querySelectorAll<HTMLElement>('[data-testid="bottom-details-row"] select, [data-testid="bottom-details-row"] button'))
-      .map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '')
+      .map((el) => el.dataset.testid ?? el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '')
 
   it('reproducer (б): no Scene select - offline or on the server, with or without ?debug=1', async () => {
     for (const apiMode of ['fixtures', 'real'] as const) {
@@ -61,7 +63,7 @@ describe('BottomBar — the visitor, the developer (048 S1)', () => {
         const { app, host } = await mountBottomBar({ propOverrides: { apiMode, debug, setSource: vi.fn() } })
         await nextTick()
         // Counter-check: the row is rendered and its selects are found by the same query.
-        expect(host.querySelector('[data-testid="bottom-details-row"] select[aria-label="Layout"]'), `${apiMode}/${debug}: the row is there`).not.toBeNull()
+        expect(host.querySelector('[data-testid="bottom-details-row"] select[data-testid="layout-select"]'), `${apiMode}/${debug}: the row is there`).not.toBeNull()
         expect(host.querySelector('[aria-label="Scene"]'), `${apiMode}/${debug}: no Scene`).toBeNull()
         app.unmount()
         host.remove()
@@ -74,7 +76,7 @@ describe('BottomBar — the visitor, the developer (048 S1)', () => {
   it('a visitor: EQ, Layout - no Labels, no source, no quality, no Refresh, Analytics or Artifacts; ?debug=1 adds the source and the quality', async () => {
     const visitor = await mountBottomBar({ propOverrides: { setSource: vi.fn() } })
     await nextTick()
-    expect(controls(visitor.host)).toEqual(['Equivalent', 'Layout'])
+    expect(controls(visitor.host)).toEqual(['equivalent-select', 'layout-select'])
     expect(visitor.host.querySelector('[data-testid="labels-select"], [aria-label="Labels"]'), 'no Labels select').toBeNull()
     expect(visitor.host.querySelector('details'), 'no menu in the bar').toBeNull()
     visitor.app.unmount()
@@ -82,7 +84,7 @@ describe('BottomBar — the visitor, the developer (048 S1)', () => {
 
     const developer = await mountBottomBar({ propOverrides: { setSource: vi.fn(), debug: true } })
     await nextTick()
-    expect(controls(developer.host)).toEqual(['Equivalent', 'Layout', 'Источник', 'Quality'])
+    expect(controls(developer.host)).toEqual(['equivalent-select', 'layout-select', 'source-select', 'quality-select'])
     expect(developer.host.querySelector('[data-testid="labels-select"], [aria-label="Labels"]'), 'no Labels select with ?debug=1 either').toBeNull()
     expect(developer.host.querySelector('[data-testid="source-select"]')).not.toBeNull()
     expect(developer.host.querySelector('[data-testid="quality-select"]')).not.toBeNull()

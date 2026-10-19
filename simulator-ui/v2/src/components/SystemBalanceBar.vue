@@ -2,6 +2,7 @@
 import { computed, unref, type ComputedRef } from 'vue'
 
 import type { SystemBalance } from '../composables/useSystemBalance'
+import { useUiLocale } from '../composables/useUiLocale'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { formatMoney } from '../utils/money'
 import HudBar from './common/HudBar.vue'
@@ -22,6 +23,7 @@ type Props = {
 }
 
 const props = defineProps<Props>()
+const { t } = useUiLocale()
 
 const shown = computed<'full' | 'debt' | 'metrics'>(() => props.variant ?? (props.compact ? 'debt' : 'full'))
 const showDebt = computed(() => shown.value !== 'metrics')
@@ -44,32 +46,32 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
   <div
     class="system-balance-bar"
     :class="{ 'system-balance-bar--compact': shown === 'debt' }"
-    :aria-label="shown === 'metrics' ? 'System metrics' : 'System balance'"
+    :aria-label="shown === 'metrics' ? t('systemBalance.metricsAria') : t('systemBalance.balanceAria')"
     :data-testid="shown === 'metrics' ? 'system-metrics' : 'system-balance'"
   >
     <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
       <div v-if="showDebt" class="ds-panel ds-ov-metric" data-testid="sbb-total-debt">
-        <span class="ds-label">Общий долг</span>
+        <span class="ds-label">{{ t('systemBalance.totalDebt') }}</span>
         <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available">
-        <span class="ds-label">Available Capacity</span>
+        <span class="ds-label">{{ t('systemBalance.available') }}</span>
         <span class="ds-value ds-mono">{{ money(b.totalAvailable) }} {{ unit }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-trustlines">
-        <span class="ds-label">Trustlines</span>
+        <span class="ds-label">{{ t('systemBalance.trustlines') }}</span>
         <span class="ds-value ds-mono">{{ b.activeTrustlines }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-participants">
-        <span class="ds-label">Participants</span>
+        <span class="ds-label">{{ t('systemBalance.participants') }}</span>
         <span class="ds-value ds-mono">{{ b.activeParticipants }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util" data-testid="sbb-utilization">
-        <span class="ds-label">Utilization</span>
+        <span class="ds-label">{{ t('systemBalance.utilization') }}</span>
         <span class="ds-value ds-mono">{{ utilPct }}%</span>
         <div class="ds-progress__track sbb-track">
           <div class="ds-progress__bar" :style="{ width: utilPct + '%' }" />

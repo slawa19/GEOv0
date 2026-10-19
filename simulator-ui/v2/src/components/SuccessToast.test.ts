@@ -110,7 +110,7 @@ describe('SuccessToast', () => {
     app.mount(host)
     await nextTick()
 
-    const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+    const btn = host.querySelector('button.ds-ov-toast__close') as HTMLButtonElement | null
     expect(btn).toBeTruthy()
     btn?.click()
     await nextTick()
@@ -173,7 +173,7 @@ describe('SuccessToast', () => {
       app.mount(host)
       await nextTick()
 
-      const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+      const btn = host.querySelector('button.ds-ov-toast__close') as HTMLButtonElement | null
       expect(btn).toBeTruthy()
 
       // Dismiss early.

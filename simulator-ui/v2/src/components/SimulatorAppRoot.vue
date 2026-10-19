@@ -36,12 +36,15 @@ import {
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { useUiTheme } from '../composables/useUiTheme'
+ import { useUiLocale } from '../composables/useUiLocale'
  import { toLower } from '../utils/stringHelpers'
  import { canonicalEquivalent } from '../config/equivalents'
  import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
+// 046 wave 1: the texts the root draws itself (the onboarding hint, the scene's loading and error overlay).
+const { t } = useUiLocale()
 const reducedMotion = useReducedMotionPreference()
 
 // 039 B3: which theme is shown, and what a switch writes back - `useUiTheme` (URL, stored choice, default).
@@ -101,7 +104,7 @@ import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
  import { keyEdge } from '../utils/edgeKey'
- import { startRetryOffered } from '../utils/runErrorClassification'
+import { runErrorLineTitle, startRetryOffered } from '../utils/runErrorClassification'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
  import type { WindowInstance } from '../composables/windowManager/types'
  import { isInteractPanelWindow, isNodeCardWindow, isEdgeDetailWindow } from '../composables/windowManager/types'
@@ -600,6 +603,7 @@ watch(
    runStatus: computed(() => real.runStatus),
    sseState: computed(() => real.sseState),
    lastError: computed(() => real.lastError),
+   lastErrorTitle: computed(() => runErrorLineTitle(real.lastErrorLine)),
    startRetryable: computed(() => startRetryOffered(real.lastErrorLine, real.retryableStartLine)),
 
    runStats: computed(() => real.runStats),
@@ -739,7 +743,8 @@ function getActionBarAnchor(): Point | null {
   // IMPORTANT: WM anchors must be in host-relative coordinates. The ActionBar and the top stack are measured for the
   // TOP of the window (under every row of the stack); its side is the right rail (043 S2, below).
   const hostRect = host.getBoundingClientRect()
-  const actionBarContainer = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
+  // 046 wave 1: found by its test id, not by its accessible name (which is in the language of the interface).
+  const actionBarContainer = host.querySelector('[data-testid="action-bar"]') as HTMLElement | null
   if (!actionBarContainer) {
     // Fallback: previous behavior (top-right under the HUD stack).
     const y = readOverlayGeometryPx(host).hudStackHeightPx
@@ -1227,11 +1232,17 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       <template #hint>
         <div v-if="showOnboardingHint" class="ds-panel sar-onboarding-hint" data-testid="onboarding-hint">
           <span class="sar-onboarding-hint__icon" aria-hidden="true">💡</span>
+          <!-- 048 item 13 (a), 046 wave 1: the three actions in the words of the protocol (live source), then what to look at. -->
           <span class="sar-onboarding-hint__text">
-            Линии — доверие между участниками. Выберите участника и наведите на его линию: кто кому доверяет и кто кому должен.
-            <template v-if="onboardingCanAct"> Нажмите <b>Send Payment</b>, чтобы попробовать самому.</template>
+            <template v-if="onboardingCanAct"><span data-testid="onboarding-protocol">{{ t('onboarding.protocol') }}</span>{{ ' ' }}</template>{{ t('onboarding.explore') }}
           </span>
-          <button type="button" class="ds-btn ds-btn--ghost ds-btn--sm sar-onboarding-hint__close" aria-label="Close hint" @click="dismissOnboarding">✕</button>
+          <button
+            type="button"
+            class="ds-btn ds-btn--ghost ds-btn--sm sar-onboarding-hint__close"
+            :aria-label="t('onboarding.close')"
+            data-testid="onboarding-close"
+            @click="dismissOnboarding"
+          >✕</button>
         </div>
       </template>
     </TopBar>
@@ -1245,7 +1256,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       tag="div"
       class="wm-layer"
       data-density="compact"
-      aria-label="Window layer"
+      :aria-label="t('windowShell.layer')"
       :css="!isTestMode"
     >
       <!-- Frameless: WindowShell renders no close button; each window closes from its own controls (×, Cancel, Close). -->
@@ -1448,12 +1459,12 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       aria-atomic="true"
     >
       <div class="ds-ov-message">
-        <div class="ds-ov-message__title">Loading…</div>
+        <div class="ds-ov-message__title">{{ t('scene.loading') }}</div>
       </div>
     </div>
     <div v-else-if="state.error" class="ds-ov-inset" role="alert" aria-atomic="true">
       <div class="ds-ov-message">
-        <div class="ds-ov-message__title">Error</div>
+        <div class="ds-ov-message__title">{{ t('scene.error') }}</div>
         <div class="ds-ov-message__text">{{ state.error }}</div>
       </div>
     </div>

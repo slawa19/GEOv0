@@ -17,8 +17,10 @@
  */
 import { computed } from 'vue'
 
+import { useUiLocale } from '../composables/useUiLocale'
+import type { MessageKey } from '../i18n/t'
 import type { GraphNode } from '../types'
-import { LEGEND_HELP, LEGEND_TITLE, LEGEND_VOCABULARY, legendEntriesFor, type DataPalette, type LegendEntryId } from '../vizMapping'
+import { LEGEND_VOCABULARY, legendEntriesFor, type DataPalette, type LegendEntryId } from '../vizMapping'
 
 // The file is `Legend.vue` (the name spec 039 gives it); the component's own name is multi-word, as the lint policy asks.
 defineOptions({ name: 'GraphLegend' })
@@ -31,6 +33,8 @@ const props = defineProps<{
   /** The resolved data colours - the object the canvas paints with. */
   palette: DataPalette
 }>()
+
+const { t } = useUiLocale()
 
 type Swatch = { cls: string; sign: string; color: string | null }
 
@@ -47,10 +51,16 @@ const SWATCH: Record<LegendEntryId, (p: DataPalette) => Swatch> = {
 
 const entries = computed(() => {
   const present = new Set(legendEntriesFor(props.nodes ?? []))
-  return LEGEND_VOCABULARY.filter((e) => present.has(e.id)).map((e) => ({ ...e, swatch: SWATCH[e.id](props.palette) }))
+  return LEGEND_VOCABULARY.filter((e) => present.has(e.id)).map((e) => ({
+    ...e,
+    text: t(`legend.entry.${e.id}` as MessageKey),
+    swatch: SWATCH[e.id](props.palette),
+  }))
 })
 
-const title = computed(() => (props.equivalent ? `${LEGEND_TITLE} · ${props.equivalent}` : LEGEND_TITLE))
+// 046 wave 1: the title names the equivalent through a placeholder of one sentence of the dictionary.
+const title = computed(() => (props.equivalent ? t('legend.titleWithEquivalent', { eq: props.equivalent }) : t('legend.title')))
+const help = computed(() => t('legend.help'))
 
 function swatchStyle(s: Swatch): Record<string, string> {
   if (!s.color) return {}
@@ -68,8 +78,8 @@ function swatchStyle(s: Swatch): Record<string, string> {
     aria-labelledby="ds-legend-title"
     aria-describedby="ds-legend-help"
   >
-    <span id="ds-legend-title" class="ds-legend__title" data-testid="legend-title" :title="LEGEND_HELP">{{ title }}</span>
-    <span id="ds-legend-help" class="ds-legend__help">{{ LEGEND_HELP }}</span>
+    <span id="ds-legend-title" class="ds-legend__title" data-testid="legend-title" :title="help">{{ title }}</span>
+    <span id="ds-legend-help" class="ds-legend__help">{{ help }}</span>
     <ul class="ds-legend__list">
       <li v-for="e in entries" :key="e.id" class="ds-legend__entry" :data-legend-role="e.id">
         <span class="ds-data-swatch" :class="e.swatch.cls" :style="swatchStyle(e.swatch)" data-legend-swatch aria-hidden="true">{{ e.swatch.sign }}<svg

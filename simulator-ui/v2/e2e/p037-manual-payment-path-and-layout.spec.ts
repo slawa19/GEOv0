@@ -34,7 +34,7 @@ async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>)
   await c.type('Amount', '#mp-amount', '1.00')
   await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
 
-  await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+  await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
   expect(bodies, 'precondition: the mocked payment-real was reached exactly once').toHaveLength(1)
   return { c, loads }
 }
@@ -237,7 +237,7 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
     // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
-    await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
     measurements.push(await measure(page, 'result'))
 
     const perPhase = measurements.map((m) => ({ phase: m.phase, scrollWidth: m.scrollWidth, container: m.container,
@@ -266,7 +266,7 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
     // The application's own error toast shows the same sentence for a few seconds, over the lower part of a phone screen.
-    await expect(page.getByLabel('Error notification')).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByTestId('error-toast')).toBeHidden({ timeout: 15_000 })
 
     const banner = await measure(page, 'unresolved-banner')
     await c.press('Discard', '[data-testid="mp-discard"]')

@@ -95,11 +95,10 @@ describe('legendEntriesFor - only what the snapshot contains, in the fixed order
     expect(legendEntriesFor([])).toEqual([])
   })
 
+  // 046 wave 1 (2026-10-19): the words of an entry are the dictionary's (`legend.entry.<id>`, `Legend.test.ts`); the
+  // vocabulary is its ids and their order.
   it('the vocabulary and its order are fixed', () => {
-    expect(LEGEND_VOCABULARY.map((e) => `${e.id}: ${e.text}`)).toEqual([
-      'debtor: Owes more', 'creditor: Is owed more', 'neutral: Even overall', 'unknown: Balance unknown',
-      'frozen: Frozen', 'hub: Hub', 'person: Person', 'organisation: Organisation',
-    ])
+    expect(LEGEND_VOCABULARY.map((e) => e.id)).toEqual(['debtor', 'creditor', 'neutral', 'unknown', 'frozen', 'hub', 'person', 'organisation'])
   })
 
   it('one entry per feature that is present, whatever the order of the nodes', () => {

@@ -40,11 +40,12 @@ async function themeOptions(): Promise<Array<{ value: string; text: string }>> {
   const app = createApp({ setup() { provideTopBarContext(context()); return () => h(TopBar, { detailsOpen: true }) } })
   app.mount(host)
   await nextTick()
-  const select = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')
+  // 046 wave 1, full (2026-10-19): by test id (the accessible name is the dictionary's).
+  const select = host.querySelector<HTMLSelectElement>('select[data-testid="theme-select"]')
   const out = select ? [...select.querySelectorAll('option')].map((o) => ({ value: o.value, text: (o.textContent ?? '').trim() })) : null
   app.unmount()
   host.remove()
-  if (!out) throw new Error('039 R4: no theme switcher (select[aria-label="UI theme"]) in TopBar - the test has nothing to judge')
+  if (!out) throw new Error('039 R4: no theme switcher (select[data-testid="theme-select"]) in TopBar - the test has nothing to judge')
   return out
 }
 

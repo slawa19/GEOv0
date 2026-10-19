@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, unref, watch, type Ref } from 'vue'
 
+import { useUiLocale } from '../composables/useUiLocale'
 import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 
 const props = defineProps<{
@@ -24,6 +25,8 @@ const effectiveDismissMs = computed(() => {
 const visible = ref(false)
 let timerId: ReturnType<typeof setTimeout> | null = null
 const successToastSurface = getOverlaySurfaceDescriptor('success-toast')
+// 046 wave 1: the catalogue declares the name; its words are the dictionary's (as `RealMetricsPanel.vue` does).
+const { t } = useUiLocale()
 
 function clearTimer() {
   if (timerId !== null) {
@@ -64,14 +67,15 @@ onUnmounted(() => {
       class="success-toast ds-alert ds-alert--ok ds-ov-surface ds-ov-toast ds-ov-toast--success"
       :role="successToastSurface.a11y?.role"
       :aria-live="successToastSurface.a11y?.ariaLive"
-      :aria-label="successToastSurface.a11y?.ariaLabel"
+      :aria-label="successToastSurface.a11y?.ariaLabel ? t('toast.successAria') : undefined"
+      data-testid="success-toast"
     >
       <span class="success-toast__icon ds-ov-toast__icon" aria-hidden="true">✓</span>
       <span class="success-toast__text ds-ov-toast__text">{{ messageText }}</span>
       <button
         class="success-toast__close ds-ov-toast__close ds-btn ds-btn--ghost ds-btn--icon"
         type="button"
-        aria-label="Dismiss"
+        :aria-label="t('toast.dismiss')"
         @click="dismiss"
       >
         ✕

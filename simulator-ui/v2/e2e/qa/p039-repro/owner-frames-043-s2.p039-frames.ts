@@ -23,6 +23,8 @@ import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
+import { expectNetworkState } from '../../helpers/networkState.js'
+
 import {
   OPEN_ROUTE, fixtureSnapshot100, installRafCounter, installSseShim, mockBackend, mockLiveRun, sseFrame, txUpdated, waitLoopAsleep,
 } from '../stand.js'
@@ -86,13 +88,13 @@ for (const theme of THEMES) {
     // The window's opening transition is over: a frame of a half-transparent window says nothing about its place.
     await expect.poll(() => page.locator('[data-testid="manual-payment-panel"]').evaluate((el) => getComputedStyle(el.closest('.ws-shell') ?? el).opacity)).toBe('1')
     await expect.poll(() => page.locator('[data-testid="manual-payment-panel"]').evaluate((el) => (el.closest('.ws-shell') ?? el).getAnimations().length)).toBe(0)
-    await expect(page.locator('[data-testid="network-state"]'), 'the state the frame is named for').toContainText(/на паузе|живёт/)
+    await expectNetworkState(page, ['paused', 'running'], { message: 'the state the frame is named for' })
     await page.screenshot({ path: join(dir, `${theme}-3-manual-action.png`) })
 
     const flow = page.locator('[data-testid="flow-toggle"]')
     if ((await flow.count()) > 0) {
       await flow.click()
-      await expect(page.locator('[data-testid="network-state"]')).toContainText('живёт')
+      await expectNetworkState(page, 'running')
     }
     await page.screenshot({ path: join(dir, `${theme}-4-flow-resumed.png`) })
   })
