@@ -146,7 +146,7 @@ Production-like запуск использует только base Compose, н�
 
 Ключевые группы:
 
-- Scenarios: `GET/POST /api/v1/simulator/scenarios`
+- Scenarios: `GET/POST /api/v1/simulator/scenarios` — после загрузки сценария перезагрузить страницу Simulator UI: каталог сценариев читается при загрузке страницы, кнопки его обновления в интерфейсе нет (слово владельца 2026-10-19, 048 S1).
 - Runs: `POST /api/v1/simulator/runs` и `GET /api/v1/simulator/runs/{run_id}`
 - Stream: `GET /api/v1/simulator/runs/{run_id}/events` (SSE)
 - Snapshots/Metrics/Bottlenecks/Artifacts: соответствующие endpoints `.../snapshot`, `.../metrics`, `.../bottlenecks`, `.../artifacts`

@@ -127,6 +127,8 @@ $body = @{ scenario = $scenarioObj } | ConvertTo-Json -Depth 100
 Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/scenarios" -Headers $Headers -ContentType 'application/json' -Body $body
 ```
 
+После загрузки сценария — перезагрузить страницу Simulator UI: каталог читается при загрузке страницы (кнопки обновления каталога в интерфейсе нет, 048 S1).
+
 ### 2.3 Get scenario summary
 
 ```powershell
