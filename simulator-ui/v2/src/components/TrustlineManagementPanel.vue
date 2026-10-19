@@ -17,6 +17,7 @@ import { amountInputHint, isOverLimit, parseTypedAmount, renderOrDash } from '..
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
+  trustlineFiguresNoticeRef,
   trustlineNoRowNotice,
   type TrustlineFiguresSource,
 } from '../composables/interact/trustlinesSourceState'
@@ -94,6 +95,8 @@ const noExistingLineFigures = computed(() => !canActOnTrustlineFigures(props.fig
 
 /** Источник не ответил вовсе — про это своё сообщение (`no-row` сюда НЕ попадает). */
 const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource, uiLocaleRef.value))
+// 048 S3 (§15 Codex P2, AGENTS.md section 12): the request id of a failed trust-lines read - its own line, not glued in.
+const sourceUnavailableRef = computed<string | null>(() => trustlineFiguresNoticeRef(props.figuresSource))
 
 /**
  * Источник ответил, и линии у пары нет — про это ОТДЕЛЬНОЕ сообщение (`tl-no-trustline` в шаблоне),
@@ -520,11 +523,13 @@ defineExpose({
 
       <div
         v-if="sourceUnavailableText"
-        class="ds-alert ds-alert--warn ds-mono"
+        class="ds-alert ds-alert--warn ds-mono tl-source-unavailable"
         data-testid="tl-source-unavailable"
         role="status"
+        :data-request-id="sourceUnavailableRef || undefined"
       >
-        {{ sourceUnavailableText }}
+        <span>{{ sourceUnavailableText }}</span>
+        <span v-if="sourceUnavailableRef" class="tl-source-ref" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }, uiLocaleRef) }}</span>
       </div>
 
       <!--
@@ -628,6 +633,16 @@ defineExpose({
   .tl-stats {
     grid-template-columns: 1fr;
   }
+}
+
+/* 048 S3: the notice and, under it, the request id of the failed read. */
+.tl-source-unavailable {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.tl-source-ref {
+  font-size: 0.85em;
 }
 </style>
 

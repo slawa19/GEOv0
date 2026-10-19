@@ -1,7 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
-import { failureRunErrorLine, renderRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
+import { failureRunErrorLine, renderRunErrorLine, runErrorLineLog, runErrorLineRef, type RunErrorLine } from '../utils/runErrorClassification'
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
@@ -241,6 +241,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       const line = failureRunErrorLine(error)
       deps.state.errorLine = line
       deps.state.error = renderRunErrorLine(line)
+      // 048 S3 (§15 Codex P3): the technical text goes to ONE console line per failed load, as the run's line does
+      // (`writeRunErrorLine`) - the overlay draws the sentence, the title only the identifiers.
+      const log = runErrorLineLog(line)
+      const ref = runErrorLineRef(line)
+      if (log || ref) console.warn('[scene] load failed:', ...(log ? [log] : []), ...(ref ? [`(request id: ${ref})`] : []))
       if (input.rethrow) throw error
       return false
     } finally {

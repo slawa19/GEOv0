@@ -153,13 +153,16 @@ export async function emptyCanvasPoint(page: Page): Promise<Pt> {
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
-// 048 S3: the refused answer went with `toast-error` (its only reader).
-async function routeClearing(page: Page, _kind: 'cycles'): Promise<void> {
+async function routeClearing(page: Page, kind: 'cycles' | 'refused'): Promise<void> {
   await page.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, (r) =>
-    json(r, {
-      ok: true, equivalent: EQ, cleared_cycles: 1, total_cleared_amount: '7.00', client_action_id: null,
-      cycles: [{ cleared_amount: '7.00', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }],
-    }))
+    kind === 'refused'
+      // 048 S3 (§15 Codex, STAND-RECIPES WEAK): read by `clearing-refused` - the window's own error block, with its request id.
+      ? r.fulfill({ status: 409, contentType: 'application/json', headers: { 'X-Request-ID': '6d1f0c2a-qa-stand-clearing-refused' },
+          body: JSON.stringify({ code: 'CLEARING_REFUSED', message: 'refused', details: { reason: 'occurrence_amount_not_in_step' } }) })
+      : json(r, {
+          ok: true, equivalent: EQ, cleared_cycles: 1, total_cleared_amount: '7.00', client_action_id: null,
+          cycles: [{ cleared_amount: '7.00', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }],
+        }))
 }
 
 async function routeAnalytics(page: Page): Promise<void> {
@@ -283,8 +286,20 @@ export const MATRIX: Entry[] = [
   { id: 'toast-success', catalogue: 'success-toast', clock: true,
     gesture: 'run a clearing that clears a cycle ("Run Clearing", "Confirm")', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.ds-ov-toast--success', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
-  // 048 S3 (decision 3): `toast-error` is gone with its surface - a window's failure is the window's own block (the
-  // clearing window is in the matrix as an interact window), and the error toast that duplicated it was removed.
+  // 048 S3 (decision 3): `toast-error` is gone with its surface - a window's failure is the window's own block, and the
+  // error toast that duplicated it was removed. §15 Codex (STAND-RECIPES WEAK): the in-window refusal is a surface of its
+  // own then - the clearing window holding its error block (`WindowErrorBlock`, role="alert", the request id line), so
+  // geometry and axe run over it. Only `inside` is declared: Escape and an outside click on a HELD result are the
+  // clearing window's own rules (037 C), judged by `p037-c-clearing.spec.ts`, not re-declared here.
+  { id: 'clearing-refused', catalogue: 'wm-interact-window',
+    gesture: 'run a clearing the backend refuses ("Run Clearing", "Confirm")', beforeLoad: (p) => routeClearing(p, 'refused'),
+    root: '.ws-shell:has([data-testid="clearing-error"])',
+    open: async (page) => {
+      await page.locator('[data-testid="actionbar-clearing"]').click()
+      await page.locator('[data-testid="clearing-confirm"]').click()
+      await expect(page.locator('[data-testid="clearing-error"]')).toBeVisible()
+    },
+    policies: { inside: 'wm-pad' } },
   { id: 'interact-history', catalogue: 'interact-history-overlay', clock: true,
     gesture: 'appears after the first completed action (here: a clearing)', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.sar-interact-history-overlay', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },

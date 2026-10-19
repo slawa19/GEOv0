@@ -237,3 +237,88 @@ describe('048 S3 (adversarial pass F3, F5): the start refusal carries its id; no
     expect(line).toMatchObject({ key: 'failure.noConnection', log: 'TypeError: Failed to fetch' })
   })
 })
+
+/**
+ * §15 Codex on S3 (2026-10-19), items 1, 2, 4: the id of a failed trust-lines read reaches its notices; the window error
+ * block is announced (role="alert") and said once; a scene-load failure writes its console line.
+ */
+describe('048 S3 §15 item 1: a failed trust-lines read keeps its request id up to the notices', () => {
+  it('the read answers 500 with X-Request-ID: the source state carries the id; a frozen copy keeps it', async () => {
+    const { useInteractActions } = await import('../composables/useInteractActions')
+    const { freezeTrustlineFiguresSource, trustlineFiguresNoticeRef } = await import('../composables/interact/trustlinesSourceState')
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('trustlines-list')
+      ? new Response(JSON.stringify({ code: 'E000', message: 'down' }), { status: 500, headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'req-tl-list' } })
+      : new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    try {
+      const mode = useInteractMode({
+        actions: useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('run-1') }),
+        runId: computed(() => 'run-1'), equivalent: computed(() => 'UAH'), snapshot: ref(null),
+      })
+      mode.selectEdge('alice->bob')
+      await vi.waitFor(() => expect(mode.trustlinesFetchState.value.kind).toBe('failed'))
+      const state = mode.trustlinesFetchState.value as { kind: 'failed'; message: string; ref?: string | null }
+      expect(state.ref).toBe('req-tl-list')
+      expect(state.message).not.toContain('req-tl-list')
+      expect(trustlineFiguresNoticeRef(state)).toBe('req-tl-list')
+      expect(trustlineFiguresNoticeRef(freezeTrustlineFiguresSource(state)), 'a frozen copy keeps the id').toBe('req-tl-list')
+      expect(trustlineFiguresNoticeRef({ kind: 'row' }), 'counter-check: an answer has no failure id').toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the trust line window and the edge popup show the id as a line of its own and data-request-id', async () => {
+    const EdgeDetailPopup = (await import('./EdgeDetailPopup.vue')).default
+    const failed = { kind: 'failed' as const, message: 'Trust lines could not be loaded.', ref: 'req-tl-list' }
+    const tl = mountWith(TrustlineManagementPanel, {
+      phase: 'editing-trustline', state: failedState('editing-trustline', { error: null, errorRef: null, errorDetail: null }), unit: 'UAH',
+      used: '0', currentLimit: '0', available: '0', figuresSource: failed, participants: PEOPLE, trustlines: [], busy: false,
+      confirmTrustlineCreate: vi.fn(), confirmTrustlineUpdate: vi.fn(), confirmTrustlineClose: vi.fn(), cancel: vi.fn(),
+      setFromPid: vi.fn(), setToPid: vi.fn(), selectTrustline: vi.fn(),
+    })
+    const edge = mountWith(EdgeDetailPopup, {
+      phase: 'editing-trustline', state: failedState('editing-trustline', { error: null }), unit: 'UAH', figuresSource: failed, close: vi.fn(),
+    })
+    await settle()
+    for (const [host, id] of [[tl, 'tl-source-unavailable'], [edge, 'edge-source-unavailable']] as const) {
+      const notice = host.querySelector(`[data-testid="${id}"]`)
+      expect(notice, `${id}: anti-vacuum, the notice is shown`).not.toBeNull()
+      expect(notice!.getAttribute('data-request-id'), id).toBe('req-tl-list')
+      expect(notice!.querySelector('[data-testid="error-request-id"]')!.textContent!.trim(), id).toBe(t('common.requestId', { id: 'req-tl-list' }, 'en'))
+    }
+  })
+})
+
+describe('048 S3 §15 item 2: the window error block is announced once', () => {
+  it.each(WINDOWS.map((w) => [w.name, w] as const))('%s: role="alert", atomic, no live region around it', async (_name, w) => {
+    const host = w.mount()
+    await settle()
+    const block = host.querySelector<HTMLElement>(`[data-testid="${w.testid}"]`)!
+    expect(block.getAttribute('role')).toBe('alert')
+    expect(block.getAttribute('aria-atomic')).toBe('true')
+    for (let el = block.parentElement; el; el = el.parentElement) {
+      const live = el.getAttribute('aria-live') ?? (['alert', 'status', 'log'].includes(el.getAttribute('role') ?? '') ? 'role' : null)
+      expect(live, `an ancestor that is a live region would announce it twice: ${el.outerHTML.slice(0, 80)}`).toBeNull()
+    }
+  })
+})
+
+describe('048 S3 §15 item 4: a failed scene load writes its console line', () => {
+  it('one line with the technical text and the request id per failed load', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { useSceneState } = await import('../composables/useSceneState')
+    const state = reactive({ loading: false, error: '', errorLine: null, sourcePath: '', snapshot: null, selectedNodeId: null as string | null })
+    const noop = () => undefined
+    const s = useSceneState({
+      eq: ref('UAH'), layoutMode: ref<'admin-force'>('admin-force'), allowEqDeepLink: () => true, isEqAllowed: () => true,
+      effectiveEq: computed(() => 'UAH'), state: state as never,
+      loadSnapshot: async () => { throw new ApiError('HTTP 503 Service Unavailable for /simulator/x/graph/preview', { status: 503, requestId: 'req-scene-1' }) },
+      clearScheduledTimeouts: noop, resetCamera: noop, resetLayoutKeyCache: noop, resetOverlays: noop, resizeAndLayout: noop,
+      ensureRenderLoop: noop, setupResizeListener: noop, teardownResizeListener: noop, stopRenderLoop: noop,
+    })
+    await s.loadScene()
+    const lines = warn.mock.calls.filter((c) => c[0] === '[scene] load failed:')
+    expect(lines).toEqual([['[scene] load failed:', 'HTTP 503 Service Unavailable for /simulator/x/graph/preview', '(request id: req-scene-1)']])
+    expect(state.error, 'the sentence is drawn, not the technical text').toBe(t('failure.serverFailed'))
+  })
+})

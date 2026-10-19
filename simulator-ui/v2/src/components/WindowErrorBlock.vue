@@ -18,8 +18,12 @@ const { t } = useUiLocale()
 </script>
 
 <template>
+  <!-- 048 S3 (§15 Codex P2): role="alert" - the failure is announced when it appears, as the removed toast announced it
+       (`role="alert"`, assertive); no ancestor of the block in the windows is a live region, so it is said once. -->
   <div
     class="ds-alert ds-alert--err ds-mono web-block"
+    role="alert"
+    aria-atomic="true"
     :data-testid="props.testid"
     :data-request-id="props.requestId || undefined"
     :title="props.detail || undefined"

@@ -110,6 +110,24 @@ for (const lang of ['en', 'ru'] as Lang[]) {
     await neverShown(page, 'error-toast')
   })
 
+  // §15 Codex (2026-10-19, item 1): the trust-lines read fails - its notice in the trust line window carries the request id.
+  test(`048 S3 [${lang}]: a failed trust-lines read - the notice keeps its request id`, async ({ page }) => {
+    await openWith(page, lang, async (p) => {
+      await p.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) =>
+        json(r, { code: 'E000', message: 'down' }, 500, { 'X-Request-ID': 'req-s3-tl-list' }))
+    })
+    await ready(page, true)
+    await page.locator('[data-testid="actionbar-trustline"]').click()
+    await page.locator('#tl-from__trigger').click()
+    await page.locator('#tl-from__surface [role="option"][data-option-value="alice"]').click()
+    await page.locator('#tl-to__trigger').click().catch(() => undefined)
+    await page.locator('#tl-to__surface [role="option"][data-option-value="bob"]').click()
+    const notice = page.getByTestId('tl-source-unavailable')
+    await expect(notice).toBeVisible()
+    await expect(notice).toHaveAttribute('data-request-id', 'req-s3-tl-list')
+    await expect(notice.getByTestId('error-request-id')).toHaveText(t('common.requestId', { id: 'req-s3-tl-list' }, lang))
+  })
+
   test.describe(`048 S3 [${lang}]: the run's error line and the scene's failure`, () => {
     test('a failed status read: one sentence, no «Error» before it, the id on its own line, the status in the title', async ({ page }) => {
       await openWith(page, lang, async (p) => {
