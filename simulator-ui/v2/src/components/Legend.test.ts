@@ -197,9 +197,10 @@ describe('the canvas, the legend and the node card agree', () => {
     expect(new Set(SCENE.map(canvasFill)).size).toBe(4)
   })
 
-  // 046 wave 1 (2026-10-19): the card keeps its own English words (`ROLE_TEXT`) until wave 3 moves it; the legend's are
-  // the dictionary's since. What is held here is the card: the role first, a freeze and a hub added, never replacing it.
-  it('the card says the role in its words; a freeze and a hub are added, the role is not replaced', () => {
+  // 046 wave 1 (2026-10-19): the card kept its own English words (`ROLE_TEXT`) until wave 3; 046 wave 3 (2026-10-19): the
+  // card says the legend's words (`legend.entry.*`) - the equality of the two in both languages is held by
+  // `inspectors.p046w3.test.ts`. What is held here is the card: the role first, a freeze and a hub added, never replacing it.
+  it('the card says the role in the words of the legend; a freeze and a hub are added, the role is not replaced', () => {
     const words = (node: GraphNode) => {
       const c = mount(NodeCardOverlay, { node, edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined })
       const el = c.host.querySelector<HTMLElement>('[data-testid="node-card-role"]')!
@@ -207,12 +208,12 @@ describe('the canvas, the legend and the node card agree', () => {
       c.done()
       return out
     }
-    expect(words(SCENE[0]!)).toEqual({ text: '− Owes more', role: 'debtor' })
-    expect(words(SCENE[1]!)).toEqual({ text: '+ Is owed more', role: 'creditor' })
-    expect(words(SCENE[2]!)).toEqual({ text: '0 Even overall', role: 'neutral' })
-    expect(words(SCENE[3]!)).toEqual({ text: '? Balance unknown', role: 'unknown' })
-    expect(words(SCENE[4]!)).toEqual({ text: '+ Is owed more · Frozen', role: 'creditor' })
-    expect(words(SCENE[6]!)).toEqual({ text: '0 Even overall · Hub', role: 'neutral' })
+    expect(words(SCENE[0]!)).toEqual({ text: '− owes more', role: 'debtor' })
+    expect(words(SCENE[1]!)).toEqual({ text: '+ is owed more', role: 'creditor' })
+    expect(words(SCENE[2]!)).toEqual({ text: '0 even', role: 'neutral' })
+    expect(words(SCENE[3]!)).toEqual({ text: '? unknown', role: 'unknown' })
+    expect(words(SCENE[4]!)).toEqual({ text: '+ is owed more · frozen', role: 'creditor' })
+    expect(words(SCENE[6]!)).toEqual({ text: '0 even · hub', role: 'neutral' })
   })
 
   it('an unknown sign shows no balance in the card: magnitude atoms are not printed as a positive amount', () => {

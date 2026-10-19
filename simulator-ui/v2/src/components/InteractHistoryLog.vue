@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
  * BUG-5: Interact Mode History Log
- * Displays the last N user actions in a compact inline list.
+ * Displays the last N user actions in a compact inline list. 046 wave 3: a line is drawn from its kept key and data in
+ * the language of now (BACKLOG 046-3) - a switch re-renders the lines already shown.
  */
 import { computed } from 'vue'
-import type { InteractHistoryEntry } from '../composables/interact/useInteractHistory'
+import { historyEntryText, type InteractHistoryEntry } from '../composables/interact/useInteractHistory'
 import { useUiLocale } from '../composables/useUiLocale'
 
 const props = withDefaults(
@@ -15,7 +16,7 @@ const props = withDefaults(
   }>(),
   { maxVisible: 8 },
 )
-const { t } = useUiLocale()
+const { t, locale } = useUiLocale()
 
 const visible = computed(() => {
   // Show most recent entries at the top
@@ -35,7 +36,7 @@ const visible = computed(() => {
         :class="{ 'interact-history__item--latest': i === 0 }"
       >
         <span class="interact-history__icon" aria-hidden="true">{{ entry.icon }}</span>
-        <span class="interact-history__text">{{ entry.text }}</span>
+        <span class="interact-history__text">{{ historyEntryText(entry, locale) }}</span>
         <span class="interact-history__time ds-mono">{{ entry.timeText }}</span>
       </li>
     </ul>

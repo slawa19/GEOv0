@@ -25,6 +25,7 @@ import { setUiLocale } from '../i18n/locale'
 import type { GraphSnapshot } from '../types'
 import { participantDisplayIdFor, provideParticipantNameOf, provideShownScenarioId } from './useParticipantDisplay'
 import { useInteractMode } from './useInteractMode'
+import { historyEntryText } from './interact/useInteractHistory'
 
 type Actions = Parameters<typeof useInteractMode>[0]['actions']
 
@@ -86,7 +87,8 @@ describe('039 D - the Interact history names participants the run list does not 
       im.selectNode(ALICE)
       im.selectNode(CAROL)
       await im.confirmPayment('1.00')
-      const texts = im.history.map((e) => e.text)
+      // 046 wave 3 (2026-10-19): a history line is kept as its key and data and drawn by `historyEntryText` (BACKLOG 046-3).
+      const texts = im.history.map((e) => historyEntryText(e))
       expect(texts, 'exactly one history line').toHaveLength(1)
       expect(texts[0]).toContain('Alice Baker')
       expect(texts[0]).toContain('Carol Dean')
@@ -103,7 +105,8 @@ describe('039 D - the Interact history names participants the run list does not 
       im.selectNode(BOB)
       expect(im.phase.value, 'counter-check: the flow reached the create step').toBe('confirm-trustline-create')
       await im.confirmTrustlineCreate('10.00')
-      const texts = im.history.map((e) => e.text)
+      // 046 wave 3 (2026-10-19): a history line is kept as its key and data and drawn by `historyEntryText` (BACKLOG 046-3).
+      const texts = im.history.map((e) => historyEntryText(e))
       expect(texts).toHaveLength(1)
       for (const text of [texts[0]!, String(im.successMessage.value)]) {
         expect(text).toContain('Carol Dean')

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import { useInteractFSM } from '../composables/interact/useInteractFSM'
-import { interactText } from '../i18n/interactStrings'
+import { t } from '../i18n/t'
 
 afterEach(() => { document.body.innerHTML = '' })
 async function settle() { for (let i = 0; i < 5; i += 1) await nextTick() }
@@ -16,7 +16,8 @@ async function settle() { for (let i = 0; i < 5; i += 1) await nextTick() }
 const PEOPLE = [{ pid: 'alice', name: 'Alice' }, { pid: 'bob', name: 'Bob' }, { pid: 'carol', name: 'Carol' }]
 const q = (host: HTMLElement, id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const text = (host: HTMLElement, id: string) => (q(host, id)?.textContent ?? '').replace(/\s+/g, ' ').trim()
-const NOTE = interactText('lineDirectionNote')
+// 046 wave 3 (2026-10-19): `interactStrings.ts` is gone; the note is the dictionary's, English here (unit tests run in en).
+const NOTE = t('payment.lineDirectionNote', {}, 'en')
 
 function mountPanel(start: (fsm: ReturnType<typeof useInteractFSM>) => void) {
   const host = document.createElement('div')

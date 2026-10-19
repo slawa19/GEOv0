@@ -146,7 +146,8 @@ async function mountFirstScreen(): Promise<void> {
   mount(Legend, { nodes: NODES, equivalent: 'UAH', palette: { debtor: '#a00', creditor: '#00a', neutral: '#ccc', frozen: '#444', hub: '#0e0' } })
   const nav = mount(GraphNavigator, { nodes: NODES, links: LINKS, edgeInspectDisabled: true })
   nav.querySelector('details')!.open = true
-  mount(InteractHistoryLog, { entries: [{ id: 'h1', icon: '💸', text: 'Алиса → Борис', timeText: '12:00' }] })
+  // 046 wave 3: a history line is kept as its key and data (BACKLOG 046-3) - so it is the interface's words too.
+  mount(InteractHistoryLog, { entries: [{ id: 'h1', icon: '💸', line: { key: 'history.payment', vars: { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' } }, timeText: '12:00' }] })
   mount(EdgeTooltip, {
     style: {}, getNodeName: (id: string) => NODES.find((n) => n.id === id)?.name ?? null,
     edge: { key: 'alice->bob', fromId: 'alice', toId: 'bob', amountText: '', trustLimit: '100.00', used: '12.00', available: '-3.00', equivalent: 'UAH' },

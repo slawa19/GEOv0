@@ -272,7 +272,8 @@ test('039 B1: canvas, legend and node card read one resolved palette - a token c
   await page.mouse.dblclick(db.x, db.y)
   const card = page.locator('.ws-shell[data-win-type="node-card"]')
   await expect(card).toBeVisible()
-  await expect(card.locator('[data-testid="node-card-role"]')).toHaveText(/Owes more/)
+  // 046 wave 3 (2026-10-19): the card says the legend's word (`legend.entry.debtor`, «owes more»; was its own «Owes more»).
+  await expect(card.locator('[data-testid="node-card-role"]')).toHaveText(/owes more/)
   expect(await card.locator('[data-testid="node-card-role-swatch"]').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(0, 255, 0)')
   expect(await card.locator('.ds-ov-node-card__balance').evaluate((el) => getComputedStyle(el).color)).toBe('rgb(0, 255, 0)')
 })

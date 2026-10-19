@@ -2,13 +2,14 @@
 import { computed } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
-import { classifyNode, fillOf, FROZEN_TEXT, HUB_TEXT, ROLE_TEXT, type DataPalette } from '../vizMapping'
+import { classifyNode, fillOf, type DataPalette } from '../vizMapping'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
-import { renderAvailable } from '../utils/valueFormat'
+import { isOverLimit, renderOrDash } from '../utils/valueFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
-import { interactText } from '../i18n/interactStrings'
+import { useUiLocale } from '../composables/useUiLocale'
+import { participantStatusText, participantTypeText } from '../i18n/statusText'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -50,6 +51,9 @@ const emit = defineEmits<{ close: [] }>()
 
 const props = defineProps<Props>()
 
+// 046 wave 3: every word of the card is the dictionary's (`card.*`), in the language of the interface.
+const { t, locale } = useUiLocale()
+
 function safeNum(v: unknown): number {
   // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not
   // parse as NaN). This is sort-only, not a guard, but inconsistent parsing would
@@ -71,8 +75,15 @@ function isSaturatedAvailable(v: unknown): boolean {
  */
 const look = computed(() => classifyNode(props.node))
 const nodeColor = computed(() => fillOf(look.value, props.palette))
-/** The role in the legend's words; a freeze and a hub mark are said after it. */
-const roleWords = computed(() => [ROLE_TEXT[look.value.role], look.value.frozen ? FROZEN_TEXT : '', look.value.hub ? HUB_TEXT : ''].filter(Boolean).join(' · '))
+/**
+ * The role in the legend's words; a freeze and a hub mark are said after it. 046 wave 3: the very entries of the legend
+ * (`legend.entry.*`) - one set of words; until wave 3 the card had its own English words («Even overall» beside «even»).
+ */
+const roleWords = computed(() => [
+  t(`legend.entry.${look.value.role}`),
+  look.value.frozen ? t('legend.entry.frozen') : '',
+  look.value.hub ? t('legend.entry.hub') : '',
+].filter(Boolean).join(' · '))
 
 /**
  * Fraction digits the equivalent this card is labelled with declares (012 / `F-012-4`).
@@ -134,24 +145,33 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
  * and visible while the row holds the keyboard focus (the `title` of the row reaches a pointer only).
  */
 function rowAvailableText(tl: TrustlineInfo): string {
-  return interactText('cardLineAvailable')
-    .replace('{amount}', renderAvailable(rowMoney(tl, tl.available)))
-    .replace('{unit}', String(tl.equivalent || props.equivalentText || '').trim())
-    .trim()
+  const unit = String(tl.equivalent || props.equivalentText || '').trim()
+  const shown = renderOrDash(rowMoney(tl, tl.available))
+  // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit - its own sentence, not "available over
+  // limit by" (046 wave 3, internal adversarial pass: the row title made that contradiction visible).
+  if (isOverLimit(shown)) return t('card.lineOverLimit', { amount: shown.slice(1), unit }).trim()
+  return t('card.lineAvailable', { amount: shown, unit }).trim()
 }
 const rowAvailableId = (tl: TrustlineInfo) => `nco-avail-${tl.from_pid}-${tl.to_pid}`.replace(/[^A-Za-z0-9_-]/g, '_')
 
 // Ids are PRINTED in this card (a name falls back to the id), so they go through the display rule; keys and events keep the full id.
 const showPid = useParticipantDisplayId()
 const nodeName = computed(() => showPid(String(props.node.name ?? props.node.id)))
-/** 045 S3 round (Codex P2): the type and status of the participant - a visible meta line under the name. */
-const nodeMeta = computed(() => `${props.node.type ?? '—'} · ${props.node.status ?? '—'}`)
+/**
+ * 045 S3 round (Codex P2): the type and status of the participant - a visible meta line under the name. 046 wave 3: in the
+ * words of the interface (the type in the legend's words, the status from its closed set; an unknown value as it came).
+ */
+const nodeMeta = computed(() => {
+  const type = props.node.type ? participantTypeText(props.node.type, locale.value) : '—'
+  const status = props.node.status ? participantStatusText(props.node.status, locale.value) : '—'
+  return `${type} · ${status}`
+})
 
 /** 043-4: why Pay and New line cannot start now, or null when they can. */
 const startBlockedReason = computed<string | null>(() => {
-  if (props.interactBusy) return interactText('cardBusyReason')
+  if (props.interactBusy) return t('card.busyReason')
   const phase = String(props.interactPhase ?? 'idle').trim().toLowerCase()
-  if (phase && phase !== 'idle') return interactText('cardFlowOpenReason')
+  if (phase && phase !== 'idle') return t('card.flowOpenReason')
   return null
 })
 
@@ -216,8 +236,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               v-if="showPinActions"
               class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
               type="button"
-              :aria-label="isPinned ? 'Unpin' : 'Pin'"
-              :title="isPinned ? 'Unpin' : 'Pin'"
+              :aria-label="isPinned ? t('card.unpin') : t('card.pin')"
+              :title="isPinned ? t('card.unpin') : t('card.pin')"
               @click="isPinned ? unpin() : pin()"
             >
               {{ isPinned ? '◆' : '◇' }}
@@ -225,8 +245,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             <button
               class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
               type="button"
-              aria-label="Close"
-              title="Close"
+              :aria-label="t('common.close')"
+              :title="t('common.close')"
               aria-keyshortcuts="Escape"
               @click="emit('close')"
             >
@@ -235,12 +255,12 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
           </div>
         </div>
 
-        <!-- Statistics, one line: Out, In (the sums of the limits). 045 S4: no Degree - the group counters "OUT -> N" /
-             "IN <- N" below already say how many lines there are, from the same source as the rows; a second number of
-             the same fact from the snapshot was duplicate state. -->
+        <!-- Statistics, one line: «Trusts others», «Trusted by» (the sums of the limits; were Out, In until 046 wave 3). 045 S4:
+             no Degree - the group counters «Trusts (N)» / «Trusted by (N)» below already say how many lines there are, from
+             the same source as the rows; a second number of the same fact from the snapshot was duplicate state. -->
         <div class="ds-ov-node-card__stats" data-testid="node-card-stats">
-          <span class="ds-label">Out</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>{{ ' · ' }}<span
-            class="ds-label">In</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>
+          <span class="ds-label" :title="t('card.trustsOthersHint')">{{ t('card.trustsOthers') }}</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.outLimitText ?? '—' }}</span>{{ ' · ' }}<span
+            class="ds-label" :title="t('card.trustedByHint')">{{ t('card.trustedBy') }}</span>{{ ' ' }}<span class="ds-value ds-mono">{{ edgeStats?.inLimitText ?? '—' }}</span>
         </div>
 
         <!-- BUG-1: Interact Mode Trustlines section --------------------------->
@@ -256,7 +276,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               data-testid="node-card-send-payment"
               @click="onInteractSendPayment?.(node.id)"
             >
-              Pay
+              {{ t('card.pay') }}
             </button>
             <button
               class="ds-btn ds-btn--secondary ds-btn--sm"
@@ -267,7 +287,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               data-testid="node-card-new-trustline"
               @click="onInteractNewTrustline?.(node.id)"
             >
-              New line
+              {{ t('card.newLine') }}
             </button>
           </div>
           <div v-if="startBlockedReason" id="node-card-actions-reason" class="ds-help" data-testid="node-card-actions-reason">
@@ -278,7 +298,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
           <div v-if="nodeTrustlines.length > 0" class="nco-trustlines">
 
             <template v-if="outTrustlines.length">
-              <div class="nco-tl-group-header">OUT → {{ outTrustlines.length }}</div>
+              <div class="nco-tl-group-header" data-testid="node-card-group-out">{{ t('card.trustsGroup', { count: outTrustlines.length }) }}</div>
               <div
                 v-for="tl in outTrustlines"
                 :key="`${tl.from_pid}→${tl.to_pid}`"
@@ -286,7 +306,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                   'nco-trustline-row',
                   { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
                 ]"
-                :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
+                :title="rowAvailableText(tl)"
               >
                 <span class="nco-trustline-row__peer">{{ showPid(tl.to_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
@@ -296,15 +316,15 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                   type="button"
                   :aria-describedby="rowAvailableId(tl)"
                   :disabled="!!interactBusy"
-                  title="Edit trustline"
-                  aria-label="Edit trustline"
+                  :title="t('card.editLine')"
+                  :aria-label="t('card.editLine')"
                   @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
-                >Edit</button>
+                >{{ t('card.edit') }}</button>
               </div>
             </template>
 
             <template v-if="inTrustlines.length">
-              <div class="nco-tl-group-header">IN ← {{ inTrustlines.length }}</div>
+              <div class="nco-tl-group-header" data-testid="node-card-group-in">{{ t('card.trustedByGroup', { count: inTrustlines.length }) }}</div>
               <div
                 v-for="tl in inTrustlines"
                 :key="`${tl.from_pid}→${tl.to_pid}`"
@@ -312,7 +332,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                   'nco-trustline-row',
                   { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
                 ]"
-                :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
+                :title="rowAvailableText(tl)"
               >
                 <span class="nco-trustline-row__peer">{{ showPid(tl.from_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
@@ -322,19 +342,19 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                   type="button"
                   :aria-describedby="rowAvailableId(tl)"
                   :disabled="!!interactBusy"
-                  :title="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
-                  :aria-label="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
+                  :title="t('card.editLineFrom', { name: showPid(tl.from_name || tl.from_pid) })"
+                  :aria-label="t('card.editLineFrom', { name: showPid(tl.from_name || tl.from_pid) })"
                   @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
-                >Edit</button>
+                >{{ t('card.edit') }}</button>
               </div>
             </template>
 
           </div>
           <div v-else-if="trustlinesLoading" class="nco-trustlines__empty ds-help">
-            Loading trustlines…
+            {{ t('card.loading') }}
           </div>
           <div v-else class="nco-trustlines__empty ds-help">
-            No trustlines
+            {{ t('card.none') }}
           </div>
         </template>
 
@@ -382,7 +402,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   overflow-y: auto;
 }
 
-/* Group heading: OUT → N / IN ← N (meta size). */
+/* Group heading: «Trusts (N)» / «Trusted by (N)» (meta size). */
 .nco-tl-group-header {
   font-size: var(--ds-typo-section-label-font-size);
   line-height: 16px;

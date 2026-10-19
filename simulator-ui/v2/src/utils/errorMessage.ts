@@ -1,3 +1,7 @@
+import { uiLocaleRef, type UiLocale } from '../i18n/locale'
+import { t, type MessageKey } from '../i18n/t'
+import type { MessageVars } from '../i18n/messages'
+
 /** The message an error carries, as it is - no request reference added (`extractErrorMessage` adds one). */
 export function plainErrorMessage(e: unknown): string {
   return baseMessage(e)
@@ -99,6 +103,29 @@ export function errorLog(e: unknown): string | null {
   if (!message || message === lead) return lead || null
   if (status !== null && !code && message.startsWith(`HTTP ${status}`)) return message
   return lead ? `${lead}: ${message}` : message
+}
+
+/**
+ * 046 wave 3 (BACKLOG 046-3): a shown failure whose SENTENCE is drawn in the language of now. `render` tells the failure
+ * in a language; `text` calls it with the language of the interface each time it is read, so a template - or the watcher
+ * of the window's error (`useInteractFSM.ts`) - that reads it follows a switch. The request id, the detail and the log
+ * are no words of a language: taken once. Until wave 3 a window kept its failure in the language it failed in.
+ */
+export function shownErrorIn(render: (locale: UiLocale) => ShownError): ShownError {
+  const first = render(uiLocaleRef.value)
+  return {
+    get text() {
+      return render(uiLocaleRef.value).text
+    },
+    ref: first.ref,
+    detail: first.detail,
+    log: first.log ?? null,
+  }
+}
+
+/** 046 wave 3: a failure the client tells in its own words (a dictionary key, no answer behind it), following a switch. */
+export function clientShownError(key: MessageKey, vars?: MessageVars): ShownError {
+  return shownErrorIn((locale) => ({ text: t(key, vars, locale), ref: null, detail: null }))
 }
 
 /** 048 S3: the shown form of a failure told by `text` (the caller's sentence): the id, the identifiers, the log - from `e`. */

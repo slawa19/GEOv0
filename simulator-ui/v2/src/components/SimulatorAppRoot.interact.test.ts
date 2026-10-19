@@ -721,22 +721,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           // emulate empty-canvas click behavior (outside click) by delegating
           // to WM-aware callback (WM-only runtime).
           //
-          // P0-2: gate cancel on busy (mirrors real Step0 policy).
+          // P0-2 (mirrors the real Step0 policy, 046 wave 3): while busy an outside click is ignored - no question, no cancel.
           const busyRef = getGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
-          const isBusy = busyRef?.value === true
-
-          if (isBusy) {
-            // Show confirm gate (mirrors real confirmCancelInteractBusy).
-            try {
-              const c = typeof window.confirm === 'function' ? window.confirm : null
-              if (typeof c === 'function') {
-                const ok = !!c('Отменить операцию?')
-                if (!ok) return
-              }
-            } catch {
-              // best-effort
-            }
-          }
+          if (busyRef?.value === true) return
 
           try {
             const cancel = getGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
@@ -1580,8 +1567,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('keeps InteractHistoryLog coexisting with BottomBar without polluting bottom-stack geometry ownership', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [
-      { id: '1', icon: 'P', text: 'Send payment', timeText: '10:00' },
-      { id: '2', icon: 'T', text: 'Update trustline', timeText: '10:01' },
+      // 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3).
+      { id: '1', icon: 'P', line: { key: 'history.payment', vars: { amount: '1.00', unit: 'UAH', from: 'Alice', to: 'Bob' } }, timeText: '10:00' },
+      { id: '2', icon: 'T', line: { key: 'history.trustlineUpdated', vars: { from: 'Alice', to: 'Bob', limit: '20.00' } }, timeText: '10:01' },
     ])
     setUrl('/?mode=real&ui=interact')
 
@@ -5033,13 +5021,16 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   // P0-2: busy-gate tests (ESC and outside-click while interact.mode.busy)
   // -----------------------------------------------------------------------
 
-  it('P0-2: ESC while busy + confirm=true → cancel called + windows closed', async () => {
+  // 046 wave 3 (advisor's decision 2026-10-19): Escape while busy asked a native `confirm()` and cancelled on "yes"; spec
+  // 046 forbids the native confirm and the owner's rule (no edge cases in the UI) means no dialog at all. Escape while busy
+  // is IGNORED: consumed, no question, no cancel, no window closed. The two tests of the confirm (true / false) are replaced.
+  it('P0-2: ESC while busy → ignored: no confirm, no cancel, no WM Escape, the window stays; after the operation Escape works again', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setUrl('/?mode=real&ui=interact')
 
     stubMissingResizeObserver()
-    // Stub window.confirm to return true (user confirms cancel)
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmSpy)
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -5052,71 +5043,31 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
-
-      // Set busy = true
+      const handleEsc = getRequiredGeoTestGlobal('__GEO_TEST_WM_HANDLE_ESC')
       const busyRef = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
       busyRef.value = true
       await nextTick()
 
-      // ESC while busy
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
       await nextTick()
       await nextTick()
 
-      // confirm must have been shown
-      expect(window.confirm).toHaveBeenCalledTimes(1)
-      // cancel must have been called (epoch bump)
-      expect(cancel).toHaveBeenCalledTimes(1)
-      // interact panel must be gone
-      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
-    } finally {
-      app.unmount()
-      host.remove()
-      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_BUSY_REF')
-      vi.unstubAllGlobals()
-    }
-  })
+      expect(confirmSpy, 'no native confirm').not.toHaveBeenCalled()
+      expect(cancel, 'the operation is not cancelled').not.toHaveBeenCalled()
+      expect(handleEsc, 'Escape is consumed: no window closes').not.toHaveBeenCalled()
+      expect(host.querySelector('[data-testid="manual-payment-panel"]'), 'the window stays').toBeTruthy()
 
-  it('P0-2: ESC while busy + confirm=false → nothing happens (windows stay, flow continues)', async () => {
-    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
-    setUrl('/?mode=real&ui=interact')
-
-    stubMissingResizeObserver()
-    // Stub window.confirm to return false (user declines cancel)
-    vi.stubGlobal('confirm', vi.fn(() => false))
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = mountSimulatorAppRoot(host)
-    try {
+      // Counter-check: the operation finished (busy false) - Escape is the window manager's again.
+      busyRef.value = false
       await nextTick()
-      await nextTick()
-
-      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
-
-      const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
-
-      // Set busy = true
-      const busyRef = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
-      busyRef.value = true
-      await nextTick()
-
-      // ESC while busy
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
       await nextTick()
-      await nextTick()
-
-      // confirm must have been shown
-      expect(window.confirm).toHaveBeenCalledTimes(1)
-      // cancel must NOT have been called
-      expect(cancel).not.toHaveBeenCalled()
-      // interact panel must still be visible
-      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+      expect(handleEsc).toHaveBeenCalledTimes(1)
+      expect(confirmSpy).not.toHaveBeenCalled()
     } finally {
       app.unmount()
       host.remove()
-      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_BUSY_REF')
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_BUSY_REF', '__GEO_TEST_WM_HANDLE_ESC')
       vi.unstubAllGlobals()
     }
   })
@@ -5163,12 +5114,17 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('P0-2: outside-click while busy + confirm=true → cancel called + windows closed', async () => {
+  // 046 wave 3: the two outside-click tests of the confirm are replaced by one. This file's `onCanvasClick` is the mock above
+  // (it mirrors the Step0 policy); the product function is judged in `useSimulatorApp.windowManagementStep0.test.ts`
+  // (ignored while busy; on the real interact mode the payment in flight completes). Held here: the canvas click reaches
+  // the handler and nothing of the window changes.
+  it('P0-2: outside-click while busy → no confirm, no cancel, the window stays', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setUrl('/?mode=real&ui=interact')
 
     stubMissingResizeObserver()
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmSpy)
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -5181,67 +5137,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
-
-      // Set busy = true
       const busyRef = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
       busyRef.value = true
       await nextTick()
 
-      // Outside click (empty canvas click)
       const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
       expect(canvas).toBeTruthy()
       canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await nextTick()
       await nextTick()
 
-      // confirm must have been shown
-      expect(window.confirm).toHaveBeenCalledTimes(1)
-      // cancel must have been called
-      expect(cancel).toHaveBeenCalledTimes(1)
-    } finally {
-      app.unmount()
-      host.remove()
-      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_BUSY_REF')
-      vi.unstubAllGlobals()
-    }
-  })
-
-  it('P0-2: outside-click while busy + confirm=false → nothing happens', async () => {
-    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
-    setUrl('/?mode=real&ui=interact')
-
-    stubMissingResizeObserver()
-    vi.stubGlobal('confirm', vi.fn(() => false))
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = mountSimulatorAppRoot(host)
-    try {
-      await nextTick()
-      await nextTick()
-
-      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
-
-      const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
-
-      // Set busy = true
-      const busyRef = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
-      busyRef.value = true
-      await nextTick()
-
-      // Outside click (empty canvas click)
-      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
-      expect(canvas).toBeTruthy()
-      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await nextTick()
-      await nextTick()
-
-      // confirm must have been shown
-      expect(window.confirm).toHaveBeenCalledTimes(1)
-      // cancel must NOT have been called
+      expect(confirmSpy, 'no native confirm').not.toHaveBeenCalled()
       expect(cancel).not.toHaveBeenCalled()
-      // panel must still be visible
       expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
     } finally {
       app.unmount()
@@ -6368,7 +6275,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
   })
 
   it('the history is three lines in the bottom overlay shell (was eight)', async () => {
-    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5].map((i) => ({ id: `h${i}`, icon: '•', text: `action ${i}`, timeText: `10:0${i}` })))
+    // 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3); the data tells the lines apart.
+    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5].map((i) => ({ id: `h${i}`, icon: '•', line: { key: 'history.trustlineClosed', vars: { from: 'action', to: String(i) } }, timeText: `10:0${i}` })))
     const { host, done } = mount()
     try {
       await nextTick()
@@ -6376,7 +6284,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(shell, 'the overlay shell hosts it').not.toBeNull()
       const items = [...shell!.querySelectorAll('.interact-history__item')].map((li) => (li.textContent ?? '').replace(/\s+/g, ' ').trim())
       expect(items).toHaveLength(3)
-      expect(items[0]).toContain('action 5')
+      expect(items[0]).toContain('action → 5')
     } finally {
       done()
     }

@@ -7,12 +7,14 @@ import { plural } from './messages'
  * of equivalents and amounts are data and never live here.
  *
  * Wave 0 (T4601) brought the language switcher; wave 2 (T4603) the windows of the actions - payment, trust line,
- * clearing - with the texts they compose (`interactStrings.ts`, the refusal maps of `utils/paymentRefusalText.ts`, the
+ * clearing - with the texts they compose (the 037 A2 list, the refusal maps of `utils/paymentRefusalText.ts`, the
  * notices of `trustlinesSourceState.ts`, the toasts and history lines of `useInteractMode.ts`) and the analytics panel.
  * Wave 2 keeps every English text that existed byte for byte; a new key is new text. Wave 1 (T4602; narrowed, then
  * full after 048 S2) the first screen: the top bar and its "Details" rows, the action bar, the onboarding hint, the
  * bottom bar, the legend, "Find on graph", the line tooltip, the recent actions and the notifications - with the words
- * of spec 048 §G where §G names them (those English texts changed with it). See spec 046.
+ * of spec 048 §G where §G names them (those English texts changed with it). Wave 3 (T4604) the participant card, the
+ * line window and their shells (`card.*`, `edgeWindow.*`, `windowShell.*`), the trust line statuses and the busy-cancel
+ * question; `interactStrings.ts` is gone. See spec 046.
  */
 export const en = {
   locale: {
@@ -47,6 +49,12 @@ export const en = {
     suspended: 'suspended',
     left: 'left',
     deleted: 'deleted',
+  },
+
+  /** 046 wave 3: trust line statuses (`chk_trust_line_status`) the line window shows; an unknown one is shown as it came. */
+  trustlineStatus: {
+    active: 'active',
+    closed: 'closed',
   },
 
   /** Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. */
@@ -319,11 +327,63 @@ export const en = {
     clearingToast: 'Clearing done: {cleared}/{total} cycles',
   },
 
-  /** 045 S3: the participant card's reasons and its line description (read through `interactStrings.ts` until wave 3). */
+  /**
+   * The participant card (`NodeCardOverlay.vue`). 045 S3: the reasons and the line description; 046 wave 3: the rest of the
+   * card (English byte for byte as it was, except the statistics and the group headings: the advisor's words of
+   * 2026-10-18, «Trusts others / Trusted by / Trusts (N) / Trusted by (N)»). The role of the participant is said in the
+   * legend's words (`legend.entry.*`) - one set of words for the legend and the card; so is its type
+   * (`statusText.ts` `participantTypeText`); its status is `participantStatus.*`.
+   */
   card: {
     flowOpenReason: 'Cancel current action first (press ESC).',
     busyReason: 'Operation in progress… please wait.',
     lineAvailable: 'available {amount} {unit}',
+    /** 046 wave 3: a negative `available` of a row - the debt's excess over a lowered limit (026 `T2602`). */
+    lineOverLimit: 'over limit by {amount} {unit}',
+    pin: 'Pin',
+    unpin: 'Unpin',
+    // The sums of the limits of the participant's lines: as the creditor (`from`) and as the debtor (`to`).
+    trustsOthers: 'Trusts others',
+    trustedBy: 'Trusted by',
+    trustsOthersHint: 'The sum of the limits this participant has given others, as the creditor.',
+    trustedByHint: 'The sum of the limits others have given this participant, as the debtor.',
+    pay: 'Pay',
+    newLine: 'New line',
+    trustsGroup: 'Trusts ({count})',
+    trustedByGroup: 'Trusted by ({count})',
+    edit: 'Edit',
+    editLine: 'Edit trustline',
+    editLineFrom: 'Edit trustline (set by {name})',
+    loading: 'Loading trustlines…',
+    none: 'No trustlines',
+  },
+
+  /**
+   * 046 wave 3: the line window (`EdgeDetailPopup.vue`). English byte for byte as it was (the fallback of "Pay" without a
+   * name is "Pay": "Pay sender" named the wrong party - the payment goes TO the line's creditor), plus the one explaining
+   * sentence of 048 item 13 (б). The line runs creditor -> debtor (`from -> to`); the window's title is that arrow.
+   */
+  edgeWindow: {
+    aria: 'Edge detail popup',
+    titleFallback: 'Edge',
+    used: 'Used',
+    limit: 'Limit',
+    available: 'avail',
+    utilization: 'Utilization',
+    utilizationBar: 'Utilization bar',
+    utilizationUnknown: 'unknown',
+    /** Said after a notice of `trustlineSource.*` that the figures are not confirmed (its own sentence). */
+    closeDisabledUntil: 'Closing the line is disabled until then.',
+    closeRequested: 'Close requested: limit stays 0; the line closes when its debt is repaid.',
+    closeRequestNote: 'Closing with debt (used: {used} {unit}) is a request: limit becomes 0 until repaid.',
+    pay: 'Pay {name}',
+    payNoName: 'Pay',
+    changeLimit: 'Change limit',
+    changeLimitTitle: 'Change the limit of this line',
+    closeLine: 'Close line',
+    closeLineTitle: 'Close this line',
+    /** 048 item 13 (б): what a trust line is, in the names of this line. */
+    trustExplanation: '{from} trusts {to} up to the limit — that is how much {to} may owe {from}.',
   },
 
   metrics: {
@@ -527,8 +587,8 @@ export const en = {
   },
 
   /**
-   * The legend of the graph (`Legend.vue`). The node card says the same roles in its own words until wave 3
-   * (`vizMapping.ts` ROLE_TEXT, English): the card is English as a whole until then.
+   * The legend of the graph (`Legend.vue`). 046 wave 3: the participant card says the role, the freeze and the hub in
+   * these same words (`NodeCardOverlay.vue`); `vizMapping.ts` ROLE_TEXT, the card's own English words, is gone.
    */
   legend: {
     title: 'Node colour — balance',
@@ -659,5 +719,10 @@ export const en = {
     clearingTitle: 'Clearing',
     /** 046 wave 1, full: the name of the layer the windows live in (the root's `TransitionGroup`). */
     layer: 'Window layer',
+    /** 046 wave 3: the shells of the two inspector windows (`resolveWindowSurfaceDescriptor`). */
+    lineDetails: 'Trustline details',
+    lineDetailsPair: 'Trustline details: {from} to {to}',
+    nodeDetails: 'Node details',
+    nodeDetailsNamed: 'Node details: {name}',
   },
 } as const

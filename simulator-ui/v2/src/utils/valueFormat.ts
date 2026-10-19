@@ -1,4 +1,4 @@
-import type { UiLocale } from '../i18n/locale'
+import { uiLocaleRef, type UiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
 import { parseAmountStringOrNull } from './numberFormat'
 
@@ -26,12 +26,11 @@ export function renderOrDash(v: unknown): string {
 
 /**
  * 026 `T2602`: `available` is signed; a negative one is the debt's excess over a lowered limit, not a payable amount.
- * 046 wave 2: the words of the excess are the dictionary's (`common.overLimit`). English unless a language is given:
- * the callers left (the participant card and the line window, wave 3) are English as a whole until wave 3 moves them,
- * and a Russian phrase inside their English text would be the mixed string spec 046 forbids. The trust line window
- * reads `isOverLimit` and says it in its own sentence.
+ * 046 wave 2: the words of the excess are the dictionary's (`common.overLimit`). 046 wave 3: in the language of the
+ * interface unless one is given (until wave 3 English by default - the participant card and the line window were English
+ * as a whole then). The trust line window reads `isOverLimit` and says it in its own sentence.
  */
-export function renderAvailable(v: unknown, locale: UiLocale = 'en'): string {
+export function renderAvailable(v: unknown, locale: UiLocale = uiLocaleRef.value): string {
   const s = renderOrDash(v)
   return isOverLimit(s) ? t('common.overLimit', { amount: s.slice(1) }, locale) : s
 }

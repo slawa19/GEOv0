@@ -173,7 +173,8 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     })
 
     return nextTick().then(() => {
-      // 045 S3 (2026-10-18): the third column is gone; what is available is the row's `title`.
+      // 045 S3 (2026-10-18): the third column is gone; what is available is the row's `title`. 046 wave 3 (2026-10-19): the
+      // title is the row's one sentence of what is available (`card.lineAvailable`, with the unit) - was "avail: <amount>".
       const row = host.querySelector('.nco-trustline-row') as HTMLElement | null
       expect(row).toBeTruthy()
       expect(host.querySelector('.nco-trustline-row__avail'), 'no third column').toBeNull()
@@ -187,12 +188,12 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
   it('NC-2: trustline row renders available at the precision its equivalent declares', async () => {
     // UAH declares precision 2, so 9.00 available must read as 9.00 — not as `9`, which is
     // what the previous `parseFloat`-based formatter printed.
-    expect(await availableTextFor('UAH')).toBe('avail: 9.00')
+    expect(await availableTextFor('UAH')).toBe('available 9.00 UAH')
   })
 
   // 026 `T2602`: a limit lowered below the debt makes `available` negative - the excess over trust, not an amount.
   it('NC-2: a negative available reads as the excess over trust', async () => {
-    expect(await availableTextFor('UAH', '-2.00')).toBe('avail: over limit by 2.00')
+    expect(await availableTextFor('UAH', '-2.00')).toBe('over limit by 2.00 UAH')
   })
 
   it('NC-2: the same available amount must not render identically under UAH and HOUR', async () => {
@@ -207,7 +208,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
       `9.00 available renders as "${asUah}" under UAH (precision 2) and as "${asHour}" under `
         + 'HOUR (precision 1). Identical output means the row is blind to its own equivalent.',
     ).not.toBe(asUah)
-    expect(asHour).toBe('avail: 9.0')
+    expect(asHour).toBe('available 9.0 HOUR')
   })
 
   it('NC-3: trustline with available="0" gets saturated class', async () => {

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GraphSnapshot } from '../types'
 import { useInteractMode } from './useInteractMode'
+import { historyEntryText } from './interact/useInteractHistory'
 
 // An unresolved payment is kept in `sessionStorage` across a re-created composable; each test starts from none.
 beforeEach(() => {
@@ -305,7 +306,8 @@ describe('what a success-shaped answer is allowed to say', () => {
 
     await im.confirmPayment('10.00')
 
-    expect(im.history.map((h) => h.text)).toEqual(['Payment 10.00 UAH: Alice → Bob'])
+    // 046 wave 3 (2026-10-19): a history line is kept as its key and data and drawn by `historyEntryText` (BACKLOG 046-3).
+    expect(im.history.map((h) => historyEntryText(h))).toEqual(['Payment 10.00 UAH: Alice → Bob'])
   })
 
   it('the result is dismissed to the recipient step, and closing clears it', async () => {

@@ -496,7 +496,9 @@ const fromParticipants = computed<ParticipantInfo[]>(() => {
 })
 
 // MP-1b: reset recipient if it becomes unavailable in known-state.
-const toSelectionInvalidWarning = ref<string | null>(null)
+// 046 wave 3 (BACKLOG 046-3): kept as its key and drawn in the language of now (a switch re-renders the warning).
+const toSelectionInvalidKey = ref<'payment.selfPaymentReselect' | 'payment.recipientGone' | null>(null)
+const toSelectionInvalidWarning = computed(() => (toSelectionInvalidKey.value ? t(toSelectionInvalidKey.value) : null))
 
 // MP-6: tri-state UX in To label/help.
 const toListUpdating = computed(() => {
@@ -594,7 +596,7 @@ watch(
     const from = (props.state.fromPid ?? '').trim()
     if (from && to === from) {
       props.setToPid?.(null)
-      toSelectionInvalidWarning.value = t('payment.selfPaymentReselect')
+      toSelectionInvalidKey.value = 'payment.selfPaymentReselect'
       return
     }
 
@@ -603,7 +605,7 @@ watch(
 
     if (!targets.has(to)) {
       props.setToPid?.(null)
-      toSelectionInvalidWarning.value = t('payment.recipientGone')
+      toSelectionInvalidKey.value = 'payment.recipientGone'
     }
   },
 )
@@ -613,7 +615,7 @@ watch(
 watch(
   () => props.state.fromPid,
   () => {
-    toSelectionInvalidWarning.value = null
+    toSelectionInvalidKey.value = null
   },
 )
 
@@ -627,14 +629,16 @@ watch(
 // EMPTIES the recipient, and that is a correction, not a first pass. A correction keeps the focus where the restore put it (on the
 // control just used), because at the confirm step the amount already holds a sum and Enter in it confirms.
 const toSelect = ref<{ openWithFocus: () => void } | null>(null)
-const nextChoice = ref('')
+// 046 wave 3 (BACKLOG 046-3): the announcement kept as whether it is due, its words drawn in the language of now.
+const nextChoiceDue = ref(false)
+const nextChoice = computed(() => (nextChoiceDue.value ? t('payment.nextChoiceRecipient') : ''))
 const firstPass = { from: false, to: false }
 
 function onFromSelected(v: string | null) {
   const first = firstPass.from
   firstPass.from = false
   if (!v || !first || unknownOutcome.value || props.busy) return
-  nextChoice.value = t('payment.nextChoiceRecipient')
+  nextChoiceDue.value = true
   toSelect.value?.openWithFocus()
 }
 
@@ -647,7 +651,7 @@ function onToSelected(v: string | null) {
 }
 
 function onToOpenChange(isOpen: boolean) {
-  if (!isOpen) nextChoice.value = ''
+  if (!isOpen) nextChoiceDue.value = false
 }
 
 function onFromChange(v: string) {
@@ -656,13 +660,13 @@ function onFromChange(v: string) {
   props.setFromPid?.(pid)
   // If To is now invalid, clear it.
   if (pid && pid === props.state.toPid) props.setToPid?.(null)
-  toSelectionInvalidWarning.value = null
+  toSelectionInvalidKey.value = null
 }
 
 function onToChange(v: string) {
   firstPass.to = !!v && !props.state.toPid
   props.setToPid?.(v ? v : null)
-  toSelectionInvalidWarning.value = null
+  toSelectionInvalidKey.value = null
 }
 
 const fromOptions = computed(() => fromParticipants.value.map((participant) => ({

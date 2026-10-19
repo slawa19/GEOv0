@@ -1,10 +1,11 @@
-import { computed, reactive, type ComputedRef, type Reactive, type Ref } from 'vue'
+import { computed, reactive, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphLink, GraphSnapshot } from '../../types'
 import { keyEdge, parseEdgeKey } from '../../utils/edgeKey'
 import { isActiveStatus } from '../../utils/status'
 import type { SimulatorActionClearingRealResponse, TrustlineInfo } from '../../api/simulatorTypes'
 import type { ShownError } from '../../utils/errorMessage'
+import { uiLocaleRef } from '../../i18n/locale'
 
 export type InteractPhase =
   | 'idle'
@@ -134,8 +135,31 @@ export function useInteractFSM(opts: {
     setError(null)
   }
 
+  // 046 wave 3 (BACKLOG 046-3): the failure as it was shown, kept so its sentence is drawn again in the language of a switch
+  // (`shownErrorIn`: `text` renders in the language of now; a plain `ShownError` keeps its text). `state.error` stays the
+  // one string every window reads.
+  // A text written into `state.error` by anything else drops the kept failure at once (a synchronous watcher), so a stale
+  // one is never drawn over it.
+  let shownNow: ShownError | null = null
+  let writingShown = false
+  function writeShownText(text: string | null) {
+    writingShown = true
+    try {
+      state.error = text
+    } finally {
+      writingShown = false
+    }
+  }
+  watch(() => state.error, () => {
+    if (!writingShown) shownNow = null
+  }, { flush: 'sync' })
+  watch(uiLocaleRef, () => {
+    if (shownNow) writeShownText(shownNow.text)
+  }, { flush: 'sync' })
+
   function setError(shown: ShownError | null) {
-    state.error = shown ? shown.text : null
+    shownNow = shown
+    writeShownText(shown ? shown.text : null)
     state.errorRef = shown ? shown.ref : null
     state.errorDetail = shown ? shown.detail : null
   }

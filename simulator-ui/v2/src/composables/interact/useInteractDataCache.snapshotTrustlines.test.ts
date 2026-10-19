@@ -312,7 +312,10 @@ describe('useInteractDataCache: trustlines source state (`F-013-7`)', () => {
     await Promise.resolve()
     await nextTick()
 
-    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'failed', message: 'GET /trustlines failed: 503' })
+    // 046 wave 3 (2026-10-19): the state also carries `render` - the same sentence in any language (BACKLOG 046-3).
+    const state = cache.trustlinesFetchState.value
+    expect(state).toEqual({ kind: 'failed', message: 'GET /trustlines failed: 503', render: expect.any(Function) })
+    expect(state.kind === 'failed' && state.render?.('en')).toBe('GET /trustlines failed: 503')
     expect(cache.findAnsweredTrustline('alice', 'bob')).toBeNull()
     // А вот для ПРОСМОТРА снапшотный фоллбэк сохраняется — это так и задумано.
     expect(cache.trustlines.value.length).toBe(1)

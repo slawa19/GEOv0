@@ -49,7 +49,7 @@ export type KeysOfKind<T, Leaf, P extends string = ''> = {
 /** A value of a placeholder. A number is printed with `String()` - never through `Intl` (see the header). */
 export type MessageVars = Readonly<Record<string, string | number>>
 
-/** Fill `{name}` placeholders; an unknown one is left visible (as `interactText` does) rather than guessed. */
+/** Fill `{name}` placeholders; an unknown one is left visible rather than guessed. */
 export function fillTemplate(template: string, vars: MessageVars = {}): string {
   return template.replace(/\{(\w+)\}/g, (whole, name: string) => (Object.hasOwn(vars, name) ? String(vars[name]) : whole))
 }

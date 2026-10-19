@@ -1,10 +1,11 @@
-import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
+import { computed, ref, shallowRef, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
-import { shownError, type ShownError } from '../utils/errorMessage'
+import { clientShownError, shownError, shownErrorIn, type ShownError } from '../utils/errorMessage'
 import { paymentStatusText } from '../i18n/statusText'
-import { t, tn } from '../i18n/t'
+import { keptText, t, type KeptText } from '../i18n/t'
+import { uiLocaleRef, type UiLocale } from '../i18n/locale'
 import { actionErrorText, clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
@@ -240,21 +241,34 @@ export function useInteractMode(opts: {
   const busyRef = ref(false)
 
   // FB-1: UI-level success toast (kept outside FSM so it doesn't affect phase logic).
-  const successMessage = ref<string | null>(null)
+  // 046 wave 3 (BACKLOG 046-3): the toast is KEPT as its key and data (`KeptText`) and drawn in the language of now, so a
+  // switch while it is up re-renders it; `successMessage` stays the one text its readers see. A text written from outside
+  // (the root's dismiss writes null) is kept as it is.
+  const successLine = shallowRef<KeptText | { readonly raw: string } | null>(null)
+  const successMessage = computed<string | null>({
+    get: () => {
+      const line = successLine.value
+      if (!line) return null
+      return 'raw' in line ? line.raw : keptText(line, uiLocaleRef.value)
+    },
+    set: (v) => {
+      successLine.value = v == null ? null : { raw: v }
+    },
+  })
 
   const scheduleMicrotask: (fn: () => void) => void =
     typeof queueMicrotask === 'function' ? queueMicrotask : (fn) => Promise.resolve().then(fn)
 
-  function setSuccessToastMessage(msg: string) {
+  function setSuccessToastMessage(line: KeptText) {
     // Ensure repeated identical messages still retrigger watchers/timers.
-    if (successMessage.value === msg) {
-      successMessage.value = null
+    if (successMessage.value === keptText(line, uiLocaleRef.value)) {
+      successLine.value = null
       scheduleMicrotask(() => {
-        successMessage.value = msg
+        successLine.value = line
       })
       return
     }
-    successMessage.value = msg
+    successLine.value = line
   }
 
   // Epoch that invalidates any in-flight async results.
@@ -686,7 +700,8 @@ export function useInteractMode(opts: {
         // 048 S3 (decision 3): the window's error block is the one place of the failure - the sentence, the request id on
         // its own line, the technical detail in the block's title and once in the console (the error toast, which showed
         // the same text and cleared it after 4-8 s, is gone; so is the null-then-set that restarted its timer).
-        const shown = error instanceof ShownFailure ? error.shown : actionErrorText(error)
+        // 046 wave 3 (BACKLOG 046-3): told again in the language of a switch (`shownErrorIn`).
+        const shown = error instanceof ShownFailure ? error.shown : shownErrorIn((locale) => actionErrorText(error, locale))
         fsm.setError(shown)
         logShownFailure(shown)
       }
@@ -714,7 +729,7 @@ export function useInteractMode(opts: {
     const to = state.toPid
     if (!from || !to) {
       await runBusy(async () => {
-        throw new Error(t('payment.noSelection'))
+        throw new ShownFailure(clientShownError('payment.noSelection'))
       })
       return
     }
@@ -754,12 +769,12 @@ export function useInteractMode(opts: {
     const { from, to, equivalent: eq, amount } = intent
     const begun = paymentIntents.begin(intent)
     if (begun.kind === 'unreadable') {
-      fsm.setError({ text: t('payment.storageUnreadable'), ref: null, detail: null })
+      fsm.setError(clientShownError('payment.storageUnreadable'))
       touchIntents()
       return
     }
     if (begun.kind === 'blocked') {
-      fsm.setError({ text: t('payment.unknownBlocksNew'), ref: null, detail: null })
+      fsm.setError(clientShownError('payment.unknownBlocksNew'))
       touchIntents()
       return
     }
@@ -767,7 +782,7 @@ export function useInteractMode(opts: {
     // Defence in depth: a payment - and above all the repeat of an unresolved one - never leaves without a valid key. A
     // missing key would not be a check, it would be a NEW payment.
     if (!isValidIdempotencyKey(record.key)) {
-      fsm.setError({ text: t('payment.noValidKey'), ref: null, detail: null })
+      fsm.setError(clientShownError('payment.noValidKey'))
       touchIntents()
       return
     }
@@ -776,7 +791,7 @@ export function useInteractMode(opts: {
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
-      if (!paymentIntents.markSent(record)) throw new Error(t('payment.storageRefused'))
+      if (!paymentIntents.markSent(record)) throw new ShownFailure(clientShownError('payment.storageRefused'))
       try {
         res = await opts.actions.sendPayment(from, to, amount, eq, { signal, idempotencyKey: record.key })
       } catch (e: unknown) {
@@ -785,6 +800,7 @@ export function useInteractMode(opts: {
           details?: unknown
           code?: unknown
           message?: unknown
+          clientText?: unknown
         }
         const spent = isKeySpent(err.details)
         const unknownNow = err.outcomeUnknown === true
@@ -796,14 +812,18 @@ export function useInteractMode(opts: {
         // RUN_TERMINAL, 401, 403 and a retryable 409 after an unknown attempt say nothing about THAT payment: the record
         // stays unresolved, and the banner is read from it.
         // 028 F-028-51: the refusal text is composed here from code + reason + details (owner В-6).
-        const text = unknownNow
-          ? err.code === 'TIMEOUT' && typeof err.message === 'string'
-            ? err.message
-            : t('payment.unknownNoAnswer', { amount, unit: eq, from: names.from, to: names.to })
-          : paymentRefusalText(e, eq, undefined, { keyed: true })
+        // 046 wave 3 (BACKLOG 046-3): told in the language of now (`shownErrorIn`), so a switch re-renders the window's block.
+        const told = (locale: UiLocale): ShownError => {
+          if (!unknownNow) return paymentRefusalText(e, eq, locale, { keyed: true })
+          const clientText = typeof err.clientText === 'function' ? (err.clientText as (l: UiLocale) => string) : null
+          const text = err.code === 'TIMEOUT' && (clientText || typeof err.message === 'string')
+            ? clientText ? clientText(locale) : String(err.message)
+            : t('payment.unknownNoAnswer', { amount, unit: eq, from: names.from, to: names.to }, locale)
+          return shownError(text, e)
+        }
         // The correlation id of the request goes with the text, like every user-facing error (AGENTS section 12) - since
         // 048 S3 apart from it (`ShownError.ref`), not glued into the sentence.
-        throw new ShownFailure(typeof text === 'string' ? shownError(text, e) : text)
+        throw new ShownFailure(shownErrorIn(told))
       }
 
       // The answer is a verdict only if it says COMMITTED: a success-shaped answer for a stored refusal is not a payment.
@@ -813,7 +833,9 @@ export function useInteractMode(opts: {
         if (refused) paymentIntents.settle(record)
         else paymentIntents.markUnknown(record)
         touchIntents()
-        throw new Error(t('payment.notCommitted', { status: paymentStatusText(res.status) }))
+        throw new ShownFailure(shownErrorIn((locale) => ({
+          text: t('payment.notCommitted', { status: paymentStatusText(res.status, locale) }, locale), ref: null, detail: null,
+        })))
       }
 
       paymentIntents.settle(record)
@@ -841,10 +863,10 @@ export function useInteractMode(opts: {
           })),
         })),
       }
-      setSuccessToastMessage(t('history.paymentToast', { amount, unit: eq }))
+      setSuccessToastMessage({ key: 'history.paymentToast', vars: { amount, unit: eq } })
 
       // BUG-5: log to history (037 A2: names, not pids)
-      pushHistory('💸', t('history.payment', { amount, unit: eq, from: names.from, to: names.to }))
+      pushHistory('💸', { key: 'history.payment', vars: { amount, unit: eq, from: names.from, to: names.to } })
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
       // The panel stays on the result: it is dismissed by the user (`dismissPaymentResult` / `cancel`), not by a reset.
@@ -858,15 +880,15 @@ export function useInteractMode(opts: {
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      if (!from || !to) throw new Error(t('trustline.noSelection'))
+      if (!from || !to) throw new ShownFailure(clientShownError('trustline.noSelection'))
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
       // 044 `T4405`: the participants' names, not their ids (identities of the run).
-      setSuccessToastMessage(t('history.trustlineCreatedToast', { from: participantName(from), to: participantName(to) }))
+      setSuccessToastMessage({ key: 'history.trustlineCreatedToast', vars: { from: participantName(from), to: participantName(to) } })
 
       // BUG-5: log to history
-      pushHistory('🔗', t('history.trustlineCreated', { from: participantName(from), to: participantName(to), limit }))
+      pushHistory('🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit } })
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -880,14 +902,14 @@ export function useInteractMode(opts: {
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      if (!from || !to) throw new Error(t('trustline.noTrustlineSelected'))
+      if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       await opts.actions.updateTrustline(from, to, newLimit, eq, { signal })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(t('history.limitUpdatedToast', { limit: newLimit, unit: eq }))
+      setSuccessToastMessage({ key: 'history.limitUpdatedToast', vars: { limit: newLimit, unit: eq } })
 
       // BUG-5: log to history
-      pushHistory('✏️', t('history.trustlineUpdated', { from: participantName(from), to: participantName(to), limit: newLimit }))
+      pushHistory('✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit } })
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
       patchTrustlineLimitLocal(from, to, newLimit, eq)
@@ -904,13 +926,13 @@ export function useInteractMode(opts: {
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      if (!from || !to) throw new Error(t('trustline.noTrustlineSelected'))
+      if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       const res = await opts.actions.closeTrustline(from, to, eq, { signal })
       if (!isCurrent()) return
 
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
       const pair = { from: participantName(from), to: participantName(to) }
-      const msg = res.status === 'closed' ? t('history.trustlineClosed', pair) : t('history.closeRequested', pair)
+      const msg: KeptText = { key: res.status === 'closed' ? 'history.trustlineClosed' : 'history.closeRequested', vars: pair }
       setSuccessToastMessage(msg)
 
       // BUG-5: log to history
@@ -970,7 +992,8 @@ export function useInteractMode(opts: {
 
       // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
       const res = await opts.actions.runClearing(eq, { signal }).catch((e: unknown) => {
-        const failure = clearingRefusalText(e, eq)
+        // 046 wave 3 (BACKLOG 046-3): the refusal is told in the language of now (`shownErrorIn`).
+        const failure = shownErrorIn((locale) => clearingRefusalText(e, eq, locale))
         // The failure stays a state of the panel (`clearingFailure`), with its request id apart from the sentence (048 S3).
         if (isCurrent()) fsm.setClearingFailure(failure)
         throw new ShownFailure(failure)
@@ -982,9 +1005,9 @@ export function useInteractMode(opts: {
       const clearedCycles = res.cleared_cycles
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
-        pushHistory('🌀', tn('history.clearing', clearedCycles, { amount: clearedAmt, unit: eq }))
+        pushHistory('🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } })
       } else {
-        pushHistory('🌀', t('history.clearingNothing'))
+        pushHistory('🌀', { key: 'history.clearingNothing' })
       }
 
       // BUG-3: trigger FX animation immediately after receiving clearing response.
@@ -995,7 +1018,7 @@ export function useInteractMode(opts: {
 
       // A success toast only when something was cleared: "no cycles" is a state of the panel, not a success.
       if (res.cleared_cycles > 0) {
-        successMessage.value = t('history.clearingToast', { cleared: res.cleared_cycles, total: res.cycles.length })
+        successLine.value = { key: 'history.clearingToast', vars: { cleared: res.cleared_cycles, total: res.cycles.length } }
       }
     })
   }

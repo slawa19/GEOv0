@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 import { trustlineFiguresNotice } from '../composables/interact/trustlinesSourceState'
-import { interactText } from '../i18n/interactStrings'
 import { setUiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
 import { renderAvailable } from '../utils/valueFormat'
@@ -131,14 +130,18 @@ describe('046 decision 4 (advisor, round 1, 2026-10-18) - a comma in an amount i
   })
 })
 
-describe('046 wave 2 - the windows of wave 3 stay English as a whole', () => {
-  it('the old keys, the line notices and the excess over a limit are English under ru unless a language is asked for', () => {
+// 046 wave 3 (2026-10-19): the rule of wave 2 - "the helpers of the wave 3 windows speak English unless a language is asked
+// for" (the card and the line window were English as a whole then) - is replaced: wave 3 moved both windows, and a helper
+// without a language speaks the language of the interface. `interactStrings.ts` is gone.
+describe('046 wave 3 - the shared helpers speak the language of the interface', () => {
+  it('without a language: the line notices and the excess over a limit are Russian under ru, English under en', () => {
     setUiLocale('ru')
-    expect(interactText('cardBusyReason')).toBe('Operation in progress… please wait.')
-    expect(interactText('lineDirectionTitle')).toBe('Why is the direction reversed?')
+    expect(trustlineFiguresNotice({ kind: 'loading' })).toBe(t('trustlineSource.loading', {}, 'ru'))
+    expect(renderAvailable('-5.00')).toBe(t('common.overLimit', { amount: '5.00' }, 'ru'))
+    setUiLocale('en')
     expect(trustlineFiguresNotice({ kind: 'loading' })).toBe('Trustline data is still loading from the backend; the figures for this pair are not available yet.')
     expect(renderAvailable('-5.00')).toBe('over limit by 5.00')
-    // Counter-check: asked for, the same helpers speak Russian (the trust line window passes the interface's language).
+    // Counter-check: an asked language still wins over the interface's.
     expect(trustlineFiguresNotice({ kind: 'loading' }, 'ru')).toBe(t('trustlineSource.loading', {}, 'ru'))
     expect(renderAvailable('-5.00', 'ru')).toBe(t('common.overLimit', { amount: '5.00' }, 'ru'))
   })

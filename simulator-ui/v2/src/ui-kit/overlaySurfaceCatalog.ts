@@ -438,13 +438,13 @@ export function resolveWindowSurfaceDescriptor(
 
   const descriptor = getOverlaySurfaceDescriptor('wm-inspector-window')
 
-  // The two inspector windows (the line window, the participant card) are English as a whole until wave 3 of 046 moves
-  // them; their shells keep the English names below, so no window is named in one language and written in another.
+  // The two inspector windows (the line window, the participant card): 046 wave 3 - named in the language of the interface,
+  // as the windows themselves are written (English byte for byte as before).
   if (isEdgeDetailWindow(win)) {
     const fromPid = String(win.data.fromPid ?? '').trim()
     const toPid = String(win.data.toPid ?? '').trim()
     const show = options.showPid ?? ((pid: string) => pid)
-    const label = fromPid && toPid ? `Trustline details: ${show(fromPid)} to ${show(toPid)}` : 'Trustline details'
+    const label = fromPid && toPid ? t('windowShell.lineDetailsPair', { from: show(fromPid), to: show(toPid) }) : t('windowShell.lineDetails')
     return {
       descriptor,
       title: '',
@@ -461,7 +461,7 @@ export function resolveWindowSurfaceDescriptor(
       descriptor,
       title: '',
       role: descriptor.a11y?.role ?? 'region',
-      ariaLabel: label ? `Node details: ${label}` : 'Node details',
+      ariaLabel: label ? t('windowShell.nodeDetailsNamed', { name: label }) : t('windowShell.nodeDetails'),
     }
   }
 
