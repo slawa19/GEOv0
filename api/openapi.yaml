@@ -2439,7 +2439,9 @@ paths:
         process, and its planning phase has a time bound (a chosen value, not a performance guarantee): a request
         that meets a plan in flight in its process, or whose own planning runs past the bound, is answered 503 (E007, `details.reason` = `diagnostics_busy` | `diagnostics_timeout`,
         `details.retry_after_seconds`) - it is not queued. A planner that fails is 500 (E010). Every error carries
-        a `request_id`; none of them is an empty list.
+        a `request_id`; none of them is an empty list. The plan is hub-wide (participant ids and debt amounts of
+        the whole equivalent), so where simulator use is detected on the server the operation is refused, as the
+        periodic clearing pass is (programme 044 T4406, programme 023 decision 9): 409 (E008).
       parameters:
         - in: query
           name: equivalent
@@ -2461,6 +2463,17 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          description: >-
+            E008: simulator use is detected on this server (programme 044 T4406; the periodic pass's rule,
+            programme 023 decision 9) - a simulator run is recorded in the database
+            (`details.reason = simulator_real_runs_in_database`) or this process does not record its runs
+            (`details.reason = simulator_persistence_disabled`). The simulator clears inside each run's own
+            perimeter instead. Detection, not proof: a database whose run records were cleaned up is not refused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: The planner process could not answer (E010)
           content:
@@ -2489,7 +2502,9 @@ paths:
         HTTP idempotency: a repeated request runs a new pass. `max_depth` is NOT accepted: clearing execution
         has no depth limit, and the presence of the key in any form (bare, empty, repeated, valid or not) is
         answered 422 (E009, `details.errors[].loc = [query, max_depth]`) before the pass starts; the diagnostic
-        GET /clearing/cycles refuses it the same way (programme 035).
+        GET /clearing/cycles refuses it the same way (programme 035). The pass is hub-wide (no run perimeter), so
+        where simulator use is detected on the server it is refused, as the periodic pass is (programme 044 T4406,
+        programme 023 decision 9): 409 (E008), see below.
       parameters:
         - in: query
           name: equivalent
@@ -2518,8 +2533,12 @@ paths:
           description: >-
             E008 before any occurrence committed: the equivalent is not active (operator stop or integrity
             hold; `details.reason`), its clearing lease is held by another pass, or clearing is switched off
-            (`CLEARING_ENABLED = false`, `details.reason = clearing_disabled`, 028 `F-028-20`). Met after
-            progress, the same stop answers 200 `interrupted` instead.
+            (`CLEARING_ENABLED = false`, `details.reason = clearing_disabled`, 028 `F-028-20`), or simulator use
+            is detected on this server (programme 044 T4406: a simulator run is recorded in the database,
+            `details.reason = simulator_real_runs_in_database`, or this process does not record its runs,
+            `details.reason = simulator_persistence_disabled`; the simulator clears inside each run's own
+            perimeter instead). Met after progress, the same stop - and the same detection on a re-plan's
+            snapshot - answers 200 `interrupted` instead.
           content:
             application/json:
               schema:

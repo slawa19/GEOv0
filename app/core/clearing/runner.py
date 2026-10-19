@@ -9,8 +9,8 @@ by a separate hub deployment, never by default (decision R1). No product caller 
 
 ONE PASS (`run_clearing_pass`), for one equivalent:
 
-1. SNAPSHOT: one read transaction - the caller's `snapshot_guard` (the periodic isolation rule reads here, in the same
-   read transaction), the equivalent id, `flow_planner.load_snapshot` (its edges are one statement) - then the transaction is rolled back and the
+1. SNAPSHOT: one read transaction - the caller's `snapshot_guard` (the periodic isolation rule, and since 044 `T4406`
+   the same rule for `POST /clearing/auto`, read here, in the same read transaction), the equivalent id, `flow_planner.load_snapshot` (its edges are one statement) - then the transaction is rolled back and the
    session closed. The read transaction is released BEFORE any CPU work is handed over.
 2. PLAN: `flow_planner.plan_clearing` runs in a separate PROCESS (a one-worker `spawn` pool by default), never on the
    event loop. Not a thread: measured 2026-09-28 on this stand, a thread running the planner starved the loop through
@@ -578,6 +578,11 @@ async def run_awaited_clearing(
 
     Refuses (409 `clearing_disabled`) when `CLEARING_ENABLED` is off. A lease held by another owner is
     `ConflictException` after `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
+
+    The pass is hub-wide (no perimeter), so every snapshot it reads is guarded by `check_hub_wide_clearing_isolation`
+    (044 `T4406`), read on the snapshot's session before the snapshot - as the periodic pass guards its own: a refusal
+    on the first snapshot is a `ClearingPassError` with nothing committed whose cause is the 409; one on a re-plan's
+    snapshot ends the pass with its committed progress (`reason: error`).
     """
 
     if not settings.CLEARING_ENABLED:
@@ -587,7 +592,13 @@ async def run_awaited_clearing(
     async with renewable_lease(
         redis_client, lease_key(equivalent_code), wait_timeout_seconds=wait_timeout_seconds, **LEASE_TIMINGS
     ) as lease:
-        return await run_clearing_pass(session_factory, equivalent_code, lease=lease, **pass_kwargs)
+        return await run_clearing_pass(
+            session_factory,
+            equivalent_code,
+            lease=lease,
+            snapshot_guard=check_hub_wide_clearing_isolation,
+            **pass_kwargs,
+        )
 
 
 # ------------------------------------------------------------------------------------------------- periodic
@@ -610,6 +621,26 @@ async def check_periodic_isolation(session) -> None:
     ).scalar_one_or_none()
     if real_run is not None:
         raise ClearingPeriodicRefused("simulator_real_runs_in_database")
+
+
+async def check_hub_wide_clearing_isolation(session) -> None:
+    """044 `T4406` (closing review of 044, class 1): decision 9's detection, applied to the two hub-wide HTTP routes.
+
+    `POST /clearing/auto` (through `run_awaited_clearing`) and `GET /clearing/cycles` authenticate any participant
+    and are limited to no run: where simulator runs share the database, any participant would read the runs'
+    participants and debts and clear their cycles across runs. They refuse exactly where the periodic pass refuses
+    (`check_periodic_isolation`, unchanged), as 409 E008 with the same `details.reason`. The simulator's own passes
+    (the tick and the Interact `clearing-real`, in the run's perimeter) do not call this. Detection, not proof - what
+    it does not see is listed under decision 9 ("Чего проверка не видит").
+    """
+
+    try:
+        await check_periodic_isolation(session)
+    except ClearingPeriodicRefused as refused:
+        raise ConflictException(
+            "Hub-wide clearing is refused: simulator use is detected on this server",
+            details={"reason": refused.reason},
+        ) from refused
 
 
 async def run_periodic_clearing_pass(session_factory, redis_client) -> dict[str, ClearingPassResult]:

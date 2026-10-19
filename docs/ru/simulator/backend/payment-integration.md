@@ -71,6 +71,7 @@ Source of truth:
 
 Ключевые свойства:
 - Guardrail: `CLEARING_ENABLED` может выключать clearing.
+- **С 2026-10-19 (044 `T4406`)** оба маршрута отказывают (409 E008, `details.reason = simulator_real_runs_in_database | simulator_persistence_disabled`), где обнаружено использование симулятора: они действуют на весь эквивалент, а не на периметр прогона (`docs/ru/02-protocol-spec.md` §7.2). Симулятору они не нужны — см. §6.
 - Есть distributed lock: `dlock:clearing:{equivalent}`.
 - Резервов платежей нет (программа 019, стадия 5, `T1909`: таблица `prepare_locks` удалена миграцией `031`), поэтому
   клиринг не пропускает циклы «по резерву»; конкурентные платежи разводятся `SERIALIZABLE` и повтором всей транзакции.
@@ -258,7 +259,7 @@ MVP правило:
 ## 6) Clearing в симуляторе
 
 Если runner включает clearing (опционально на раннем MVP):
-- инициировать `POST /api/v1/clearing/auto?equivalent=...` по политике (например раз в N тиков или при достижении порога debt).
+- ~~инициировать `POST /api/v1/clearing/auto?equivalent=...` по политике~~ — исторический дизайн MVP. С программы 023 тик и Interact-действие `clearing-real` вызывают общий раннер `run_clearing_pass` **в периметре прогона** (`app/core/simulator/tick.py`, `app/api/v1/simulator.py`); `POST /clearing/auto` на сервере с прогонами отказывает (044 `T4406`, 2026-10-19).
 
 Визуализация:
 - по результату:
