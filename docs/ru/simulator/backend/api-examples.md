@@ -22,6 +22,8 @@ $Equivalent = "UAH"
 
 Simulator endpoints в OpenAPI требуют `Authorization: Bearer ...`.
 
+Кто вызывает — решает `require_simulator_actor` (`app/api/deps.py:258-340`), по порядку: заголовок `X-Admin-Token` (администратор, владелец `admin`, либо `cli:<имя>` с `X-Simulator-Owner`), Bearer-токен участника (владелец `pid:<pid>`), cookie `geo_sim_sid` (анонимный посетитель демо, владелец `anon:…`). Владелец — единица лимитов и доступа: у владельца не больше одного активного прогона, чужой прогон закрыт (403), администратор видит все (`real-mode-runbook.md`, раздел 6.6). Примеры ниже идут от участника (Bearer); шаги, требующие администратора, помечены.
+
 Ниже — минимальный «dev-flow», который:
 1) генерирует Ed25519 ключи,
 2) регистрирует участника через `POST /participants`,
@@ -120,11 +122,14 @@ Invoke-RestMethod -Method Get -Uri "$BaseUrl/simulator/scenarios" -Headers $Head
 
 OpenAPI ожидает: `{ "scenario": <scenario-json> }`.
 
+**Загрузка — только администратору** (`app/api/v1/simulator.py:2804-2816`: иначе 403): добавьте заголовок `X-Admin-Token` со значением `ADMIN_TOKEN` бэкенда — в примере ниже `-Headers $AdminHeaders`.
+
 ```powershell
+$AdminHeaders = @{ 'X-Admin-Token' = '<значение ADMIN_TOKEN бэкенда>' }
 $scenarioObj = Get-Content $ScenarioPath -Raw | ConvertFrom-Json
 $body = @{ scenario = $scenarioObj } | ConvertTo-Json -Depth 100
 
-Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/scenarios" -Headers $Headers -ContentType 'application/json' -Body $body
+Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/scenarios" -Headers $AdminHeaders -ContentType 'application/json' -Body $body
 ```
 
 После загрузки сценария — перезагрузить страницу Simulator UI: каталог читается при загрузке страницы (кнопки обновления каталога в интерфейсе нет, 048 S1).
@@ -138,6 +143,8 @@ Invoke-RestMethod -Method Get -Uri "$BaseUrl/simulator/scenarios/minimal" -Heade
 ## 3) Run: start / status / pause / resume / stop / restart / intensity
 
 ### 3.1 Start run
+
+Не-администратор стартует и читает только допущенные сценарии: по умолчанию это три демо-сценария, остальные отвечают 404 как неизвестные; допуск — `SIMULATOR_SCENARIO_ALLOWLIST` (`*` или `all` — все; `app/core/simulator/runtime_impl.py:49-70, 341-351`). Для `minimal` из примера под Bearer-участником задайте `SIMULATOR_SCENARIO_ALLOWLIST=minimal` (или `*`) либо стартуйте с `-Headers $AdminHeaders`. Прогон получает свежих участников под идентичностями `<run_id>:p<n>`, поэтому участники в ответах прогона называются так, а не pid сценария (`app/core/simulator/run_perimeter.py:59-62`).
 
 ```powershell
 $run = Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/runs" -Headers $Headers -ContentType 'application/json' -Body (
@@ -169,6 +176,16 @@ Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/runs/$runId/intensity" -
   @{ intensity_percent = 70 } | ConvertTo-Json
 )
 ```
+
+### 3.5 Лимиты, простой и причина остановки
+
+Что вернёт сервер (подробности и якоря — `real-mode-runbook.md`, раздел 6.6):
+
+- второй активный прогон того же владельца — 409, `error.details.conflict_kind = owner_active_exists`;
+- все места процесса заняты (`SIMULATOR_MAX_ACTIVE_RUNS`) — 409, `error.details.conflict_kind = global_active_limit`, `max_active_runs`, `active_runs`; повторить можно, когда любой прогон остановится;
+- чужой прогон — 403; неизвестный, удалённый из памяти или оставшийся от прежнего процесса — 404;
+- свой активный прогон владельца — `GET $BaseUrl/simulator/runs/active` (`{ "run_id": "…" }`; `{ "run_id": null }`, если активного нет);
+- прогон без SSE-подписчика дольше `SIMULATOR_RUN_IDLE_STOP_SEC` (600 с по умолчанию) останавливается сам: `GET …/runs/$runId` отдаёт `state = stopped`, `stop_source = server`, `stop_reason = idle_no_subscribers`; `POST …/runs` того же владельца после этого создаёт новый прогон.
 
 ## 4) SSE: подключение к stream событий
 
@@ -242,6 +259,9 @@ Invoke-WebRequest -Method Get -Uri "$BaseUrl/simulator/runs/$runId/artifacts/$ar
 ## 6) Типовые ошибки и быстрые проверки
 
 - `401 Unauthorized`: токен отсутствует/протух/не тот тип; повторите шаг (1).
-- `404 Not Found` на run endpoints: неправильный `run_id` или run ещё не создан.
+- `403 Forbidden` на run endpoints: прогон принадлежит другому владельцу (`pid:…` / `anon:…` / `admin`); загрузка сценария без `X-Admin-Token`.
+- `404 Not Found` на run endpoints: неправильный `run_id`, run ещё не создан, запись удалена по `SIMULATOR_MAX_RUN_RECORDS` или процесс перезапускался; сценарий вне `SIMULATOR_SCENARIO_ALLOWLIST` для не-администратора.
+- `409 Conflict` на `POST /simulator/runs`: `details.conflict_kind` — `owner_active_exists` или `global_active_limit` (раздел 3.5).
+- `429 Too Many Requests` на `GET …/events`: предел подписок SSE (`SIMULATOR_SSE_MAX_CONNECTIONS`, `SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN`; `ws-protocol.md`, раздел 2.1.1).
 - `400 Bad Request`: чаще всего отсутствует обязательный query `equivalent`.
 - Проверка базовой доступности сервиса: `GET $BaseUrl/health`.

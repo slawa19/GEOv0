@@ -97,14 +97,14 @@
 | Критерий | Описание | Статус |
 |----------|----------|--------|
 | Анонимная идентичность | Cookie-based сессия (HMAC-SHA256, `geo_sim_sid`, Path=/, Secure via X-Forwarded-Proto) | ✅ Done |
-| Per-owner лимиты | `_active_run_id_by_owner`, 409 с `conflict_kind: owner_active_exists` / `global_active_limit` | ✅ Done |
+| Per-owner лимиты | `_active_run_id_by_owner`, 409 с `conflict_kind: owner_active_exists` / `global_active_limit`; с 044 (2026-10-17/18) у каждого посетителя свой прогон: общий предел `SIMULATOR_MAX_ACTIVE_RUNS` (10 в `run_full_stack.ps1` и Compose, `1` в коде), остановка брошенного прогона `SIMULATOR_RUN_IDLE_STOP_SEC` (`idle_no_subscribers`) — `real-mode-runbook.md`, раздел 6.6 | ✅ Done |
 | Owner isolation | `_check_run_access()` deny-by-default, пустой owner → только admin | ✅ Done |
 | Admin control plane | `GET /admin/runs`, `POST /admin/runs/stop-all`, ForbiddenException | ✅ Done |
 | CLI override | `X-Simulator-Owner` с `.strip()` + regex validation, E009 | ✅ Done |
 | CSRF защита | Origin check, ForbiddenException с E006, `details.reason=csrf_origin` | ✅ Done |
 | Config guardrail | Fail-fast RuntimeError в non-dev при дефолтном секрете | ✅ Done |
 | DB миграция | `owner_id`, `owner_kind` nullable; backfill: `owner_id='legacy:unknown'`, `owner_kind=NULL` для legacy | ✅ Done |
-| UI интеграция | `credentials: 'include'`, session bootstrap, admin controls TopBar | ✅ Done |
+| UI интеграция | `credentials: 'include'`, session bootstrap; admin controls TopBar упразднены 2026-10-19 (048 S2) — прогоны и файлы оператор смотрит через API (`real-mode-runbook.md`, раздел 6.7) | ✅ Done (в части, не отменённой 048 S2) |
 | Recovery | `reconcile_stale_runs()` на startup (включая `stopped_at=now`), rate-limit exemption `/session/ensure` | ✅ Done |
 
 ### Покрытие тестами

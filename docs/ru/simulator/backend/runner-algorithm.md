@@ -83,6 +83,7 @@ $$ sim\_time\_ms = tick\_index \cdot tick\_ms\_base $$
    - прекратить планирование новых действий
    - дождаться in-flight действий (или отменить по политике)
    - перейти в `stopped` и корректно завершить stream
+   - остановку запрашивает не только человек: цикл прогона сам вызывает `stop(source="server", reason="idle_no_subscribers")`, когда у прогона нет SSE-подписчика дольше `SIMULATOR_RUN_IDLE_STOP_SEC` (проверка стоит перед пропуском паузы, `app/core/simulator/runtime_impl.py:733-752`; правило и числа — `real-mode-runbook.md`, раздел 6.6)
 
 ---
 
