@@ -341,8 +341,14 @@ export function useInteractMode(opts: {
 
   function participantName(pid: string): string {
     const found = participants.value.find((p) => p.pid === pid)
-    const name = String(found?.name ?? '').trim()
+    const listed = String(found?.name ?? '').trim()
     // A list entry whose name IS its id (the cache falls back to the id as the name) is an id as well.
+    // 039 slice D: a participant the run's fetched list does not name (joined after the list was read, or listed by
+    // its id) is named by the shown snapshot - the rule of the rest of the screen (`SimulatorAppRoot.vue`
+    // `participantNameOf`). Until then such a line printed the raw run identity `<run id>:p<n>`.
+    const name = listed && listed !== pid
+      ? listed
+      : String(opts.snapshot.value?.nodes.find((n) => n.id === pid)?.name ?? '').trim()
     return showPid(name || pid)
   }
 

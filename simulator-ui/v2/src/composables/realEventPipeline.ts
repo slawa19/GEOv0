@@ -10,6 +10,7 @@ import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { runStatusErrorLine, writeRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
+import { debtChangeAround } from './debtChange'
 
 export type RealEventReplayRejection = {
   status: 'rejected'
@@ -364,6 +365,7 @@ export function applyAcceptedRealEvent(
     draft.real.runStats.attempts += 1
     draft.real.runStats.committed += 1
     if (otherEquivalent) return intents
+    // 039 slice D (advisor 2026-10-19, option (a)): a payment neither creates, replaces nor drops the clearing's pair.
     deps.patchApplier.applyNodePatches(event.node_patch)
     deps.patchApplier.applyEdgePatches(event.edge_patch)
 
@@ -431,8 +433,12 @@ export function applyAcceptedRealEvent(
 
   if (event.type === 'clearing.done') {
     if (otherEquivalent) return intents
-    deps.patchApplier.applyNodePatches(event.node_patch)
-    deps.patchApplier.applyEdgePatches(event.edge_patch)
+    // 039 slice D: "was" is the total just before the clearing's patches - never `now + cleared_amount` (P-5); "now"
+    // is the total just after them. A clearing that changes nothing gives `null` (no false "was").
+    draft.state.debtChange = debtChangeAround(draft.state.snapshot, event.event_id, () => {
+      deps.patchApplier.applyNodePatches(event.node_patch)
+      deps.patchApplier.applyEdgePatches(event.edge_patch)
+    })
     intents.push({ type: 'clearing-fx', event }, { type: 'wake' })
     return intents
   }
