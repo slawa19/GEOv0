@@ -16,6 +16,7 @@ import { keyEdge } from '../utils/edgeKey'
 import type { TrustlinesFetchState } from '../composables/interact/trustlinesSourceState'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
 import { t } from '../i18n/t'
+import { setUiLocale } from '../i18n/locale'
 
 /**
  * Layout fixture behind the mocked app: a 1000x600 viewport, two placed participants, and by
@@ -1086,6 +1087,46 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       app.unmount()
       host.remove()
       storedDetails(null)
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  /**
+   * 046 wave 1, full (2026-10-19): the root finds the ActionBar to anchor a window by its test id, not by its accessible
+   * name - in Russian that name is «Действия», and a lookup by the English «Interact actions» found nothing and fell
+   * back to the stack's published height. Observed by the anchor: the bar is stubbed BELOW the stack, so only a found bar
+   * gives its bottom (300). Mutation (the lookup by the English name) - red here, green in the English tests above.
+   */
+  it('046 wave 1: in Russian the window is anchored under the ActionBar the root found (by test id, not by its name)', async () => {
+    setUiLocale('ru')
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+      stubRect(host.querySelector('.root') as HTMLElement, { left: 0, top: 0, width: 1400, height: 800 })
+      const actionBar = host.querySelector('[data-testid="action-bar"]') as HTMLElement
+      expect(actionBar.getAttribute('aria-label'), 'precondition: the name is Russian').toBe('Действия')
+      stubRect((actionBar.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar, { left: 400, top: 260, width: 404, height: 40 })
+      stubRect(host.querySelector('.ds-ov-top-stack') as HTMLElement, { left: 14, top: 14, width: 1372, height: 132 })
+      host.querySelector<HTMLButtonElement>('[data-testid="actionbar-payment"]')!.click()
+      await nextTick()
+      await nextTick()
+      const calls = getGeoTestGlobal('__GEO_TEST_WM_OPEN')!.mock.calls.map((c) => c[0] as { type?: string; anchor?: { x: number; y: number } })
+      const anchor = [...calls].reverse().find((c) => c?.type === 'interact-panel')?.anchor
+      expect(anchor, 'the panel was opened with an anchor').toBeTruthy()
+      expect(anchor!.y, 'under the ActionBar the root found (its bottom 300), not the fallback').toBe(300)
+    } finally {
+      app.unmount()
+      host.remove()
+      setUiLocale('en')
+      window.localStorage.clear()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
