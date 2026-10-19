@@ -29,7 +29,6 @@ export const ru = {
     stepHint: '{eq}: не больше {precision} знаков после точки; сервер такую сумму не примет.',
     overLimit: 'сверх лимита на {amount}',
     requestId: 'код запроса: {id}',
-    cancelOperationConfirm: 'Отменить операцию?',
   },
 
   participantStatus: {

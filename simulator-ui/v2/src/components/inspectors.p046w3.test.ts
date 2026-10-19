@@ -12,7 +12,9 @@
  * Red before the wave on `main` `d195e259`: both inspectors were English as a whole («Pay», «New line», «Edit trustline»,
  * «Close line», «Used / Limit · avail»...), the card said the roles in its own words («Even overall» beside the legend's
  * «even»), the line window had no explanatory line (048 item 13 (б)), the history and the success notification kept the
- * language they were made in, a window's failure too, and the native confirm of a busy cancel was Russian in English.
+ * language they were made in, a window's failure too. (The busy cancel's native confirm, Russian in English before the
+ * wave, is gone - Escape and an outside click while busy are ignored: `SimulatorAppRoot.interact.test.ts` P0-2 and
+ * `useSimulatorApp.windowManagementStep0.test.ts`.)
  *
  * What this does NOT see: the width of the Russian texts at 1366x768 (the browser test `e2e/p046-w3-inspectors.spec.ts`
  * measures it); whether a translation reads well (the parity guard and a human).
@@ -23,7 +25,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useInteractMode } from '../composables/useInteractMode'
 import { useInteractActions } from '../composables/useInteractActions'
 import { freezeTrustlineFiguresSource, resolveTrustlineFiguresSource, trustlineFiguresNotice } from '../composables/interact/trustlinesSourceState'
-import { confirmCancelBusyOperation } from '../utils/confirmCancelBusy'
 import { setUiLocale, type UiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
 import type { GraphNode, GraphSnapshot } from '../types'
@@ -434,30 +435,5 @@ describe('046 wave 3 - BACKLOG 046-3: the warning the payment window keeps follo
     setUiLocale('ru')
     await settle()
     expect(warn()).toBe(t('payment.selfPaymentReselect', {}, 'ru'))
-  })
-})
-
-describe('046 wave 3 - the question before a busy operation is cancelled', () => {
-  it('is asked in the language of the interface (red before: «Отменить операцию?» in English too)', () => {
-    const asked: string[] = []
-    vi.stubGlobal('confirm', (q: string) => { asked.push(q); return false })
-    try {
-      setUiLocale('en')
-      expect(confirmCancelBusyOperation(), 'the answer is passed on').toBe(false)
-      setUiLocale('ru')
-      confirmCancelBusyOperation()
-    } finally {
-      vi.unstubAllGlobals()
-    }
-    expect(asked).toEqual(['Cancel the operation in progress?', 'Отменить операцию?'])
-  })
-
-  it('counter-check: without a confirm to show, the cancel is allowed', () => {
-    vi.stubGlobal('confirm', undefined)
-    try {
-      expect(confirmCancelBusyOperation()).toBe(true)
-    } finally {
-      vi.unstubAllGlobals()
-    }
   })
 })

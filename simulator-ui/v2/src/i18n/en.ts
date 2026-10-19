@@ -40,11 +40,6 @@ export const en = {
      * the sentence (and `data-request-id`) - no longer glued into the sentence.
      */
     requestId: 'request id: {id}',
-    /**
-     * 046 wave 3: the question before Escape or a click outside cancels an operation that is in flight
-     * (`utils/confirmCancelBusy.ts`; it was a Russian literal in both languages).
-     */
-    cancelOperationConfirm: 'Cancel the operation in progress?',
   },
 
   /** Participant statuses (`chk_participant_status`, plus the scenario's `frozen`); an unknown one is shown as it came. */

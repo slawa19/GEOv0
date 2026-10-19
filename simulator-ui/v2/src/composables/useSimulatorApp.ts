@@ -72,7 +72,6 @@ import { useSystemBalance } from './useSystemBalance'
 
 import { CLEARING_EFFECT_MS, useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
 import { useRealTxFx } from './realFx/useRealTxFx'
-import { confirmCancelBusyOperation } from '../utils/confirmCancelBusy'
 import {
   createLivePathDelivery,
   createRecordingSceneSource,
@@ -393,10 +392,11 @@ export function __selectNodeFromCanvasStep0(opts: {
   isInteractCanvasNodePickPhase: boolean
   interactSelectNode: (nodeId: string) => void
 
-  /** P0-2: when true, hard dismiss (ESC/outside-click) must be confirmed. */
+  /**
+   * P0-2, 046 wave 3 (advisor's decision 2026-10-19): while an operation is in flight an outside click is IGNORED - it
+   * neither cancels nor asks; the operation finishes on its own (the action bar says it is in progress).
+   */
   isInteractBusy?: boolean
-  /** P0-2: confirm callback used only when busy and user attempts a hard dismiss. */
-  confirmCancelInteractBusy?: () => boolean
 
   closeTopmostOverlayOnOutsideClick: () => void
 
@@ -413,11 +413,9 @@ export function __selectNodeFromCanvasStep0(opts: {
 
   // Outside click: cancel active interact flow and close inspector card overlays (edge-detail + node-card).
   if (!opts.id) {
-    // P0-2 policy B: when Interact is busy, outside-click hard dismiss must be gated.
-    if (opts.isInteractBusy && typeof opts.confirmCancelInteractBusy === 'function') {
-      const ok = opts.confirmCancelInteractBusy()
-      if (!ok) return
-    }
+    // P0-2: while Interact is busy an outside click does nothing. Until 046 wave 3 it asked a native `confirm()` (spec 046
+    // forbids it; the owner's rule: no edge cases in the UI - no dialog at all, not an in-app one either).
+    if (opts.isInteractBusy) return
 
     opts.cancelInteract()
 
@@ -1468,8 +1466,6 @@ export function useSimulatorApp(opts?: {
       isInteractCanvasNodePickPhase: isInteractCanvasNodePickPhase.value,
       interactSelectNode: (nodeId) => interactMode.selectNode(nodeId),
       isInteractBusy: !!interactMode.busy.value,
-      // 046 wave 3: the question in the language of the interface (one place, `utils/confirmCancelBusy.ts`).
-      confirmCancelInteractBusy: confirmCancelBusyOperation,
 
       closeTopmostOverlayOnOutsideClick: () => {
         void closeTopmostOverlayOnOutsideClick()

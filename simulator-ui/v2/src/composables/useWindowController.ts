@@ -9,7 +9,6 @@ import { isNodeCardWindow } from './windowManager/types'
 import type { FocusMode, WindowAnchor, WindowCloseReason, WindowDataByType, WindowManagerApi, WindowOpenArgs } from './windowManager/types'
 
 import { useWmEdgeDetail, type EdgeDetailCloseReason } from './useWmEdgeDetail'
-import { confirmCancelBusyOperation } from '../utils/confirmCancelBusy'
 
 // ARCH-4 (WM bridging): `watchEffect` запрещён.
 // `wm.open()`/`wm.closeGroup()` читают реактивное состояние WM, и `watchEffect` может
@@ -205,10 +204,6 @@ function dispatchTopmostWindowEsc(wm: WindowManagerApi): boolean {
 	}
 }
 
-function confirmCancelInteractBusy(): boolean {
-	// P0-2 policy B: ESC / outside-click while busy must ask for confirmation (046 wave 3: in the language of the interface).
-	return confirmCancelBusyOperation()
-}
 
 export function useWindowController(opts: {
 	apiMode: Ref<string>
@@ -522,24 +517,15 @@ export function useWindowController(opts: {
 		wmNodeCardId.value = id
 	}
 
-	function hardDismissInteractBusyIfNeeded(): boolean {
+	/**
+	 * P0-2, 046 wave 3 (advisor's decision 2026-10-19): Escape while an operation is in flight is IGNORED - consumed with no
+	 * window closed, no flow cancelled and no question asked; the operation finishes on its own (the action bar says it is in
+	 * progress). Until wave 3 it asked a native `confirm()` and cancelled on "yes" (spec 046 forbids the native confirm; the
+	 * owner's rule: no edge cases in the UI - no dialog at all).
+	 */
+	function escIgnoredWhileInteractBusy(): boolean {
 		if (!opts.isLiveUi.value) return false
-		if (!opts.interactMode.busy.value) return false
-
-		const ok = confirmCancelInteractBusy()
-		if (!ok) {
-			// User declined: consume ESC (no WM close, no flow cancel).
-			return true
-		}
-
-		// User confirmed: cancel flow (epoch bump) and close all related windows.
-		opts.interactMode.cancel()
-		opts.wm.closeGroup('interact', 'programmatic')
-
-		// Match Step0 hard dismiss behavior: close inspector windows too.
-		uiCloseTopmostInspectorWindow()
-		uiCloseTopmostInspectorWindow()
-		return true
+		return !!opts.interactMode.busy.value
 	}
 
 	function onGlobalKeydown(ev: KeyboardEvent) {
@@ -548,8 +534,8 @@ export function useWindowController(opts: {
 			// Preserve existing rule: do not treat ESC in inputs as a global dismiss.
 			if (isFormLikeTarget(ev.target)) return
 
-			// P0-2 policy B: while Interact is busy, ESC is gated by confirmation.
-			if (hardDismissInteractBusyIfNeeded()) return
+			// P0-2: while Interact is busy, Escape does nothing.
+			if (escIgnoredWhileInteractBusy()) return
 
 			// If nested content already consumed ESC via a container listener, do not run WM close logic.
 			if (ev.defaultPrevented) return

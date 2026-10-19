@@ -19,6 +19,7 @@
  * mount test `inspectors.p046w3.test.ts` holds those on the real `useInteractMode`).
  */
 import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test, type Locator, type Page } from '@playwright/test'
@@ -111,7 +112,8 @@ const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs)
 async function frame(page: Page, name: string): Promise<void> {
   if (!FRAMES) return
   mkdirSync(FRAMES_DIR, { recursive: true })
-  await page.screenshot({ path: `${FRAMES_DIR}${name}.png` })
+  // §15 Codex P3: joined, not concatenated - a `P046_FRAMES_DIR` without a trailing separator wrote beside the directory.
+  await page.screenshot({ path: join(FRAMES_DIR, `${name}.png`) })
 }
 
 for (const theme of THEMES) {
