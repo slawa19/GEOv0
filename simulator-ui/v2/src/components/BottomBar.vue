@@ -80,7 +80,7 @@ const playlistPosition = computed(() => {
 <template>
   <div class="ds-ov-bottom">
     <!-- 043 S1: the service row, while Details is on; above the main row, which therefore never moves. -->
-    <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Bottom bar" data-testid="bottom-details-row">
+    <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="bb-details-row" aria-label="Bottom bar" data-testid="bottom-details-row">
       <div class="hud-bar__left" aria-label="View settings">
         <div class="ds-row bb-row" aria-label="Equivalent">
         <span class="ds-label">EQ</span>
@@ -226,10 +226,15 @@ const playlistPosition = computed(() => {
   wide as the button itself - it was a fixed 8.5rem with the button absolutely positioned over it, and in `hud` the
   button is wider (145 px against 136): it reached over the item to its left (the playlist's "0 / 20"). The place has no
   height and sits at the bottom of its line, the button rising from it: the line - and the measured bar - is no taller
-  than before. Open, the navigator floats above the row, anchored at the right edge of its place.
+  than before. Open, the navigator floats above the WHOLE service row, at the row's right edge: the row is its
+  containing block (§15 Codex r3, 2026-10-19: anchored to its zero-height place, the open panel came down over the
+  playlist line and the selects to its left).
 */
-.bb-navigator {
+.bb-details-row {
   position: relative;
+}
+
+.bb-navigator {
   min-width: 8.5rem;
   align-self: flex-end;
   height: 0;
@@ -245,10 +250,10 @@ const playlistPosition = computed(() => {
   max-width: min(520px, calc(100vw - 2 * var(--ds-ov-inset, 12px)));
 }
 
-/* Open: the panel floats above the row, so it never covers the row's other controls. */
+/* Open: the panel floats above the service row, so it never covers the row's other controls. */
 .bb-navigator :deep(.graph-navigator:has(> details[open])) {
   position: absolute;
-  right: 0;
+  right: var(--ds-hud-bar-px, var(--ds-space-3, 12px));
   bottom: calc(100% + var(--ds-space-2, 8px));
 }
 

@@ -95,11 +95,25 @@ test('043 S1: Tab through the first view reaches the first view\'s controls only
 async function navigatorPlace(page: Page) {
   return page.evaluate(() => {
     const row = document.querySelector('[data-testid="bottom-details-row"]')!
-    // The visible button is the navigator's panel (its frame), the summary inside it is the hit target.
-    const nav = row.querySelector('.graph-navigator')!.getBoundingClientRect()
+    // The visible button is the navigator's panel (its frame), the summary inside it is the hit target. Open, the
+    // same panel is the whole navigator (summary and lists) floating above the row.
+    const panel = row.querySelector<HTMLElement>('.graph-navigator')!
+    const summary = row.querySelector<HTMLElement>('.graph-navigator > details > summary')!
+    const nav = panel.getBoundingClientRect()
     const rr = row.getBoundingClientRect()
+    // §15 Codex r3 (2026-10-19): an invisible button kept its rectangle and passed the geometry. Judged first: the
+    // summary is rendered, not hidden, not transparent (its own and every ancestor's opacity), and has a size.
+    const sr = summary.getBoundingClientRect()
+    let opacity = 1
+    for (let el: HTMLElement | null = summary; el; el = el.parentElement) opacity *= Number(getComputedStyle(el).opacity)
+    const cs = getComputedStyle(summary)
+    const visible = { display: cs.display !== 'none', visibility: cs.visibility === 'visible', opaque: opacity > 0.05, sized: sr.width > 0 && sr.height > 0 }
     const name = (el: Element) => `${el.tagName.toLowerCase()} "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 24)}"`
+    // A clearance of CLEAR px around the navigator counts, on BOTH axes (§15 Codex r3, P3): the row's own gap is 8 px,
+    // and a frame decoration (the `hud` corners) touching the next item read as "on top of it" on the owner's frame
+    // although the boxes met at 1 px. TOL absorbs subpixel rounding of the layout.
     const CLEAR = 4
+    const TOL = 0.5
     const overlaps: string[] = []
     let controls = 0
     // Controls, and the texts that read them (the playlist's position "0 / 20" is what the owner saw covered).
@@ -108,33 +122,50 @@ async function navigatorPlace(page: Page) {
       const r = el.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) continue
       controls += 1
-      // A clearance of CLEAR px around the button counts: the row's own gap is 8 px, and a frame decoration (the `hud`
-      // corners) touching the next item read as "on top of it" on the owner's frame although the boxes met at 1 px.
       const ix = Math.min(r.right, nav.right + CLEAR) - Math.max(r.left, nav.left - CLEAR)
-      const iy = Math.min(r.bottom, nav.bottom) - Math.max(r.top, nav.top)
-      if (ix > 0.5 && iy > 0.5) overlaps.push(`${name(el)} ${Math.round(ix - CLEAR)}x${Math.round(iy)}`)
+      const iy = Math.min(r.bottom, nav.bottom + CLEAR) - Math.max(r.top, nav.top - CLEAR)
+      if (ix > TOL && iy > TOL) overlaps.push(`${name(el)} ${Math.round(ix - CLEAR)}x${Math.round(iy - CLEAR)}`)
     }
     const pad = parseFloat(getComputedStyle(row).paddingRight) || 0
-    return { overlaps, controls, rightGap: Math.round(rr.right - pad - nav.right), nav: [Math.round(nav.left), Math.round(nav.top), Math.round(nav.width)] }
+    return { visible, overlaps, controls, rightGap: Math.round(rr.right - pad - nav.right), nav: [Math.round(nav.left), Math.round(nav.top), Math.round(nav.width), Math.round(nav.height)] }
   })
 }
 
-async function expectNavigatorPlaced(page: Page, what: string) {
+/** Read the row until two reads agree (a condition, not a sleep): it re-flows after a resize, the panel after a toggle. */
+async function settledPlace(page: Page) {
+  let prev = ''
+  await expect.poll(async () => {
+    const cur = JSON.stringify(await navigatorPlace(page))
+    const same = cur === prev
+    prev = cur
+    return same
+  }, { timeout: 5_000, intervals: [16] }).toBe(true)
+  return navigatorPlace(page)
+}
+
+async function expectNavigatorPlaced(page: Page, what: string, o: { open?: boolean } = {}) {
+  const summary = page.locator('[data-testid="bottom-details-row"] .graph-navigator > details > summary')
   for (const vp of [VIEWPORT_MAIN, VIEWPORT_RESIZED]) {
     await page.setViewportSize(vp)
-    // The row re-flows after a resize: read it until two reads agree (a condition, not a sleep).
-    let prev = ''
-    await expect.poll(async () => {
-      const cur = JSON.stringify(await navigatorPlace(page))
-      const same = cur === prev
-      prev = cur
-      return same
-    }, { timeout: 5_000, intervals: [16] }).toBe(true)
-    const p = await navigatorPlace(page)
+    const p = await settledPlace(page)
     console.log('[048 S1 navigator]', what, `${vp.width}x${vp.height}`, JSON.stringify(p))
+    expect(p.visible, `${what} ${vp.width}x${vp.height}: "Inspect graph" is shown (rendered, visible, not transparent, sized) - judged before its place`)
+      .toEqual({ display: true, visibility: true, opaque: true, sized: true })
     expect(p.controls, `${what} ${vp.width}x${vp.height}: anti-vacuum - the row has other controls to compare with`).toBeGreaterThanOrEqual(4)
     expect.soft(p.overlaps, `${what} ${vp.width}x${vp.height}: "Inspect graph" lies over no other control or text of the row, nor within 4 px of one`).toEqual([])
     expect.soft(Math.abs(p.rightGap), `${what} ${vp.width}x${vp.height}: "Inspect graph" stays at the right edge of its row (gap ${p.rightGap} px)`).toBeLessThanOrEqual(2)
+    if (o.open) {
+      // §15 Codex r3 (P2, 2026-10-19): OPEN, the navigator floats above the row - it must not come down over the row's
+      // own controls (the playlist line included) either.
+      await summary.click()
+      await expect(page.locator('[data-testid="bottom-details-row"] .graph-navigator > details')).toHaveAttribute('open', '')
+      const q = await settledPlace(page)
+      console.log('[048 S1 navigator open]', what, `${vp.width}x${vp.height}`, JSON.stringify(q))
+      expect(q.nav[3]!, `${what} ${vp.width}x${vp.height}: anti-vacuum - the open navigator is taller than the closed button`).toBeGreaterThan(p.nav[3]! + 20)
+      expect.soft(q.overlaps, `${what} ${vp.width}x${vp.height}: the OPEN navigator lies over no control or text of the row, nor within 4 px of one`).toEqual([])
+      await summary.click()
+      await expect(page.locator('[data-testid="bottom-details-row"] .graph-navigator > details')).not.toHaveAttribute('open', '')
+    }
   }
   await page.setViewportSize(VIEWPORT_MAIN)
 }
@@ -187,7 +218,7 @@ for (const theme of THEMES) {
     await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
     if ((await page.locator(DETAILS_TOGGLE).getAttribute('aria-expanded')) !== 'true') await page.locator(DETAILS_TOGGLE).click()
     await expect(page.locator('[data-testid="playlist-workbench"]'), 'anti-vacuum: the developer\'s row has the playlist').toBeVisible()
-    await expectNavigatorPlaced(page, `[${theme}] ?debug=1 offline`)
+    await expectNavigatorPlaced(page, `[${theme}] ?debug=1 offline`, { open: true })
     // Details on: MEASURED, NOT ASSERTED (2026-10-16). Spec 043 (Verification plan 2) asks for 85 % in both states;
     // the approved mock-up (`mockup-s2.png`: two rows and a metrics row on top, a row of settings and tools above the
     // legend) gives about 69 % here, and no arrangement of those rows reaches 85 % at 1366x768 (four rows of 38-42 px
