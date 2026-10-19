@@ -240,7 +240,7 @@ for (const vp of VIEWPORTS) {
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
       // 048 S3: no error toast over the window any more - the measurement needs no wait for it to go.
-      await expect(page.getByTestId('error-toast')).toHaveCount(0)
+      expect(await page.getByTestId('error-toast').count()).toBe(0) // at once: `toHaveCount(0)` would retry until a toast expired
 
       const banner = await measure(page, 'unresolved', ['[data-testid="mp-retry"]', '[data-testid="mp-discard"]', '[data-testid="manual-payment-cancel"]'])
       await c.press('Discard', '[data-testid="mp-discard"]')

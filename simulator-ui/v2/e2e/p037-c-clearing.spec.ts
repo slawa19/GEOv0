@@ -94,7 +94,7 @@ test.describe('037 C - what a held result survives', () => {
     await expect(page.locator('[data-testid="clearing-error"]')).toBeVisible()
     const message = (await page.locator('[data-testid="clearing-error"]').textContent())!.trim()
 
-    await expect(page.getByTestId('error-toast'), 'one place: no toast beside the block').toHaveCount(0)
+    expect(await page.getByTestId('error-toast').count(), 'one place: no toast beside the block').toBe(0) // at once: `toHaveCount(0)` would retry until a toast expired
     // That nothing clears the block after the seconds the toast lived is held on a controlled clock in the unit test
     // (`SimulatorAppRoot.interact.test.ts`, "048 S3: a window error is the window block alone").
 

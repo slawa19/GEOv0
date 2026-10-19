@@ -267,7 +267,7 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
     // Until 048 S3 the application's own error toast showed the same sentence for a few seconds over the lower part of a
     // phone screen; it is gone - the window's block is the one place.
-    await expect(page.getByTestId('error-toast')).toHaveCount(0)
+    expect(await page.getByTestId('error-toast').count()).toBe(0) // at once: `toHaveCount(0)` would retry until a toast expired
 
     const banner = await measure(page, 'unresolved-banner')
     await c.press('Discard', '[data-testid="mp-discard"]')

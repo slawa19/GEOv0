@@ -777,7 +777,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
 
     await expect(page.getByTestId('trustline-error')).toBeVisible()
     await expect(page.getByTestId('trustline-error')).toContainText('Trustline not found')
-    await expect(page.getByTestId('error-toast')).toHaveCount(0)
+    expect(await page.getByTestId('error-toast').count()).toBe(0) // at once: `toHaveCount(0)` would retry until a toast expired
   })
 })
 

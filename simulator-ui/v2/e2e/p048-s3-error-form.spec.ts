@@ -4,7 +4,8 @@
  *   1. a window's failure is the window's own block - one sentence, the request id a line of its own and
  *      `data-request-id` (AGENTS.md section 12), the identifiers (HTTP status, code) the title only; no error toast;
  *   2. the run's error line - the same form, no «Error» / «Ошибка» before the sentence, no «HTTP» drawn;
- *   3. a scene-load failure has ONE place - the overlay over the canvas, not also the run's error line;
+ *   3. a scene-load failure is shown in the overlay over the canvas, in the same form (that it is not ALSO copied to the run's
+ *      line is held by the unit tests - see the bounded claim at the test);
  *   4. (044 closing review) a saved run whose status answers 403 - the anonymous cookie was lost - is cleared like a 404:
  *      a reload starts exactly one new run, and the network lives.
  *
@@ -27,6 +28,18 @@ async function openWith(page: Page, lang: Lang, extra: (page: Page) => Promise<v
   await extra(page)
   await page.setViewportSize({ width: 1366, height: 768 })
   await page.goto(`/?mode=real&e2eReal=1&lang=${lang}`)
+}
+
+/**
+ * "Never there" over a short watch, not `toHaveCount(0)`: that assertion RETRIES until it holds, so a toast that shows and
+ * expires within the expect timeout (4-8 s) would pass it - vacuous (found by the mutation "put the toast back").
+ */
+async function neverShown(page: Page, testid: string, ms = 1500): Promise<void> {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    expect(await page.getByTestId(testid).count(), `${testid} is never on screen`).toBe(0)
+    await page.waitForTimeout(100)
+  }
 }
 
 /** The block of a failure: its sentence, its id line, its attributes - read in one place. */
@@ -58,7 +71,7 @@ for (const lang of ['en', 'ru'] as Lang[]) {
       await page.locator('[data-testid="manual-payment-confirm"]').click()
       await expectShown(page, 'manual-payment-error', lang, 'req-s3-pay', /^HTTP 409 NO_ROUTE$/)
       await expect(page.getByTestId('manual-payment-error').getByTestId('error-text')).toHaveText(t('refusal.noRouteMax', { max: '0.00', eq: 'UAH' }, lang))
-      await expect(page.getByTestId('error-toast'), 'one place: no toast').toHaveCount(0)
+      await neverShown(page, 'error-toast')
     })
 
     test('a clearing refused with X-Request-ID', async ({ page }) => {
@@ -70,7 +83,7 @@ for (const lang of ['en', 'ru'] as Lang[]) {
       await page.locator('[data-testid="actionbar-clearing"]').click()
       await page.locator('[data-testid="clearing-confirm"]').click()
       await expectShown(page, 'clearing-error', lang, 'req-s3-clr', /^HTTP 409 CLEARING_FAILED$/)
-      await expect(page.getByTestId('error-toast')).toHaveCount(0)
+      await neverShown(page, 'error-toast')
     })
   })
 
@@ -99,7 +112,9 @@ for (const lang of ['en', 'ru'] as Lang[]) {
       await expect(overlay.getByTestId('error-text')).toHaveText(t('failure.serverFailed', {}, lang))
       await expect(overlay.getByTestId('error-request-id')).toHaveText(t('common.requestId', { id: 'req-s3-scene' }, lang))
       expect((await overlay.textContent()) ?? '').not.toMatch(/\bError\b|Ошибка|HTTP/)
-      // One place: the run line does not repeat it (it may hold the run's own failure, never this id).
+      // The run line does not repeat it. Bounded claim (mutation M6b, 2026-10-19): on this mock a status read rewrites the line
+      // right after, so a copy written back would be overwritten here as well - the browser cannot tell; "no copy" is held
+      // by `useSimulatorApp.sceneLoadFailure.p034.test.ts` (red under the copy). These two lines only guard the end state.
       await expect(page.locator('[data-testid="top-error"][data-request-id="req-s3-scene"]')).toHaveCount(0)
       await expect(page.getByTestId('top-error')).toHaveCount(0)
     })
