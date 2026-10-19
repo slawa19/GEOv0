@@ -873,10 +873,12 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
     # application), so only the reaction is stubbed - after `undo()`, which would remove it.
     from app.core.ledger import reconciliation
 
-    async def _no_reaction(session_factory, equivalent_id):
+    async def _no_reaction(session, equivalent_id, locked):
+        # 047 `T4704`: the hold is decided inside the publication (`_publish` -> `_hold_latest_failed`), no longer by a
+        # separate `react_to_failed`; stubbing the decision keeps the equivalent unheld and nothing else changes.
         return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
 
-    monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
+    monkeypatch.setattr(reconciliation, "_hold_latest_failed", _no_reaction)
 
     await _scheduled_run(monkeypatch, factory)
     results = await _results(factory, triangle.equivalent.id)

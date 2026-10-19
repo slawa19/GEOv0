@@ -3,8 +3,10 @@
 The integrity loop reconciles at process start and then once a day (`INTEGRITY_CHECKPOINT_INTERVAL_SECONDS`). After
 a repair in the database, a restore, or a hold, the operator runs this instead of waiting for the next run
 (`docs/ru/runbook-integrity-hold.md` §3). It is a caller, not a second verifier: each equivalent goes through
-`run_scheduled_reconciliation` - one read snapshot, the stored result row, and on a FAILED the step 5c reaction
-(re-verify, then hold the equivalent). It never clears a hold; an admin does, after a later PASSED.
+`run_scheduled_reconciliation` - one read snapshot, the stored result row, and on a FAILED the step 5c reaction: the
+equivalent is held in the same transaction (fail-closed since 047 `T4704`; no re-verification). An equivalent whose
+latest STORED result is FAILED and which is not held is held WITHOUT a verification pass; run the command again to
+verify it. It never clears a hold; an admin does, after a later PASSED.
 
     python scripts/reconcile_debts.py --all
     python scripts/reconcile_debts.py --equivalent UAH --equivalent HOUR
@@ -16,7 +18,7 @@ The database is the one `DATABASE_URL` names, as for the application. Exit codes
     2  the check did not happen, wholly or for some equivalent: usage, an empty or unknown code, no equivalent at all,
        the configuration or the database unusable, or the verifier erred - such an equivalent is printed as
        NOT CHECKED. A discrepancy found elsewhere in the same run still exits 1. (047 `T4704`: an equivalent whose
-       stored FAILED this run tried and failed to re-confirm and hold is printed FAILED, marked so - exit 1.)
+       stored FAILED this run held without verifying it, or failed to hold, is printed FAILED, marked so - exit 1.)
 
 The verdict and the exit code are this run's. The details printed (`entries_read`, findings, `missing_evidence`) are
 those of the latest STORED result row, named with its id, `checked_at` and `last_checked_at`: an unchanged verdict only
@@ -67,7 +69,7 @@ async def _stored_result(session_factory, equivalent_id):
 def _hold_text(rec, counts) -> str:
     named = (
         (rec.HOLD_SET, "set"), (rec.HOLD_ALREADY_HELD, "already held"),
-        (rec.HOLD_NOT_CONFIRMED, "not confirmed by the re-run"), (rec.HOLD_EQUIVALENT_GONE, "equivalent gone"),
+        (rec.HOLD_NOT_CONFIRMED, "not set: the latest result is not FAILED"), (rec.HOLD_EQUIVALENT_GONE, "equivalent gone"),
     )
     return next((name for key, name in named if counts[f"hold_{key}"]),
                 "ERROR (see the log)" if counts["hold_errors"] else "unknown")
@@ -110,11 +112,11 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
             print(f"{code}: NOT CHECKED - the reconciliation did not run for it: {_report_error(error)}")
             continue
         verdict = next((status for status in (rec.PASSED, rec.FAILED, rec.UNVERIFIABLE) if counts[status]), None)
-        restated = verdict is None and bool(counts["hold_errors"])
+        restated = verdict is None and bool(counts["hold_errors"] or counts[f"hold_{rec.HOLD_SET}"])
         if restated:
-            # 047 `T4704`: a hold error with no verdict happens only when the latest STORED result was FAILED and unheld,
-            # so the run went straight to the reaction, and the reaction (its re-run or its hold) failed. That FAILED
-            # stands - it is reported as FAILED, never as "did not run" - and is marked as not re-confirmed by this run.
+            # 047 `T4704`: a hold decision with no verdict happens only when the latest STORED result was FAILED and
+            # unheld - the run held it (or failed to) WITHOUT a verification pass. That FAILED stands - it is reported as
+            # FAILED, never as "did not run" - and is marked as not verified by this run.
             verdict = rec.FAILED
         if verdict is None:
             not_checked = True
@@ -125,7 +127,8 @@ async def _run(codes: list[str], check_all: bool, session_factory) -> int:
         if verdict == rec.FAILED:
             line += f" hold={_hold_text(rec, counts)}"
         if restated:
-            line += " (the stored FAILED; this run's re-confirmation and hold did not complete)"
+            line += (" (the stored FAILED, held without a verification pass; run again to verify it)"
+                     if counts[f"hold_{rec.HOLD_SET}"] else " (the stored FAILED; this run's hold did not complete)")
         try:
             stored = await _stored_result(session_factory, equivalent_id)
         except Exception as error:  # noqa: BLE001 - reporting only: the verdict above is this run's and stands

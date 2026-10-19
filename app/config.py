@@ -341,12 +341,17 @@ class Settings(BaseSettings):
     # 100 000 journal rows. The rate taken is the WORST measured, 1.5 s per 1 000 operations.
     # The deadline of one attempt (checkpoints + reconciliation + reactions; `app/core/maintenance_jobs.py`).
     # PREMISE REWRITTEN 2026-10-19 (047 `T4704`). It read "peak memory fails before the deadline does"; since 047
-    # `T4703` the history is streamed and the peak of a clean history no longer grows with it, so NOTHING ends a long
-    # attempt before this deadline. What bounds an attempt now is PASSES x HISTORY: one full pass over every equivalent
-    # (PASSED, FAILED-and-held, and - since `T4704` - a stored FAILED not yet held, which its reaction's re-run alone
-    # confirms), plus a second pass only in the attempt that FIRST finds a divergence (the fresh verification publishes
-    # FAILED, then the reaction re-runs). That attempt may be cut in its confirmation; the next one needs a single pass.
-    # So the limit is ONE PASS over the history of all equivalents within this value.
+    # `T4703` the history is streamed and the peak of a clean history no longer grows with it, so memory is no longer
+    # the expected earlier limit. (Other bounds still end PART of an attempt earlier: a lock wait or a statement past
+    # `INTEGRITY_DB_LOCK_TIMEOUT_MS` / `INTEGRITY_DB_STATEMENT_TIMEOUT_MS` below is an error of that equivalent.) What
+    # bounds an attempt now is PASSES x HISTORY: since the fail-closed narrowing of `T4704` exactly one full pass per
+    # equivalent - a FAILED is published and held in that pass, with no confirmation re-run - and ZERO passes for an
+    # equivalent whose stored FAILED is not yet held (it is held first, and verified by the next run). So a FAILED is
+    # held in the transaction that publishes it, and a stored one at the start of its turn, whatever the passes after
+    # it cost; a publication-and-hold transaction that fails or is cut stores neither, and the next run verifies that
+    # equivalent again. What the deadline still limits is CAPACITY: when the sum of single passes exceeds it, the
+    # equivalents after the cut are not verified in that attempt, and a divergence there is not found (accepted
+    # ceiling, spec 047 `T4704`).
     # MEASURED (spec 047 Changelog, `T4703`, this machine, streaming): 80 033 journal entries of one equivalent - the
     # verifier 5.23-5.42 s, ≈0.066 ms per entry; 1 800 s is then ≈27 M entries in one pass. At the 044 public-demo
     # load (≈2 909 entries/min in one equivalent, a 29-min window: `docs/ru/simulator/backend/real-mode-runbook.md`

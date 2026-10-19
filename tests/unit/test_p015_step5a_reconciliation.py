@@ -692,10 +692,12 @@ async def test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identi
     from app.core.ledger import reconciliation
     from tests.conftest import TestingSessionLocal as factory
 
-    async def _no_reaction(session_factory, equivalent_id):
+    async def _no_reaction(session, equivalent_id, locked):
+        # 047 `T4704`: the hold is decided inside the publication (`_publish` -> `_hold_latest_failed`), no longer by a
+        # separate `react_to_failed`; stubbing the decision keeps the equivalent unheld and nothing else changes.
         return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
 
-    monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
+    monkeypatch.setattr(reconciliation, "_hold_latest_failed", _no_reaction)
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])

@@ -4,7 +4,8 @@ money INJECT envelope (T3000 decision DELETE), plus the anti-vacuum of the trans
 Every corrupted state is written AROUND the application by THE named corruption helper (`tests/ledger_corruption.py`)
 and COORDINATED, so criterion (a) stays silent: a structural debt arrives with the baseline offset that adopts it (the
 equivalent's baseline is taken at creation, 030 F-030-9), a money INJECT with its envelope and journal entry. The hold
-is the existing confirm-then-hold path (`run_scheduled_reconciliation` -> `react_to_failed`); the proof that money
+is the existing hold path (`run_scheduled_reconciliation`; fail-closed since 047 `T4704`: published and held in one
+transaction, until then confirm-then-hold via `react_to_failed`); the proof that money
 stops is a payment on a pair the corruption does not touch, refused for the hold by name.
 """
 
