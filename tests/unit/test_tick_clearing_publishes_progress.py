@@ -12,12 +12,14 @@ History (023 slice (d), 2026-09-28): the service doubles this module used (`find
 `execute_clearing_with_amount`) were replaced by the runner seam; the same five shapes are held there, as the
 runner's contract produces them (decision 10): the first occurrence handed off through `on_committed`, then
 
-* `geo` - the pass stops on a GeoException (`ClearingPassError`): the progress is finalised (trust growth, one
-  `clearing.done`), then the error takes its classification (a run error, sanitised);
+* `geo` - the pass stops on a GeoException (`ClearingPassError`): the progress is finalised (one `clearing.done`, then
+  trust growth), then the error takes its classification (a run error, sanitised);
 * `cancelled_find` / `cancelled_execute` - the pass is cancelled (`ClearingPassCancelled`): progress is published
   without patches, no trust growth, the cancellation is preserved, no run error. In the runner both are one
   shape - cancellation between or during occurrences - and are kept as two ids for the history of this file;
-* `cancelled_finalize` - the pass completes and the cancellation lands in trust growth;
+* `cancelled_finalize` - the pass completes and the cancellation lands in trust growth. Since 039 D-fix (2026-10-19)
+  growth runs AFTER `clearing.done`, so the event is already out (with its patches) and the cancellation adds no
+  second one; a cancellation before `clearing.done` is the shape of `cancelled_find` / `cancelled_execute`;
 * `committed_cancel` - the occurrence became durable while the caller was being cancelled (`after_cancellation`).
 
 The tick against the REAL runner and PostgreSQL: `tests/integration/test_p023_d_tick_driver_through_runner_postgres.py`.

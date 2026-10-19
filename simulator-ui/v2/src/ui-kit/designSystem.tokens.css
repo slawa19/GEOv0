@@ -288,7 +288,14 @@
 
   /* SimulatorAppRoot (Interact Mode history overlay) */
   --ds-sar-interact-history-right: 12px;
-  --ds-sar-interact-history-bottom: 120px;
+  /*
+    039 D-fix (2026-10-19): the history stands this far above the TOP of the bottom bar (was a fixed 120px from the
+    viewport's bottom). The room in between is the bottom bar's own: the clearing's "was -> now" (about 24px over the
+    bar, 58px with "Подробнее" on, where it clears "Найти на графе"). At 120px the history lay over that sentence with
+    "Подробнее" on, and over the bar itself when the bar's rows wrap. 4rem keeps the first view where it was (12 + 42 +
+    64 = 118px).
+  */
+  --ds-sar-interact-history-clear: 4rem;
   --ds-sar-interact-history-pad-y: 6px;
   --ds-sar-interact-history-pad-x: 10px;
 

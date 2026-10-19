@@ -220,3 +220,47 @@ describe('039 D - "was -> now" of the last clearing', () => {
     s.stop()
   })
 })
+
+/**
+ * 039 D-fix (2026-10-19): an AUTOMATIC clearing with trust growth, as the backend tick publishes it. Growth raises the
+ * limits of the lines the clearing touched and broadcasts `topology.changed` (`reason: trust_drift_growth`) with an
+ * edge patch of EVERY edge of the equivalent, read after the clearing committed - so it carries the post-clearing
+ * debts. Until the D-fix the tick broadcast it BEFORE `clearing.done` (`app/core/simulator/tick.py`
+ * `RealTick._run_clearing`): the debts were already lowered when `clearing.done` arrived, and its pair came out empty.
+ * The order the backend now holds (`tests/integration/test_p039_dfix_clearing_done_precedes_trust_growth_postgres.py`)
+ * is `clearing.done` first, as of the clearing, then the growth.
+ */
+describe('039 D-fix - an automatic clearing with trust growth', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** The growth's edge patch: every edge, post-clearing `used`, grown limit (1000 -> 1050 on the cleared lines). */
+  const growthPatch = (s: ReturnType<typeof stand>) => [
+    ...CYCLE_TO_ZERO(s).map((p) => ({ ...p, available: '1050.00', trust_limit: '1050.00' })),
+    { source: 'd', target: 'e', used: '25.00', available: '75.00', trust_limit: '100.00' },
+    { source: 'e', target: 'f', used: '0.00', available: '100.00', trust_limit: '100.00' },
+  ]
+  const growth = (s: ReturnType<typeof stand>) =>
+    s.topology(growthPatch(s).map((p) => ({ ...p })))
+
+  it('the order the backend publishes - clearing.done, then the growth: the pair is stated, and the growth leaves it', () => {
+    const s = stand()
+    s.payment([s.patch('d', 'e', '25.00')])
+    s.clearing(CYCLE_TO_ZERO(s))
+    expect(s.shown(), 'the clearing states its own "was -> now"').toEqual({ was: '55.00', after: '25.00', now: '25.00', eq: 'UAH' })
+    growth(s)
+    expect(s.shown(), 'the growth that follows neither creates, replaces nor drops the pair (decision (a))').toEqual({ was: '55.00', after: '25.00', now: '25.00', eq: 'UAH' })
+    expect(s.state.snapshot?.links.find((l) => l.source === 'a' && l.target === 'b')?.trust_limit, 'counter-check: the growth WAS applied').toBe('1050.00')
+    s.stop()
+  })
+
+  it('premise - why the order matters: the growth BEFORE clearing.done (the tick until the D-fix) leaves no pair', () => {
+    const s = stand()
+    s.payment([s.patch('d', 'e', '25.00')])
+    growth(s)
+    expect(s.shown().now, 'the growth event alone already lowered the total').toBe('25.00')
+    s.clearing(CYCLE_TO_ZERO(s))
+    expect(s.shown(), 'clearing.done found nothing left to change: no pair').toEqual({ ...NONE, now: '25.00', eq: 'UAH' })
+    s.stop()
+  })
+})

@@ -1185,10 +1185,11 @@ class RealTick:
 
         THE ENDINGS, per equivalent:
         * nothing committed - no event; a failure of the pass is classified below;
-        * progress - trust growth on the touched edges (its own failure only logged), node and edge patches, one
-          `clearing.done`; a failure of the pass after progress is raised only then;
+        * progress - node and edge patches as of the clearing's commit, one `clearing.done`, THEN trust growth on the
+          touched edges and its `topology.changed` (039 D-fix, 2026-10-19: the growth event follows the clearing's,
+          never precedes it; its own failure only logged); a failure of the pass after progress is raised only then;
         * cancellation - progress not yet published is published without patches and without growth, and the
-          cancellation propagates;
+          cancellation propagates (a cancellation that lands in the growth finds `clearing.done` already out);
         * the operator's stop or an integrity hold (`MoneyBoundary.MONEY_STOP_REASONS`) - the equivalent is skipped,
           not a run error; any other failure - a run error (`CLEARING_ERROR`, sanitised), then the next equivalent.
         """
@@ -1292,11 +1293,12 @@ class RealTick:
                         run.current_phase = None
                     continue
 
+                # 039 D-fix (2026-10-19, advisor's decision (a)): `clearing.done` goes out BEFORE trust growth and its
+                # `topology.changed`. Its patches are read as of the clearing's commit (no growth yet); the growth is
+                # the next event, a consequence of the clearing. Until then growth ran first and broadcast an edge
+                # patch of every edge, already carrying the post-clearing debts, so the UI met `clearing.done` with
+                # nothing left to change and never stated the clearing's "was -> now" after an automatic clearing.
                 async with session_local() as clearing_session:
-                    if touched_edges:
-                        await self._grow_trust_after_clearing(
-                            run_id, run, eq, clearing_session, touched_edges
-                        )
                     closed: set[tuple[str, str]] = set()
                     node_patch, edge_patch = await self._clearing_patches(
                         run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles, closed
@@ -1328,8 +1330,12 @@ class RealTick:
                         int((time.monotonic() - eq_t0) * 1000.0),
                         int(cleared_cycles),
                     )
-                    if execution_error is not None:
-                        raise execution_error
+                if touched_edges:
+                    # Its own session and transaction (the growth commits or rolls back itself), after the event.
+                    async with session_local() as growth_session:
+                        await self._grow_trust_after_clearing(run_id, run, eq, growth_session, touched_edges)
+                if execution_error is not None:
+                    raise execution_error
             except asyncio.CancelledError:
                 if cleared_cycles > 0 and not done_emitted:
                     with rr._lock:
@@ -1412,7 +1418,9 @@ class RealTick:
         clearing_session: Any,
         touched_edges: set[tuple[str, str]],
     ) -> None:
-        """Trust growth on the edges clearing touched, on the clearing's session; a failure is logged, not raised."""
+        """Trust growth on the edges clearing touched, AFTER that clearing's `clearing.done` (039 D-fix); a failure
+        is logged, not raised. Its `topology.changed` (`trust_drift_growth`) is therefore the event after the
+        clearing's, never before it."""
         rr = self._runner
         try:
             growth = await rr._trust_drift_engine.apply_trust_growth(

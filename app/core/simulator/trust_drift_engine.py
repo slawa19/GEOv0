@@ -292,8 +292,9 @@ class TrustDriftEngine:
     ) -> TrustDriftResult:
         """Apply trust growth to edges that participated in clearing.
 
-        Uses the *clearing_session* (isolated per-equivalent session used by
-        the tick's clearing step, `tick.py::RealTick._run_clearing`). Commits internally on success.
+        Uses the *clearing_session*: since 039 D-fix (2026-10-19) a session of its own that the tick's clearing step
+        (`tick.py::RealTick._run_clearing`) opens AFTER publishing that equivalent's `clearing.done`. Commits
+        internally on success.
 
         Returns structured information about updated edges.
         """
