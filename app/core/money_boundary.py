@@ -226,7 +226,7 @@ class MoneyBoundary:
 
     #: `details.reason` of the integrity-hold refusal (programme 015 step 5c, `T1546`). Same status,
     #: code and non-retryability as the operator stop, and a distinct reason: a hold is set by the
-    #: scheduled reaction to a confirmed reconciliation `FAILED` and lifted only by an admin.
+    #: reconciliation's reaction to a published `FAILED` (fail-closed since 047 `T4704`) and lifted only by an admin.
     EQUIVALENT_INTEGRITY_HOLD_REASON = "equivalent_integrity_hold"
 
     #: Every reason this boundary refuses with. The simulator classifies each as a REJECTION of the

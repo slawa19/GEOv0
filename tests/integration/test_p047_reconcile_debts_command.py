@@ -134,7 +134,7 @@ async def test_a_debt_moved_around_the_application_exits_1_records_failed_and_ho
         latest = (await session.execute(select(debt_reconciliation_results.c.id).where(
             debt_reconciliation_results.c.equivalent_id == faulty.equivalent.id,
             debt_reconciliation_results.c.is_latest.is_(True)))).scalar_one()
-    assert await _hold(factory, faulty.equivalent.id) == latest, "the confirmed FAILED did not hold its equivalent"
+    assert await _hold(factory, faulty.equivalent.id) == latest, "the FAILED did not hold its equivalent"
     assert await _hold(factory, clean.equivalent.id) is None
 
     narrowed = _command(url, "--equivalent", clean.equivalent.code.lower())
