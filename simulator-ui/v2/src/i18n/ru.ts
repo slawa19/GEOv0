@@ -11,6 +11,7 @@ import { plural, type Messages } from './messages'
  * «кредитор / должник» only in hints. No gendered or person-only forms for a participant (a participant may be an
  * organisation): no «он / ему / она»; a status agrees with the noun «участник». Labels of the 72 px rail are short
  * («От кого», «Кому», «Сумма»).
+ * Clarified 2026-10-19 (advisor, 046 W1): a pronoun agreeing with the noun «участник» (which may be an organisation) is allowed - «ему должны больше» of 048 §G; what the rule forbids is a form valid only for a person.
  */
 export const ru = {
   locale: {

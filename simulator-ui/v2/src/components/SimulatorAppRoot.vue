@@ -104,7 +104,7 @@ import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
  import { keyEdge } from '../utils/edgeKey'
- import { startRetryOffered } from '../utils/runErrorClassification'
+import { runErrorLineTitle, startRetryOffered } from '../utils/runErrorClassification'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
  import type { WindowInstance } from '../composables/windowManager/types'
  import { isInteractPanelWindow, isNodeCardWindow, isEdgeDetailWindow } from '../composables/windowManager/types'
@@ -603,6 +603,7 @@ watch(
    runStatus: computed(() => real.runStatus),
    sseState: computed(() => real.sseState),
    lastError: computed(() => real.lastError),
+   lastErrorTitle: computed(() => runErrorLineTitle(real.lastErrorLine)),
    startRetryable: computed(() => startRetryOffered(real.lastErrorLine, real.retryableStartLine)),
 
    runStats: computed(() => real.runStats),

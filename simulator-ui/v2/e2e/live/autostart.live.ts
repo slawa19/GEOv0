@@ -17,6 +17,8 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
+import { expectNetworkState } from '../helpers/networkState.js'
+
 type Diag = { events_by_type?: Record<string, number> }
 
 const txUpdatedSeen = (page: Page) =>
@@ -108,7 +110,7 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   expect(creates[0], 'at the visitor default intensity').toMatchObject({ intensity_percent: 15 })
   expect(pauses, 'nothing paused it').toEqual([])
   // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page). The live config is English (Chromium en-US).
-  await expect(page.locator('[data-testid="network-state"]')).toHaveAttribute('data-network-state', 'running')
+  await expectNetworkState(page, 'running') // the attribute and its word in the page's language (§15 Codex round)
 
   // Leave the backend as found: stop the run this test started. 048 S2 (amendment 8): a visitor has no Stop in the UI
   // (the run row is the administrator's), so the stop goes where the product's own Stop goes - `POST
@@ -123,5 +125,5 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   }, stopUrl)
   expect(stopped.status, `the stop of the run was accepted (${JSON.stringify(stopped)})`).toBe(200)
   expect(stopped.state, 'the run is stopping or stopped').toMatch(/^(stopping|stopped)$/)
-  await expect(page.locator('[data-testid="network-state"]'), 'and the screen says so').toHaveAttribute('data-network-state', /^(stopped|stopping)$/)
+  await expectNetworkState(page, ['stopped', 'stopping'], { message: 'and the screen says so' })
 })

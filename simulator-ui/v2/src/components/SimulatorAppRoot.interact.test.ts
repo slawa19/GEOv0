@@ -17,6 +17,7 @@ import type { TrustlinesFetchState } from '../composables/interact/trustlinesSou
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
 import { t } from '../i18n/t'
 import { setUiLocale } from '../i18n/locale'
+import { renderRunErrorLine, runStatusErrorLine } from '../utils/runErrorClassification'
 
 /**
  * Layout fixture behind the mocked app: a 1000x600 viewport, two placed participants, and by
@@ -6255,6 +6256,32 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
    * and differ exactly by the administrator's row. Red before S2: the visitor's top had the scenario, Stop, the tempo,
    * Apply and the badge, and the bottom had Labels.
    */
+  /**
+   * 046 wave 1, §15 Codex round (advisor's condition, 2026-10-19; 048 decision 3, AGENTS.md section 12): the line of a run
+   * ended by an error is the interface's sentence with the code, and the server's FULL text stays reachable - the
+   * `title` of the line. Red before: the title repeated the sentence (`String(lastError)`).
+   */
+  it('046 wave 1: the error line of a run ended by an error says the sentence; its title is the server full text', async () => {
+    const { host, app, done } = mount('/?mode=real')
+    try {
+      const real = rootSetup(app).real as Record<string, unknown>
+      const line = runStatusErrorLine({ state: 'error', last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed at step 12', at: 't' } }, () => true)!
+      real.lastErrorLine = line
+      real.lastError = renderRunErrorLine(line, 'en')
+      await nextTick()
+      const value = host.querySelector('[data-testid="top-error"] .ds-value')!
+      expect(value.textContent, 'the sentence with the code').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }))
+      expect(value.getAttribute('title'), 'the server full text').toBe('REAL_MODE_TICK_FAILED: tick failed at step 12')
+      // Counter-check: a line without a server text (the idle stop) keeps its own text as the title.
+      real.lastErrorLine = { kind: 'dict', key: 'runLine.idleStopped' }
+      real.lastError = t('runLine.idleStopped')
+      await nextTick()
+      expect(host.querySelector('[data-testid="top-error"] .ds-value')!.getAttribute('title')).toBe(t('runLine.idleStopped'))
+    } finally {
+      done()
+    }
+  })
+
   it('048 S2 (amendment 12): the whole of «Подробнее» - the visitor\'s, and the administrator\'s (the same plus the own run)', async () => {
     const contents = (host: HTMLElement) => {
       const list = (root: Element | null) => (root ? [...root.querySelectorAll<HTMLElement>(

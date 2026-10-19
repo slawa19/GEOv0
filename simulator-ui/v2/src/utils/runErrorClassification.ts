@@ -23,7 +23,9 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  *   - `count` - a plural key and its count (the server's number of places);
  *   - `raw`   - a text kept as it came (the server's own `CODE: message`, a transport error, a scene-load error);
  *   - `code`  - a dictionary key whose text names a server code (`{code}`): the sentence is in the interface language,
- *               the code stays as it came, for correlation (046 wave 1, full: the line of a run ended by an error).
+ *               the code stays as it came, for correlation (046 wave 1, full: the line of a run ended by an error);
+ *               `detail` is the server's own `CODE: message` - not drawn, but the line's `title` and one console line
+ *               (048 decision 3, AGENTS.md section 12: the full text stays reachable for correlation).
  * `renderRunErrorLine` gives the text in a language. The holder (`useSimulatorRealMode.ts`) keeps the VALUE in
  * `lastErrorLine` and the text of the current language in `lastError` (for every reader that wants a string: the top
  * bar, its title, tests), and renders again on a switch. A line put aside and brought back (a scene-load error over it)
@@ -35,7 +37,7 @@ export type RunErrorLine =
   | { readonly kind: 'dict'; readonly key: MessageKey }
   | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number }
   | { readonly kind: 'raw'; readonly text: string }
-  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string }
+  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string }
 
 export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLocale()): string {
   switch (line.kind) {
@@ -52,6 +54,11 @@ export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLoca
 
 export const rawRunErrorLine = (text: string): RunErrorLine => ({ kind: 'raw', text })
 
+/** The server's full text behind a line (the `title` of the error line), when the line keeps one; else null. */
+export function runErrorLineTitle(line: RunErrorLine | null | undefined): string | null {
+  return line?.kind === 'code' && line.detail ? line.detail : null
+}
+
 /**
  * Write a line into a holder: the text (current language) FIRST, then the value. The holder's own watcher of `lastError`
  * forgets the value of a text written without one (`useSimulatorRealMode.ts`), so the order matters: a write of the
@@ -62,6 +69,12 @@ export function writeRunErrorLine(
   line: RunErrorLine | null,
   locale: UiLocale = uiLocale(),
 ): void {
+  // 048 decision 3 (§12): the server's full text of a run ended by an error goes to the console ONCE - when this line
+  // first replaces another, not on each status that repeats it, nor on a re-render after a switch of the language.
+  const previous = target.lastErrorLine
+  if (line?.kind === 'code' && line.detail && !(previous?.kind === 'code' && previous.detail === line.detail)) {
+    console.warn('[run] stopped with an error:', line.detail)
+  }
   target.lastError = line ? renderRunErrorLine(line, locale) : ''
   target.lastErrorLine = line
 }
@@ -103,7 +116,7 @@ const STOPPED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.s
  */
 export function runEndedByErrorLine(error: RunError): RunErrorLine {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return runErrorLine(error)
-  return { kind: 'code', key: 'runLine.errorStopped', code: error.code }
+  return { kind: 'code', key: 'runLine.errorStopped', code: error.code, detail: `${error.code}: ${error.message}` }
 }
 
 export function runStatusErrorText(

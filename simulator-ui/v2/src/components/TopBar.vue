@@ -519,7 +519,8 @@ function onApplyIntensity() {
       >
         <span class="ds-alert__icon">✕</span>
         <span class="ds-label">{{ t('topBar.errorLabel') }}</span>
-        <span class="ds-value ds-mono tb-fade-92" :title="String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
+        <!-- 048 decision 3: the line is the interface's sentence; its title keeps the server's full text when there is one. -->
+        <span class="ds-value ds-mono tb-fade-92" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
         <!-- 046 wave 1: a start refused by the limit of runs (409 global_active_limit) can be tried again from here, on the first view. -->
         <button
           v-if="startRetryable"
