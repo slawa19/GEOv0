@@ -30,6 +30,8 @@ type Harness = {
   fullEditor: Ref<boolean>
   state: InteractState
   cancel: ReturnType<typeof vi.fn>
+  /** Where every node is on screen (a live graph moves it; the card follows it - UX-9). */
+  center: Ref<{ x: number; y: number }>
   unmount: () => void
 }
 
@@ -37,6 +39,7 @@ function mountHarness(): Harness {
   const phase = ref<InteractPhase>('idle')
   const busy = ref(false)
   const fullEditor = ref(false)
+  const center = ref({ x: 100, y: 100 })
   const state = reactive({
     phase: 'idle',
     fromPid: null,
@@ -75,14 +78,14 @@ function mountHarness(): Harness {
         },
         wm,
         wmEdgeDetail: edge,
-        getNodeScreenCenter: () => ({ x: 100, y: 100 }),
+        getNodeScreenCenter: () => center.value,
       })
       return () => null
     },
   })
   const host = document.createElement('div')
   app.mount(host)
-  return { ctl, wm, edge, phase, busy, fullEditor, state, cancel, unmount: () => app.unmount() }
+  return { ctl, wm, edge, phase, busy, fullEditor, state, cancel, center, unmount: () => app.unmount() }
 }
 
 const ANCHOR = { x: 300, y: 200 }
@@ -234,3 +237,81 @@ describe('048 T4840: closing the line window ends the "trust line" action', () =
     }
   })
 })
+
+/**
+ * Found by the T4840 walk on a live seeded backend (sibling path "a participant from the navigator, close its card"): on a
+ * graph that keeps moving the participant card did not close - Escape and its x closed it and it came straight back. The
+ * card follows its node (UX-9) through a trailing throttle; a follow request still pending when the card closed re-opened
+ * it 100 ms later (`nodeCardAnchorUpdater` -> `wm.open`), and on a live graph a request is pending almost always.
+ */
+describe('048 T4840 (sibling): a closed participant card stays closed while its node moves', () => {
+  for (const route of ['Escape', 'its x (action)'] as const) {
+    it(`closed by ${route} with a follow pending: not re-opened by the trailing follow`, async () => {
+      vi.useFakeTimers()
+      const h = mountHarness()
+      try {
+        h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'alice', anchor: { x: 100, y: 100 } })
+        await nextTick()
+        const cards = () => h.wm.windows.value.filter((w) => w.type === 'node-card')
+        expect(cards(), 'counter-check: the card is open').toHaveLength(1)
+
+        // The node moves (a live graph): the card asks to follow it - one trailing request pending.
+        h.center.value = { x: 140, y: 120 }
+        await nextTick()
+        await nextTick()
+
+        if (route === 'Escape') escape(h)
+        else h.wm.close(cards()[0]!.id, 'action')
+        await nextTick()
+        expect(cards()).toHaveLength(0)
+
+        vi.advanceTimersByTime(500)
+        await nextTick()
+        expect(cards(), 'the card stays closed').toHaveLength(0)
+
+        // Counter-check (anti-vacuum): the follow still works for an open card - open again, move, the trailing request
+        // moves the window to the node.
+        h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'alice', anchor: { x: 140, y: 120 } })
+        await nextTick()
+        h.center.value = { x: 200, y: 160 }
+        await nextTick()
+        await nextTick()
+        vi.advanceTimersByTime(150)
+        await nextTick()
+        expect(cards()).toHaveLength(1)
+        expect(cards()[0]!.anchor).toMatchObject({ x: 200, y: 160 })
+      } finally {
+        h.unmount()
+        vi.useRealTimers()
+      }
+    })
+  }
+
+  it('replaced by a line window with a follow pending: the follow does not bring the card back over the line', async () => {
+    // Internal adversarial pass, 2026-10-19 (finding 2): the pending follow re-opened the card after a line window had
+    // replaced it, and the card in turn pushed the line window out - the T4840 dead end with no participant click at all.
+    vi.useFakeTimers()
+    const h = mountHarness()
+    try {
+      h.ctl.uiOpenOrUpdateNodeCard({ nodeId: 'alice', anchor: { x: 100, y: 100 } })
+      await nextTick()
+      h.center.value = { x: 140, y: 120 }
+      await nextTick()
+      await nextTick()
+
+      await openLineAsTheNavigatorDoes(h)
+      expect(h.wm.windows.value.map((w) => w.type), 'counter-check: the line window replaced the card').toEqual(['edge-detail'])
+
+      vi.advanceTimersByTime(500)
+      await nextTick()
+      await nextTick()
+      expect(h.wm.windows.value.map((w) => w.type)).toEqual(['edge-detail'])
+      expect(h.phase.value).toBe('editing-trustline')
+      expect(h.cancel).not.toHaveBeenCalled()
+    } finally {
+      h.unmount()
+      vi.useRealTimers()
+    }
+  })
+})
+

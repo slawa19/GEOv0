@@ -394,6 +394,11 @@ export function useWindowController(opts: {
 	})
 
 	const nodeCardAnchorUpdater = createPeriodicTrailingThrottle(100, (o: { nodeId: string; anchor: Point | null }) => {
+		// 048 `T4840` (sibling found on a live backend): a follow is a MOVE of an open card, never an open. A request still
+		// pending when the card closed (Escape, x, outside click) re-opened it 100 ms later - on a graph that keeps moving a
+		// request is pending almost always, so the card could not be closed at all.
+		const stillOpen = opts.wm.windows.value.some((w) => isNodeCardWindow(w) && String(w.data.nodeId ?? '') === o.nodeId)
+		if (!stillOpen) return
 		wmNodeCardId.value = opts.wm.open({
 			type: 'node-card',
 			// Use the same anchor source as the initial open to avoid a spurious
