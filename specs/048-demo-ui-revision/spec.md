@@ -347,3 +347,15 @@
     - `git diff --check` чист.
 
     Не проверено: CI (не запушено), §15 Codex (обязателен: меняются рецепты стенда), живой бэкенд (`test:e2e:live`), axe на странице посетителя в браузере (имя контейнера статусов проверено структурно, unit).
+  - **2026-10-19 — CI PR #313 (прогон 39227075349, `65c8a360`) упал в `ui-smoke`, шаг «first-visit autostart against the seeded backend».**
+    - **Сбой:** `e2e/live/autostart.live.ts` — `locator.click: Test timeout of 120000ms exceeded`. Уборка в конце теста искала кнопку Stop в «Подробнее» (`getByRole('button', { name: 'Stop' })`), а живой конфиг идёт посетителем (dev-токен опустошён). Кнопку S2 у посетителя убрал.
+    - **Причина:** скан читателей удалённого шёл по test id, а не по роли и имени, и `e2e/live` локально не запускался.
+    - **Исправление:** тест останавливает свой прогон через API, куда идёт и Stop продукта: `POST /simulator/runs/{run_id}/stop` (`app/api/v1/simulator.py:2930`, `stop_run`; владельцу прогона доступно, `_check_run_access`). Запрос делается изнутри страницы — с cookie сессии посетителя и Origin страницы (проверка CSRF для cookie-сессии, `app/api/deps.py:224`). Run id берётся из ответа на create, который тест и так видит. Утверждаются статус 200 и `state` stopping/stopped, затем текст состояния «остановлен|останавливается». Прежние утверждения не тронуты: один create, темп 15, ни одной паузы, «живёт».
+    - **Пересканировано по роли, имени и id** (`e2e/live`, `e2e/qa`, `e2e/*.spec.ts`, `scripts/**`, рецепты кадров) на Stop, Start, Apply, Scenario, Intensity, Admin, Labels, Analytics. Посетителем идёт только живой конфиг (`playwright.live.config.ts`, `VITE_GEO_DEV_ACCESS_TOKEN: ''`), в нём один тест. Остальные находки (выбор Scenario в `empty-scene`, `beam-lifetime`, `owner.qavideo`, `drag-preview-stale`, `scenario-switch-real-mode`, `phase5`, `p046-w1`; Start в `phase5`; `analytics-toggle` в рецептах `?debug=1`) идут на dev-сервере с админским токеном и полностью зелёные.
+    - **По ревью §15 Codex (P3):**
+      - `src/ui-kit/AI-AGENT-GUIDE.md`: строки экземпляров «TopBar Admin dropdown» и «BottomBar Artifacts dropdown» сведены в одну строку семейства без экземпляра;
+      - `p048-s2-edge-cases-out.spec.ts`: мок отвечает на create новым живым прогоном. После перезагрузки утверждаются «живёт» (`data-run-state=running`) и включённые действия, а не только `creates === 1`. Контрпроверка: со старым моком тест красный — `Expected: "running" Received: "stopped"`.
+    - **Гейты:**
+      - живой тест — как в CI: одноразовая база `geov0_dev_p048-s2-live-*`, миграции, сид `riverside-town-50`, uvicorn на свободном порту, `npm run test:e2e:live`. Итог: 1 passed, `043 S2 LIVE {"tookMs":3365, …, "creates":[{… "intensity_percent":15}],"pauses":0}`, база удалена;
+      - `p048-s2-edge-cases-out.spec.ts` — 15/15 при `--repeat-each=3`;
+      - `npm run typecheck` 0; `npm run test:unit` 0 (190 файлов / 2154); `git diff --check` чист.

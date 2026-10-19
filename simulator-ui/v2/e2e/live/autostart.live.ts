@@ -76,10 +76,17 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   })
   const creates: Array<Record<string, unknown>> = []
   const pauses: string[] = []
+  /** The run the product created (URL of the create and the id it answered) - the cleanup stops exactly this one. */
+  const created: Array<{ url: string; runId: string }> = []
   page.on('request', (r) => {
     const path = new URL(r.url()).pathname
     if (r.method() === 'POST' && /\/simulator\/runs$/.test(path)) creates.push(JSON.parse(r.postData() ?? '{}') as Record<string, unknown>)
     if (r.method() === 'POST' && /\/simulator\/runs\/[^/]+\/pause$/.test(path)) pauses.push(path)
+  })
+  page.on('response', async (r) => {
+    if (r.request().method() !== 'POST' || !/\/simulator\/runs$/.test(new URL(r.url()).pathname) || !r.ok()) return
+    const body = (await r.json().catch(() => ({}))) as { run_id?: unknown }
+    if (typeof body.run_id === 'string' && body.run_id) created.push({ url: r.url(), runId: body.run_id })
   })
 
   await page.goto('/')
@@ -102,8 +109,18 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   expect(pauses, 'nothing paused it').toEqual([])
   await expect(page.locator('[data-testid="network-state"]')).toContainText('живёт')
 
-  // Leave the backend as found: stop the run this test started (Details -> Stop).
-  await page.locator('[data-testid="details-toggle"]').click()
-  await page.getByRole('button', { name: 'Stop', exact: true }).click()
-  await expect(page.locator('[data-testid="network-state"]')).toContainText(/остановлен|останавливается/)
+  // Leave the backend as found: stop the run this test started. 048 S2 (amendment 8): a visitor has no Stop in the UI
+  // (the run row is the administrator's), so the stop goes where the product's own Stop goes - `POST
+  // /simulator/runs/{run_id}/stop` (`app/api/v1/simulator.py`, `stop_run`), which the run's owner may call - from inside
+  // the page: the visitor's session cookie and the page's Origin (the CSRF check of a cookie actor, `deps.py`
+  // `_check_csrf_origin`) go with it as with any request of the product.
+  expect(created, 'the create answered with the id of the run').toHaveLength(1)
+  const stopUrl = `${created[0]!.url}/${encodeURIComponent(created[0]!.runId)}/stop?source=e2e&reason=live_test_cleanup`
+  const stopped = await page.evaluate(async (url) => {
+    const r = await fetch(url, { method: 'POST', credentials: 'include' })
+    return { status: r.status, state: String(((await r.json().catch(() => ({}))) as { state?: unknown }).state ?? '') }
+  }, stopUrl)
+  expect(stopped.status, `the stop of the run was accepted (${JSON.stringify(stopped)})`).toBe(200)
+  expect(stopped.state, 'the run is stopping or stopped').toMatch(/^(stopping|stopped)$/)
+  await expect(page.locator('[data-testid="network-state"]'), 'and the screen says so').toContainText(/остановлен|останавливается/)
 })

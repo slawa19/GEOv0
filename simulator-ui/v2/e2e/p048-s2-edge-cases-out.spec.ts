@@ -19,11 +19,13 @@
  */
 import { expect, test, type Page, type Route } from '@playwright/test'
 
-import { mockApp, ready, RUN_ID, SCENARIO_ID } from './helpers/p037Mock.js'
+import { mockApp, ready, RUN_ID, SCENARIO_ID, snapshot } from './helpers/p037Mock.js'
 
 const DETAILS = '[data-testid="details-toggle"]'
 const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl'
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+/** The run a create makes (the server gives a new run a new id): it lives. */
+const NEW_RUN_ID = 'run-p048s2-new'
 const runBody = (extra: Record<string, unknown> = {}) => ({
   api_version: 'simulator-api/1', run_id: RUN_ID, scenario_id: SCENARIO_ID, mode: 'real', state: 'running',
   sim_time_ms: 0, intensity_percent: 30, ops_sec: 0, queue_depth: 0, ...extra,
@@ -43,9 +45,13 @@ async function open(page: Page, o: { visitor: boolean; query?: string }): Promis
   const held: Route[] = []
   await page.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, run))
   await page.route(/\/simulator\/runs$/i, (r) => {
-    if (r.request().method() === 'POST') creates += 1
-    return json(r, { run_id: RUN_ID })
+    if (r.request().method() !== 'POST') return json(r, { run_id: RUN_ID })
+    creates += 1
+    return json(r, { run_id: NEW_RUN_ID })
   })
+  // The new run, as the server answers it: running, with its own scene.
+  await page.route(`**/simulator/runs/${NEW_RUN_ID}`, (r) => json(r, { ...runBody(), run_id: NEW_RUN_ID }))
+  await page.route(new RegExp(`/simulator/runs/${NEW_RUN_ID}/graph/snapshot`, 'i'), (r) => json(r, snapshot()))
   await page.route(/\/simulator\/runs\/[^/]+\/events/i, (r) => { held.push(r) })
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/(metrics|bottlenecks)`, 'i'), (r) =>
     json(r, r.request().url().includes('/metrics')
@@ -155,5 +161,9 @@ test.describe('048 S2 (amendment 8): a visitor whose run was stopped has no Star
     await page.reload()
     await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
     await expect.poll(app.creates, { message: 'the opening\'s autostart replaces the stopped run on a reload' }).toBe(1)
+    // §15 Codex P3 (2026-10-19): the way back is a LIVING run, not only a create - the network lives and the actions are
+    // enabled again (the mock answers the create with a new run, running, as the server does).
+    await expect(page.getByTestId('network-state'), 'the new run lives').toHaveAttribute('data-run-state', 'running')
+    for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) await expect(page.getByTestId(id), `${id} is enabled again`).toBeEnabled()
   })
 })
