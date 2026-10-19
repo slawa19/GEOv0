@@ -27,7 +27,10 @@ jobs:
   required-backend:
     name: Required backend gates (PostgreSQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 2026-10-19: 45 -> 60. The job came within 50-200 s of the 45-min limit (job durations of runs 39270201003,
+    # 39269368139, 39276112318, 39277477895: 2489 / 2508 / 2555 / 2651 s) and run 39298794250 was cancelled by it in
+    # the backend-tier step (a frontend-only PR). The tier grows; trimming it is programme 041 T4113, not this limit.
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
