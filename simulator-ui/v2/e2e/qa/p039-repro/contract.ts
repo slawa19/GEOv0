@@ -52,8 +52,9 @@ export const THEME = { switcher: { testId: 'theme-select' }, root: '.root', attr
 
 /**
  * The total debt "was -> now" (spec 039, P-5): the bar it is shown in, and the two values, in this order. 039 slice D
- * (2026-10-19): they EXIST now under exactly these names (`src/components/SystemBalanceBar.vue`); "after" is the bar's
- * figure with its unit. Read by the counted `e2e/qa/debt-before-after.qa.ts` (the reproducer R7 is gone with it).
+ * (2026-10-19): they EXIST now under exactly these names (`src/components/SystemBalanceBar.vue`) - the two figures of
+ * the last clearing's sentence above the bar ("after" is the clearing's own after-total, not the bar's current figure:
+ * advisor's decision 2026-10-19, option (a)). Read by the counted `e2e/qa/debt-before-after.qa.ts` (R7 is gone).
  */
 export const DEBT = {
   bar: '[data-testid="system-balance"]',

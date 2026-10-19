@@ -198,6 +198,9 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   `debt-before-after.qa.ts`: the 100-node scene, Russian, 1366x768 - a "was" leaves the bottom bar's box unchanged
  *   and is whole on screen. The first build wrote the pair inside the row and wrapped it (42 -> 80 px, red here); the
  *   "was" now sits above the bar out of its flow. 3.6 s locally; forecast as above plus about 5 s.
+ * - 2026-10-19 (039 slice D, advisor's decision (a) and §15 Codex): count unchanged. `debt-before-after.qa.ts` now holds
+ *   that only a clearing states "was -> now" (a payment before it states nothing, a payment after it leaves the pair),
+ *   and that "now" is seen as well as "was" (R7 held both; the first form of the file only "was").
  */
 export const EXPECTED = { gate: 137, full: 229 }
 

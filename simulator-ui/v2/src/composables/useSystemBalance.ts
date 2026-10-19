@@ -4,7 +4,7 @@ import type { GraphSnapshot } from '../types'
 import { addMoney, moneyText } from '../utils/money'
 import { isActiveStatus } from '../utils/status'
 import { canonicalEquivalent } from '../config/equivalents'
-import { shownDebtBefore, totalDebtOf, type DebtChange } from './debtChange'
+import { shownClearingChange, totalDebtOf, type DebtChange } from './debtChange'
 
 /** 028 F-028-48: the totals are money TEXT of the snapshot's `equivalent` (exact sums, no float). */
 export type SystemBalance = {
@@ -15,10 +15,10 @@ export type SystemBalance = {
   activeParticipants: number
   utilization: number
   /**
-   * 039 slice D: the total debt just before the last debt-changing event ("was"), shown beside `totalUsed` ("now")
-   * while that pair belongs to the shown snapshot (`debtChange.ts`, `shownDebtBefore`); `null` - the total alone.
+   * 039 slice D: the total debt just before and just after the last CLEARING on the shown snapshot (`debtChange.ts`,
+   * `shownClearingChange`); `null` - none. Its `after` is the clearing's own and stays while payments move `totalUsed`.
    */
-  debtBefore: string | null
+  clearingChange: { before: string; after: string } | null
   // 048 S1 (decision 4): no `isClean` - its only reader, the "Clean" badge of `SystemBalanceBar`, is gone (it repeated
   // "Общий долг 0.00"); a clean or frozen debt is read from `totalUsed`.
 }
@@ -31,7 +31,7 @@ const BALANCE_DEBOUNCE_MS = 100
 
 export function useSystemBalance(
   snapshot: Ref<GraphSnapshot | null>,
-  /** 039 slice D: the pair of totals around the last debt-changing event (`SimulatorAppState.debtChange`). */
+  /** 039 slice D: the pair of totals around the last clearing (`SimulatorAppState.debtChange`). */
   debtChange?: () => DebtChange | null | undefined,
 ): {
   balance: ComputedRef<SystemBalance>
@@ -67,7 +67,7 @@ export function useSystemBalance(
         activeTrustlines: 0,
         activeParticipants: 0,
         utilization: 0,
-        debtBefore: null,
+        clearingChange: null,
       }
     }
 
@@ -111,7 +111,7 @@ export function useSystemBalance(
       // these (debounced) totals come from. Compared with the debounced object alone, the old "was" stayed ~100 ms
       // beside the old total after `applySceneLoad` replaced the snapshot (a refresh, a switch of equivalent or run).
       // Reading `snapshot.value` here also recomputes at once on a replacement; the totals keep their debounce.
-      debtBefore: toRaw(snapshot.value) === toRaw(snap) ? shownDebtBefore(debtChange?.(), snap, debt) : null,
+      clearingChange: toRaw(snapshot.value) === toRaw(snap) ? shownClearingChange(debtChange?.(), snap) : null,
     }
   })
 

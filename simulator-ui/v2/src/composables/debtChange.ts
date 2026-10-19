@@ -5,7 +5,10 @@ import type { GraphLink, GraphSnapshot } from '../types'
 import { addMoney, compareMoney, moneyText } from '../utils/money'
 
 /**
- * 039 slice D (T3940): the total debt "was -> now" after a debt-changing event (spec 039, target 6, amendment P-5).
+ * 039 slice D (T3940): the total debt "was -> now" of the last CLEARING (spec 039 :160, target 6, amendment P-5).
+ * Only `clearing.done` states it; payments and topology events neither create, replace nor drop it (advisor's
+ * decision 2026-10-19, option (a): the label means "the clearing took this much off"). A clearing that changes no
+ * debt drops it.
  *
  * The two totals are exact sums of the lines of ONE snapshot, taken immediately before and after the patches of ONE
  * accepted event (`realEventPipeline.ts`). Never `now + cleared_amount` (a cycle of three lines cleared by 10 lowers
@@ -60,19 +63,20 @@ export function debtChangeAround(snapshot: GraphSnapshot | null, eventId: string
 }
 
 /**
- * The "was" the bar may state for the shown totals, or `null`. Stated only while the pair belongs to what the bar
- * shows: the same snapshot object (a reload, an incremental refresh, a switch of equivalent, scenario or run replaces
- * it), the same equivalent, a complete total, and a "now" that IS the current total (a change by any other path drops
- * the pair instead of leaving a stale "was" beside a new figure).
+ * The clearing's "was -> now" the bar may state, or `null`. Stated only while the pair belongs to what the bar shows:
+ * the same snapshot object (a reload, an incremental refresh, a switch of equivalent, scenario or run replaces it) and
+ * the same equivalent.
+ *
+ * Deliberately NOT required (changed 2026-10-19 with the advisor's decision (a)): that the pair's "now" equals the
+ * current total. Payments after the clearing move the bar's total and leave the pair - which is the clearing's own
+ * before and after, a statement about what the clearing did, true whatever came after it on the same snapshot.
  */
-export function shownDebtBefore(
+export function shownClearingChange(
   change: DebtChange | null | undefined,
   snapshot: GraphSnapshot | null | undefined,
-  total: { total: string; complete: boolean },
-): string | null {
+): { before: string; after: string } | null {
   if (!change || !snapshot) return null
   if (toRaw(change.snapshot) !== toRaw(snapshot)) return null
   if (!sameEquivalent(change.equivalent, snapshot.equivalent)) return null
-  if (!total.complete || compareMoney(change.after, total.total) !== 0) return null
-  return change.before
+  return { before: change.before, after: change.after }
 }

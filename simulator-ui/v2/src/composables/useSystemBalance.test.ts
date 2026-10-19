@@ -65,8 +65,8 @@ describe('useSystemBalance', () => {
       activeTrustlines: 0,
       activeParticipants: 0,
       utilization: 0,
-      // 039 slice D: no snapshot - no "was" either.
-      debtBefore: null,
+      // 039 slice D: no snapshot - no clearing pair either.
+      clearingChange: null,
     })
 
     scope.stop()

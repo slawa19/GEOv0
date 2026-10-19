@@ -7,10 +7,12 @@
  * The stand's backend and its small scene with debts (the scene of `e2e/qa/debt-before-after.qa.ts`: a cycle a>b>c>a
  * of 10 each and d>e of 18 - total 48.00 UAH), 1366x768, no GPU, both themes (`?theme=`), both languages (`?lang=`):
  *   <theme>-<lang>-1-settled        the scene as it opens: "Общий долг 48.00 UAH";
- *   <theme>-<lang>-2-after-payment  a payment raised d>e to 25: total 55.00 (slice D: "было 48.00 UAH" above it);
- *   <theme>-<lang>-3-after-clearing a clearing took 10 off each line of the cycle: total 25.00 (slice D: "было 55.00 UAH"
- *                                   above it);
- *   <theme>-<lang>-4-bar            the bottom row alone, after the clearing.
+ *   <theme>-<lang>-2-after-payment  a payment raised d>e to 25: total 55.00 (slice D: nothing above it - only a
+ *                                   clearing states the pair, advisor's decision 2026-10-19, option (a));
+ *   <theme>-<lang>-3-after-clearing a clearing took 10 off each line of the cycle: total 25.00 (slice D: "клиринг: было
+ *                                   55.00 → стало 25.00 UAH" above it);
+ *   <theme>-<lang>-4-bar            the bottom row alone, after the clearing;
+ *   <theme>-<lang>-5-payment-after-clearing  a payment raised d>e to 27: total 27.00, the clearing's pair unchanged.
  * The last test lays `before` and `after` side by side into `compare/`.
  *
  * LIMITS: the backend is the stand's mock; events are frames the script writes; nothing here judges.
@@ -91,11 +93,19 @@ for (const theme of THEMES) {
       await waitLoopAsleep(page)
       await page.screenshot({ path: join(dir, `${theme}-${lang}-3-after-clearing.png`) })
       // What makes the frame mean what the README says: the bar did not move (slice D only; the base has no "was").
-      if (PHASE === 'after') expect(await barBox(), 'the bottom bar keeps its place and size with a "was"').toEqual(settledBar)
+      if (PHASE === 'after') expect(await barBox(), 'the bottom bar keeps its place and size with the pair').toEqual(settledBar)
       const bar = page.locator('.ds-ov-bottom').first()
       const box = await bar.boundingBox()
       expect(box, 'the bottom row is on screen').not.toBeNull()
       await page.screenshot({ path: join(dir, `${theme}-${lang}-4-bar.png`), clip: box!, scale: 'device' })
+
+      await pushEvent(page, {
+        type: 'tx.updated', from: 'e', to: 'd', amount: '2.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: 'e', to: 'd' }],
+        edge_patch: [{ source: 'd', target: 'e', used: '27.00', available: '73.00' }],
+      })
+      await expect(total(page)).toHaveText(`27.00 ${EQ}`)
+      await waitLoopAsleep(page)
+      await page.screenshot({ path: join(dir, `${theme}-${lang}-5-payment-after-clearing.png`) })
     })
   }
 }
