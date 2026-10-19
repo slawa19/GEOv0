@@ -15,6 +15,15 @@ verification the integrity loop runs:
 
 Only a disposable empty database is accepted (`scripts/seed_recipe.py`, the same guards as the seed). The recipe's
 acceptance checks are not run: the reconciliation the command then runs is the check that matters here.
+
+`--measure CODE` (047 `T4703`) seeds nothing: over the database `DATABASE_URL` names, it runs the verifier
+(`verify_journal_equals_change`) of that equivalent in one verification snapshot `--repeat` times and prints, per
+run, the verdict, `entries_read`, the wall time, and the PEAK of Python allocations (`tracemalloc`, started after a
+warm-up run and a `gc.collect()`, so compiled statements, lazy imports and the previous run are not counted; stopped
+in `finally`). The timed runs are without `tracemalloc`;
+the peak runs are separate, because tracing slows the run. It reads only; it never publishes a result or holds:
+
+    python scripts/measure_reconciliation_workload.py --measure UAH --repeat 3
 """
 
 from __future__ import annotations
@@ -85,14 +94,74 @@ async def _run(args) -> int:
     return 0
 
 
+async def _measure(code: str, repeat: int) -> int:
+    import gc
+    import json
+    import time
+    import tracemalloc
+
+    from sqlalchemy import select
+
+    from app.core.ledger.reconciliation import bound_the_waits, open_verification_snapshot, verify_journal_equals_change
+    from app.db.models.equivalent import Equivalent
+    from app.db.session import AsyncSessionLocal, engine
+
+    async def _once(equivalent_id):
+        async with AsyncSessionLocal() as session:
+            await open_verification_snapshot(session)
+            await bound_the_waits(session)
+            started = time.perf_counter()
+            outcome = await verify_journal_equals_change(session, equivalent_id)
+            elapsed = time.perf_counter() - started
+            await session.rollback()
+        return outcome, elapsed
+
+    try:
+        async with AsyncSessionLocal() as session:
+            equivalent_id = (await session.execute(select(Equivalent.id).where(Equivalent.code == code))).scalar_one()
+        await _once(equivalent_id)  # warm-up: statement compilation and lazy imports are not the history
+        for index in range(repeat):
+            outcome, elapsed = await _once(equivalent_id)
+            outcome_text = (outcome.status, outcome.entries_read, outcome.transactions_read)
+            examined = outcome.detail()["criterion_b"]["operations_examined"]
+            del outcome
+            gc.collect()  # the previous run's garbage is not this run's peak
+            tracemalloc.start()
+            try:
+                live_before = tracemalloc.get_traced_memory()[0]
+                _traced, traced_elapsed = await _once(equivalent_id)
+                peak = tracemalloc.get_traced_memory()[1] - live_before
+            finally:
+                tracemalloc.stop()
+            del _traced
+            print(json.dumps({
+                "run": index + 1, "equivalent": code, "status": outcome_text[0], "entries_read": outcome_text[1],
+                "operations_examined": examined, "transactions_read": outcome_text[2], "wall_s": round(elapsed, 3),
+                "peak_mib": round(peak / 2**20, 2), "wall_s_under_tracemalloc": round(traced_elapsed, 3),
+            }))
+    finally:
+        await engine.dispose()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--community", required=True, help="a community under seeds/communities with a recipe")
-    parser.add_argument("--payments", type=int, required=True, help="extra direct payments before the recipe")
+    parser.add_argument("--community", help="a community under seeds/communities with a recipe")
+    parser.add_argument("--payments", type=int, help="extra direct payments before the recipe")
+    parser.add_argument("--measure", metavar="CODE", help="seed nothing; measure the verifier of this equivalent")
+    parser.add_argument("--repeat", type=int, default=3, help="with --measure: how many runs")
     parser.add_argument("--equivalent", default="UAH")
     parser.add_argument("--payer", default=_DEFAULT_PAYER, help="community ref")
     parser.add_argument("--payee", default=_DEFAULT_PAYEE, help="community ref; trusts the payer")
     args = parser.parse_args(argv)
+    if args.measure:
+        if args.community or args.payments is not None:
+            parser.error("--measure seeds nothing: no --community or --payments")
+        if args.repeat < 1:
+            parser.error("--repeat must be >= 1")
+        return asyncio.run(_measure(args.measure, args.repeat))
+    if not args.community or args.payments is None:
+        parser.error("--community and --payments are required to seed")
     if args.payments < 0:
         parser.error("--payments must be >= 0")
     return asyncio.run(_run(args))
