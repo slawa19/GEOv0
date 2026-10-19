@@ -201,17 +201,19 @@ for (const theme of THEMES) {
     }
   })
 
-  test(`P046W1F (4) [${theme}] a visitor whose run the operator stopped, or ended with an error, reads "reload the page"`, async ({ page }) => {
+  test(`P046W1F (4) [${theme}] a visitor whose run was stopped (stop-all, an API stop without a reason) or ended with an error reads "reload the page"`, async ({ page }) => {
     for (const lang of LANGS) {
       for (const [ending, extra, key] of [
-        ['operator', { state: 'stopped', stop_source: 'admin', stop_reason: 'admin_stop_all' }, 'runLine.operatorStopped'],
+        ['operator', { state: 'stopped', stop_source: 'admin', stop_reason: 'admin_stop_all' }, 'runLine.stopped'],
+        // The runbook's one-run stop through the API sends no reason (internal adversarial pass, 2026-10-19).
+        ['api-no-reason', { state: 'stopped', stop_source: null, stop_reason: null }, 'runLine.stopped'],
         ['error', { state: 'error', last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-19T00:00:00Z' } }, 'runLine.errorStopped'],
       ] as const) {
         const app = await open(page, { theme, lang, visitor: true })
         await expect(page.getByTestId('network-state')).toHaveAttribute('data-run-state', 'running')
         app.setRun(extra)
         await app.endStreams()
-        await expect(page.getByTestId('network-state')).toHaveAttribute('data-run-state', ending === 'operator' ? 'stopped' : 'error')
+        await expect(page.getByTestId('network-state')).toHaveAttribute('data-run-state', ending === 'error' ? 'error' : 'stopped')
         // On the first view ("Подробнее" closed): the line says what to do.
         await expect(page.locator(DETAILS)).toHaveAttribute('aria-expanded', 'false')
         await expect(page.getByTestId('top-error'), `${lang} ${ending}`).toContainText(t(key, { code: 'REAL_MODE_TICK_FAILED' }, lang))
