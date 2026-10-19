@@ -72,11 +72,17 @@ function stand(initial: GraphSnapshot = sceneSnapshot()) {
   const balance = scope.run(() => useSystemBalance(computed(() => state.snapshot), () => state.debtChange).balance)!
   /** What the bottom row states: "was" (or null) and "now". */
   const shown = () => ({ was: balance.value.debtBefore, now: balance.value.totalUsed, eq: balance.value.equivalent })
+  /**
+   * Replaces the snapshot as `useSceneState.applySceneLoad` does; returns what the row stated INSIDE the bar's debounce
+   * window (100 ms: the totals still of the old object), then lets the debounce fire.
+   */
   const replaceSnapshot = async (next: GraphSnapshot) => {
     state.snapshot = next
     await nextTick()
+    const withinDebounce = shown()
     vi.advanceTimersByTime(150)
     await nextTick()
+    return withinDebounce
   }
   return { state, payment, clearing, status, shown, patch, replaceSnapshot, stop: () => scope.stop(), send }
 }
@@ -149,7 +155,10 @@ describe('039 D - "was -> now" of the total debt', () => {
     expect(s.shown(), 'a payment of USD on the UAH scene is not applied and states nothing').toEqual({ was: '48.00', now: '55.00', eq: 'UAH' })
     // The switch: the same lines in USD, with the SAME total as the UAH pair's "now" (55.00) - only the equivalent and
     // the object tell them apart.
-    await s.replaceSnapshot(sceneSnapshot('USD', { ...USED, 'd>e': '25.00' }))
+    const within = await s.replaceSnapshot(sceneSnapshot('USD', { ...USED, 'd>e': '25.00' }))
+    // §15 Codex 2026-10-19 (P2): the pair was compared with the DEBOUNCED snapshot, so for ~100 ms after the switch the
+    // old "was" stayed beside the old total. Red before: { was: '48.00', now: '55.00', eq: 'UAH' }.
+    expect(within, 'inside the debounce window (the totals still of the UAH object): no "was" already').toEqual({ was: null, now: '55.00', eq: 'UAH' })
     expect(s.shown(), 'the UAH "was" is not stated under USD').toEqual({ was: null, now: '55.00', eq: 'USD' })
     s.stop()
   })
@@ -157,9 +166,13 @@ describe('039 D - "was -> now" of the total debt', () => {
   it('a reload of the same equivalent (a new snapshot object) drops the "was"', async () => {
     const s = stand()
     s.payment([s.patch('d', 'e', '25.00')])
-    await s.replaceSnapshot(sceneSnapshot('UAH', { ...USED, 'd>e': '25.00' }))
+    const within = await s.replaceSnapshot(sceneSnapshot('UAH', { ...USED, 'd>e': '25.00' }))
+    expect(within.was, 'inside the debounce window: no "was" already (the refresh replaced the object)').toBeNull()
     expect(s.shown()).toEqual({ was: null, now: '55.00', eq: 'UAH' })
-    await s.replaceSnapshot(null as unknown as GraphSnapshot)
+    s.payment([s.patch('d', 'e', '26.00')])
+    expect(s.shown().was, 'counter-check: on the new object a payment states its "was" again').toBe('55.00')
+    const gone = await s.replaceSnapshot(null as unknown as GraphSnapshot)
+    expect(gone.was, 'no snapshot, inside the debounce window: nothing').toBeNull()
     expect(s.shown().was, 'no snapshot: nothing').toBeNull()
     s.stop()
   })

@@ -1,4 +1,4 @@
-import { computed, type ComputedRef, getCurrentScope, onScopeDispose, type Ref, shallowRef, watch } from 'vue'
+import { computed, type ComputedRef, getCurrentScope, onScopeDispose, type Ref, shallowRef, toRaw, watch } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { addMoney, moneyText } from '../utils/money'
@@ -107,7 +107,11 @@ export function useSystemBalance(
       activeTrustlines,
       activeParticipants,
       utilization: Number.isFinite(utilization) ? utilization : 0,
-      debtBefore: shownDebtBefore(debtChange?.(), snap, debt),
+      // 039 slice D, §15 Codex 2026-10-19 (P2): the pair must belong to the snapshot shown NOW as well as to the one
+      // these (debounced) totals come from. Compared with the debounced object alone, the old "was" stayed ~100 ms
+      // beside the old total after `applySceneLoad` replaced the snapshot (a refresh, a switch of equivalent or run).
+      // Reading `snapshot.value` here also recomputes at once on a replacement; the totals keep their debounce.
+      debtBefore: toRaw(snapshot.value) === toRaw(snap) ? shownDebtBefore(debtChange?.(), snap, debt) : null,
     }
   })
 
