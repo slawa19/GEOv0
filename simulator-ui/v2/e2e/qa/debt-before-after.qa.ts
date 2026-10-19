@@ -1,0 +1,120 @@
+/**
+ * 039 slice D (T3940) - the total debt "was -> now" in the bottom row, through the product's own SSE reader, event
+ * pipeline, state and bar (spec 039, target 6, amendment P-5). Grown from the reproducer R7 of T3901
+ * (`p039-repro/r07-debt-before-after.p039-repro.ts`, removed with this file: every assertion it made is made here, its
+ * last one changed on purpose - see below).
+ *
+ * The scene separates the candidates for "was":
+ *   - settled ............................................ 48.00 (cycle a>b>c>a of 10 each, and d>e of 18)
+ *   - a payment raises d>e to 25: was 48.00, now 55.00
+ *   - written IN THE SAME CALL, a clearing takes 10 off each line of the cycle: was 55.00, now 25.00. Wrong: 48.00 (the
+ *     total displayed before the payment) and 35.00 (now + `cleared_amount`, forbidden by P-5).
+ *   - a status frame keeps the pair; a clearing that changes nothing drops it (no false "was");
+ *   - the next debt-changing event states ITS pair: a payment 25 -> 27 gives was 25.00, now 27.00. (R7 asserted that
+ *     no "was" is shown after the next event; slice D shows "was -> now" after a payment as well as after a clearing
+ *     - brief of T3940 - so the clearing's 55.00 is gone and the payment's own pair stands.)
+ *
+ * Both languages (`?lang=ru`, `?lang=en`): the words are the dictionary's (`systemBalance.debtChange`), the figures
+ * and the equivalent the same.
+ *
+ * NOT seen here (unit tier, `src/composables/debtChange.p039d.test.ts`): the debounce of the bar held by a fake clock,
+ * a switch of equivalent, a reload, an unknown debt, exact sums beyond a double. Not seen at all: a real backend.
+ */
+import { expect, test, type Page } from '@playwright/test'
+
+import { EQ, RUN_ID, SCENARIO_ID, boot, pushEvent, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
+import { DEBT } from './p039-repro/contract.js'
+
+const USED: Record<string, string> = { 'a>b': '10.00', 'b>c': '10.00', 'c>a': '10.00', 'd>e': '18.00' }
+
+function sceneWithDebts(): QaSnapshot {
+  const s = ringSnapshot()
+  const pairs: Array<[string, string]> = [['a', 'b'], ['b', 'c'], ['c', 'a'], ['d', 'e'], ['e', 'f'], ['f', 'd']]
+  const links = pairs.map(([source, target]) => {
+    const used = USED[`${source}>${target}`] ?? '0.00'
+    return { ...s.links[0]!, source, target, used, available: (100 - Number(used)).toFixed(2), trust_limit: '100.00' }
+  })
+  return { ...s, links }
+}
+
+/** The bar's figure the rest of the app reads (`.ds-value`): the current total with its unit. */
+const shownTotal = (page: Page) => page.locator(`${DEBT.bar} [data-testid="sbb-total-debt"] .ds-value`).first().textContent()
+
+/** The pair as the page states it: the two fields, the sentence they are in, and whether "was" comes first. */
+async function pair(page: Page) {
+  return page.evaluate(({ bar, before, after }) => {
+    const root = document.querySelector(bar)
+    const b = root?.querySelector(before) ?? null
+    const a = root?.querySelector(after) ?? null
+    const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const shown = (el: Element | null) => !!el && (el as HTMLElement).getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    return {
+      before: b ? text(b) : null, after: a ? text(a) : null, beforeShown: shown(b),
+      sentence: text(root?.querySelector('[data-testid="total-debt-change"]')),
+      beforeComesFirst: !!a && !!b && !!(b.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING),
+    }
+  }, DEBT)
+}
+
+const WORDS = { ru: { was: 'было', now: 'стало' }, en: { was: 'was', now: 'now' } } as const
+
+for (const lang of ['ru', 'en'] as const) {
+  test(`039 D [${lang}] - the total debt states "was -> now" after a payment and after a clearing, held until the next debt-changing event`, async ({ page }) => {
+    const snapshot = sceneWithDebts()
+    await boot(page, {
+      snapshot, clock: false, query: `&lang=${lang}`,
+      // The stand's own answer to trustlines-list says used 0.00 for every line; here the lines carry debts.
+      beforeLoad: (p) => p.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) => r.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ items: snapshot.links.map((l) => ({
+          from_pid: l.source, from_name: l.source, to_pid: l.target, to_name: l.target, equivalent: EQ,
+          limit: '100.00', used: l.used, reverse_used: '0.00', available: l.available, status: 'active',
+        })) }),
+      })),
+    })
+    await expect(page.locator(DEBT.bar).first(), 'counter-check: the system balance bar is on screen').toBeVisible()
+    await expect.poll(() => shownTotal(page), { message: 'counter-check: the settled bar shows the known total' }).toBe(`48.00 ${EQ}`)
+    expect((await pair(page)).beforeShown, 'settled: no "was"').toBe(false)
+
+    // A payment, then a clearing within the bar's debounce: both frames in ONE call.
+    const payment = sseFrame({
+      type: 'tx.updated', from: 'e', to: 'd', amount: '7.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: 'e', to: 'd' }],
+      edge_patch: [{ source: 'd', target: 'e', used: '25.00', available: '75.00' }],
+    }).frame
+    const clearing = sseFrame({
+      type: 'clearing.done', plan_id: 'plan-p039-d', cleared_cycles: 1, cleared_amount: '10.00',
+      cycle_edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }],
+      edge_patch: [['a', 'b'], ['b', 'c'], ['c', 'a']].map(([source, target]) => ({ source, target, used: '0.00', available: '100.00' })),
+    }).frame
+    const taken = await page.evaluate((frames) => {
+      const sse = (window as unknown as { __qaSse: { push: (t: string) => Promise<number> } }).__qaSse
+      return Promise.all(frames.map((f) => sse.push(f)))
+    }, [payment, clearing])
+    expect(taken, 'counter-check: the product took both frames (one connection each)').toEqual([1, 1])
+    await expect.poll(() => shownTotal(page), { message: 'counter-check: both events were APPLIED' }).toBe(`25.00 ${EQ}`)
+
+    const w = WORDS[lang]
+    const stated = await pair(page)
+    expect(stated, 'was 55.00 (just before the clearing\'s patches; not the displayed 48.00, not 25 + 10 = 35.00), now 25.00 with the equivalent')
+      .toEqual({ before: '55.00', after: `25.00 ${EQ}`, beforeShown: true, sentence: `${w.was} 55.00 → ${w.now} 25.00 ${EQ}`, beforeComesFirst: true })
+
+    // Held through traffic that does not change a debt: a status frame of the run.
+    await pushEvent(page, { type: 'run_status', run_id: RUN_ID, scenario_id: SCENARIO_ID, state: 'paused', sim_time_ms: 1000, intensity_percent: 0, ops_sec: 0, queue_depth: 0 })
+    expect(await pair(page), 'a status frame keeps the pair').toEqual(stated)
+
+    // A clearing that changes nothing: no false "was".
+    await pushEvent(page, { type: 'clearing.done', plan_id: 'plan-p039-d-0', cleared_cycles: 0, cleared_amount: '0.00', cycle_edges: [], edge_patch: [] })
+    await expect.poll(async () => (await pair(page)).beforeShown, { message: 'a clearing that changes nothing drops the pair' }).toBe(false)
+    expect(await shownTotal(page)).toBe(`25.00 ${EQ}`)
+
+    // The next debt-changing event states its own pair.
+    await pushEvent(page, {
+      type: 'tx.updated', from: 'e', to: 'd', amount: '2.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: 'e', to: 'd' }],
+      edge_patch: [{ source: 'd', target: 'e', used: '27.00', available: '73.00' }],
+    })
+    await expect.poll(() => shownTotal(page), { message: 'counter-check: the payment was applied' }).toBe(`27.00 ${EQ}`)
+    const next = await pair(page)
+    expect({ before: next.before, after: next.after, beforeShown: next.beforeShown }, 'the payment\'s pair: was 25.00, now 27.00')
+      .toEqual({ before: '25.00', after: `27.00 ${EQ}`, beforeShown: true })
+  })
+}

@@ -4,6 +4,7 @@ import type { GraphSnapshot } from '../types'
 import { addMoney, moneyText } from '../utils/money'
 import { isActiveStatus } from '../utils/status'
 import { canonicalEquivalent } from '../config/equivalents'
+import { shownDebtBefore, totalDebtOf, type DebtChange } from './debtChange'
 
 /** 028 F-028-48: the totals are money TEXT of the snapshot's `equivalent` (exact sums, no float). */
 export type SystemBalance = {
@@ -13,6 +14,11 @@ export type SystemBalance = {
   activeTrustlines: number
   activeParticipants: number
   utilization: number
+  /**
+   * 039 slice D: the total debt just before the last debt-changing event ("was"), shown beside `totalUsed` ("now")
+   * while that pair belongs to the shown snapshot (`debtChange.ts`, `shownDebtBefore`); `null` - the total alone.
+   */
+  debtBefore: string | null
   // 048 S1 (decision 4): no `isClean` - its only reader, the "Clean" badge of `SystemBalanceBar`, is gone (it repeated
   // "Общий долг 0.00"); a clean or frozen debt is read from `totalUsed`.
 }
@@ -23,7 +29,11 @@ export type SystemBalance = {
 // happens at most once per ~100 ms even under intensive server-side ticking.
 const BALANCE_DEBOUNCE_MS = 100
 
-export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
+export function useSystemBalance(
+  snapshot: Ref<GraphSnapshot | null>,
+  /** 039 slice D: the pair of totals around the last debt-changing event (`SimulatorAppState.debtChange`). */
+  debtChange?: () => DebtChange | null | undefined,
+): {
   balance: ComputedRef<SystemBalance>
 } {
   // Debounced copy of snapshot. Vue tracks only the shallowRef itself, not the
@@ -57,18 +67,20 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
         activeTrustlines: 0,
         activeParticipants: 0,
         utilization: 0,
+        debtBefore: null,
       }
     }
 
-    let totalUsed = '0'
+    // 034 S8 (F-034-D1): a debt exists whatever the state of its line - freezing is not repayment. One sum for the
+    // bar and for the "was -> now" of slice D (`totalDebtOf`), so the two cannot disagree.
+    const debt = totalDebtOf(snap.links)
+    const totalUsed = debt.total
     let totalAvailable = '0'
     let usableUsed = '0'
     let activeTrustlines = 0
 
     for (const l of snap.links ?? []) {
-      // 034 S8 (F-034-D1): a debt exists whatever the state of its line - freezing is not repayment. Only the
-      // capacity and the count below belong to usable lines.
-      totalUsed = addMoney(totalUsed, l.used)
+      // Only the capacity and the count below belong to usable lines (the total debt is above).
       if (!isActiveStatus(l.status)) continue
       activeTrustlines += 1
       usableUsed = addMoney(usableUsed, l.used)
@@ -95,6 +107,7 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
       activeTrustlines,
       activeParticipants,
       utilization: Number.isFinite(utilization) ? utilization : 0,
+      debtBefore: shownDebtBefore(debtChange?.(), snap, debt),
     }
   })
 

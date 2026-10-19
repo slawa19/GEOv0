@@ -10,6 +10,7 @@ import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { runStatusErrorLine, writeRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
+import { debtChangeAround, startDebtChange } from './debtChange'
 
 export type RealEventReplayRejection = {
   status: 'rejected'
@@ -245,12 +246,19 @@ function applyTopologyEvent(
   if (!sameEquivalent(snapshot.equivalent, event.equivalent)) return
 
   if (!hasStructuralChanges) {
-    deps.patchApplier.applyNodePatches(payload.node_patch)
-    deps.patchApplier.applyEdgePatches(payload.edge_patch)
+    const change = debtChangeAround(snapshot, event.event_id, () => {
+      deps.patchApplier.applyNodePatches(payload.node_patch)
+      deps.patchApplier.applyEdgePatches(payload.edge_patch)
+    })
+    // 039 slice D: a topology event is debt-changing only when it moved a debt; otherwise the pair stays.
+    if (change) draft.state.debtChange = change
     snapshot.generated_at = event.ts
     intents.push({ type: 'wake' })
     return
   }
+
+  // 039 slice D: a structural change can move a debt too (a removed line takes its debt with it).
+  const finishDebtChange = startDebtChange(snapshot, event.event_id)
 
   const nodesById = new Map(snapshot.nodes.map((node) => [node.id, node] as const))
   const removedNodes = new Set(payload.removed_nodes)
@@ -324,6 +332,8 @@ function applyTopologyEvent(
   snapshot.generated_at = event.ts
   deps.patchApplier.applyNodePatches(payload.node_patch)
   deps.patchApplier.applyEdgePatches(payload.edge_patch)
+  const change = finishDebtChange()
+  if (change) draft.state.debtChange = change
   intents.push({ type: 'wake' })
 }
 
@@ -364,8 +374,11 @@ export function applyAcceptedRealEvent(
     draft.real.runStats.attempts += 1
     draft.real.runStats.committed += 1
     if (otherEquivalent) return intents
-    deps.patchApplier.applyNodePatches(event.node_patch)
-    deps.patchApplier.applyEdgePatches(event.edge_patch)
+    // 039 slice D: the exact totals immediately before and after THIS event's patches (no change - no pair).
+    draft.state.debtChange = debtChangeAround(draft.state.snapshot, event.event_id, () => {
+      deps.patchApplier.applyNodePatches(event.node_patch)
+      deps.patchApplier.applyEdgePatches(event.edge_patch)
+    })
 
     intents.push({ type: 'tx-fx', event }, { type: 'wake' })
     const allowAmountFlyout = event.amount_flyout !== false
@@ -431,8 +444,11 @@ export function applyAcceptedRealEvent(
 
   if (event.type === 'clearing.done') {
     if (otherEquivalent) return intents
-    deps.patchApplier.applyNodePatches(event.node_patch)
-    deps.patchApplier.applyEdgePatches(event.edge_patch)
+    // 039 slice D: "was" is the total just before the clearing's patches - never `now + cleared_amount` (P-5).
+    draft.state.debtChange = debtChangeAround(draft.state.snapshot, event.event_id, () => {
+      deps.patchApplier.applyNodePatches(event.node_patch)
+      deps.patchApplier.applyEdgePatches(event.edge_patch)
+    })
     intents.push({ type: 'clearing-fx', event }, { type: 'wake' })
     return intents
   }

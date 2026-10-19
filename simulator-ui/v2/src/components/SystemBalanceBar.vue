@@ -4,6 +4,7 @@ import { computed, unref, type ComputedRef } from 'vue'
 import type { SystemBalance } from '../composables/useSystemBalance'
 import { useUiLocale } from '../composables/useUiLocale'
 import { equivalentPrecision } from '../config/equivalentPrecision'
+import { templateParts } from '../i18n/t'
 import { formatMoney } from '../utils/money'
 import HudBar from './common/HudBar.vue'
 
@@ -40,6 +41,13 @@ const utilPct = computed(() => {
 const unit = computed(() => b.value?.equivalent || props.equivalent || '')
 // 028 F-028-48: money at the equivalent's precision (was: a float with 0 fraction digits).
 const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
+
+/**
+ * 039 slice D: "was -> now" of the total debt, as ONE dictionary sentence whose two figures keep elements of their own
+ * (`total-debt-before`, `total-debt-after`). `null` - the total alone. When the pair is shown and what it means is
+ * `useSystemBalance` / `debtChange.ts`; here only the words and the two fields.
+ */
+const debtChangeParts = computed(() => (b.value?.debtBefore == null ? null : templateParts('systemBalance.debtChange')))
 </script>
 
 <template>
@@ -52,7 +60,14 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
     <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
       <div v-if="showDebt" class="ds-panel ds-ov-metric" data-testid="sbb-total-debt">
         <span class="ds-label">{{ t('systemBalance.totalDebt') }}</span>
-        <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
+        <span v-if="debtChangeParts" class="sbb-change" data-testid="total-debt-change">
+          <template v-for="(part, i) in debtChangeParts" :key="i">
+            <span v-if="'text' in part" class="sbb-change__word">{{ part.text }}</span>
+            <span v-else-if="part.name === 'before'" class="sbb-change__before ds-mono" data-testid="total-debt-before">{{ money(b.debtBefore!) }}</span>
+            <span v-else-if="part.name === 'after'" class="ds-value ds-mono" data-testid="total-debt-after">{{ money(b.totalUsed) }} {{ unit }}</span>
+          </template>
+        </span>
+        <span v-else class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
       <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available">
@@ -82,6 +97,20 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
 </template>
 
 <style scoped>
+/* 039 slice D: the words of "was -> now" are quieter than the figures; the pair stays on one line. */
+.sbb-change {
+  white-space: nowrap;
+}
+
+.sbb-change__word {
+  opacity: 0.7;
+  white-space: pre;
+}
+
+.sbb-change__before {
+  opacity: 0.85;
+}
+
 .sbb-util {
   gap: var(--ds-space-3, 12px);
 }

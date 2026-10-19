@@ -1,3 +1,4 @@
+import type { DebtChange } from '../composables/debtChange'
 import type { GraphSnapshot } from '../types'
 
 export type SimulatorAppState = {
@@ -7,4 +8,10 @@ export type SimulatorAppState = {
   snapshot: GraphSnapshot | null
 
   selectedNodeId: string | null
+
+  /**
+   * 039 slice D: the exact total debt before and after the last debt-changing event, written by the event pipeline
+   * (`realEventPipeline.ts`); the bottom row states it only while it belongs to the shown snapshot (`debtChange.ts`).
+   */
+  debtChange?: DebtChange | null
 }
