@@ -39,13 +39,14 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import delete, func, select, update
 
 from app.config import settings
 from app.core.clearing import flow_planner, runner
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.simulator_storage import SimulatorRun
 from app.db.models.trustline import TrustLine
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
@@ -56,6 +57,20 @@ from tests.p035_support import held_rotated_plan, stamped_slow_rotated_plan
 _LAYERS = 12
 _WIDTH = 3
 _LOOP_DELAY_THRESHOLD_SECONDS = 0.25
+
+
+@pytest.fixture(autouse=True)
+async def _a_hub_database(db_session):
+    """These tests are about a HUB's diagnostics, and since 044 `T4406` (2026-10-19) `GET /clearing/cycles` refuses
+    (409) where simulator use is detected - a `simulator_runs` row. In mode A the tier's shared database carries such
+    rows: simulator tests' runs are stopped and upserted through `TestingSessionLocal`, which commits outside any
+    test's rolled-back transaction (measured 2026-10-19: 55 rows after one full tier). Inside THIS test's transaction
+    (rolled back after it) the rows are removed, so the premise "a hub" holds; mode-B clones start without rows."""
+
+    await db_session.execute(delete(SimulatorRun))
+    await db_session.commit()
+    assert (await db_session.execute(select(func.count()).select_from(SimulatorRun))).scalar_one() == 0
+    yield
 
 
 def _people(prefix: str, n: str, size: int) -> list[Participant]:
