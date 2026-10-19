@@ -6346,6 +6346,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       // 048 item 13 (a), 046 wave 1: the three actions in the words of the protocol (no longer "press Send Payment").
       expect(hints[0]!.querySelector('[data-testid="onboarding-protocol"]')?.textContent).toBe(t('onboarding.protocol'))
       expect(hints[0]!.textContent).not.toContain('Send Payment')
+      expect(hints[0]!.querySelector('.sar-onboarding-hint__text')!.textContent!.replace(/\s+/g, ' ').trim(), 'two sentences, a space between')
+        .toBe(`${t('onboarding.protocol')} ${t('onboarding.explore')}`)
       expect(hints[0]!.closest('.ds-ov-top'), 'it hangs under the top bar').not.toBeNull()
       hints[0]!.querySelector<HTMLButtonElement>('[data-testid="onboarding-close"]')!.click()
       await nextTick()

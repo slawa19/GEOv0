@@ -1233,7 +1233,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           <span class="sar-onboarding-hint__icon" aria-hidden="true">💡</span>
           <!-- 048 item 13 (a), 046 wave 1: the three actions in the words of the protocol (live source), then what to look at. -->
           <span class="sar-onboarding-hint__text">
-            <template v-if="onboardingCanAct"><span data-testid="onboarding-protocol">{{ t('onboarding.protocol') }}</span> </template>{{ t('onboarding.explore') }}
+            <template v-if="onboardingCanAct"><span data-testid="onboarding-protocol">{{ t('onboarding.protocol') }}</span>{{ ' ' }}</template>{{ t('onboarding.explore') }}
           </span>
           <button
             type="button"

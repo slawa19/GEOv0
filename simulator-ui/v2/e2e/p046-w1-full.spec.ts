@@ -191,6 +191,9 @@ for (const theme of THEMES) {
       const hint = page.getByTestId('onboarding-hint')
       await expect(hint.getByTestId('onboarding-protocol')).toHaveText(t('onboarding.protocol', undefined, lang))
       await expect(hint).toContainText(t('onboarding.explore', undefined, lang))
+      // Two sentences, one space between them (the frame of the first run read "по кругу.Выберите").
+      expect((await hint.locator('.sar-onboarding-hint__text').innerText()).replace(/\s+/g, ' ').trim())
+        .toBe(`${t('onboarding.protocol', undefined, lang)} ${t('onboarding.explore', undefined, lang)}`)
       for (const [id, key] of [['actionbar-payment', 'actions.paymentHint'], ['actionbar-trustline', 'actions.trustlineHint'], ['actionbar-clearing', 'actions.clearingHint']] as const) {
         await expect(page.getByTestId(id), `${lang} ${id}`).toHaveAttribute('title', t(key, undefined, lang))
       }
