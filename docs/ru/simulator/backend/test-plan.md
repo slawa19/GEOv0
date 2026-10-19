@@ -215,13 +215,13 @@ Feature: Simulator UI Real Mode
     Then UI получает run_status: running в течение 2 секунд
     And UI получает хотя бы 1 доменное событие в течение 30 секунд
 
-  Scenario: Pause/Resume работает без дрейфа
+  Scenario: Пауза и возобновление работают без дрейфа
     Given Запущен run
-    When Пользователь нажимает Pause
-    Then UI показывает статус paused
+    When Пользователь нажимает «Поток» (⏸; прежде Pause)
+    Then UI показывает состояние «на паузе» (paused)
     And доменные события прекращаются (кроме run_status)
-    When Пользователь нажимает Resume
-    Then UI показывает статус running
+    When Пользователь нажимает «Поток» (▶; прежде Resume)
+    Then UI показывает состояние «живёт» (running)
 
   Scenario: Stop завершает прогон
     Given Запущен run
