@@ -58,6 +58,9 @@ FIRST_LINE = {
     "trust-drift-decay-minimal": ("Bob", "Alice"),
     "clearing-demo-10": ("Алиса", "Магазин"),
 }
+#: Three payments of `clearing-demo-10` closing a cycle, by NAME (payer, payee), each over the payee's direct line to
+#: the payer (shop->alice, alice->farmer, farmer->shop): alice owes shop, farmer owes alice, shop owes farmer.
+CYCLE_DEMO_PAYMENTS = (("Алиса", "Магазин"), ("Фермер", "Алиса"), ("Магазин", "Фермер"))
 
 
 @pytest.fixture
@@ -120,6 +123,15 @@ class Visitor:
         r = await self.post(
             f"/runs/{run_id}/actions/payment-real",
             json={"from_pid": debtor, "to_pid": creditor, "equivalent": "UAH", "amount": amount},
+        )
+        assert r.status_code == 200, r.text
+        assert str(r.json().get("status") or "").upper() == "COMMITTED", r.text
+
+    async def pay_by_name(self, run_id: str, payer: str, payee: str, amount: str) -> None:
+        ids = await self.ids(run_id)
+        r = await self.post(
+            f"/runs/{run_id}/actions/payment-real",
+            json={"from_pid": ids[payer], "to_pid": ids[payee], "equivalent": "UAH", "amount": amount},
         )
         assert r.status_code == 200, r.text
         assert str(r.json().get("status") or "").upper() == "COMMITTED", r.text
@@ -223,31 +235,50 @@ async def test_two_runs_of_disjoint_scenarios_stay_in_their_own_perimeters(
     client: AsyncClient, db_session, started
 ) -> None:
     # Counter-check of the RED test below: where the scenarios name disjoint pids, the runs ARE apart.
+    #
+    # Strengthened 2026-10-19 (044 `T4406`, closing review of 044): A's run used to hold one ONE-WAY debt, which no
+    # clearing pass can touch - scoped or not - so "B's clearing leaves A's debt" could not tell a perimeter-bound
+    # pass from a hub-wide one. A now holds a CLEARABLE cycle (`clearing-demo-10`, whose pids are disjoint from
+    # `minimal`'s), it must survive B's clearing, and A's own clearing then clears it (the anti-vacuum).
     a, b = await _visitor(client, started), await _visitor(client, started)
-    run_a, run_b = await a.start("minimal"), await b.start("trust-drift-decay-minimal")
-    await a.pay(run_a, "minimal", amount="3")
-    await b.pay(run_b, "trust-drift-decay-minimal", amount="2")
+    run_a, run_b = await a.start("clearing-demo-10"), await b.start("minimal")
+    ids_a, ids_b = await a.ids(run_a), await b.ids(run_b)
+    for payer, payee in CYCLE_DEMO_PAYMENTS:
+        await a.pay_by_name(run_a, payer, payee, amount="3")
+    await b.pay(run_b, "minimal", amount="2")
 
     perimeter_a, perimeter_b = await a.perimeter(run_a), await b.perimeter(run_b)
-    ids_a, ids_b = await a.ids(run_a), await b.ids(run_b)
-    assert perimeter_a == set(ids_a.values()) and set(ids_a) == {"Ivan", "Coffee Shop"}
-    assert perimeter_b == set(ids_b.values()) and set(ids_b) == {"Alice", "Bob"}
-    p1, p2, alice, bob = ids_a["Ivan"], ids_a["Coffee Shop"], ids_b["Alice"], ids_b["Bob"]
+    assert perimeter_a == set(ids_a.values()) and len(ids_a) == 10
+    assert perimeter_b == set(ids_b.values()) and set(ids_b) == {"Ivan", "Coffee Shop"}
+    assert perimeter_a.isdisjoint(perimeter_b)
+    p1, p2 = ids_b["Ivan"], ids_b["Coffee Shop"]
+    cycle_a = {(ids_a[payer], ids_a[payee]): Decimal("3") for payer, payee in CYCLE_DEMO_PAYMENTS}
+    assert await _debts_among(db_session, perimeter_a) == cycle_a  # premise: a cycle a hub-wide pass WOULD clear
 
-    # B's clearing runs on B's perimeter; A's debt is untouched by it.
+    # B's clearing runs on B's perimeter; A's clearable cycle is untouched by it.
     r = await b.post(f"/runs/{run_b}/actions/clearing-real", json={"equivalent": "UAH"})
     assert r.status_code == 200, r.text
-    assert await _debts_among(db_session, perimeter_a) == {(p2, p1): Decimal("3")}
-    assert await _debts_among(db_session, perimeter_b) == {(bob, alice): Decimal("2")}
-    assert await a.used_by_line(run_a) == {(p1, p2): Decimal("3")}
-    assert await b.used_by_line(run_b) == {(alice, bob): Decimal("2")}
+    assert await _debts_among(db_session, perimeter_a) == cycle_a
+    assert await _debts_among(db_session, perimeter_b) == {(p2, p1): Decimal("2")}
+    # The runs' own views: a line is `creditor -> debtor`, so each debt shows on the payee's line to the payer.
+    assert {k: v for k, v in (await a.used_by_line(run_a)).items() if v} == {
+        (ids_a[payee], ids_a[payer]): Decimal("3") for payer, payee in CYCLE_DEMO_PAYMENTS
+    }
+    assert await b.used_by_line(run_b) == {(p1, p2): Decimal("2")}
     # A payment of B's run cannot name A's participant: it is outside B's perimeter.
+    alice, shop = ids_a["Алиса"], ids_a["Магазин"]
     r = await b.post(
         f"/runs/{run_b}/actions/payment-real",
-        json={"from_pid": p2, "to_pid": p1, "equivalent": "UAH", "amount": "1"},
+        json={"from_pid": alice, "to_pid": shop, "equivalent": "UAH", "amount": "1"},
     )
     assert r.status_code == 404, r.text
-    assert await _debts_among(db_session, perimeter_a) == {(p2, p1): Decimal("3")}
+    assert await _debts_among(db_session, perimeter_a) == cycle_a
+
+    # Anti-vacuum: A's own clearing clears the very cycle B's clearing left alone; B's one-way debt stays.
+    r = await a.post(f"/runs/{run_a}/actions/clearing-real", json={"equivalent": "UAH"})
+    assert r.status_code == 200, r.text
+    assert await _debts_among(db_session, perimeter_a) == {}
+    assert await _debts_among(db_session, perimeter_b) == {(p2, p1): Decimal("2")}
 
 
 @pytest.mark.asyncio

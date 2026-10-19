@@ -16,6 +16,7 @@ from app.core.clearing.runner import (
     ClearingPassError,
     ClearingPassResult,
     atoms_text,
+    check_hub_wide_clearing_isolation,
     planned_cycles_for_diagnostics,
     run_awaited_clearing,
 )
@@ -43,6 +44,11 @@ _EXECUTION_DEPTH_REMOVED = (
     response_model=ClearingCyclesResponse,
     responses={
         # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Simulator use is detected on this server (044 T4406, the periodic pass's rule of 023 "
+            "decision 9): `details.reason = simulator_real_runs_in_database | simulator_persistence_disabled`",
+        },
         500: {"model": ErrorEnvelope, "description": "The planner process could not answer (E010)"},
         503: {
             "model": ErrorEnvelope,
@@ -65,10 +71,16 @@ async def list_cycles(
     this server process) or planning past its time bound is 503, a planner that failed is 500 - never an empty list
     and never another detector. The pass itself may still refuse to run
     (a stopped or held equivalent, clearing switched off): this route does not ask.
+
+    It is hub-wide - the plan of the whole equivalent, participant ids and debt amounts - so it refuses (409) where
+    simulator use is detected (044 `T4406`, `check_hub_wide_clearing_isolation`): the check is read on this request's
+    session before the slot is taken and before the snapshot, in the transaction the snapshot then reads in - one
+    READ COMMITTED transaction, so two statement snapshots, not one state.
     """
 
     _refuse_execution_depth(request)
     validate_equivalent_code(equivalent)
+    await check_hub_wide_clearing_isolation(db)
     try:
         cycles = await planned_cycles_for_diagnostics(db, equivalent)
     except ClearingDiagnosticsUnavailable as unavailable:
@@ -154,8 +166,9 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
         409: {
             "model": ErrorEnvelope,
             "description": "Equivalent is not active (operator stop or integrity hold) before any occurrence "
-            "committed, the equivalent's clearing lease is held by another pass, or clearing is switched off "
-            "(`details.reason = clearing_disabled`)",
+            "committed, the equivalent's clearing lease is held by another pass, clearing is switched off "
+            "(`details.reason = clearing_disabled`), or simulator use is detected on this server (044 T4406: "
+            "`details.reason = simulator_real_runs_in_database | simulator_persistence_disabled`)",
         },
     },
 )
@@ -166,7 +179,11 @@ async def auto_clear(
     redis_client=Depends(deps.get_redis_client),
     session_factory=Depends(deps.get_payment_session_factory),
 ):
-    """One awaited pass of the common clearing runner (programme 023, decisions 7, 10; R3 outcome table)."""
+    """One awaited pass of the common clearing runner (programme 023, decisions 7, 10; R3 outcome table).
+
+    Refused (409) where simulator use is detected (044 `T4406`): `run_awaited_clearing` guards every snapshot of the
+    pass with `check_hub_wide_clearing_isolation`.
+    """
 
     _refuse_execution_depth(request)
     validate_equivalent_code(equivalent)

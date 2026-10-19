@@ -141,33 +141,56 @@ async def test_a_restart_of_the_same_run_keeps_its_participants_and_debts(client
     assert await _debts(db_session, ids_before.values()) == {(ids_before["Coffee Shop"], ids_before["Ivan"]): Decimal("5")}
 
 
+#: `clearing-demo-10`: three payments closing a cycle, by NAME (payer, payee), each over the payee's direct line to the
+#: payer (shop->alice, alice->farmer, farmer->shop): alice owes shop, farmer owes alice, shop owes farmer.
+CYCLE_SCENARIO = "clearing-demo-10"
+CYCLE_PAYMENTS = (("Алиса", "Магазин"), ("Фермер", "Алиса"), ("Магазин", "Фермер"))
+
+
 @pytest.mark.asyncio
-async def test_two_runs_of_one_scenario_cannot_name_each_other_s_participants(client: AsyncClient, db_session, started):
+async def test_two_runs_of_one_scenario_cannot_name_each_other_s_participants(
+    client: AsyncClient, db_session, started, monkeypatch
+):
+    """Strengthened 2026-10-19 (044 `T4406`, closing review of 044): the runs were of `minimal`, and A held one
+    ONE-WAY debt, which no clearing pass can touch - scoped or not - so "B's clearing leaves A's debt" could not tell
+    a perimeter-bound pass from a hub-wide one. Both runs are now of `clearing-demo-10`, A holds a CLEARABLE cycle that
+    must survive B's clearing, and A's own clearing then clears it (the anti-vacuum)."""
+
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", f"minimal,{CYCLE_SCENARIO}")
     headers = await _anon(client)
-    run_a = (await _start(client, headers, started)).json()["run_id"]
-    await _pay(client, headers, run_a, "4")
+    run_a = (await _start(client, headers, started, CYCLE_SCENARIO)).json()["run_id"]
     ids_a = await _ids(client, headers, run_a)
-    run_b = (await _start(client, ADMIN, started)).json()["run_id"]  # another owner, the same scenario
+    for payer, payee in CYCLE_PAYMENTS:
+        r = await client.post(f"{API}/runs/{run_a}/actions/payment-real", headers=headers, json={
+            "from_pid": ids_a[payer], "to_pid": ids_a[payee], "equivalent": "UAH", "amount": "4"})
+        assert r.status_code == 200 and str(r.json().get("status")).upper() == "COMMITTED", r.text
+    cycle_a = {(ids_a[payer], ids_a[payee]): Decimal("4") for payer, payee in CYCLE_PAYMENTS}
+    assert await _debts(db_session, ids_a.values()) == cycle_a  # premise: a cycle a hub-wide pass WOULD clear
+    run_b = (await _start(client, ADMIN, started, CYCLE_SCENARIO)).json()["run_id"]  # another owner, the same scenario
     ids_b = await _ids(client, ADMIN, run_b)
     assert set(ids_a.values()).isdisjoint(ids_b.values()) and set(ids_a) == set(ids_b), (ids_a, ids_b)
 
     # B names A's participants in B's own run: they are not in B's perimeter.
     pay = await client.post(f"{API}/runs/{run_b}/actions/payment-real", headers=ADMIN, json={
-        "from_pid": ids_a["Coffee Shop"], "to_pid": ids_a["Ivan"], "equivalent": "UAH", "amount": "1"})
+        "from_pid": ids_a["Алиса"], "to_pid": ids_a["Магазин"], "equivalent": "UAH", "amount": "1"})
     targets = await client.get(f"{API}/runs/{run_b}/payment-targets", headers=ADMIN,
-                               params={"from_pid": ids_a["Coffee Shop"], "equivalent": "UAH"})
+                               params={"from_pid": ids_a["Алиса"], "equivalent": "UAH"})
     lines = await client.get(f"{API}/runs/{run_b}/actions/trustlines-list", headers=ADMIN,
-                             params={"equivalent": "UAH", "participant_pid": ids_a["Ivan"]})
+                             params={"equivalent": "UAH", "participant_pid": ids_a["Алиса"]})
     assert (pay.status_code, targets.status_code, lines.status_code) == (404, 404, 404), (pay.text, targets.text, lines.text)
     clearing = await client.post(f"{API}/runs/{run_b}/actions/clearing-real", headers=ADMIN, json={"equivalent": "UAH"})
     assert clearing.status_code == 200, clearing.text
 
-    assert await _debts(db_session, ids_a.values()) == {(ids_a["Coffee Shop"], ids_a["Ivan"]): Decimal("4")}
+    assert await _debts(db_session, ids_a.values()) == cycle_a
     assert await _debts(db_session, ids_b.values()) == {}
-    # Counter-check: B's own participants are found by the same routes.
+    # Counter-check: B's own participants are found by the same routes (alice: shop->alice and alice->farmer).
     own = await client.get(f"{API}/runs/{run_b}/actions/trustlines-list", headers=ADMIN,
-                           params={"equivalent": "UAH", "participant_pid": ids_b["Ivan"]})
-    assert own.status_code == 200 and len(own.json()["items"]) == 1, own.text
+                           params={"equivalent": "UAH", "participant_pid": ids_b["Алиса"]})
+    assert own.status_code == 200 and len(own.json()["items"]) == 2, own.text
+    # Anti-vacuum: A's own clearing clears the very cycle B's clearing left alone.
+    mine = await client.post(f"{API}/runs/{run_a}/actions/clearing-real", headers=headers, json={"equivalent": "UAH"})
+    assert mine.status_code == 200, mine.text
+    assert await _debts(db_session, ids_a.values()) == {}
 
 
 @pytest.mark.asyncio
