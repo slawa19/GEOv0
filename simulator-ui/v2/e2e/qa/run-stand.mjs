@@ -217,8 +217,17 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   and that "now" is seen as well as "was" (R7 held both; the first form of the file only "was").
  * - 2026-10-19 (merge of 039 D into 048 S3, orchestrator): gate 137, full 229 - 039 D +3 gate / +3 full on 134 / 226,
  *   048 S3 net 0 (toast-error -2/-6, clearing-refused +2/+6); last CI with 137 tests: 569 s (run 39269368139).
+ * - 2026-10-19 (039 D-fix, closes §15 Codex P2 on slice D "the figure is visible, not that it fits"): gate 137 -> 138,
+ *   full 229 -> 230 (counted with `playwright test --list`). `debt-before-after.qa.ts`: the one 100-node test ([ru],
+ *   1366x768) is replaced by two ([ru], [en]); each boots once and holds, in both themes (the product's switcher),
+ *   "Подробнее" off and on, at 1366x768 and 1024x640, that the sentence and both figures overlap no neighbour and are
+ *   whole in the viewport. Red on `4e9f083c` in both languages (the sentence over the legend at 1024x640; with the
+ *   sentence above the whole bar, over "Найти на графе" with "Подробнее" on). Cost: locally 3.6 s for the replaced
+ *   test, about 5 s for each new one - about +6.4 s; no CI number for them yet. Forecast from CI figures only: 569 s
+ *   (the line above; the brief of the D-fix says about 555 s) plus that difference scaled by the CI/local ratio of the
+ *   whole step (about 1.12: 546-569 s in CI against 486-504 s locally) - about 563-577 s, under 600 s.
  */
-export const EXPECTED = { gate: 137, full: 229 }
+export const EXPECTED = { gate: 138, full: 230 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

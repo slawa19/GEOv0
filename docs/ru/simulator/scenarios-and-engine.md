@@ -447,10 +447,23 @@ sequenceDiagram
   end
   alt clearing tick
     RR->>DB: plan+apply clearing
-    RR->>SSE: clearing.done
+    RR->>SSE: clearing.done (патчи на момент клиринга)
+    opt trust drift включён и рост поднял лимиты
+      RR->>DB: trust growth (своя транзакция)
+      RR->>SSE: topology.changed (reason trust_drift_growth)
+    end
   end
   RR->>SSE: run_status (heartbeat)
 ```
+
+**Порядок клиринга и роста доверия (039 D-fix, 2026-10-19).** Внутри эквивалента тик публикует сначала
+`clearing.done` — его `node_patch`/`edge_patch` прочитаны сразу после коммита клиринга, лимиты ещё не выросли, — затем
+закрытые клирингом линии (`topology.changed` с `removed_edges`, если есть), и только потом выполняет рост доверия по
+затронутым рёбрам; рост, поднявший хотя бы один лимит, публикует `topology.changed` с `reason: "trust_drift_growth"` и
+патчем всех рёбер эквивалента. Имена и формы событий не менялись, изменился только порядок: до 2026-10-19 рост шёл
+**перед** `clearing.done`, его патч уже нёс долги после клиринга, и интерфейс, снимающий «клиринг: было X → стало Y»
+вокруг патчей `clearing.done`, после автоматического клиринга пары не показывал. Ручной клиринг (`actions/clearing-real`)
+доверие не растит. Держит порядок `tests/integration/test_p039_dfix_clearing_done_precedes_trust_growth_postgres.py`.
 
 ### 2.12 Ошибки: где логгируются и как их расшифровывать
 

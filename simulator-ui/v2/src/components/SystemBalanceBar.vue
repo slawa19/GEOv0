@@ -51,7 +51,8 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
  *
  * The sentence sits ABOVE the bar, out of its flow: written inline the first build widened the row by 95-115 px and
  * the main row of the bottom bar wrapped to a second line in Russian at 1366x768 (42 -> 80 px, measured 2026-10-19).
- * Out of the flow the bar keeps its size with and without it.
+ * Out of the flow the bar keeps its size with and without it. Above the WHOLE bottom bar, not above this panel (039
+ * D-fix, see the style).
  */
 const clearingParts = computed(() => (b.value?.clearingChange == null ? null : templateParts('systemBalance.clearingChange')))
 </script>
@@ -104,13 +105,18 @@ const clearingParts = computed(() => (b.value?.clearingChange == null ? null : t
 </template>
 
 <style scoped>
-/* 039 slice D: the last clearing's "was -> now", right-aligned just above the bar and out of its flow (see the script). */
-.system-balance-bar {
-  position: relative;
-}
-
+/*
+  039 slice D: the last clearing's "was -> now", out of the bar's flow (see the script).
+  039 D-fix (2026-10-19): above the WHOLE bottom bar (`.ds-ov-bottom`, its containing block: nothing between it and this
+  element is positioned - this bar no longer is), at its right edge. Above this panel only, as slice D first placed
+  it, the sentence lay over whatever is above the panel: the legend when the main row wraps (the Russian legend at
+  1024x640 in both themes, and in Russian at 1366x768 on the live demo), the service row when "Подробнее" is on.
+  Above the whole bar nothing of the bar is above it. `z-index: -1` (in the bar's own stacking context): a popover the
+  bar opens upwards ("Inspect graph") covers the sentence rather than the reverse.
+*/
 .sbb-was {
   position: absolute;
+  z-index: -1;
   right: 0;
   bottom: calc(100% + 2px);
   padding: 1px 8px;
@@ -118,6 +124,16 @@ const clearingParts = computed(() => (b.value?.clearingChange == null ? null : t
   font-size: 0.85em;
   opacity: 0.85;
   pointer-events: none;
+}
+
+/*
+  With "Подробнее" on, "Inspect graph" stands in the bar's right corner ABOVE the bar: its 42 px button rises from a
+  zero-height place in the middle of the 38 px service row (048 S1, `BottomBar.vue` `.bb-navigator`), 23 px over the
+  bar's top edge (measured 2026-10-19 at 1366x768 and 1024x640, both themes). The sentence clears it with a margin.
+  The stand holds the result (`e2e/qa/debt-before-after.qa.ts`, "the pair fits": "Подробнее" on and off).
+*/
+.ds-ov-bottom:has(.bb-navigator) .sbb-was {
+  bottom: calc(100% + 2px + 2rem);
 }
 
 .sbb-was__word {

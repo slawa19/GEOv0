@@ -27,7 +27,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
+import { DETAILS_TOGGLE, EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
 import { DEBT } from './p039-repro/contract.js'
 
 const USED: Record<string, string> = { 'a>b': '10.00', 'b>c': '10.00', 'c>a': '10.00', 'd>e': '18.00' }
@@ -155,24 +155,110 @@ for (const lang of ['ru', 'en'] as const) {
   })
 }
 
-// The widest first view the demo shows: the 100-node scene (its full legend), Russian, 1366x768. Here the inline form
-// of the first build of slice D (e10ac818: "Общий долг было X → стало Y" inside the row) wrapped the main row of the
-// bottom bar to two lines, 42 -> 80 px: this test was red on it (`the bottom bar keeps its place and size`).
-test('039 D [ru] [1366x768, 100 nodes] - the pair does not move or resize the bottom bar', async ({ page }) => {
-  await page.setViewportSize({ width: 1366, height: 768 })
-  const snapshot = fixtureSnapshot100()
-  // The line with the largest debt: a clearing of it (the scene's total is about 88 thousand: a realistic magnitude).
-  const l = snapshot.links.reduce((m, x) => (Number(x.used ?? 0) > Number(m.used ?? 0) ? x : m))
-  expect(Number(l.used ?? 0), 'counter-check: the scene has a line with a debt to clear').toBeGreaterThan(0)
-  await boot(page, { snapshot, clock: false, query: '&lang=ru' })
-  const settled = await barBox(page)
-  expect((await pair(page)).beforeShown, 'counter-check: settled, no pair').toBe(false)
-  await pushEvent(page, {
-    type: 'clearing.done', plan_id: 'plan-p039-d-100', cleared_cycles: 1, cleared_amount: String(l.used),
-    cycle_edges: [{ from: String(l.source), to: String(l.target) }],
-    edge_patch: [{ source: l.source, target: l.target, used: '0.00', available: String(l.trust_limit ?? '0') }],
-  })
-  await expect.poll(async () => (await pair(page)).beforeShown, { message: 'counter-check: the clearing states its pair' }).toBe(true)
-  expect(await barBox(page), 'the bottom bar keeps its place and size with the pair').toEqual(settled)
-  expect(await wasPlaced(page), 'the pair is whole on screen, just above the total').toEqual({ inViewport: true, abovePanel: true, drawn: true })
+/**
+ * 039 D-fix (2026-10-19, closes §15 Codex P2 on slice D: "the stand checks the figure is visible, not that it fits").
+ * The sentence and each of its two figures: whole inside the viewport, and overlapping NO neighbour - every other
+ * panel, control, legend box and legend entry on the page that is not the sentence itself, inside it or around it.
+ * Until the D-fix, in Russian at 1366x768 the sentence (absolute, just above the total's panel, right-aligned) lay over
+ * the end of the legend ("организация") in both themes - the legend's row is taller than the total's panel.
+ * Returns the offenders by a readable name, so a red run says what it lies on.
+ */
+const pairFits = (page: Page) => page.evaluate(() => {
+  const sentence = document.querySelector('[data-testid="total-debt-change"]')
+  if (!sentence) return { present: false, outside: [] as string[], overlaps: [] as string[] }
+  const subjects: Array<[string, Element]> = [['sentence', sentence]]
+  for (const id of ['total-debt-before', 'total-debt-after']) {
+    const el = sentence.querySelector(`[data-testid="${id}"]`)
+    if (el) subjects.push([id, el])
+  }
+  const visible = (el: Element) => {
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return false
+    for (let n: Element | null = el; n; n = n.parentElement) {
+      const cs = getComputedStyle(n)
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false
+    }
+    return true
+  }
+  const name = (el: Element) => {
+    const id = el.getAttribute('data-testid')
+    const role = el.getAttribute('data-legend-role')
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+    return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ''}${role ? `[legend:${role}]` : ''}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''} "${text}"`
+  }
+  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title')]
+    .filter((el) => el !== sentence && !sentence.contains(el) && !el.contains(sentence) && visible(el))
+  const outside: string[] = []
+  const overlaps: string[] = []
+  for (const [label, el] of subjects) {
+    const r = el.getBoundingClientRect()
+    if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) outside.push(`${label} ${JSON.stringify([r.left, r.top, r.right, r.bottom].map(Math.round))}`)
+    for (const n of neighbours) {
+      const q = n.getBoundingClientRect()
+      const w = Math.min(r.right, q.right) - Math.max(r.left, q.left)
+      const h = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top)
+      if (w > 0.5 && h > 0.5) overlaps.push(`${label} over ${name(n)} (${Math.round(w)}x${Math.round(h)} px)`)
+    }
+  }
+  return { present: true, outside, overlaps }
 })
+
+/** The viewports the pair is held at: the main desktop size of the demo and the narrowest the stand resizes a window to. */
+const FIT_VIEWPORTS = [{ width: 1366, height: 768 }, { width: 1024, height: 640 }] as const
+
+// The widest first view the demo shows: the 100-node scene (its full legend), each language, both themes, with
+// "Подробнее" off and on (its service row is the neighbour right above the main row), at 1366x768 and the narrowest
+// width of the stand (1024x640, `surfaceMatrix.ts` VIEWPORT_RESIZED). One boot per language: the theme is switched with
+// the product's own switcher, the viewport resized in place. Here the inline form of the first build of slice D
+// (e10ac818: "Общий долг было X → стало Y" inside the row) wrapped the main row of the bottom bar to two lines,
+// 42 -> 80 px (red on `the bottom bar keeps its place and size`); and the out-of-flow form of 039 D lay over the end of
+// the Russian legend (red on `overlaps no neighbour`, 039 D-fix).
+for (const lang of ['ru', 'en'] as const) {
+  test(`039 D [${lang}] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the pair fits: no neighbour under it, whole on screen, the bar unmoved`, async ({ page }) => {
+    await page.setViewportSize(FIT_VIEWPORTS[0])
+    const snapshot = fixtureSnapshot100()
+    // The line with the largest debt: a clearing of it (the scene's total is about 88 thousand: a realistic magnitude).
+    const l = snapshot.links.reduce((m, x) => (Number(x.used ?? 0) > Number(m.used ?? 0) ? x : m))
+    expect(Number(l.used ?? 0), 'counter-check: the scene has a line with a debt to clear').toBeGreaterThan(0)
+    await boot(page, { snapshot, clock: false, query: `&lang=${lang}&theme=saas` })
+    await expect(page.locator('[data-testid="legend"]').first(), 'counter-check: the full legend is on screen').toBeVisible()
+    const settled = await barBox(page)
+    expect((await pair(page)).beforeShown, 'counter-check: settled, no pair').toBe(false)
+    await pushEvent(page, {
+      type: 'clearing.done', plan_id: 'plan-p039-d-100', cleared_cycles: 1, cleared_amount: String(l.used),
+      cycle_edges: [{ from: String(l.source), to: String(l.target) }],
+      edge_patch: [{ source: l.source, target: l.target, used: '0.00', available: String(l.trust_limit ?? '0') }],
+    })
+    await expect.poll(async () => (await pair(page)).beforeShown, { message: 'counter-check: the clearing states its pair' }).toBe(true)
+    expect(await barBox(page), 'the bottom bar keeps its place and size with the pair').toEqual(settled)
+    expect(await wasPlaced(page), 'the pair is whole on screen, just above the total').toEqual({ inViewport: true, abovePanel: true, drawn: true })
+
+    const toggle = page.locator(DETAILS_TOGGLE)
+    const setDetails = async (on: boolean) => {
+      if (((await toggle.getAttribute('aria-expanded')) === 'true') !== on) await toggle.evaluate((el) => (el as HTMLButtonElement).click())
+      await expect(toggle).toHaveAttribute('aria-expanded', on ? 'true' : 'false')
+    }
+    const seen: string[] = []
+    for (const theme of ['saas', 'hud'] as const) {
+      if (theme !== 'saas') {
+        await setDetails(true)
+        await page.getByTestId('theme-select').selectOption(theme)
+      }
+      await expect(page.locator('.root'), `counter-check: the theme is ${theme}`).toHaveAttribute('data-theme', theme)
+      for (const details of [false, true]) {
+        await setDetails(details)
+        if (details) await expect(page.locator('[data-testid="bottom-details-row"]'), 'counter-check: the service row is the neighbour above').toBeVisible()
+        for (const vp of FIT_VIEWPORTS) {
+          await page.setViewportSize(vp)
+          await expect.poll(async () => (await pair(page)).afterShown, { message: `counter-check: [${theme}] the pair is still stated` }).toBe(true)
+          const where = `[${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}]`
+          expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
+            .toEqual({ present: true, outside: [], overlaps: [] })
+          seen.push(where)
+        }
+      }
+      await page.setViewportSize(FIT_VIEWPORTS[0])
+    }
+    expect(seen, 'counter-check: every combination was measured').toHaveLength(8)
+  })
+}
