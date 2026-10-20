@@ -87,7 +87,8 @@ describe('item 1: the request id survives the Interact path', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const shown = paymentRefusalText(await call, 'UAH', 'en')
-    expect(shown).toMatchObject({ text: 'The action failed (SOMETHING_NEW).', ref: 'req-new' })
+    // 049 S2 (decision 7): the code is not drawn in brackets; it is the detail (the block's title).
+    expect(shown).toMatchObject({ text: 'The action failed.', ref: 'req-new', detail: 'HTTP 409 SOMETHING_NEW' })
     expect(shown.text).not.toContain('server words')
   })
 
@@ -269,7 +270,7 @@ describe('046 fix-delta F2: a network failure is told in the language of the int
     vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted.', 'AbortError') }))
     const aborted = await rejection(a.createTrustline('a', 'b', '10', 'UAH'))
     expect(aborted.clientMessage).toBeUndefined()
-    expect(actionErrorText(aborted, 'ru').text).toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
+    expect(actionErrorText(aborted, 'ru').text).toBe(t('actionError.unknown', {}, 'ru'))
     // Counter-check: the text the client composed (a missing run id) is still its own.
     setUiLocale('ru')
     const own = await rejection(useInteractActions({ httpConfig: ref({ apiBase: '/api/v1' }), runId: ref('') }).createTrustline('a', 'b', '10', 'UAH'))

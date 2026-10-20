@@ -36,7 +36,8 @@ describe('F-028-51: the human text of a payment refusal', () => {
     await im.confirmPayment('5.00')
     // 046 wave 2: the Russian text is the dictionary's (not hand-built here); the amount keeps its dot.
     expect(im.state.error).toBe(t('refusal.insufficientCapacityMax', { max: '0.50', eq: 'UAH' }, 'ru'))
-    expect(im.state.error).toBe('Недостаточно доступного лимита: сейчас можно отправить не больше 0.50 UAH.')
+    // 049 S2 (decision 8): the spec's words.
+    expect(im.state.error).toBe('Платёж не прошёл: сейчас доступно не больше 0.50 UAH. Уменьшите сумму.')
   })
   it('every reason of the server set has its own text in both languages (anti-vacuum: not the generic one)', () => {
     // The set of `app/core/payments/service.py` PAYMENT_REFUSAL_REASONS / openapi PaymentRefusalDetails.reason.
@@ -85,9 +86,11 @@ describe('046 wave 2 (decision 3): an action error is told by its code, by a clo
       }
     }
   })
-  it('an unknown code: the general text WITH the code, in both languages; the server message is not shown', () => {
-    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'en')).toBe('The action failed (X_NEW).')
-    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'ru')).toBe(t('actionError.unknown', { code: 'X_NEW' }, 'ru'))
+  // 049 S2 (decision 7): the code is no longer printed in brackets - it is the detail (the title) and the console line.
+  it('an unknown code: the general text, in both languages; the code is the detail; the server message is not shown', () => {
+    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'en')).toBe('The action failed.')
+    expect(actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'ru')).toBe('Действие не выполнено.')
+    expect(refusals.actionErrorText({ status: 409, code: 'X_NEW', message: 'server words' }, 'en').detail).toBe('HTTP 409 X_NEW')
   })
   // 048 S3 (decision 3): an answer that named no code of its own gets the client's `HTTP_<status>` - not printed (was:
   // "The action failed (HTTP_500)."); the status is the block's title, the server's message the console line.
@@ -113,13 +116,13 @@ describe('046 wave 2 (decision 3): an action error is told by its code, by a clo
   })
   // Codex §15 round 1 (P2): a SERVER answer with the code UNKNOWN was taken for the client's own message - its English
   // prose was shown, and an empty message showed nothing at all (`v-if="state.error"` hid the window's error).
-  it('a server code UNKNOWN is told by the general text with the code - with prose, and with an empty message', () => {
+  it('a server code UNKNOWN is told by the general text - with prose, and with an empty message', () => {
     expect(actionErrorText({ status: 500, code: 'UNKNOWN', message: 'Something broke on the server' }, 'ru'))
-      .toBe(t('actionError.unknown', { code: 'UNKNOWN' }, 'ru'))
-    expect(actionErrorText({ status: 500, code: 'UNKNOWN', message: '' }, 'en')).toBe('The action failed (UNKNOWN).')
+      .toBe(t('actionError.unknown', {}, 'ru'))
+    expect(actionErrorText({ status: 500, code: 'UNKNOWN', message: '' }, 'en')).toBe('The action failed.')
     // A kept text that is empty is never an empty error either.
-    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: '', clientMessage: true }, 'en')).toBe('The action failed (UNKNOWN).')
-    expect(actionErrorText(new Error(''), 'en')).toBe('The action failed (UNKNOWN).')
+    expect(actionErrorText({ status: 0, code: 'UNKNOWN', message: '', clientMessage: true }, 'en')).toBe('The action failed.')
+    expect(actionErrorText(new Error(''), 'en')).toBe('The action failed.')
   })
   // Codex §15 round 1 (P3): the reference after the client's own text follows its language too.
   // 048 S3: rewritten, not removed - the client's own text carries the id APART (it was glued: "… (код запроса: req-123)").

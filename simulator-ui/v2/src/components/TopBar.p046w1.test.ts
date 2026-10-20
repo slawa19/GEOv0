@@ -188,13 +188,15 @@ describe('046 wave 1 (4) - the stop reason in words', () => {
     }
   })
 
-  it('an unknown reason: the general text with the value itself; the raw source and reason are the title', async () => {
+  // 049 S2 (decision 7): a code is not drawn in brackets - the raw source and reason stay the title (red before:
+  // «stopped (maintenance_window)»).
+  it('an unknown reason: the general text; the raw source and reason are the title, not drawn', async () => {
     setUiLocale('en')
-    expect(await reasonOf('maintenance_window', 'cli')).toEqual({ value: 'stopped (maintenance_window)', title: 'cli: maintenance_window', present: true })
+    expect(await reasonOf('maintenance_window', 'cli')).toEqual({ value: 'stopped', title: 'cli: maintenance_window', present: true })
     setUiLocale('ru')
-    expect((await reasonOf('maintenance_window', 'cli')).value).toBe('остановлен (maintenance_window)')
-    // The key of the general text is not a reason: a server that sends the word "unknown" gets the general text WITH it.
-    expect((await reasonOf('unknown')).value).toBe('остановлен (unknown)')
+    expect((await reasonOf('maintenance_window', 'cli')).value).toBe('остановлен')
+    // The key of the general text is not a reason: a server that sends the word "unknown" gets the general text, and the title.
+    expect(await reasonOf('unknown')).toMatchObject({ value: 'остановлен', title: 'ui: unknown' })
   })
 
   it('no reason (a source alone, or nothing): no line - there is nothing readable to say', async () => {

@@ -90,16 +90,12 @@ describe('the clearing result stays until it is closed', () => {
     expect(done).toHaveBeenCalledTimes(1)
   })
 
-  it('the toast is a success for cleared cycles only; "no cycles" is not announced as success', async () => {
-    const im = mk(vi.fn(async () => twoCycles))
-    im.startClearingFlow()
-    await runAndWait(im)
-    expect(im.successMessage.value).toBe('Clearing done: 2/2 cycles')
-
+  // 049 S2 (decision 6): the test of the clearing's success toast is removed - the contract is removed (no toast; the
+  // result is the panel's and the history's).
+  it('"no cycles" is a state of the panel: the result is held, nothing is cleared', async () => {
     const empty = mk(vi.fn(async () => none))
     empty.startClearingFlow()
     await runAndWait(empty)
-    expect(empty.successMessage.value, 'nothing was cleared: no success toast').toBeNull()
     expect(empty.state.lastClearing).toEqual(none)
     expect(empty.phase.value).not.toBe('idle')
   })
@@ -111,7 +107,6 @@ describe('the clearing result stays until it is closed', () => {
 
     expect(im.state.error).toBeTruthy()
     expect(im.state.lastClearing).toBeNull()
-    expect(im.successMessage.value).toBeNull()
     expect(im.busy.value).toBe(false)
     expect(im.phase.value).not.toBe('idle')
   })
@@ -176,19 +171,17 @@ describe('a refusal is a state of the panel, not a passing message', () => {
     expect(im.state.clearingFailure, 'Close ends it').toBeNull()
   })
 
-  it('the next clearing starts clean: no earlier refusal, no earlier success announcement', async () => {
+  it('the next clearing starts clean: its own result replaces the earlier one', async () => {
     const run = vi.fn<Actions['runClearing']>().mockResolvedValueOnce(twoCycles).mockResolvedValueOnce(none)
     const im = mk(run)
     im.startClearingFlow()
     await runAndWait(im)
-    expect(im.successMessage.value).toBe('Clearing done: 2/2 cycles')
+    expect(im.state.lastClearing).toEqual(twoCycles)
     im.cancel()
 
-    // The same composable, before the old toast would have expired: the next clearing finds nothing.
+    // The same composable: the next clearing finds nothing (049 S2: no success announcement to withdraw any more).
     im.startClearingFlow()
-    expect(im.successMessage.value, 'starting a clearing withdraws the earlier announcement').toBeNull()
     await runAndWait(im)
-    expect(im.successMessage.value).toBeNull()
     expect(im.state.lastClearing).toEqual(none)
   })
 })

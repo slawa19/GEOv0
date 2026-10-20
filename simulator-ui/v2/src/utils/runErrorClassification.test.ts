@@ -31,6 +31,7 @@ describe('utils/runErrorClassification', () => {
     expect(runErrorText(refused, 'ru')).toBe(
       'Клиринг отклонён: в базе есть долги мельче шага учёта эквивалента. Нужен пересев базы.',
     )
-    expect(runErrorText({ code: 'INTERNAL_ERROR', message: 'boom', at: 't' }, 'en')).toBe('Something failed during the run (INTERNAL_ERROR); the run goes on.')
+    // 049 S2 (decision 7): the code is not drawn in brackets (the title and the console carry it).
+    expect(runErrorText({ code: 'INTERNAL_ERROR', message: 'boom', at: 't' }, 'en')).toBe('Something failed during the run; the run goes on.')
   })
 })

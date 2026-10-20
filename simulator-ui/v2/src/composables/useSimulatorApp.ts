@@ -477,6 +477,12 @@ export function useSimulatorApp(opts?: {
    * surface": nothing is polled at all.
    */
   isAnalyticsPanelOpen?: () => boolean
+
+  /**
+   * 049 S2 (decision 5): is «Show events» on? The mount point owns and remembers the switch (like the theme); read when an
+   * event arrives and watched by the history (off: the network's lines are dropped). Omitted means off.
+   */
+  eventsFeedOn?: () => boolean
 }): SimulatorAppApi {
   const eq = ref('UAH')
 
@@ -610,7 +616,7 @@ export function useSimulatorApp(opts?: {
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
     intensityPercent: (() => {
-      // 044 stage 2: the visitor's tempo (15) on a screen without an admin token, the operator's (30) with one.
+      // 044 stage 2: the visitor's tempo (5 since 049 S2, was 15) on a screen without an admin token, the operator's (30) with one.
       const fallback = defaultIntensityPercentFor(initialAccessToken)
       const raw = lsGet('geo.sim.v2.intensityPercent', '')
       // 043 S3 (decision 5): a stored 0 is what the removed Interact mode forced and kept; it is dropped here, once per
@@ -886,6 +892,7 @@ export function useSimulatorApp(opts?: {
 
   const interactMode = useInteractMode({
     showPid: participantDisplayIdFor(() => shownScenarioId.value),
+    eventsFeedOn: opts?.eventsFeedOn,
     actions: interactActions,
     runId: interactRunId,
     equivalent: sceneEq,
@@ -1729,6 +1736,8 @@ export function useSimulatorApp(opts?: {
     scheduleTimeout,
     wakeUp,
     optionalFxEnabled: opts?.optionalFxEnabled,
+    // 049 S2 (decision 5): the accepted events reach the history, which keeps them only while «Show events» is on.
+    onFeedItem: (item) => interactMode.pushFeedItem(item),
   })
   handleRealSceneContextChange = realMode.handleSceneContextChange
   resetStaleRunOwner = realMode.resetStaleRun

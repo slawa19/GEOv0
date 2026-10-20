@@ -94,22 +94,23 @@ const clearingParts = computed(() => {
       </div>
     </template>
     <HudBar v-if="showMetrics" variant="ghost" layout="start" fit class="system-balance-bar__inner">
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available">
+      <!-- 049 S2 (decision 8): the short definition of each figure is its `title` - not text on the screen. -->
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-available" :title="t('systemBalance.availableHint')">
         <span class="ds-label">{{ t('systemBalance.available') }}</span>
         <span class="ds-value ds-mono">{{ money(b.totalAvailable) }} {{ unit }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-trustlines">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-trustlines" :title="t('systemBalance.trustlinesHint')">
         <span class="ds-label">{{ t('systemBalance.trustlines') }}</span>
         <span class="ds-value ds-mono">{{ b.activeTrustlines }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-participants">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric" data-testid="sbb-participants" :title="t('systemBalance.participantsHint')">
         <span class="ds-label">{{ t('systemBalance.participants') }}</span>
         <span class="ds-value ds-mono">{{ b.activeParticipants }}</span>
       </div>
 
-      <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util" data-testid="sbb-utilization">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util" data-testid="sbb-utilization" :title="t('systemBalance.utilizationHint')">
         <span class="ds-label">{{ t('systemBalance.utilization') }}</span>
         <span class="ds-value ds-mono">{{ utilPct }}%</span>
         <div class="ds-progress__track sbb-track">

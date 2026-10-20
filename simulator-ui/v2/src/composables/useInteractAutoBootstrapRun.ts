@@ -10,10 +10,13 @@ export const AUTOSTART_DEFAULT_INTENSITY_PERCENT = 30
 
 /**
  * 044 stage 2 (spec amendments (vii), (viii)): the default intensity of a VISITOR's run - a screen without an admin
- * token, the public demo. 10 concurrent visitor runs were measured on one process at this tempo (64 % of a core, tick
- * stretch 1.24); at the operator's 30 the same 10 saturate the core. A stored preference still wins.
+ * token, the public demo. 10 concurrent visitor runs were measured on one process at 15 (64 % of a core, tick stretch
+ * 1.24); at the operator's 30 the same 10 saturate the core. A stored preference still wins.
+ *
+ * 049 S2 (decision 10, the owner's word of 2026-10-20): 15 -> 5, the step «обычно» of the visitor's three (2 / 5 / 15 % -
+ * «медленно / обычно / быстро», `TopBar.vue`): about one payment a second, slow enough to read the network's events.
  */
-export const VISITOR_DEFAULT_INTENSITY_PERCENT = 15
+export const VISITOR_DEFAULT_INTENSITY_PERCENT = 5
 
 /** The default intensity of this screen: the operator's when it holds an admin token (not a participant JWT), else the visitor's. */
 export function defaultIntensityPercentFor(accessToken: string | null | undefined): number {
@@ -49,7 +52,7 @@ export function autostartDecision(runId: string | null | undefined, status: RunS
  * is behind the admin token) and a reload of the page for a visitor (a reload makes this one attempt again).
  *
  * The run is started with the existing `startRun` - not paused, at the person's stored intensity (when none is stored,
- * the screen's default: 15 for a visitor, 30 for the operator - `defaultIntensityPercentFor`, 044 stage 2; a stored 0 is
+ * the screen's default: 5 for a visitor (049 S2; was 15), 30 for the operator - `defaultIntensityPercentFor`, 044 stage 2; a stored 0 is
  * dropped when it is read, `useSimulatorApp.ts`, 043 S3). When the person is already in a manual action at that moment (a panel
  * is open, a participant chosen - decision 3), the run is started paused instead, so no automatic payment runs over it.
  *

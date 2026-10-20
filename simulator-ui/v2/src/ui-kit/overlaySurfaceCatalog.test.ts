@@ -84,12 +84,6 @@ describe('overlaySurfaceCatalog', () => {
       zLayerToken: '--ds-z-inset',
     })
 
-    expect(getOverlaySurfaceDescriptor('success-toast')).toMatchObject({
-      family: 'notification-toast',
-      zLayerToken: '--ds-z-alert',
-      a11y: { role: 'status', ariaLive: 'polite', ariaLabel: 'Success notification' },
-    })
-
     expect(getOverlaySurfaceDescriptor('interact-history-overlay')).toMatchObject({
       family: 'bottom-overlay',
       zLayerToken: '--ds-z-bottom',

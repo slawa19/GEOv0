@@ -294,51 +294,6 @@ details[open].ds-ov-details > summary::after {
   -webkit-backdrop-filter: var(--ds-blur);
 }
 
-.ds-ov-toast {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--ds-z-alert, 200);
-  display: flex;
-  align-items: center;
-  gap: var(--ds-toast-gap, 8px);
-  min-width: min(var(--ds-toast-minw), calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px)));
-  max-width: min(var(--ds-toast-maxw), calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px)));
-  pointer-events: auto;
-}
-
-.ds-ov-toast--error {
-  bottom: calc(var(--ds-hud-bottom-stack-height, 56px) + var(--ds-toast-stack-gap, 12px));
-}
-
-.ds-ov-toast--success {
-  bottom: calc(
-    var(--ds-hud-bottom-stack-height, 56px) + var(--ds-toast-stack-gap, 12px) + var(--ds-toast-stack-step, 60px)
-  );
-}
-
-.ds-ov-toast__icon {
-  flex-shrink: 0;
-  opacity: var(--ds-toast-icon-opacity, 0.9);
-}
-
-.ds-ov-toast__text {
-  flex: 1 1 auto;
-  word-break: break-word;
-}
-
-.ds-ov-toast__close {
-  flex-shrink: 0;
-  min-width: var(--ds-toast-close-min-size, 24px);
-  min-height: var(--ds-toast-close-min-size, 24px);
-  opacity: var(--ds-toast-close-opacity, 0.85);
-  transition: opacity var(--ds-toast-close-opacity-dur, 0.15s);
-}
-
-.ds-ov-toast__close:hover {
-  opacity: var(--ds-toast-close-hover-opacity, 1);
-}
-
 /* Compact toolbar-like surface (layout only; visuals come from ds-panel). */
 .ds-ov-bar {
   display: inline-flex;

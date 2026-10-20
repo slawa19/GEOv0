@@ -150,12 +150,13 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
     }
   })
 
-  it('a run ended by an error: the code and the reload, not the server\'s English prose; the step refusal keeps its text', () => {
+  // 049 S2 (decisions 7, 8): the sentence of decision 8, the code not in brackets - it is the title (red before: the code drawn).
+  it('a run ended by an error: the reload, not the server\'s English prose nor the code; the step refusal keeps its text', () => {
     const line = runStatusErrorLine(status('error', null, { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }), always)
     expect(line).toEqual({ kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED', detail: 'REAL_MODE_TICK_FAILED: tick failed' })
     expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed')
-    expect(renderRunErrorLine(line!, 'en')).toBe('The run stopped with an error (REAL_MODE_TICK_FAILED). To start again, reload the page.')
-    expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановился с ошибкой (REAL_MODE_TICK_FAILED). Чтобы запустить снова, перезагрузите страницу.')
+    expect(renderRunErrorLine(line!, 'en')).toBe('The demo stopped because of an error. Reload the page to start a new run.')
+    expect(renderRunErrorLine(line!, 'ru')).toBe('Демо остановилось из-за сбоя. Перезагрузите страницу, чтобы начать новый прогон.')
     expect(renderRunErrorLine(line!, 'ru')).not.toContain('tick failed')
     const step = runStatusErrorLine(status('error', null, { code: 'CLEARING_REFUSED', message: 'x', at: 't' }), always)
     expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })

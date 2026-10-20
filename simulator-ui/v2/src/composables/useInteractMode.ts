@@ -1,11 +1,11 @@
-import { computed, ref, shallowRef, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { clientShownError, shownError, shownErrorIn, type ShownError } from '../utils/errorMessage'
 import { paymentStatusText } from '../i18n/statusText'
-import { keptText, t, type KeptText } from '../i18n/t'
-import { uiLocaleRef, type UiLocale } from '../i18n/locale'
+import { t, type KeptText } from '../i18n/t'
+import type { UiLocale } from '../i18n/locale'
 import { actionErrorText, clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
@@ -13,7 +13,8 @@ import { useInteractActions } from './useInteractActions'
 import { useInteractDataCache } from './interact/useInteractDataCache'
 import type { TrustlinesFetchState } from './interact/trustlinesSourceState'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
-import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
+import { feedLineOf, useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
+import type { RealEventFeedItem } from './realEventPipeline'
 import { createPaymentIntentKeeper, isKeySpent, isValidIdempotencyKey, type PaymentIntent } from './interact/paymentIntent'
 
 export type { InteractPhase, InteractState }
@@ -99,12 +100,11 @@ export function useInteractMode(opts: {
    * `utils/participantDisplayId.ts`). The state and the actions keep the full id; without it ids are printed as they are.
    */
   showPid?: (pid: string) => string
+  /** 049 S2 (decision 5): is «Show events» on (the network's events are written into the history)? Omitted: off. */
+  eventsFeedOn?: () => boolean
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
-
-  /** UI-level success toast message (outside FSM). */
-  successMessage: Ref<string | null>
 
   // Phase transitions
   startPaymentFlow: () => void
@@ -196,8 +196,14 @@ export function useInteractMode(opts: {
   setTrustlineToPid: (pid: string | null) => void
   selectTrustline: (fromPid: string, toPid: string) => void
 
-  // BUG-5: history log
+  // BUG-5: history log - the person's own actions.
   history: InteractHistoryEntryT[]
+  /** 049 S2 (decision 5): the network's events, written only while «Show events» is on. */
+  feed: InteractHistoryEntryT[]
+  /** 049 S2: what the history shows now - the own lines with the events off; own and network merged with them on. */
+  shownHistory: ComputedRef<InteractHistoryEntryT[]>
+  /** 049 S2: the line of an accepted SSE event (`realEventPipeline.ts`): kept while the events are on and the event is of the equivalent on screen. */
+  pushFeedItem: (item: RealEventFeedItem) => void
 } {
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
@@ -240,36 +246,8 @@ export function useInteractMode(opts: {
 
   const busyRef = ref(false)
 
-  // FB-1: UI-level success toast (kept outside FSM so it doesn't affect phase logic).
-  // 046 wave 3 (BACKLOG 046-3): the toast is KEPT as its key and data (`KeptText`) and drawn in the language of now, so a
-  // switch while it is up re-renders it; `successMessage` stays the one text its readers see. A text written from outside
-  // (the root's dismiss writes null) is kept as it is.
-  const successLine = shallowRef<KeptText | { readonly raw: string } | null>(null)
-  const successMessage = computed<string | null>({
-    get: () => {
-      const line = successLine.value
-      if (!line) return null
-      return 'raw' in line ? line.raw : keptText(line, uiLocaleRef.value)
-    },
-    set: (v) => {
-      successLine.value = v == null ? null : { raw: v }
-    },
-  })
-
-  const scheduleMicrotask: (fn: () => void) => void =
-    typeof queueMicrotask === 'function' ? queueMicrotask : (fn) => Promise.resolve().then(fn)
-
-  function setSuccessToastMessage(line: KeptText) {
-    // Ensure repeated identical messages still retrigger watchers/timers.
-    if (successMessage.value === keptText(line, uiLocaleRef.value)) {
-      successLine.value = null
-      scheduleMicrotask(() => {
-        successLine.value = line
-      })
-      return
-    }
-    successLine.value = line
-  }
+  // 049 S2 (decision 6): no success toast - the result is in the window and in the history line (the toast, FB-1, was a
+  // third record of the same event).
 
   // Epoch that invalidates any in-flight async results.
   // Incremented:
@@ -291,8 +269,31 @@ export function useInteractMode(opts: {
   const cancellingRef = ref(false)
   const cancelling = computed(() => cancellingRef.value)
 
-  // BUG-5: inline history log (last N actions)
-  const { history, pushHistory } = useInteractHistory({ max: 20 })
+  // BUG-5: inline history log (last N actions). 049 S2: and the network's events beside them.
+  const historyStore = useInteractHistory({ max: 20 })
+  const { history, feed } = historyStore
+  const feedOn = () => opts.eventsFeedOn?.() ?? false
+  /**
+   * An own line. 049 S2 (decision 5): `publishedToStream` - an event the run's stream publishes as well (a committed
+   * payment, a clearing that cleared): written while the events are on, the network's line is its one line.
+   */
+  function pushHistory(icon: string, line: KeptText, o?: { publishedToStream?: boolean }) {
+    historyStore.pushHistory(icon, line, { shownByNetwork: o?.publishedToStream === true && feedOn() })
+  }
+  const shownHistory = computed(() => historyStore.shownEntries(feedOn()))
+  function pushFeedItem(item: RealEventFeedItem) {
+    if (!feedOn()) return
+    // The pipeline admitted the event for its connection; the history belongs to the equivalent on screen.
+    if (!sameEquivalent(item.equivalent, opts.equivalent.value)) return
+    const line = feedLineOf(item, participantName)
+    if (line) historyStore.pushFeedLine(line)
+  }
+  // A change of run or equivalent, or of the switch, drops the network's lines (decision 5); the own lines stay.
+  watch(
+    () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}|${feedOn() ? 1 : 0}`,
+    () => historyStore.clearFeed(),
+    { flush: 'sync' },
+  )
 
   const dataCache = useInteractDataCache({
     actions: opts.actions,
@@ -644,7 +645,6 @@ export function useInteractMode(opts: {
     if (busyRef.value) return
     if (state.phase !== 'idle') return
     fsm.startClearingFlow()
-    successMessage.value = null // an earlier clearing's announcement is not this one's
     // 037 C: the result names participants. Clearing may be the first thing done in a session, so the list is asked for now,
     // while the user reads the confirm step (the graph snapshot's nodes are the fallback; an id is shown only when neither knows).
     void refreshParticipants()
@@ -787,7 +787,6 @@ export function useInteractMode(opts: {
       return
     }
     const names = { from: participantName(from), to: participantName(to) }
-    successMessage.value = null
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
@@ -863,10 +862,8 @@ export function useInteractMode(opts: {
           })),
         })),
       }
-      setSuccessToastMessage({ key: 'history.paymentToast', vars: { amount, unit: eq } })
-
-      // BUG-5: log to history (037 A2: names, not pids)
-      pushHistory('💸', { key: 'history.payment', vars: { amount, unit: eq, from: names.from, to: names.to } })
+      // BUG-5: log to history (037 A2: names, not pids). The stream publishes the payment (`tx.updated`) as well.
+      pushHistory('💸', { key: 'history.payment', vars: { amount, unit: eq, from: names.from, to: names.to } }, { publishedToStream: true })
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
       // The panel stays on the result: it is dismissed by the user (`dismissPaymentResult` / `cancel`), not by a reset.
@@ -884,10 +881,7 @@ export function useInteractMode(opts: {
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
-      // 044 `T4405`: the participants' names, not their ids (identities of the run).
-      setSuccessToastMessage({ key: 'history.trustlineCreatedToast', vars: { from: participantName(from), to: participantName(to) } })
-
-      // BUG-5: log to history
+      // BUG-5: log to history. 044 `T4405`: the participants' names, not their ids (identities of the run).
       pushHistory('🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit, unit: eq } })
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
@@ -905,8 +899,6 @@ export function useInteractMode(opts: {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       await opts.actions.updateTrustline(from, to, newLimit, eq, { signal })
       if (!isCurrent()) return
-
-      setSuccessToastMessage({ key: 'history.limitUpdatedToast', vars: { limit: newLimit, unit: eq } })
 
       // BUG-5: log to history
       pushHistory('✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit, unit: eq } })
@@ -933,7 +925,6 @@ export function useInteractMode(opts: {
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
       const pair = { from: participantName(from), to: participantName(to) }
       const msg: KeptText = { key: res.status === 'closed' ? 'history.trustlineClosed' : 'history.closeRequested', vars: pair }
-      setSuccessToastMessage(msg)
 
       // BUG-5: log to history
       pushHistory('🗑️', msg)
@@ -1005,7 +996,8 @@ export function useInteractMode(opts: {
       const clearedCycles = res.cleared_cycles
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
-        pushHistory('🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } })
+        // The stream publishes a clearing that cleared (`clearing.done`) as well.
+        pushHistory('🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } }, { publishedToStream: true })
       } else {
         pushHistory('🌀', { key: 'history.clearingNothing' })
       }
@@ -1015,19 +1007,12 @@ export function useInteractMode(opts: {
       if (res && typeof opts.onClearingDone === 'function' && sameEquivalent(opts.equivalent.value, eq)) {
         try { opts.onClearingDone(res) } catch { /* ignore */ }
       }
-
-      // A success toast only when something was cleared: "no cycles" is a state of the panel, not a success.
-      if (res.cleared_cycles > 0) {
-        successLine.value = { key: 'history.clearingToast', vars: { cleared: res.cleared_cycles, total: res.cycles.length } }
-      }
     })
   }
 
   return {
     state,
     phase,
-
-    successMessage,
 
     startPaymentFlow,
     startPaymentFlowWithFrom,
@@ -1079,6 +1064,9 @@ export function useInteractMode(opts: {
     selectTrustline,
 
     history,
+    feed,
+    shownHistory,
+    pushFeedItem,
   }
 }
 

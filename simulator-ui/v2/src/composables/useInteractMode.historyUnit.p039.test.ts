@@ -63,7 +63,7 @@ describe('039 closing, finding 1 - a trust line history line carries the equival
     expect(historyEntryText(entry, 'ru')).toBe('Линия доверия открыта: Bob Carter → Carol Dean (12345.67 HOUR)')
   })
 
-  it('a trust line limit CHANGED: the new limit with its equivalent, in both languages (the toast already had it)', async () => {
+  it('a trust line limit CHANGED: the new limit with its equivalent, in both languages', async () => {
     const { im } = mode()
     expect(im.selectEdge('pid-0001→pid-0003'), 'counter-check: the existing line is selected').toBe(true)
     await im.confirmTrustlineUpdate('20.50')
@@ -71,7 +71,5 @@ describe('039 closing, finding 1 - a trust line history line carries the equival
     const entry = im.history[0]!
     expect(historyEntryText(entry, 'en')).toBe('Trustline updated: Alice Baker → Carol Dean → limit 20.50 HOUR')
     expect(historyEntryText(entry, 'ru')).toBe('Линия доверия изменена: Alice Baker → Carol Dean, лимит 20.50 HOUR')
-    setUiLocale('en')
-    expect(String(im.successMessage.value), 'counter-check: the toast of the same change').toBe('Limit updated: 20.50 HOUR')
   })
 })

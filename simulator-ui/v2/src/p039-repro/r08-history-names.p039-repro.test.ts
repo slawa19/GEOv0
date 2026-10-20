@@ -73,7 +73,7 @@ describe('039 R8 - the Interact history names participants', () => {
     im.selectNode('pid-0003')
     expect(im.phase.value, 'counter-check: the flow reached the create step').toBe('confirm-trustline-create')
     await im.confirmTrustlineCreate('10.00')
-    measured('R8 trustline created', { history: texts(im), toast: im.successMessage.value })
+    measured('R8 trustline created', { history: texts(im) })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
     expect(texts(im)[0], 'CREATED: the history line names Bob Carter').toContain('Bob Carter')
     expect(texts(im)[0], 'CREATED: the history line names Carol Dean').toContain('Carol Dean')
@@ -84,20 +84,20 @@ describe('039 R8 - the Interact history names participants', () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003'), 'counter-check: the existing line is selected').toBe(true)
     await im.confirmTrustlineUpdate('20.00')
-    measured('R8 trustline updated', { history: texts(im), toast: im.successMessage.value })
+    measured('R8 trustline updated', { history: texts(im) })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
     expect(texts(im)[0], 'CHANGED: the history line names Alice Baker').toContain('Alice Baker')
     expect(texts(im)[0], 'CHANGED: the history line names Carol Dean').toContain('Carol Dean')
     expect(texts(im)[0]).not.toMatch(/pid-000\d/)
   })
 
-  it('a trust line CLOSED: the history line and the toast carry both names and no id (today: ids)', async () => {
+  it('a trust line CLOSED: the history line carries both names and no id (today: ids)', async () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003')).toBe(true)
     await im.confirmTrustlineClose()
-    measured('R8 trustline closed', { history: texts(im), toast: im.successMessage.value })
+    measured('R8 trustline closed', { history: texts(im) })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
-    for (const text of [texts(im)[0]!, String(im.successMessage.value)]) {
+    for (const text of [texts(im)[0]!]) {
       expect(text, 'CLOSED: the text names Alice Baker').toContain('Alice Baker')
       expect(text, 'CLOSED: the text names Carol Dean').toContain('Carol Dean')
       expect(text).not.toMatch(/pid-000\d/)

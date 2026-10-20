@@ -8,6 +8,7 @@ import { equivalentOptions } from '../config/equivalents'
 import { useInteractDataCache } from './interact/useInteractDataCache'
 import { applyAcceptedRealEvent, type RealEventDraft } from './realEventPipeline'
 import { useInteractMode } from './useInteractMode'
+import { historyEntryText } from './interact/useInteractHistory'
 import { useRealClearingFx } from './realFx/useRealClearingFx'
 import { useSceneState } from './useSceneState'
 import { useSystemBalance } from './useSystemBalance'
@@ -70,7 +71,8 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
     const done = im.confirmPayment('1.00')
     eq.value = 'HOUR'
     release(); await done
-    expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
+    // 049 S2: the toast is gone; the history line records the action in its own equivalent.
+    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual([expect.stringContaining('1.00 UAH')])
   })
   it('B4: the same participants in another equivalent are a new scene, not an increment', async () => {
     const eq = ref('UAH')

@@ -263,8 +263,8 @@ function onCloseLine() {
       data-testid="edge-source-unavailable"
       :data-request-id="sourceUnavailableRef || undefined"
     >
+      <!-- 049 S2 (decision 7): the request id is `data-request-id` only, not a drawn line (AGENTS.md section 12). -->
       {{ sourceUnavailableText }} {{ t('edgeWindow.closeDisabledUntil') }}
-      <div v-if="sourceUnavailableRef" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }) }}</div>
     </div>
     <div v-if="noTrustlineText" class="ds-help popup__warn" data-testid="edge-no-trustline">
       {{ noTrustlineText }}

@@ -323,19 +323,6 @@
   --ds-cp-spinner-spin-dur: 0.9s;
   --ds-cp-cycles-max-h: 140px;
 
-  --ds-toast-minw: 240px;
-  --ds-toast-maxw: 480px;
-  --ds-toast-gap: 8px;
-  --ds-toast-stack-gap: var(--ds-space-3);
-  --ds-toast-stack-step: 60px;
-  --ds-toast-icon-opacity: 0.9;
-  --ds-toast-close-min-size: 24px;
-  --ds-toast-close-opacity: 0.85;
-  --ds-toast-close-hover-opacity: 1;
-  --ds-toast-close-opacity-dur: 0.15s;
-  --ds-toast-enter-shift-y: 8px;
-  --ds-toast-transition-dur: 0.2s;
-
   /* semantic defaults (will be overwritten by theme blocks below) */
   --ds-page-bg: #0f172a;
   --ds-text-1: rgba(226, 232, 240, 0.92);

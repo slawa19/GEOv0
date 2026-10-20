@@ -213,8 +213,8 @@ const CASES: Case[] = [
   {
     name: 'payment: the result screen with two routes',
     render: async () => { mountWith(ManualPaymentPanel, paymentProps('confirm-payment', 'alice', 'bob', { paymentOutcome: SUCCESS })); await settle() },
-    en: ['Payment sent', 'Payment ID', 'Status', 'COMMITTED', 'Route 1 of 2', 'Another payment', 'Close'],
-    ru: [r('payment.resultTitle'), r('payment.resultPaymentId'), r('payment.resultStatus'), r('paymentStatus.COMMITTED'),
+    en: ['Payment sent', 'Status', 'COMMITTED', 'Route 1 of 2', 'Another payment', 'Close'],
+    ru: [r('payment.resultTitle'), r('payment.resultStatus'), r('paymentStatus.COMMITTED'),
       r('payment.resultRoutes', { n: 1, total: 2 }), r('payment.resultAnother'), r('payment.resultClose'), 'Алиса → Вера: 6.00 UAH'],
   },
   {
