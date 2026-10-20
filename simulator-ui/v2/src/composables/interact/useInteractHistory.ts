@@ -72,7 +72,7 @@ export function feedLineOf(item: RealEventFeedItem, name: (pid: string) => strin
     }
     case 'failure': {
       const key = FAILURE_LINE[item.code.toUpperCase()] ?? 'feed.failed'
-      return { kind: 'failure', icon: '⛔', line: { key, vars: { from: name(item.from), to: name(item.to) } } }
+      return { kind: 'failure', icon: '✕', line: { key, vars: { from: name(item.from), to: name(item.to) } } }
     }
     case 'clearing': {
       const drop = item.debtDrop !== null && moneyText(item.debtDrop) !== null ? money(item.debtDrop) : null

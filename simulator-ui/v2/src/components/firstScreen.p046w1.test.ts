@@ -156,8 +156,8 @@ async function mountFirstScreen(): Promise<void> {
     entries: [
       { id: 'o1', seq: 1, source: 'own', icon: '🔗', line: { key: 'history.trustlineClosed', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
       { id: 'n1', seq: 2, source: 'network', icon: '💸', lead: { plural: 'feed.paymentSeries', count: 6 }, line: { key: 'feed.payment', vars: { from: 'Алиса', to: 'Борис', amount: '1.00', unit: 'UAH' } }, timeText: '12:00' },
-      { id: 'n2', seq: 3, source: 'network', icon: '⛔', lead: { plural: 'feed.failureSeries', count: 2 }, line: { key: 'feed.failedNoCapacity', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
-      { id: 'n3', seq: 4, source: 'network', icon: '⛔', line: { key: 'feed.failed', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
+      { id: 'n2', seq: 3, source: 'network', icon: '✕', lead: { plural: 'feed.failureSeries', count: 2 }, line: { key: 'feed.failedNoCapacity', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
+      { id: 'n3', seq: 4, source: 'network', icon: '✕', line: { key: 'feed.failed', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
       { id: 'n4', seq: 5, source: 'network', icon: '🌀', line: { plural: 'feed.clearing', count: 2, vars: { amount: '30.00', unit: 'UAH' } }, timeText: '12:00' },
       { id: 'n5', seq: 6, source: 'network', icon: '🌀', line: { plural: 'feed.clearingCycles', count: 1 }, timeText: '12:00' },
       { id: 'n6', seq: 7, source: 'network', icon: '📈', line: { key: 'feed.trustGrowth' }, timeText: '12:00' },
