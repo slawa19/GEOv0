@@ -48,7 +48,7 @@ test.describe('037 B2 - progression in a real browser', () => {
 
     await page.keyboard.type('1.00')
     await page.keyboard.press('Enter')
-    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', PAYMENT_ID) // 049 S2: not drawn
     expect(bodies).toHaveLength(1)
   })
 
@@ -89,7 +89,7 @@ test.describe('037 B2 - progression in a real browser', () => {
 
     await page.keyboard.type('1.00')
     await page.keyboard.press('Enter')
-    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', PAYMENT_ID) // 049 S2: not drawn
     expect(bodies).toHaveLength(1)
   })
 

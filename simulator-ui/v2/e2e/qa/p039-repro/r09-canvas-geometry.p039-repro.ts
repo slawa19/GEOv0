@@ -28,8 +28,9 @@ type R = { name: string; x: number; y: number; w: number; h: number }
 
 const HUD_PANELS = ['.ds-ov-top .ds-panel', '.ds-ov-bottom:not(.sar-interact-history-overlay) .ds-panel', '.graph-navigator', '.action-bar'] as const
 const WINDOWS = '.ws-shell'
-// 048 S3: the error toast is gone (a window's failure is its own block).
-const TOASTS = '.ds-ov-toast--success, .sar-interact-history-overlay'
+// 048 S3: the error toast is gone (a window's failure is its own block). 049 S2: the success toast is gone (the history
+// line and the window keep the result).
+const TOASTS = '.sar-interact-history-overlay'
 
 const note = (id: string, row: unknown) => {
   console.log(`[039 ${id}]`, JSON.stringify(row))
@@ -164,7 +165,7 @@ test('039 R9 - a toast and the history line of an action at 1366x768 lie over no
   })
   await page.locator('[data-testid="actionbar-clearing"]').click()
   await page.locator('[data-testid="clearing-confirm"]').click()
-  await expect(page.locator('.ds-ov-toast--success'), 'the toast exists before anything is judged').toBeVisible()
+  await expect(page.locator('.sar-interact-history-overlay'), 'the history line exists before anything is judged').toBeVisible()
   const toasts = await rects(page, TOASTS.split(', '))
   const hud = await rects(page, HUD_PANELS)
   const windows = await rects(page, [WINDOWS])

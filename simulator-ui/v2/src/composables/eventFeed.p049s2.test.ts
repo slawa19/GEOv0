@@ -83,8 +83,14 @@ async function harness(o: { feedOn?: boolean } = {}) {
     runId: null, runStatus: null, sseState: 'idle', lastEventId: null, lastError: '', artifacts: [], artifactsLoading: false,
     runStats: { startedAtMs: 0, attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} },
   })
+  const sendPayment = vi.fn(async (from: string, to: string, amount: string) => ({
+    ok: true, payment_id: 'man:1', from_pid: from, to_pid: to, equivalent: 'UAH', amount, status: 'COMMITTED', routes: [],
+  }))
   const im = useInteractMode({
-    actions: { actionsDisabled: ref(false), fetchParticipants: async () => [], fetchTrustlines: async () => [], fetchPaymentTargets: async () => [] } as never,
+    actions: {
+      actionsDisabled: ref(false), sendPayment, fetchParticipants: async () => [], fetchTrustlines: async () => [],
+      fetchPaymentTargets: async () => [{ to_pid: 'B', hops: 1, max_available: '100.00' }],
+    } as never,
     runId: computed(() => real.runId ?? ''),
     equivalent,
     snapshot: snap,
@@ -251,6 +257,24 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     later()
     emit(payment('evt_r1_3'))
     expect(h.lines(), 'counter-check: the same connection still writes its own events').toHaveLength(1)
+    h.rm.stopSse()
+  })
+
+  it('a manual payment is ONE line: with the switch on the line of its tx.updated (no «вы»); off - its own line, as before', async () => {
+    const h = await harness()
+    h.im.startPaymentFlow()
+    h.im.selectNode('A')
+    h.im.selectNode('B')
+    await flush()
+    expect(h.im.phase.value, 'counter-check: the payment reached its confirm step').toBe('confirm-payment')
+    await h.im.confirmPayment('5.00')
+    expect(h.im.paymentOutcome.value, 'counter-check: the payment is committed').toMatchObject({ kind: 'success' })
+    expect(h.im.history, 'the own line is kept - for the switch off').toHaveLength(1)
+    expect(h.lines(), 'on: the own line of a payment is not shown beside the network\'s').toEqual([])
+    emit(payment('evt_r1_1', 'A', 'B', '5.00'))
+    expect(h.lines()).toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
+    h.feedOn.value = false
+    expect(h.lines(), 'off: exactly the own lines, as before 049').toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
     h.rm.stopSse()
   })
 

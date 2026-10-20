@@ -11,7 +11,9 @@
  * (`?lang=en`, `?lang=ru`). By the owner's narrowing of that day only the SWITCH (its label "Язык") and the stop reason
  * change with the language; the other texts of the row stay English literals until their review. The stop summary is
  * now the stop reason in words (`runStop.*`): the free-text reason below is outside the closed set, so it reads as the
- * general text with the value, cut at 64 characters as before.
+ * general text. 049 S2 (decision 7): the value is no longer drawn in brackets after it - it is the `title` of the stop
+ * reason (with its source); the row still holds the longest scenario, the run row, the payments badge and, new, the
+ * switch «Показывать события» (a checkbox, measured with the other leaves).
  *
  * LIMITS: the controls compared are the leaves of the row (selects, buttons, inputs, badges, labels, the stop summary),
  * not their containers; a control clipped by `overflow` inside its own box (an ellipsis) is not an
@@ -78,7 +80,6 @@ function problems(boxes: Box[], vw: number, vh: number): string[] {
 }
 
 const LANGS = ['en', 'ru'] as const
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 for (const lang of LANGS) {
 for (const vp of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
@@ -92,8 +93,9 @@ for (const vp of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }]) {
       const scenario = page.locator('select[data-testid="scenario-select"]')
       // Anti-vacuum: the long inputs are on screen - the option and the cut stop summary - and the payments badge is there.
       await expect(scenario.locator('option:checked')).toHaveText(`${LONG_SCENARIO} (${SCENARIO_ID})`)
-      const generalText = t('runStop.unknown', { code: LONG_REASON }, lang)
-      await expect(page.locator('[data-testid="stop-reason"] .ds-value')).toHaveText(new RegExp(`^${escapeRe(generalText.slice(0, 40))}.{10,}`))
+      await expect(page.locator('[data-testid="stop-reason"] .ds-value')).toHaveText(t('runStop.unknown', {}, lang))
+      await expect(page.locator('[data-testid="stop-reason"]')).toHaveAttribute('title', `operator: ${LONG_REASON}`)
+      await expect(page.locator('[data-testid="events-feed-toggle"]'), '049 S2: the switch is a leaf of this row').toBeVisible()
       await expect(page.locator('[data-testid="run-payments"]')).toBeVisible()
       // 046 wave 1: the language switch is a control of this row, measured with the rest.
       await expect(page.locator('[data-testid="language-switch"] .ds-label')).toHaveText(t('locale.switcherLabel', undefined, lang))

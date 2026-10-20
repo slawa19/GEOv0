@@ -20,7 +20,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { measure, problems, type StepMeasure } from './helpers/p037Fit.js'
-import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
+import { Counter, PAYMENT_ID, mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 /** The open dropdown surface: inside the viewport, scrolls on its own, every option reachable. */
 async function measureSurface(page: Page, id: string, step: string) {
@@ -124,9 +124,10 @@ for (const vp of VIEWPORTS) {
 
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
-      await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
-      // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
-      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
+      // 049 S2 (decision 7): the payment's number is the result's `data-payment-id`, not a drawn row; (decision 6) no success
+      // toast to wait out any more - that wait had also let the window settle, so the settle is now explicit.
+      await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', PAYMENT_ID)
+      await settleShell(page)
       steps.push(await measure(page, 'result', ['[data-testid="mp-result-another"]', '[data-testid="mp-result-close"]']))
 
       const report = { viewport: vp, steps: steps.map((s) => ({ step: s.step, shell: s.shell, body: s.body, problems: problems(s) })), surfaces, keyboard }
@@ -159,7 +160,9 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-result-route-3"]')).toBeVisible()
-      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
+      // 049 S2: the toast wait that stood here (and let the window settle) went with the toast - the settle is explicit
+      // (in the full run, measured in the frame the result appeared, the last step lay at 677 px on a 667 px screen).
+      await settleShell(page)
 
       // Scroll the body to its end and look at the LAST step of the LAST route: it must lie wholly above the sticky button row
       // (not under it) and wholly inside the visible body. Measured before any click.
@@ -191,7 +194,9 @@ for (const vp of VIEWPORTS) {
 
       expect.soft(problems(m), `long result in ${vp.w}x${vp.h}`).toEqual([])
       // Not vacuous: on a short screen this result really is longer than the window, so the inner scroll is what keeps the buttons reachable.
-      if (vp.h <= 667) expect.soft(scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)
+      // 049 S2 (decision 7, 2026-10-20): the payment's number left the result (one row less) - at 375x667 the result now fits
+      // exactly (scrollHeight 596 = clientHeight 596, measured); the screens shorter than that (360x640, 844x390) still scroll.
+      if (vp.h < 667) expect.soft(scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)
     })
 
     test('each panel re-shapes only ITS OWN window: the payment rules do not reach the clearing window, the trustline window keeps the manager layout', async ({ page }) => {

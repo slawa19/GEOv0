@@ -341,6 +341,55 @@ async function setTotal(page: Page, lines: DebtLine[], target: string): Promise<
 const SEEN = ['[data-testid="total-debt-change"]', '[data-testid="total-debt-before"]', '[data-testid="total-debt-after"]', '[data-testid="sbb-total-debt"]',
   '[data-testid="reset-view"]', '.interact-history__header', '.interact-history__text', '.interact-history__time'] as const
 
+/**
+ * 049 S2 (decision 5; Verification plan 2): with «Показывать события» on the history is five lines - each line, the
+ * heading and the whole log whole inside the viewport and over NO neighbour (the bars' panels and controls, the legend,
+ * the floating column, the node labels). Returns the offenders by a readable name.
+ */
+const feedFits = (page: Page) => page.evaluate(() => {
+  const log = document.querySelector('.interact-history')
+  if (!log) return { present: false, lines: 0, outside: [] as string[], overlaps: [] as string[] }
+  const subjects = [log.querySelector('.interact-history__header')!, ...log.querySelectorAll('.interact-history__item')]
+  const visible = (el: Element) => {
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return false
+    for (let n: Element | null = el; n; n = n.parentElement) {
+      const cs = getComputedStyle(n)
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false
+    }
+    return true
+  }
+  const name = (el: Element) => `${el.tagName.toLowerCase()}${el.getAttribute('data-testid') ? `[${el.getAttribute('data-testid')}]` : ''}.${String(el.className).split(' ')[0]} "${(el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`
+  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title, .node-label, [data-testid="total-debt-change"], .ws-shell')]
+    .filter((el) => visible(el) && !log.contains(el) && !el.contains(log))
+  const outside: string[] = []
+  const overlaps: string[] = []
+  for (const el of subjects) {
+    const r = el.getBoundingClientRect()
+    if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) outside.push(`${name(el)} ${JSON.stringify([r.left, r.top, r.right, r.bottom].map(Math.round))}`)
+    for (const n of neighbours) {
+      const q = n.getBoundingClientRect()
+      const w = Math.min(r.right, q.right) - Math.max(r.left, q.left)
+      const h = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top)
+      if (w > 0.5 && h > 0.5) overlaps.push(`${name(el)} over ${name(n)} (${Math.round(w)}x${Math.round(h)} px)`)
+    }
+  }
+  return { present: true, lines: subjects.length - 1, outside, overlaps }
+})
+
+/** The canvas share of 043 R9 (`layout.qa.ts`): the bars' rectangles against the viewport, and the hit-tested share. */
+const canvasShare = (page: Page) => page.evaluate(() => {
+  const vh = window.innerHeight
+  const vw = window.innerWidth
+  const top = document.querySelector('.ds-ov-top .ds-ov-top-stack')!.getBoundingClientRect()
+  const bottom = [...document.querySelectorAll<HTMLElement>('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!.getBoundingClientRect()
+  let total = 0
+  let free = 0
+  for (let y = 2; y < vh; y += 4) for (let x = 2; x < vw; x += 4) { total += 1; if (document.elementFromPoint(x, y) instanceof HTMLCanvasElement) free += 1 }
+  const pct = (n: number) => Math.round(n * 1000) / 10
+  return { heightSharePct: pct((bottom.top - top.bottom) / vh), hitTestSharePct: pct(free / total) }
+})
+
 /** The viewports the pair is held at: the main desktop size of the demo and the narrowest the stand resizes a window to. */
 const FIT_VIEWPORTS = [{ width: 1366, height: 768 }, { width: 1024, height: 640 }] as const
 /** 049 S1 (decision 1): the total debt at five and at seven digits before the point - the spec's two figures. */
@@ -354,7 +403,7 @@ const TOTALS = ['49745.90', '1049745.90'] as const
 // 42 -> 80 px (red on `the bottom bar keeps its place and size`); and the out-of-flow form of 039 D lay over the end of
 // the Russian legend (red on `overlaps no neighbour`, 039 D-fix).
 for (const lang of ['ru', 'en'] as const) {
-  test(`039 D [${lang}] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the pair fits: no neighbour under it, whole on screen, the bar unmoved; 049 S1: the edge group on the control line at 49745.90 and 1049745.90`, async ({ page }) => {
+  test(`039 D [${lang}] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the pair fits: no neighbour under it, whole on screen, the bar unmoved; 049 S1: the edge group on the control line at 49745.90 and 1049745.90; 049 S2: the five-line feed fits`, async ({ page }, info) => {
     await page.setViewportSize(FIT_VIEWPORTS[0])
     const snapshot = fixtureSnapshot100()
     // The line with the largest debt: a clearing of it (the scene's total is about 88 thousand: a realistic magnitude).
@@ -366,11 +415,10 @@ for (const lang of ['ru', 'en'] as const) {
     })) })
     await expect(page.locator('[data-testid="legend"]').first(), 'counter-check: the full legend is on screen').toBeVisible()
     // A manual clearing through the action bar: its answer puts a line in "Recent actions", the neighbour at the right
-    // edge above the bar. Its toast is waited out, its window closed: what is measured is the HUD at rest.
+    // edge above the bar. Its window is closed: what is measured is the HUD at rest (049 S2: no success toast to wait out).
     await page.locator('[data-testid="actionbar-clearing"]').click()
     await page.locator('[data-testid="clearing-confirm"]').click()
     await expect(page.locator('[data-testid="recent-actions"]'), 'counter-check: the history is on screen').toBeVisible()
-    await expect(page.locator('.ds-ov-toast')).toHaveCount(0, { timeout: 10_000 })
     await page.keyboard.press('Escape')
     await expect(page.locator('.ws-shell')).toHaveCount(0)
     const settled = await barBox(page)
@@ -471,5 +519,61 @@ for (const lang of ['ru', 'en'] as const) {
       }
     }
     expect(seen, 'counter-check: every combination was measured').toHaveLength(20)
+
+    // 049 S2 (decision 5; Verification plan 2): «Показывать события». Anti-vacuum FIRST: every payment and clearing above
+    // arrived (each frame taken by the product, `pushEvent`) with the switch off - and not one line of the network was
+    // written; the history is the own action alone, as before 049.
+    const log = page.locator('[data-testid="recent-actions"]')
+    await expect(log).toHaveAttribute('data-feed', 'off')
+    await expect(page.locator('.interact-history__item[data-source="network"]'), 'switch off: no network line, though events arrived').toHaveCount(0)
+    await expect(page.locator('.interact-history__item'), 'switch off: the own line only').toHaveCount(1)
+    await setDetails(true)
+    await page.getByTestId('events-feed-toggle').check()
+    await expect(log).toHaveAttribute('data-feed', 'on')
+    // Four events of the network: a payment, a failure (no amount), the growth of trust, a clearing that lowers a debt by
+    // 1.00 (the pair is restated, not dropped). With the own line: five lines.
+    const [d1, d2] = debts
+    await pushEvent(page, { type: 'tx.updated', from: d1!.target, to: d1!.source, amount: '12.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: d1!.target, to: d1!.source }] })
+    await pushEvent(page, { type: 'tx.failed', from: d2!.target, to: d2!.source, error: { code: 'ROUTING_NO_CAPACITY', message: 'no capacity', at: '2026-02-01T00:00:01.000Z' } })
+    await pushEvent(page, { type: 'topology.changed', reason: 'trust_drift_growth', payload: { added_nodes: [], removed_nodes: [], added_edges: [], removed_edges: [], edge_patch: [{ source: d2!.source, target: d2!.target, trust_limit: '999999.00' }] } })
+    const top = [...debts].sort((x, y) => (y.used > x.used ? 1 : -1))[0]!
+    top.used -= 100n
+    await pushEvent(page, {
+      type: 'clearing.done', plan_id: 'plan-p049-s2', cleared_cycles: 1, cleared_amount: '1.00',
+      cycle_edges: [{ from: top.source, to: top.target }], edge_patch: [{ source: top.source, target: top.target, used: money(top.used), available: '0.00' }],
+    })
+    await expect(page.locator('.interact-history__item'), 'counter-check: five lines - the own one and four of the network').toHaveCount(5)
+    await expect(page.locator('.interact-history__item[data-source="network"]')).toHaveCount(4)
+    const FEED_SEEN = [...SEEN, '.interact-history__item[data-source="network"] .interact-history__text'] as const
+    const feedSeen: string[] = []
+    const shares: Record<string, unknown> = {}
+    for (const theme of ['hud', 'saas'] as const) {
+      await setDetails(true)
+      await page.getByTestId('theme-select').selectOption(theme)
+      await expect(page.locator('.root')).toHaveAttribute('data-theme', theme)
+      for (const details of [false, true]) {
+        await setDetails(details)
+        for (const vp of FIT_VIEWPORTS) {
+          await page.setViewportSize(vp)
+          const where = `[feed on, ${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}]`
+          await settledLayout(page, where)
+          expect(await renderedProblems(page, FEED_SEEN), `${where} every measured subject - the network's lines too - is drawn and seen`).toEqual([])
+          expect(await feedFits(page), `${where} the five lines overlap no neighbour and are whole inside the viewport`)
+            .toEqual({ present: true, lines: 5, outside: [], overlaps: [] })
+          expect(await pairFits(page), `${where} the pair overlaps no neighbour - the five lines neither`)
+            .toEqual({ present: true, outside: [], overlaps: [] })
+          const e = await edges(page)
+          expect(e.historyText, `${where} counter-check: the heading and the five lines are measured`).toHaveLength(6)
+          for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+          // Measured and recorded, not asserted (spec 049, Verification plan 2): the canvas share of the first view with the feed.
+          if (!details && vp.width === 1366) shares[theme] = await canvasShare(page)
+          feedSeen.push(where)
+        }
+      }
+    }
+    expect(feedSeen, 'counter-check: every combination with the feed was measured').toHaveLength(8)
+    const row = { lang, viewport: '1366x768', details: 'off', feed: 'on (5 lines)', shares }
+    console.log('[049 S2 feed canvas share]', JSON.stringify(row))
+    info.annotations.push({ type: '049-S2-feed-canvas-share', description: JSON.stringify(row) })
   })
 }

@@ -236,8 +236,20 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   tests 5 s -> 8.6-9.1 s each, the two new tests 5.0 s each - about +17 s; no CI number for them yet. Forecast from CI
  *   figures only: the step's last CI runs 512-569 s with 138 tests (the brief of S1; 569 s above) plus that difference
  *   scaled by the CI/local ratio of the whole step (about 1.12) - about 531-588 s, under 600 s.
+ * - 2026-10-20 (049 S2, decision 6 - the success toast removed): gate 140 -> 138, full 232 -> 226 (counted with
+ *   `playwright test --list`: 138 without `@extended`, 226 in all). The matrix entry `toast-success` is gone with its
+ *   surface: -2 in the gate (`matrix [saas|hud] toast-success`), -4 under `@extended` (its resize and its frame-and-axe test
+ *   in each theme). `interact-history` opens through the same clearing and now waits for the history's latest line
+ *   instead of the toast. The two "pair fits" tests of `debt-before-after.qa.ts` also hold the five-line feed
+ *   («Показывать события» on): anti-vacuum first (no network line with the switch off, though events arrived), then in
+ *   both themes, "Подробнее" off and on, 1366x768 and 1024x640 - every line drawn and seen, over no neighbour, on the
+ *   control line - and record the canvas share with the feed. Cost, locally: the two "pair fits" tests 8.6-9.1 s ->
+ *   11.6-12.6 s. No CI number for the removed entry; the same gesture's `toast-error` took 4.99 and 5.08 s in CI run
+ *   39256014175. Forecast from CI figures only: the last CI 567 s with 140 tests (the brief of S2) - about 10 s
+ *   (`toast-success`, by the `toast-error` figures) + the local growth of "pair fits" (about +6 s) scaled by the CI/local
+ *   ratio of the whole step (about 1.12, about +7 s) - about 564 s, under 600 s.
  */
-export const EXPECTED = { gate: 140, full: 232 }
+export const EXPECTED = { gate: 138, full: 226 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

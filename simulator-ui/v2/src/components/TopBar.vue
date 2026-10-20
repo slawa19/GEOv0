@@ -645,6 +645,12 @@ function onApplyIntensity() {
     min-content is kept small by the cap on the select below.
   */
   min-width: min-content;
+  /*
+    049 S2: the middle holds the administrator's run row AND the line of the network's events switch (the visitor's tempo
+    steps share that line); when the two lines stack, they are as close as the theme and the language of the left column
+    (`.tb-mode-row`), so the row stays two lines of controls tall (`e2e/p046-w1-first-screen.spec.ts` (2)).
+  */
+  row-gap: var(--ds-space-1, 4px);
 }
 
 /* The Scenario select at desktop sizes: capped, its text cut by the control; the whole option is its `title`. */

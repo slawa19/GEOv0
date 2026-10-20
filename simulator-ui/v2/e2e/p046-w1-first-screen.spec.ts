@@ -230,7 +230,10 @@ for (const theme of THEMES) {
       await page.reload()
       await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
       await page.locator(DETAILS).click()
-      await expect(value).toHaveText(t('runStop.unknown', { code: 'maintenance_window' }, lang))
+      await expect(value).toHaveText(t('runStop.unknown', {}, lang))
+      // 049 S2 (decision 7): the raw reason is not drawn in brackets - it stays the title.
+      await expect(page.locator('[data-testid="stop-reason"]')).toHaveAttribute('title', 'server: maintenance_window')
+      await expect(value).not.toContainText('maintenance_window')
     })
 
     test(`P046W1 (6) [${theme}] [${lang}] a trust line create refused for a suspended participant says so`, async ({ page }) => {
