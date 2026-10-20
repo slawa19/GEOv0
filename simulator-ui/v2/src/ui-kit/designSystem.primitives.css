@@ -821,19 +821,22 @@
   border-radius: 0;
   font-family: var(--ds-font-mono);
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
-  background: rgba(10, 16, 32, 0.55);
+  /* Opaque, like the hud's panels (`--ds-surface-1` is the card colour): an alert of the top stack stands over the canvas,
+     and a node showed through its words at 0.55 (owner's review of the final frames, 2026-10-20, frame 07). The tints of
+     the variants below are laid over it. */
+  background: var(--ds-surface-1);
 }
 
 [data-theme='hud'] .ds-alert--ok {
   border-color: rgba(0, 255, 136, 0.35);
-  background: rgba(0, 255, 136, 0.06);
+  background: linear-gradient(rgba(0, 255, 136, 0.06), rgba(0, 255, 136, 0.06)), var(--ds-surface-1);
   box-shadow: none;
   text-shadow: 0 0 6px rgba(0, 255, 136, 0.20);
 }
 
 [data-theme='hud'] .ds-alert--err {
   border-color: rgba(255, 61, 90, 0.35);
-  background: rgba(255, 61, 90, 0.06);
+  background: linear-gradient(rgba(255, 61, 90, 0.06), rgba(255, 61, 90, 0.06)), var(--ds-surface-1);
   box-shadow: none;
   text-shadow: 0 0 6px rgba(255, 61, 90, 0.20);
 }
