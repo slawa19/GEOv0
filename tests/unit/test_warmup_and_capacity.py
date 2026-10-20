@@ -138,10 +138,11 @@ class TestWarmupRamp:
     """Tests for the warm-up ramp feature in _plan_real_payments()."""
 
     def test_warmup_ramp_reduces_actions_at_tick_zero(self) -> None:
-        """At tick_index=0 with warmup(ticks=50, floor=0.1), intensity ≈ 10%.
+        """At tick_index=0 with warmup(ticks=50, floor=0.1), 100 % runs at 23.5 %.
 
-        ramp_factor = 0.1 + 0.9 * (0 / 50) = 0.1
-        target_actions = floor(50 * B(0)) = floor(50 * 0.1) = 5
+        ramp_factor = 0.1 + 0.9 * (0 / 50) = 0.1, applied only above the visitor's «быстро» step (15 %):
+        intensity = 0.15 + 0.1 * 0.85 = 0.235 (049 T4915, the closing review; before it 0.1 on the whole tempo)
+        target_actions = floor(50 * B(0)) = floor(50 * 0.235) = 11
         (049 fractional budget, ``_actions_this_tick``: B(t) sums the ramped intensities of ticks 0..t)
         """
         runner = _runner(actions_per_tick_max=50)
@@ -154,19 +155,19 @@ class TestWarmupRamp:
         run_f = _make_run(seed=1, tick_index=0, intensity_percent=100)
         planned_full = runner._plan_real_payments(run_f, scenario_full)
 
-        # With warmup at tick 0: target_actions = 5, without: 50.
+        # With warmup at tick 0: target_actions = 11, without: 50.
         assert len(planned_warmup) < len(planned_full), (
             f"Warmup at tick 0 should reduce actions: "
             f"got {len(planned_warmup)} vs {len(planned_full)}"
         )
-        assert len(planned_warmup) <= 5
+        assert len(planned_warmup) <= 11
 
     def test_warmup_ramp_linear_progression(self) -> None:
         """At tick_index=25 (half of warmup_ticks=50), ramp_factor ≈ 0.55.
 
-        ramp_factor = 0.1 + 0.9 * (25 / 50) = 0.55
-        target_actions = floor(50 * B(25)) - floor(50 * B(24)) = 422 - 395 = 27 at rate 27.5
-        (049 fractional budget, ``_actions_this_tick``)
+        ramp_factor = 0.1 + 0.9 * (25 / 50) = 0.55, on the tempo above 15 % only: intensity = 0.15 + 0.55 * 0.85
+        target_actions = floor(50 * B(25)) - floor(50 * B(24)) = 31 at rate 30.875
+        (049 fractional budget, ``_actions_this_tick``; 049 T4915 closing review - 27 at rate 27.5 before)
         """
         runner = _runner(actions_per_tick_max=50)
         scenario = _mesh_scenario(warmup={"ticks": 50, "floor": 0.1})
@@ -177,13 +178,13 @@ class TestWarmupRamp:
         run_start = _make_run(seed=1, tick_index=0, intensity_percent=100)
         planned_start = runner._plan_real_payments(run_start, scenario)
 
-        # Mid-warmup should produce more than start (5 < x ≤ 27).
+        # Mid-warmup should produce more than start (11 < x ≤ 31).
         assert len(planned_mid) > len(planned_start), (
             f"Tick 25 should produce more actions than tick 0: "
             f"{len(planned_mid)} vs {len(planned_start)}"
         )
-        assert len(planned_mid) <= 27, (
-            f"At tick 25/50 warmup expected ≤ 27 actions, got {len(planned_mid)}"
+        assert len(planned_mid) <= 31, (
+            f"At tick 25/50 warmup expected ≤ 31 actions, got {len(planned_mid)}"
         )
 
     def test_warmup_ramp_full_intensity_after_warmup(self) -> None:
@@ -228,7 +229,8 @@ class TestWarmupRamp:
         """floor=0.0 must be accepted as an explicit value.
 
         At tick_index=0: ramp_factor = 0.0 + 1.0 * 0 = 0.0
-        intensity becomes 0.0, therefore target_actions becomes 0.
+        the ramp scales only the tempo above 15 % (049 T4915, the closing review), so 100 % runs at 15 % and
+        target_actions becomes floor(50 * 0.15) = 7 (0 while the ramp scaled the whole tempo); floor=0.1 gives 11.
         """
         runner = _runner(actions_per_tick_max=50)
 
@@ -241,13 +243,14 @@ class TestWarmupRamp:
         planned_zero = runner._plan_real_payments(run_z, scenario_zero)
         planned_point1 = runner._plan_real_payments(run_p, scenario_point1)
 
-        assert len(planned_zero) == 0, (
-            f"floor=0.0 at tick 0 should produce 0 actions, got {len(planned_zero)}"
+        assert len(planned_zero) == 7, (
+            f"floor=0.0 at tick 0 should produce 7 actions (the unramped 15 %), got {len(planned_zero)}"
         )
 
-        # floor=0.1 at tick 0 yields ramp_factor=0.1 -> ≤ 5 actions (max(1,int(50*0.1)) = 5)
-        assert 1 <= len(planned_point1) <= 5, (
-            f"floor=0.1 at tick 0 should produce 1..5 actions, got {len(planned_point1)}"
+        # floor=0.1 at tick 0: 0.15 + 0.1 * 0.85 = 0.235 -> floor(50 * 0.235) = 11; differs from floor=0.0, so the
+        # explicit 0.0 is not read as the missing-value default 0.1.
+        assert len(planned_point1) == 11, (
+            f"floor=0.1 at tick 0 should produce 11 actions, got {len(planned_point1)}"
         )
 
 
