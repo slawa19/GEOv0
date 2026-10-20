@@ -267,9 +267,11 @@ async def test_restart_starts_the_stall_run_from_zero(clock) -> None:  # noqa: F
 
     run = await _started(clock, "anon:p049-s2a-restart")
     run._real_consec_all_rejected_ticks = 4
+    run._real_consec_tick_failures = 3  # the run stopped by `REAL_MODE_TICK_FAILED_REPEATED`
     await runtime.stop(run.run_id)
     await runtime.restart(run.run_id)
     assert run._real_consec_all_rejected_ticks == 0
+    assert run._real_consec_tick_failures == 0  # a single failure of the new launch must not stop it again
     assert run.tick_index == 0  # the derived carry starts from zero with it
 
 
@@ -323,8 +325,10 @@ class _Sse:
 class _ScriptedRunner(_Runner):
     """`plan` per tick: "fail" raises inside the money phase, "empty" plans nothing, "ok" plans one action that the
     real executor runs to its end (a scripted payment of an unknown sender: refused without the database), "landed"
-    is "ok" whose money phase then fails AFTER the executor ran - the accounting position of a commit that landed and
-    still failed the tick (`money_replay.py`, the confirmed-commit and unresolved-outcome branches)."""
+    is "ok" whose money attempt then raises AFTER the executor ran. That is the accounting position of a commit that
+    landed and still failed the tick (`money_replay.py`, the confirmed-commit and unresolved-outcome branches: the
+    executor has run, `money` stays None, the failure counts) - the stand raises from the attempt, it does not run
+    those branches themselves."""
 
     def __init__(self, *, run: RunRecord, logger: logging.Logger, script: list[str]) -> None:
         _, phase, _, _ = _run_with_phase(logger=logger, run_id=run.run_id)
@@ -422,7 +426,8 @@ async def test_an_attempted_tick_that_completes_clears_the_failures_at_the_slow_
 
 
 async def test_a_failing_tail_on_an_empty_tick_is_not_an_attempted_failure(monkeypatch) -> None:
-    """The concern of the first round - tail failures piling up across empty ticks once empty ticks stop clearing the
+    """Guard against the gate-only alternative (green on `aa31f6df` too, where the executor cleared every tick). The
+    concern of the first round - tail failures piling up across empty ticks once empty ticks stop clearing the
     counter - does not hold: an empty tick neither counts nor clears, its failing tail included."""
 
     _run, runner, counters = await _drive(monkeypatch, 2, ["fail", "empty", "empty", "empty", "empty"], tail_fails=True)
