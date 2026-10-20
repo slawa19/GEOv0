@@ -105,7 +105,7 @@ describe('ClearingPanel', () => {
 
     const help = host.querySelector('[data-testid="clearing-confirm-help"]') as HTMLElement | null
     expect(help).toBeTruthy()
-    expect(help?.textContent ?? '').toContain('This will run a clearing cycle in backend.')
+    expect(help?.textContent ?? '').toContain('The server will reduce the debts that close into a loop.')
 
     const btnConfirm = host.querySelector('button.ds-btn--primary') as HTMLButtonElement | null
     expect(btnConfirm).toBeTruthy()

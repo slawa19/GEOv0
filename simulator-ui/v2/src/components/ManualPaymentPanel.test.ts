@@ -941,7 +941,7 @@ describe('ManualPaymentPanel', () => {
     // Phase 2.5 multi-hop: exceeding direct capacity is a non-blocking warning.
     const warn = host.querySelector('[data-testid="mp-confirm-warning"]') as HTMLElement
     expect(warn).toBeTruthy()
-    expect((warn.textContent ?? '').trim()).toContain('Amount may exceed direct trustline capacity')
+    expect((warn.textContent ?? '').trim()).toContain('The amount may exceed what the direct line allows')
     expect((warn.textContent ?? '').trim()).toContain('10 UAH')
 
     // Warning is non-blocking: confirm stays enabled.

@@ -128,7 +128,7 @@ test.describe('037 B2 - progression in a real browser', () => {
     await expect(page.locator('#mp-amount')).toBeVisible()
     // 045 S2: the summary row ("Alice pays Bob") was removed; who pays whom is the title of the panel (names, in the order
     // of the payment).
-    await expect(page.locator('[data-testid="manual-payment-panel"] .ds-panel__header')).toHaveText('Manual payment: Alice → Bob')
+    await expect(page.locator('[data-testid="manual-payment-panel"] .ds-panel__header')).toHaveText('Payment: Alice → Bob')
     await expect(page.locator('#mp-from__surface')).toHaveCount(0)
     await expect(page.locator('#mp-to__surface')).toHaveCount(0)
     expect(bodies).toHaveLength(0)

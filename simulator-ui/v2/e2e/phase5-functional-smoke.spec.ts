@@ -633,7 +633,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 048 S3: in the window's own block (the error toast is gone).
     await expect(page.getByTestId('manual-payment-error')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
-    await expect(page.getByLabel('Manual payment panel')).toBeHidden()
+    await expect(page.getByLabel('Payment panel')).toBeHidden()
 
     await activateTestId(page, 'actionbar-trustline')
     await chooseTrustlineFromWhenRequested(page)

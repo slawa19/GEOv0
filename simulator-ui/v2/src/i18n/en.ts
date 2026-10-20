@@ -64,9 +64,9 @@ export const en = {
   },
 
   payment: {
-    panelAria: 'Manual payment panel',
-    title: 'Manual payment',
-    titlePair: 'Manual payment: {from} → {to}',
+    panelAria: 'Payment panel',
+    title: 'Payment',
+    titlePair: 'Payment: {from} → {to}',
     fromLabel: 'From',
     toLabel: 'To',
     amountLabel: 'Amount',
@@ -94,7 +94,7 @@ export const en = {
     routesUpdatingLastAnswer: 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.',
     routesFailedUnreachable: 'Routes update failed; showing fallback data. Some recipients may be unreachable.',
     routesFailedMissing: 'Routes update failed; showing fallback data. Some recipients may be missing.',
-    exceedsDirect: 'Amount may exceed direct trustline capacity ({capacity} {unit}). Multi-hop may still succeed; backend will validate.',
+    exceedsDirect: 'The amount may exceed what the direct line allows ({capacity} {unit}). Through other participants the payment may still go through; the server will check.',
     noSelection: 'Select From and To first',
 
     // The result screen of a committed payment.
@@ -195,13 +195,13 @@ export const en = {
    * policy about buttons.
    */
   trustlineSource: {
-    neverAsked: 'Trustline data for this pair has not been requested from the backend; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.',
-    loading: 'Trustline data is still loading from the backend; the figures for this pair are not available yet.',
+    neverAsked: 'Trustline data for this pair has not been requested from the server; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.',
+    loading: 'Trustline data is still loading from the server; the figures for this pair are not available yet.',
     loadingFrozen: 'Trustline data for this pair was still being requested when this window was frozen; that request will not update these figures, and nothing has confirmed them for this pair.',
     failed: 'Trustline data could not be loaded: {message}. The figures for this pair are not available, and what the graph shows may be out of date.',
-    frozenAnswer: 'These figures are a frozen copy of an earlier backend answer, kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
+    frozenAnswer: 'These figures are a frozen copy of an earlier server answer, kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
     frozenOther: 'The figures in this window are a frozen copy kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
-    noRow: 'The backend answered for this pair: there is no trustline. The figures on the graph come from the snapshot and do not describe an existing line — there is nothing to update or close here; create the line instead.',
+    noRow: 'The server answered for this pair: there is no trustline. The figures on the graph come from the snapshot and do not describe an existing line — there is nothing to update or close here; create the line instead.',
     trustlinesFailed: 'Trustlines refresh failed',
     paymentTargetsFailed: 'Payment targets refresh failed',
   },
@@ -209,7 +209,7 @@ export const en = {
   clearing: {
     panelAria: 'Clearing panel',
     runTitle: 'Run clearing',
-    confirmHelp: 'This will run a clearing cycle in backend.',
+    confirmHelp: 'The server will reduce the debts that close into a loop.',
     confirm: 'Confirm',
     runningShort: 'Running…',
     // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}").
@@ -544,7 +544,7 @@ export const en = {
     clearingHint: 'Debts that run around a cycle cancel out — each participant in the cycle owes less.',
     cancellingTitle: 'Cancelling… please wait for the operation to finish.',
     cancellingHint: 'Cancelling… please wait.',
-    disabled: 'Actions are disabled by backend feature flags.',
+    disabled: 'Actions are turned off on the server.',
     /**
      * 048 S2 hand-over (P2-2): a visitor has no Start since S2, so the reason no longer sends them to one. A reload makes
      * the opening's one attempt again (`useInteractAutoBootstrapRun.ts`: an ended run is replaced by a new one).

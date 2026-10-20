@@ -139,7 +139,7 @@ describe('046 wave 3 - the shared helpers speak the language of the interface', 
     expect(trustlineFiguresNotice({ kind: 'loading' })).toBe(t('trustlineSource.loading', {}, 'ru'))
     expect(renderAvailable('-5.00')).toBe(t('common.overLimit', { amount: '5.00' }, 'ru'))
     setUiLocale('en')
-    expect(trustlineFiguresNotice({ kind: 'loading' })).toBe('Trustline data is still loading from the backend; the figures for this pair are not available yet.')
+    expect(trustlineFiguresNotice({ kind: 'loading' })).toBe('Trustline data is still loading from the server; the figures for this pair are not available yet.')
     expect(renderAvailable('-5.00')).toBe('over limit by 5.00')
     // Counter-check: an asked language still wins over the interface's.
     expect(trustlineFiguresNotice({ kind: 'loading' }, 'ru')).toBe(t('trustlineSource.loading', {}, 'ru'))

@@ -709,7 +709,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
 
     // Confirm step should be opened with prefilled pids (trustline to→from).
     await expect(page.locator('[data-testid="mp-direct-capacity-help"]')).toBeVisible()
-    await expect(page.locator('[data-testid="manual-payment-panel"]')).toContainText('Manual payment: Bob → Alice') // 037 B2: names, not ids
+    await expect(page.locator('[data-testid="manual-payment-panel"]')).toContainText('Payment: Bob → Alice') // 037 B2: names, not ids
     await expect.poll(async () => await getSelectValue(page, '#mp-from')).toBe('bob')
     await expect.poll(async () => await getSelectValue(page, '#mp-to')).toBe('alice')
   })
