@@ -87,6 +87,23 @@ const roleWords = computed(() => [
 ].filter(Boolean).join(' · '))
 
 /**
+ * 049 S1 (decision 3): the balance of the head, or null when it did not arrive - then no figure, no dash and no unit is
+ * drawn, never a zero. A participant whose balance did not arrive at all (no sign, no amount: the role "unknown") says
+ * ONE thing: the role's words become «Баланс не получен» (a freeze and a hub are still added). Until S1 the head said
+ * «неизвестно» beside «— UAH»: two half-messages of one absence (owner frame 18). The swatch stays - the card's link to
+ * the node on the canvas (`?` there as well). A known sign without an amount keeps its role's words.
+ */
+const balanceText = computed(() => netText(props.node))
+const roleText = computed(() => {
+  if (balanceText.value !== null || look.value.role !== 'unknown') return roleWords.value
+  return [
+    t('card.balanceUnavailable'),
+    look.value.frozen ? t('legend.entry.frozen') : '',
+    look.value.hub ? t('legend.entry.hub') : '',
+  ].filter(Boolean).join(' · ')
+})
+
+/**
  * Fraction digits the equivalent this card is labelled with declares (012 / `F-012-4`).
  * `equivalentText` is the snapshot's equivalent code (`SimulatorAppRoot.vue:1358`).
  */
@@ -222,12 +239,38 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
     <div class="ds-panel ds-panel--elevated">
       <div class="ds-panel__body ds-ov-node-card__body">
 
-        <!-- Head, one line (045 S3): name and role, balance and its equivalent, pin and close. -->
+        <!-- Head, two rows (049 S1, decision 3; one line since 045 S3): the name and the two buttons; then the type and
+             status, the role (or the balance state), the balance with its unit. The name is cut by an ellipsis, its whole
+             text the title; nothing of the second row is cut - its groups wrap as wholes. -->
         <div class="ds-ov-node-card__identity">
-          <div class="ds-ov-node-card__who">
-            <div class="ds-ov-node-card__who-line">
+          <div class="ds-ov-node-card__title-row">
             <span class="ds-ov-node-card__name" data-testid="node-card-name" :title="nodeName">{{ nodeName }}</span>
-            <span class="nco-role" data-testid="node-card-role" :data-role="look.role">
+            <div class="ds-ov-node-card__service">
+              <button
+                v-if="showPinActions"
+                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+                type="button"
+                :aria-label="isPinned ? t('card.unpin') : t('card.pin')"
+                :title="isPinned ? t('card.unpin') : t('card.pin')"
+                @click="isPinned ? unpin() : pin()"
+              >
+                {{ isPinned ? '◆' : '◇' }}
+              </button>
+              <button
+                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+                type="button"
+                :aria-label="t('common.close')"
+                :title="t('common.close')"
+                aria-keyshortcuts="Escape"
+                @click="emit('close')"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div class="ds-ov-node-card__facts">
+            <span class="ds-ov-node-card__meta" data-testid="node-card-meta" :title="nodeMeta">{{ nodeMeta }}</span>
+            <span class="nco-role" data-testid="node-card-role" :data-role="look.role" :title="roleText">
               <span
                 class="ds-data-swatch"
                 :class="look.frozen ? 'ds-data-swatch--frozen' : 'ds-data-swatch--role'"
@@ -235,34 +278,9 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 data-testid="node-card-role-swatch"
                 aria-hidden="true"
               >{{ look.sign }}</span>
-              <span class="nco-role__words">{{ roleWords }}</span>
+              <span class="nco-role__words">{{ roleText }}</span>
             </span>
-            </div>
-            <div class="ds-ov-node-card__meta" data-testid="node-card-meta">{{ nodeMeta }}</div>
-          </div>
-          <span class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</span>
-          <span v-if="equivalentText" class="ds-ov-node-card__unit">{{ equivalentText }}</span>
-          <div class="ds-ov-node-card__service">
-            <button
-              v-if="showPinActions"
-              class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-              type="button"
-              :aria-label="isPinned ? t('card.unpin') : t('card.pin')"
-              :title="isPinned ? t('card.unpin') : t('card.pin')"
-              @click="isPinned ? unpin() : pin()"
-            >
-              {{ isPinned ? '◆' : '◇' }}
-            </button>
-            <button
-              class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-              type="button"
-              :aria-label="t('common.close')"
-              :title="t('common.close')"
-              aria-keyshortcuts="Escape"
-              @click="emit('close')"
-            >
-              ×
-            </button>
+            <span v-if="balanceText !== null" class="ds-ov-node-card__money"><span class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ balanceText }}</span><template v-if="equivalentText">&nbsp;<span class="ds-ov-node-card__unit">{{ equivalentText }}</span></template></span>
           </div>
         </div>
 
@@ -319,7 +337,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 ]"
                 :title="rowAvailableText(tl)"
               >
-                <span class="nco-trustline-row__peer">{{ showPid(tl.to_name) }}</span>
+                <span class="nco-trustline-row__peer" :title="showPid(tl.to_name)">{{ showPid(tl.to_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
                 <span :id="rowAvailableId(tl)" class="nco-trustline-row__avail-desc" data-testid="node-card-line-available">{{ rowAvailableText(tl) }}</span>
                 <button
@@ -345,7 +363,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 ]"
                 :title="rowAvailableText(tl)"
               >
-                <span class="nco-trustline-row__peer">{{ showPid(tl.from_name) }}</span>
+                <span class="nco-trustline-row__peer" :title="showPid(tl.from_name)">{{ showPid(tl.from_name) }}</span>
                 <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
                 <span :id="rowAvailableId(tl)" class="nco-trustline-row__avail-desc" data-testid="node-card-line-available">{{ rowAvailableText(tl) }}</span>
                 <button
@@ -389,7 +407,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   flex: 1 1 0;
 }
 
-/* 039 slice B: the role - the swatch the legend shows, and the same words. In the head, after the name. */
+/* 039 slice B: the role - the swatch the legend shows, and the same words. 049 S1: in the head's second row. */
 .nco-role {
   display: inline-flex;
   align-items: center;
@@ -401,6 +419,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   white-space: nowrap;
 }
 
+/* 049 S1: the second row is not cut - the role keeps its words whole; only a single group wider than the whole card (an
+   unknown status as it came) is cut, and its title holds it. */
 .nco-role__words {
   min-width: 0;
   overflow: hidden;

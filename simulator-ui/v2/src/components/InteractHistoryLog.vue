@@ -36,7 +36,7 @@ const visible = computed(() => {
         :class="{ 'interact-history__item--latest': i === 0 }"
       >
         <span class="interact-history__icon" aria-hidden="true">{{ entry.icon }}</span>
-        <span class="interact-history__text">{{ historyEntryText(entry, locale) }}</span>
+        <span class="interact-history__text" :title="historyEntryText(entry, locale)">{{ historyEntryText(entry, locale) }}</span>
         <span class="interact-history__time ds-mono">{{ entry.timeText }}</span>
       </li>
     </ul>
@@ -44,9 +44,15 @@ const visible = computed(() => {
 </template>
 
 <style scoped>
+/*
+  049 S1 (decisions 4 and 9): the history stands at the right edge of the screen (on the control line, placed by
+  `SimulatorAppRoot.vue`), so its content is aligned to that side - the heading and every line end on the line, a shorter
+  line starts further right. A long line is cut by an ellipsis inside a bounded width, its whole text is its `title`.
+*/
 .interact-history {
   pointer-events: none;
   user-select: none;
+  max-width: min(28rem, 45vw);
 }
 
 .interact-history__header {
@@ -55,6 +61,7 @@ const visible = computed(() => {
   text-transform: uppercase;
   letter-spacing: var(--ds-typo-section-label-letter-spacing);
   margin-bottom: var(--ds-ihl-header-margin-bottom);
+  text-align: right;
 }
 
 .interact-history__list {
@@ -68,6 +75,7 @@ const visible = computed(() => {
 
 .interact-history__item {
   display: flex;
+  justify-content: flex-end;
   align-items: baseline;
   gap: var(--ds-ihl-item-gap);
   font-size: var(--ds-ihl-item-font-size);
@@ -87,7 +95,10 @@ const visible = computed(() => {
 }
 
 .interact-history__text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The one part of the history a pointer reaches: the `title` of a cut line (decision 9). */
+  pointer-events: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

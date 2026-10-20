@@ -6,8 +6,8 @@
  *   (а) the card and the line window say nothing in the other language - visible text and the `aria-label` / `title` /
  *       `placeholder` of every element inside the two shells, and the shells' own names - only data (names, ids, the
  *       equivalent code, the key `Esc`); the rule is structural, as wave 1's (`p046-w1-full.spec.ts`);
- *   (б) Russian fits: the card's head and statistics stay one line each, the line window stays 320 wide with its figures
- *       on one line and its buttons on one row (045 S3's measures, `p045-s3-inspectors.spec.ts`, now in Russian too);
+ *   (б) Russian fits: the card's head keeps its two rows (049 S1; one line until then) and its statistics one line, the
+ *       line window stays 320 wide with its figures on one line and its buttons on one row (045 S3's measures, `p045-s3-inspectors.spec.ts`, now in Russian too);
  *       nothing inside either window is wider than the window;
  *   (в) 048 item 13 (б): the line window says "A trusts B up to the limit - that is how much B may owe A" in the names of
  *       its title, in the language of the page;
@@ -119,7 +119,7 @@ async function frame(page: Page, name: string): Promise<void> {
 for (const theme of THEMES) {
   for (const lang of LANGS) {
     test.describe(`046 W3 [${theme}] [${lang}] inspectors at 1366x768`, () => {
-      test('(а)(б) the participant card: one language, the head and the statistics one line each, nothing sticks out', async ({ page }, info) => {
+      test('(а)(б) the participant card: one language, the head in two rows (049 S1) and the statistics one line, nothing sticks out', async ({ page }, info) => {
         await open(page, theme, lang, { aliceLines: 2 })
         const card = await openCard(page)
         await frame(page, `${theme}-${lang}-1-card`)
@@ -127,11 +127,15 @@ for (const theme of THEMES) {
         await expect(card.getByTestId('node-card-group-out')).toHaveText(t('card.trustsGroup', { count: 2 }, lang))
         await expect(card.getByTestId('node-card-group-in')).toHaveText(t('card.trustedByGroup', { count: 1 }, lang))
         expect(await foreignWords(card, lang)).toEqual([])
-        const head = [await centreY(card.getByTestId('node-card-name')), await centreY(card.getByTestId('node-card-role'))]
+        // 049 S1 (decision 3; was "name and role one line"): the name and the close button are one row, the meta and the role the next.
+        const head = [await centreY(card.getByTestId('node-card-name')), await centreY(card.getByRole('button', { name: t('common.close', {}, lang) }))]
+        const facts = [await centreY(card.getByTestId('node-card-meta')), await centreY(card.getByTestId('node-card-role'))]
         const stats = await card.locator('[data-testid="node-card-stats"] > span').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }))
-        info.annotations.push({ type: 'P046W3-card', description: JSON.stringify({ head, stats }) })
+        info.annotations.push({ type: 'P046W3-card', description: JSON.stringify({ head, facts, stats }) })
         expect(stats.length, 'counter-check: labels and values').toBe(4)
-        expect(spread(head), 'name and role one line').toBeLessThan(4)
+        expect(spread(head), 'name and close one row').toBeLessThan(4)
+        expect(spread(facts), 'meta and role one row').toBeLessThan(4)
+        expect(facts[0]! - head[0]!, 'the meta and the role are the row under the name').toBeGreaterThan(10)
         expect(spread(stats), 'the statistics one line').toBeLessThan(4)
         expect(await overflowing(card)).toEqual([])
       })

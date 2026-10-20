@@ -300,6 +300,7 @@ export const ru = {
     lineOverLimit: 'сверх лимита на {amount} {unit}',
     pin: 'Закрепить',
     unpin: 'Открепить',
+    balanceUnavailable: 'Баланс не получен',
     trustsOthers: 'Доверяет:',
     trustedBy: 'Доверяют:',
     trustsOthersHint: 'Сумма лимитов, которые этот участник открыл другим как кредитор.',

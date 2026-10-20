@@ -528,30 +528,47 @@ details[open].ds-ov-details > summary::after {
   align-items: center;
 }
 
-/* ---- Head: one line (045 S3) - name and role, balance and its equivalent, service actions ---- */
+/* ---- Head: two rows (049 S1, decision 3; one line in 045 S3) -------------------------------------------------
+   Row 1: the name (cut by an ellipsis, its whole text the title) and the service actions. Row 2: the type and status, the
+   role or the balance state, the balance with its unit - groups that wrap as wholes, never cut inside the card's width. */
 
 .ds-ov-node-card__identity {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ds-ov-node-card__who {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
   flex-direction: column;
-}
-
-.ds-ov-node-card__who-line {
+  gap: 2px;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
-/* The type and status of the participant (045 S3 round, Codex P2): visible meta text under the name. */
+.ds-ov-node-card__title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 0;
+}
+
+.ds-ov-node-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.ds-ov-node-card__facts > * {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* The balance and its unit: one group, never broken between them (049 decision 9). */
+.ds-ov-node-card__money {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+/* The type and status of the participant (045 S3 round, Codex P2): visible meta text. */
 .ds-ov-node-card__meta {
   font-size: var(--ds-typo-section-label-font-size);
   line-height: 1.3;

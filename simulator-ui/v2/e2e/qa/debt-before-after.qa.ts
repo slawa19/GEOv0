@@ -168,11 +168,15 @@ for (const lang of ['ru', 'en'] as const) {
 const pairFits = (page: Page) => page.evaluate(() => {
   const sentence = document.querySelector('[data-testid="total-debt-change"]')
   if (!sentence) return { present: false, outside: [] as string[], overlaps: [] as string[] }
-  const subjects: Array<[string, Element]> = [['sentence', sentence]]
+  // [label, element, its group]: a neighbour that IS the group, is inside it or contains it is not judged against it.
+  const subjects: Array<[string, Element, Element]> = [['sentence', sentence, sentence]]
   for (const id of ['total-debt-before', 'total-debt-after']) {
     const el = sentence.querySelector(`[data-testid="${id}"]`)
-    if (el) subjects.push([id, el])
+    if (el) subjects.push([id, el, sentence])
   }
+  // 049 S1 (option B): the "Общий долг" plate floats with the sentence above the bar - a subject as well.
+  const plate = document.querySelector('[data-testid="system-balance"] [data-testid="sbb-total-debt"]')
+  if (plate) subjects.push(['debt plate', plate, plate])
   const visible = (el: Element) => {
     const r = el.getBoundingClientRect()
     if (r.width <= 0 || r.height <= 0) return false
@@ -188,14 +192,16 @@ const pairFits = (page: Page) => page.evaluate(() => {
     const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
     return `${el.tagName.toLowerCase()}${id ? `[${id}]` : ''}${role ? `[legend:${role}]` : ''}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''} "${text}"`
   }
-  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title, .interact-history, .interact-history__item')]
-    .filter((el) => el !== sentence && !sentence.contains(el) && !el.contains(sentence) && visible(el))
+  // 049 S1: and the node labels of the graph (DOM; none at rest - labels on selection - but held when there are).
+  const neighbours = [...document.querySelectorAll('.ds-panel, button, select, input, .ds-legend, .ds-legend__entry, .ds-legend__title, .interact-history, .interact-history__item, .node-label')]
+    .filter((el) => visible(el))
   const outside: string[] = []
   const overlaps: string[] = []
-  for (const [label, el] of subjects) {
+  for (const [label, el, group] of subjects) {
     const r = el.getBoundingClientRect()
     if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) outside.push(`${label} ${JSON.stringify([r.left, r.top, r.right, r.bottom].map(Math.round))}`)
     for (const n of neighbours) {
+      if (n === group || group.contains(n) || n.contains(group)) continue
       const q = n.getBoundingClientRect()
       const w = Math.min(r.right, q.right) - Math.max(r.left, q.left)
       const h = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top)
@@ -205,8 +211,129 @@ const pairFits = (page: Page) => page.evaluate(() => {
   return { present: true, outside, overlaps }
 })
 
+/**
+ * 049 S1 (decisions 1 and 4; reproducer (а)): the right edges of the bottom-right group - the clearing sentence, the
+ * "Общий долг" plate, "Показать всю сеть" - and of the "Recent actions" history are the CONTROL LINE: the content edge of
+ * the bottom bar's main row (a HudBar: its box minus its own padding), read from the page by that rule, never as a px
+ * literal (spec 049, Verification plan item 4). The history is measured at its text (a Range over the heading, the
+ * last element of each line), not at its box: a box on the line with text inside it is not "on the line".
+ * The advisor's refinement of decision 1 (2026-10-20, option B): the sentence and the plate stand OUT of the bar's flow,
+ * one right-aligned column above its right end; "Показать всю сеть" stays in the bar (the 85 % canvas floor, 043 R9).
+ */
+const edges = (page: Page) => page.evaluate(() => {
+  const half = (v: number) => Math.round(v * 2) / 2
+  const row = document.querySelector('.ds-ov-bottom .bb-main-row')!
+  const line = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight)
+  const right = (sel: string) => {
+    const el = document.querySelector(sel)
+    const r = el?.getBoundingClientRect()
+    return r && r.width > 0 ? half(r.right) : null
+  }
+  const history = document.querySelector('.interact-history')
+  let historyText: number[] = []
+  if (history) {
+    const heading = history.querySelector('.interact-history__header')!
+    const range = document.createRange()
+    range.selectNodeContents(heading)
+    historyText = [half(range.getBoundingClientRect().right)]
+    for (const li of history.querySelectorAll('.interact-history__item')) historyText.push(half(li.lastElementChild!.getBoundingClientRect().right))
+  }
+  return {
+    line: half(line),
+    sentence: right('[data-testid="total-debt-change"]'),
+    debt: right('[data-testid="sbb-total-debt"]'),
+    fit: right('[data-testid="reset-view"]'),
+    historyText,
+  }
+})
+
+/**
+ * BACKLOG 048-10 (implemented here, 049 S1; the advisor's rule on its repeat): a measurement of the bottom row waits
+ * until the layout has SETTLED - the bar's height the product publishes (`--ds-hud-bottom-stack-height`, which places the
+ * history and the windows) equals the bar's actual height, and the boxes of the bar's groups and their neighbours are the
+ * same on three reads in a row. A resize, a theme switch, "Подробнее" and a new total reflow the row asynchronously (a
+ * ResizeObserver publishes the height); measured at once, the stand judged the pair against a history that had not yet
+ * moved (CI, PR #330: `[en] [hud, details on, 1024x640]`, the pair over "Recent actions").
+ */
+async function settledLayout(page: Page, where: string): Promise<void> {
+  let prev = ''
+  let same = 0
+  let last = ''
+  await expect.poll(async () => {
+    const g = await page.evaluate(() => {
+      const bar = [...document.querySelectorAll<HTMLElement>('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
+      const published = getComputedStyle(document.querySelector('.root')!).getPropertyValue('--ds-hud-bottom-stack-height').trim()
+      const actual = `${Math.round(bar.getBoundingClientRect().height)}px`
+      const sel = '[data-testid="total-debt-change"], [data-testid="sbb-total-debt"], [data-testid="reset-view"], .interact-history, [data-testid="bottom-details-row"], .graph-navigator, [data-testid="legend"]'
+      const boxes = [...document.querySelectorAll(sel)].map((el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom].map((v) => Math.round(v * 2) / 2) })
+      return { published, actual, key: JSON.stringify(boxes) }
+    })
+    last = JSON.stringify(g)
+    same = g.published === g.actual && g.key === prev ? same + 1 : 0
+    prev = g.key
+    return same >= 2
+  }, { message: `${where} the layout settles: the published bar height equals the actual one and the groups stop moving (${last})`, intervals: [50, 100, 100, 150] }).toBe(true)
+}
+
+/**
+ * 049 S1 (option B, the advisor's condition 1): the floating column lies over the canvas, so it is held against what
+ * the canvas shows there - no node of the graph under it (a node's centre inside the column grown by the node's radius on
+ * screen). The node labels are DOM and are neighbours of `pairFits`; at rest the demo draws none (labels on selection).
+ */
+const nodesUnderColumn = (page: Page) => page.evaluate(() => {
+  const sim = (window as unknown as { __geoSim?: { layoutNodes?: Array<{ id: string; x: number; y: number }>; camera: { panX: number; panY: number; zoom: number } } }).__geoSim!
+  const canvas = document.querySelector('canvas')!.getBoundingClientRect()
+  const boxes = ['[data-testid="total-debt-change"]', '[data-testid="sbb-total-debt"]'].map((s) => document.querySelector(s)?.getBoundingClientRect()).filter((r): r is DOMRect => !!r && r.width > 0)
+  const cam = sim.camera
+  const radius = 12 * cam.zoom
+  const nodes = sim.layoutNodes ?? []
+  const under = nodes.filter((n) => {
+    const x = canvas.left + n.x * cam.zoom + cam.panX
+    const y = canvas.top + n.y * cam.zoom + cam.panY
+    return boxes.some((r) => x > r.left - radius && x < r.right + radius && y > r.top - radius && y < r.bottom + radius)
+  }).map((n) => `${n.id}@${Math.round(canvas.left + n.x * cam.zoom + cam.panX)},${Math.round(canvas.top + n.y * cam.zoom + cam.panY)}`)
+  return { nodes: nodes.length, columns: boxes.length, under, boxes: boxes.map((r) => [r.left, r.top, r.right, r.bottom].map(Math.round)), zoom: cam.zoom }
+})
+
+/**
+ * A total of the bar set to an exact figure by one payment frame (exact cents): a rise goes onto one line, a fall is
+ * taken from the largest debts first. `lines` is the test's copy of the debts of the scene, kept in step.
+ */
+type DebtLine = { source: string; target: string; used: bigint }
+/** Exact cents of a money text ("86973.5 UAH" -> 8697350n); a debt has two fraction digits in this equivalent. */
+function cents(text: string): bigint {
+  const [int = '0', frac = ''] = text.replace(/[^0-9.-]/g, '').split('.')
+  return BigInt(int) * 100n + BigInt((frac + '00').slice(0, 2))
+}
+async function setTotal(page: Page, lines: DebtLine[], target: string): Promise<void> {
+  const money = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, '0')}`
+  let delta = cents(target) - cents((await shownTotal(page)) ?? '')
+  const changed = new Set<DebtLine>()
+  if (delta >= 0n) {
+    lines[0]!.used += delta
+    changed.add(lines[0]!)
+  } else {
+    for (const line of [...lines].sort((x, y) => (y.used > x.used ? 1 : y.used < x.used ? -1 : 0))) {
+      if (delta === 0n) break
+      const take = line.used < -delta ? line.used : -delta
+      if (take === 0n) continue
+      line.used -= take
+      delta += take
+      changed.add(line)
+    }
+  }
+  const first = [...changed][0]!
+  await pushEvent(page, {
+    type: 'tx.updated', from: first.target, to: first.source, amount: '1.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: first.target, to: first.source }],
+    edge_patch: [...changed].map((x) => ({ source: x.source, target: x.target, used: money(x.used), available: '0.00' })),
+  })
+  await expect.poll(() => shownTotal(page), { message: `counter-check: the total is ${target}` }).toBe(`${target} ${EQ}`)
+}
+
 /** The viewports the pair is held at: the main desktop size of the demo and the narrowest the stand resizes a window to. */
 const FIT_VIEWPORTS = [{ width: 1366, height: 768 }, { width: 1024, height: 640 }] as const
+/** 049 S1 (decision 1): the total debt at five and at seven digits before the point - the spec's two figures. */
+const TOTALS = ['49745.90', '1049745.90'] as const
 
 // The widest first view the demo shows: the 100-node scene (its full legend), each language, both themes, with
 // "Подробнее" off and on (its service row is the neighbour right above the main row), at 1366x768 and the narrowest
@@ -216,7 +343,7 @@ const FIT_VIEWPORTS = [{ width: 1366, height: 768 }, { width: 1024, height: 640 
 // 42 -> 80 px (red on `the bottom bar keeps its place and size`); and the out-of-flow form of 039 D lay over the end of
 // the Russian legend (red on `overlaps no neighbour`, 039 D-fix).
 for (const lang of ['ru', 'en'] as const) {
-  test(`039 D [${lang}] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the pair fits: no neighbour under it, whole on screen, the bar unmoved`, async ({ page }) => {
+  test(`039 D [${lang}] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the pair fits: no neighbour under it, whole on screen, the bar unmoved; 049 S1: the edge group on the control line at 49745.90 and 1049745.90`, async ({ page }) => {
     await page.setViewportSize(FIT_VIEWPORTS[0])
     const snapshot = fixtureSnapshot100()
     // The line with the largest debt: a clearing of it (the scene's total is about 88 thousand: a realistic magnitude).
@@ -246,6 +373,11 @@ for (const lang of ['ru', 'en'] as const) {
     expect(await barBox(page), 'the bottom bar keeps its place and size with the pair').toEqual(settled)
     expect(await wasPlaced(page), 'the pair is whole on screen, just above the total').toEqual({ inViewport: true, abovePanel: true, drawn: true })
 
+    // 049 S1: the test's copy of the debts (the cleared line is at 0.00 now), for totals set to an exact figure.
+    const debts: DebtLine[] = snapshot.links.map((x) => ({
+      source: String(x.source), target: String(x.target), used: x === l ? 0n : cents(String(x.used ?? '0')),
+    }))
+
     const toggle = page.locator(DETAILS_TOGGLE)
     const setDetails = async (on: boolean) => {
       if (((await toggle.getAttribute('aria-expanded')) === 'true') !== on) await toggle.evaluate((el) => (el as HTMLButtonElement).click())
@@ -264,14 +396,32 @@ for (const lang of ['ru', 'en'] as const) {
         for (const vp of FIT_VIEWPORTS) {
           await page.setViewportSize(vp)
           await expect.poll(async () => (await pair(page)).afterShown, { message: `counter-check: [${theme}] the pair is still stated` }).toBe(true)
-          const where = `[${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}]`
-          expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
-            .toEqual({ present: true, outside: [], overlaps: [] })
-          seen.push(where)
+          // 049 S1 (reproducer (а)): at a total of five and of seven digits before the point - the plate grows to the left,
+          // its right edge stays on the line with the sentence's and the button's.
+          for (const total of TOTALS) {
+            await setTotal(page, debts, total)
+            const where = `[${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}, total ${total}]`
+            await settledLayout(page, where)
+            expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
+              .toEqual({ present: true, outside: [], overlaps: [] })
+            const e = await edges(page)
+            expect(e.line, `${where} counter-check: the control line is inset from the edge: ${JSON.stringify(e)}`).toBeLessThan(vp.width - 1)
+            for (const k of ['sentence', 'debt', 'fit'] as const) {
+              expect(e[k], `${where} ${k} is drawn: ${JSON.stringify(e)}`).not.toBeNull()
+              expect(Math.abs(e[k]! - e.line), `${where} ${k}: its right edge is the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+            }
+            expect(e.historyText.length, `${where} counter-check: the history heading and its line are measured`).toBeGreaterThanOrEqual(2)
+            for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+            const g = await nodesUnderColumn(page)
+            expect(g.nodes, `${where} counter-check: the graph's nodes are read`).toBeGreaterThan(50)
+            expect(g.columns, `${where} counter-check: the sentence and the plate are measured`).toBe(2)
+            expect(g.under, `${where} no node of the graph under the floating column ${JSON.stringify(g)}`).toEqual([])
+            seen.push(where)
+          }
         }
       }
       await page.setViewportSize(FIT_VIEWPORTS[0])
     }
-    expect(seen, 'counter-check: every combination was measured').toHaveLength(8)
+    expect(seen, 'counter-check: every combination was measured').toHaveLength(16)
   })
 }
