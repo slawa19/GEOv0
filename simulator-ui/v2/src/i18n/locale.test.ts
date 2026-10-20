@@ -22,6 +22,7 @@ import {
   UI_LOCALE_STORAGE_KEY as KEY,
   uiLocaleRef,
 } from './locale'
+import { t } from './t'
 
 function at(search: string) {
   window.history.replaceState(null, '', `/${search}`)
@@ -224,5 +225,43 @@ describe('046 T4601 - the reader of <html lang> and the first import', () => {
     expect(localeFromNavigatorLanguages(['uk-UA', 'en'])).toBe('ru')
     expect(localeFromNavigatorLanguages(['en-US', 'ru'])).toBe('en')
     expect(localeFromNavigatorLanguages([])).toBeNull()
+  })
+})
+
+// 046 closing review, finding 1 (2026-10-20): the browser tab's title was the static «GEO Simulator — Demo Fast Mock v2»
+// of `index.html` in both languages, and nothing wrote `document.title`. The module that writes `<html lang>` writes the
+// title from the dictionary at the same moment: the first import, a switch, popstate.
+describe('046 closing - the browser tab title follows the language', () => {
+  const title = (l: 'en' | 'ru') => t('locale.documentTitle', undefined, l)
+
+  it('the two titles are dictionary texts and differ (the checks below would pass over one shared text otherwise)', () => {
+    expect(title('en')).not.toBe('locale.documentTitle')
+    expect(title('ru')).not.toBe('locale.documentTitle')
+    expect(title('ru')).not.toBe(title('en'))
+  })
+
+  it('a switch writes the title of the new language, and back', () => {
+    document.title = 'stale'
+    setUiLocale('ru')
+    expect(document.title).toBe(title('ru'))
+    setUiLocale('en')
+    expect(document.title).toBe(title('en'))
+  })
+
+  it('popstate writes the title of the language it decides', () => {
+    at('?lang=ru')
+    onUiLocalePopState()
+    expect(document.title).toBe(title('ru'))
+    at('?lang=en')
+    onUiLocalePopState()
+    expect(document.title).toBe(title('en'))
+  })
+
+  it('the first import writes the title before the app mounts (here: ?lang=ru)', async () => {
+    vi.resetModules()
+    document.title = 'GEO'
+    at('?lang=ru')
+    await import('./locale')
+    expect(document.title).toBe(title('ru'))
   })
 })

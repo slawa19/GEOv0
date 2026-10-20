@@ -3,7 +3,7 @@
  * 1366x768, both product themes, both languages, a visitor (a participant JWT) and the administrator (the dev build's
  * admin token), on the mocked backend of the 037 specs (`helpers/p037Mock.ts`):
  *
- *   1. everything the page says - visible text and the `aria-label` / `title` / `placeholder` of every element, the
+ *   1. everything the page says - the browser tab's title, visible text and the `aria-label` / `title` / `placeholder` of every element, the
  *      first row, both rows of "Подробнее", the network figures, the bottom bar, the legend, "Find on graph" (open) and
  *      the onboarding hint - holds no word of the other language: under `ru` no Latin word but data, under `en` no
  *      Cyrillic. The rule is structural (AGENTS.md §9); data is read from the mock (participant names, the scenario's
@@ -88,7 +88,8 @@ async function openEverything(page: Page): Promise<void> {
 /** Everything the page says: its text nodes one by one, and the names, titles and placeholders of its elements. */
 function said(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const out: string[] = []
+    // The browser tab's title is said too (046 closing review, finding 1): it lives in <head>, outside the body walk.
+    const out: string[] = [document.title]
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const parent = n.parentElement

@@ -17,6 +17,7 @@ export const ru = {
   locale: {
     switcherLabel: 'Язык',
     switcherAria: 'Язык интерфейса',
+    documentTitle: 'GEO — демо сети взаимного кредита',
   },
 
   common: {
