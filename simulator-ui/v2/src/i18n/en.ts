@@ -652,15 +652,17 @@ export const en = {
    * «Show events» is on. Built from accepted SSE events only (`realEventPipeline.ts` `feedItemOf`); a missing field writes
    * no line. A failure has no amount (`tx.failed` carries none) and an unknown reason gets no diagnosis. A series within
    * 2 s is one line: its lead (`paymentSeries`, `failureSeries`) and the latest event's line after it.
+   * The reasons are short (owner's review of the final frames, 2026-10-20): a line is one row of a 448 px column, where only
+   * the names give way (decision 9) - the longest reason with two one-letter names must fit in the hud's monospace.
    */
   feed: {
     payment: '{from} → {to}: {amount}\u00a0{unit}',
     failed: '{from} → {to}: payment did not go through',
-    failedNoCapacity: '{from} → {to}: payment did not go through — not enough capacity on the route',
-    failedNoRoute: '{from} → {to}: payment did not go through — no route',
-    failedLimit: '{from} → {to}: payment did not go through — a trustline limit would be exceeded',
-    failedLineInactive: '{from} → {to}: payment did not go through — a trustline is not active',
-    failedTimeout: '{from} → {to}: payment did not go through — the payment timed out',
+    failedNoCapacity: '{from} → {to}: failed — route lacks capacity',
+    failedNoRoute: '{from} → {to}: failed — no route',
+    failedLimit: '{from} → {to}: failed — would exceed a line limit',
+    failedLineInactive: '{from} → {to}: failed — a trustline is not active',
+    failedTimeout: '{from} → {to}: failed — timed out',
     paymentSeries: plural({ one: 'In 2 s: {count} payment; latest — ', other: 'In 2 s: {count} payments; latest — ' }),
     failureSeries: plural({ one: 'In 2 s: {count} failure; latest — ', other: 'In 2 s: {count} failures; latest — ' }),
     clearing: plural({

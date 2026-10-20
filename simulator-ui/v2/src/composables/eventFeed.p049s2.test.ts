@@ -17,7 +17,7 @@ import type { GraphSnapshot } from '../types'
 import type { RealModeState } from './useSimulatorRealMode'
 import { useSimulatorRealMode } from './useSimulatorRealMode'
 import { useInteractMode } from './useInteractMode'
-import { historyEntryText } from './interact/useInteractHistory'
+import { historyEntryParts, historyEntryText, type InteractHistoryEntry } from './interact/useInteractHistory'
 
 vi.mock('../api/simulatorApi', () => ({
   artifactDownloadUrl: () => 'http://artifact',
@@ -182,7 +182,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     later()
     emit(failure('evt_r1_2', 'PAYMENT_REJECTED'))
     expect(h.lines()).toEqual([
-      'Анна → Пекарня: платёж не прошёл — не хватило лимита на маршруте',
+      'Анна → Пекарня: не прошёл — мало лимита на маршруте',
       'Анна → Пекарня: платёж не прошёл',
     ])
     for (const line of h.lines()) {
@@ -233,7 +233,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     emit(payment('evt_r1_8'))
     expect(h.lines()).toEqual([
       `За 2 с: 6 платежей; последний — Анна → Вера: 6.00${NBSP}UAH`,
-      'Анна → Пекарня: платёж не прошёл — нет маршрута',
+      'Анна → Пекарня: не прошёл — нет маршрута',
       `Анна → Пекарня: 120.00${NBSP}UAH`,
     ])
     h.rm.stopSse()
@@ -369,5 +369,33 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     emit(payment('evt_r1_2'))
     expect(g.lines()).toHaveLength(1)
     g.rm.stopSse()
+  })
+})
+
+describe('049 decision 9 (owner review 2026-10-20): the parts of a line - the names give way, the values do not', () => {
+  const entry = (line: InteractHistoryEntry['line'], lead?: InteractHistoryEntry['lead']) => ({ line, ...(lead ? { lead } : {}) })
+  const roles = (e: ReturnType<typeof entry>) => historyEntryParts(e, 'ru').map((p) => `${p.role}:${p.text}`)
+
+  it('a payment: the two names, then the amount with its unit as one value; the parts are the line', () => {
+    const e = entry({ key: 'feed.payment', vars: { from: 'Анна', to: 'Пекарня', amount: '120.00', unit: 'UAH' } })
+    expect(roles(e)).toEqual(['name:Анна', 'value: → ', 'name:Пекарня', `value:: 120.00${NBSP}UAH`])
+    expect(historyEntryParts(e, 'ru').map((p) => p.text).join('')).toBe(historyEntryText(e, 'ru'))
+  })
+
+  it('a failure: the reason is a value; a series: its count is the lead; a clearing (no names) is one value', () => {
+    expect(roles(entry({ key: 'feed.failedLimit', vars: { from: 'A', to: 'B' } }))).toEqual([
+      'name:A', 'value: → ', 'name:B', 'value:: не прошёл — превысил бы лимит линии',
+    ])
+    const series = entry({ key: 'feed.payment', vars: { from: 'A', to: 'B', amount: '6.00', unit: 'UAH' } }, { plural: 'feed.paymentSeries', count: 6 })
+    expect(roles(series)[0]).toBe('lead:За 2 с: 6 платежей; последний — ')
+    expect(roles(entry({ plural: 'feed.clearing', count: 1, vars: { amount: '30.00', unit: 'UAH' } }))).toEqual([
+      `value:Клиринг: общий долг уменьшился на 30.00${NBSP}UAH; 1 круг`,
+    ])
+  })
+
+  it('an own payment line: the amount before the names is a value too', () => {
+    expect(roles(entry({ key: 'history.payment', vars: { amount: '5.00', unit: 'UAH', from: 'A', to: 'B' } }))).toEqual([
+      'value:Платёж 5.00 UAH: ', 'name:A', 'value: → ', 'name:B',
+    ])
   })
 })

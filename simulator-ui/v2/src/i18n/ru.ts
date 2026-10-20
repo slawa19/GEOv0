@@ -282,7 +282,7 @@ export const ru = {
       many: 'Клиринг: {count} циклов, −{amount} {unit}',
       other: 'Клиринг: {count} цикла, −{amount} {unit}',
     }),
-    clearingNothing: 'Клиринг: замкнутых цепочек долгов не найдено',
+    clearingNothing: 'Клиринг: замкнутых цепочек долгов нет',
   },
 
   // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and
@@ -560,11 +560,11 @@ export const ru = {
   feed: {
     payment: '{from} → {to}: {amount}\u00a0{unit}',
     failed: '{from} → {to}: платёж не прошёл',
-    failedNoCapacity: '{from} → {to}: платёж не прошёл — не хватило лимита на маршруте',
-    failedNoRoute: '{from} → {to}: платёж не прошёл — нет маршрута',
-    failedLimit: '{from} → {to}: платёж не прошёл — был бы превышен лимит линии доверия',
-    failedLineInactive: '{from} → {to}: платёж не прошёл — линия доверия не действует',
-    failedTimeout: '{from} → {to}: платёж не прошёл — истекло время ожидания',
+    failedNoCapacity: '{from} → {to}: не прошёл — мало лимита на маршруте',
+    failedNoRoute: '{from} → {to}: не прошёл — нет маршрута',
+    failedLimit: '{from} → {to}: не прошёл — превысил бы лимит линии',
+    failedLineInactive: '{from} → {to}: не прошёл — линия не действует',
+    failedTimeout: '{from} → {to}: не прошёл — истекло время ожидания',
     paymentSeries: plural({
       one: 'За 2 с: {count} платёж; последний — ',
       few: 'За 2 с: {count} платежа; последний — ',
