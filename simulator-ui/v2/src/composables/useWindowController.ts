@@ -394,6 +394,11 @@ export function useWindowController(opts: {
 	})
 
 	const nodeCardAnchorUpdater = createPeriodicTrailingThrottle(100, (o: { nodeId: string; anchor: Point | null }) => {
+		// 048 `T4840` (sibling found on a live backend): a follow is a MOVE of an open card, never an open. A request still
+		// pending when the card closed (Escape, x, outside click) re-opened it 100 ms later - on a graph that keeps moving a
+		// request is pending almost always, so the card could not be closed at all.
+		const stillOpen = opts.wm.windows.value.some((w) => isNodeCardWindow(w) && String(w.data.nodeId ?? '') === o.nodeId)
+		if (!stillOpen) return
 		wmNodeCardId.value = opts.wm.open({
 			type: 'node-card',
 			// Use the same anchor source as the initial open to avoid a spurious
@@ -446,7 +451,33 @@ export function useWindowController(opts: {
 		},
 	)
 
+	/**
+	 * 048 `T4840` (advisor's decision 2026-10-19): in `editing-trustline` without the full editor the line window IS the
+	 * window of the action (`interactWindowOfPhase`). Closing it must end the action: until `T4840` the phase stayed with no
+	 * window of it on screen - the action bar locked ("cancel the current action first (Esc)") and Escape had no window to
+	 * close; from the navigator (the only keyboard route into the graph) nothing released it but a reload.
+	 */
+	function lineWindowIsTheAction(): boolean {
+		return String(opts.interactPhase.value) === 'editing-trustline' && !opts.isFullEditor.value
+	}
+
+	// Every route a person closes the line window by - Escape (the window manager), the x (`uiCloseEdgeDetailWindow`), a
+	// click outside it (`uiCloseTopmostInspectorWindow`; step 0 has already cancelled, so the phase is idle here) - and a
+	// participant card that replaces it (the window manager keeps one inspector) ends the action. Not the line-window
+	// machine's own programmatic close: "Change Limit" hands the action to the full editor, "Send Payment" keeps the window
+	// as the payment's context (the phase is the payment's then - it is not ended). A request in flight is never cancelled
+	// here: Escape and an outside click are ignored while busy (046 W3), and so are the x and a participant card below (a
+	// card would replace the window mid-request; this guard stays as the last line if another opener ever skips them).
+	opts.wmEdgeDetail.setUserCloseListener(() => {
+		if (!lineWindowIsTheAction() || opts.interactMode.busy.value) return
+		opts.interactMode.cancel()
+	})
+
 	function uiCloseEdgeDetailWindow(reason: EdgeDetailCloseReason) {
+		// 048 `T4840`: as Escape and an outside click (046 W3) - while the line's own request is in flight its x does nothing;
+		// the operation finishes on its own and the window shows its result (a close here would leave a failure with no
+		// window and the action locked - the dead end of `T4840`).
+		if (lineWindowIsTheAction() && opts.interactMode.busy.value) return
 		opts.wmEdgeDetail.close({ reason, suppress: true })
 		opts.wmEdgeDetail.applyToWindowManager(opts.wm, { closeReason: reason })
 	}
@@ -491,6 +522,13 @@ export function useWindowController(opts: {
 	function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
 		const reqNodeId = String(o.nodeId ?? '').trim()
 		if (!reqNodeId) return
+
+		// 048 `T4840` (§15 Codex, 2026-10-20): while the line's own request is in flight (Close line - up to the 120 s timeout,
+		// `api/simulatorApi.ts:261`) a participant card would REPLACE the line window (one inspector, `useWindowManager.ts`
+		// `closeGroup`); a failure would then stay in the closed window and the action open with no window - the T4840 dead
+		// end. Ignored, as Escape, an outside click and the x are while busy (046 W3); every route that opens a card comes
+		// here (the navigator's "Open participant", a double click on the canvas, a bottleneck row, the dev hook).
+		if (lineWindowIsTheAction() && opts.interactMode.busy.value) return
 
 		// UX-5: repeated dblclick on the SAME node while its NodeCard is already the
 		// WM topmost window must be a no-op to avoid a visible flicker / extra relayout.

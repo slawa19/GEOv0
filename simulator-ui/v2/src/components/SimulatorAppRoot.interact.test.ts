@@ -2586,7 +2586,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('edge-detail UI-close closes the window and does NOT cancel interact flow (H-3)', async () => {
+  // 048 `T4840` (advisor's decision 2026-10-19) replaces H-3 ("the x closes the window and does NOT cancel the flow"): with
+  // the window gone the phase stayed `editing-trustline` - the action bar locked, Escape had no window to close, and from
+  // the navigator (no canvas to click) only a reload released it. Closing the line window now ends the "trust line" action.
+  it('048 T4840: the x of the line window closes it AND ends the "trust line" action - the action bar is not locked', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
 
@@ -2600,8 +2603,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      // Initially: edge-detail window is visible.
+      // Initially: edge-detail window is visible, and the action bar is locked by the open action.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+      expect(host.querySelector('[data-testid="actionbar-locked-hint"]'), 'counter-check: the action locks the bar').not.toBeNull()
+      expect(host.querySelector('[data-testid="actionbar-trustline"]')?.getAttribute('data-active')).toBe('1')
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
 
@@ -2615,15 +2620,19 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      // Window must be closed...
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
-      // ...but flow MUST NOT be cancelled.
-      expect(cancel).not.toHaveBeenCalled()
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(getPhaseRef().value).toBe('idle')
+      expect(host.querySelector('[data-testid="actionbar-locked-hint"]')).toBeNull()
+      expect(host.querySelector('[data-testid="actionbar-trustline"]')?.getAttribute('data-active')).toBe('0')
 
-      // Suppression is UI-only: selecting a new edge (anchor change) should reopen the window.
+      // A line chosen again (the selection and the phase, as `selectEdge`) opens the window again.
       const st = getInteractState()
       expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
       st.edgeAnchor = { x: 20, y: 20 }
+      getPhaseRef().value = 'editing-trustline'
       await nextTick()
       await nextTick()
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
@@ -2923,7 +2932,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('EdgeDetailPopup Close closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
+  // 048 `T4840`: was a second copy of H-3 through the x (the test above holds the x now); the route it did not cover is
+  // Escape - the window manager closes the window itself, bypassing the line-window state machine.
+  it('048 T4840: Escape on the line window closes it AND ends the "trust line" action - the action bar is not locked', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
 
@@ -2937,30 +2948,29 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      // Initially: edge-detail window is visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+      expect(host.querySelector('[data-testid="actionbar-locked-hint"]'), 'counter-check: the action locks the bar').not.toBeNull()
 
       const cancel = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')
 
-      // 045 S3: the × of the window's title, named "Close".
-      const closeBtn = Array.from(host.querySelectorAll('[data-testid="edge-detail-popup"] button')).find((b) =>
-        b.getAttribute('aria-label') === 'Close',
-      ) as HTMLButtonElement | undefined
-      expect(closeBtn).toBeTruthy()
-
-      closeBtn?.click()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
       await nextTick()
       await nextTick()
 
-      // Window must be closed...
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
-      // ...but flow MUST NOT be cancelled.
-      expect(cancel).not.toHaveBeenCalled()
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(getPhaseRef().value).toBe('idle')
+      expect(host.querySelector('[data-testid="actionbar-locked-hint"]')).toBeNull()
 
-      // Suppression is UI-only: selecting a new edge (anchor change) should reopen the window.
+      // The same line at the same anchor chosen again opens the window again. What this does NOT hold: the stale window id
+      // an Escape left in the line-window state machine - here the window was opened by the phase (driver `auto`), and
+      // the cancel heals that path by itself; the navigator's manual open is held by `useWindowController.p048t4840.test.ts`
+      // ("after Escape the same line opens again") and the e2e (internal adversarial pass, 2026-10-19).
       const st = getInteractState()
-      expect(st).toBeTruthy()
-      st.edgeAnchor = { x: 20, y: 20 }
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
+      st.edgeAnchor = { x: 10, y: 10 }
+      getPhaseRef().value = 'editing-trustline'
       await nextTick()
       await nextTick()
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
