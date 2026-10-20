@@ -1,7 +1,7 @@
 import type { RunError } from '../api/simulatorTypes'
 import { toRaw } from 'vue'
 
-import { errorDetail, errorLog, requestIdOf } from './errorMessage'
+import { errorDetail, errorLog, logFailureLine, requestIdOf } from './errorMessage'
 
 import type { UiLocale } from '../i18n/locale'
 import { t, tn, type MessageKey, type PluralKey } from '../i18n/t'
@@ -43,7 +43,7 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  */
 export type RunErrorLine =
   | { readonly kind: 'dict'; readonly key: MessageKey; readonly ref?: string | null; readonly detail?: string; readonly log?: string }
-  | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number; readonly ref?: string | null }
+  | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number; readonly ref?: string | null; readonly log?: string }
   | { readonly kind: 'raw'; readonly text: string }
   | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string; readonly ref?: string | null }
 
@@ -69,7 +69,7 @@ export function runErrorLineTitle(line: RunErrorLine | null | undefined): string
 
 /** 048 S3: the full technical text behind a line, for the console (a failed request's `log`, else its title), else null. */
 export function runErrorLineLog(line: RunErrorLine | null | undefined): string | null {
-  if (line?.kind === 'dict' && line.log) return line.log
+  if ((line?.kind === 'dict' || line?.kind === 'count') && line.log) return line.log
   return runErrorLineTitle(line)
 }
 
@@ -127,10 +127,7 @@ export function writeRunErrorLine(
   const previous = target.lastErrorLine
   const detail = runErrorLineLog(line)
   if (line && detail && (runErrorLineLog(previous) !== detail || runErrorLineRef(previous) !== runErrorLineRef(line))) {
-    const ref = runErrorLineRef(line)
-    const args: string[] = [line.kind === 'code' && line.key === 'runLine.errorStopped' ? '[run] stopped with an error:' : '[run] error:', detail]
-    if (ref) args.push(`(request id: ${ref})`)
-    console.warn(...args)
+    logFailureLine(line.kind === 'code' && line.key === 'runLine.errorStopped' ? '[run] stopped with an error:' : '[run] error:', detail, runErrorLineRef(line))
   }
   target.lastError = line ? renderRunErrorLine(line, locale) : ''
   target.lastErrorLine = line
@@ -259,8 +256,11 @@ export function startRunErrorLine(e: unknown): RunErrorLine | null {
   const raw = detailsOf409(e)?.max_active_runs
   const n = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null
   // 048 S3 (adversarial pass F3, AGENTS.md section 12): the refusal carries the request id of its answer, as every line.
+  // 049 S2 (§15 Codex P2): and its technical text for the console line (`log`, not drawn, not the title) - without it
+  // `writeRunErrorLine` wrote no line, and the id lived in `data-request-id` only.
   const id = requestIdOf(e)
-  const ref = id ? { ref: id } : {}
+  const log = errorLog(e)
+  const ref = { ...(id ? { ref: id } : {}), ...(log ? { log } : {}) }
   if (n === null) return { kind: 'dict', key: 'runStart.limitBusy', ...ref }
   if (n === 1) return { kind: 'dict', key: 'runStart.limitOne', ...ref }
   return { kind: 'count', key: 'runStart.limitAll', count: n, ...ref }

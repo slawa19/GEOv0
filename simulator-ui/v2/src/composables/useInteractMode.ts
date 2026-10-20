@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 
 
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
-import { clientShownError, shownError, shownErrorIn, type ShownError } from '../utils/errorMessage'
+import { clientShownError, logFailureLine, shownError, shownErrorIn, type ShownError } from '../utils/errorMessage'
 import { paymentStatusText } from '../i18n/statusText'
 import { t, type KeptText } from '../i18n/t'
 import type { UiLocale } from '../i18n/locale'
@@ -75,9 +75,7 @@ class ShownFailure extends Error {
 function logShownFailure(shown: ShownError): void {
   const what = shown.log ?? shown.detail
   if (!what && !shown.ref) return
-  const args: string[] = ['[action] failed:', what ?? shown.text]
-  if (shown.ref) args.push(`(request id: ${shown.ref})`)
-  console.warn(...args)
+  logFailureLine('[action] failed:', what ?? shown.text, shown.ref)
 }
 
 export function useInteractMode(opts: {

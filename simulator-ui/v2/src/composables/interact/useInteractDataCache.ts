@@ -4,7 +4,7 @@ import type { GraphSnapshot } from '../../types'
 import { uiLocaleRef, type UiLocale } from '../../i18n/locale'
 import { t } from '../../i18n/t'
 import { actionErrorText } from '../../utils/paymentRefusalText'
-import { requestIdOf } from '../../utils/errorMessage'
+import { errorLog, logFailureLine, requestIdOf } from '../../utils/errorMessage'
 import { subMoney } from '../../utils/money'
 import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
@@ -287,6 +287,9 @@ export function useInteractDataCache(opts: {
       // Keep a lightweight error signal for UI hints/debugging.
       trustlinesLastErrorId.value = requestIdOf(error)
       trustlinesLastFailure.value = { error }
+      // 049 S2 (§15 Codex P2, AGENTS.md section 12): the notices keep the id in `data-request-id` only; the console line
+      // is the other half of the correlation (one line per failed read - a read is a person's step, not a tick).
+      logFailureLine('[trustlines] read failed:', errorLog(error), trustlinesLastErrorId.value)
     } finally {
       if (
         trustlinesFetchEpoch === myEpoch &&
