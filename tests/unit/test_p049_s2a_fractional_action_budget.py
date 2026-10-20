@@ -5,7 +5,7 @@ THE DEFECT (red on `5d0779a8`). `RealPaymentPlanner.plan_payments` sized a tick 
 so the visitor's slow step «2 %» (one payment every 2.5 s) planned ten payments in ten ticks instead of four.
 
 THE RULE. Tick `t` (the run's `tick_index`; a created run is at 0 and the heartbeat's first tick is 1) at rate
-`r_t = ACTIONS_PER_TICK_MAX * intensity_t` (the warm-up ramp included) plans `floor(B(t)) - floor(B(t - 1))`,
+`r_t = ACTIONS_PER_TICK_MAX * intensity_t` (the warm-up ramp on the tempo above 15 % included, see the end) plans `floor(B(t)) - floor(B(t - 1))`,
 `B(t) = r_0 + ... + r_t`. This is the accumulator `carry += r_t; actions = floor(carry); carry -= actions` started at 0
 at tick 0, with its carry derived from the tick number and the current percent instead of stored:
 a replay of the same tick's money phase (`money_replay.py`) with unchanged inputs plans the same count, a paused run does not advance
@@ -168,16 +168,18 @@ WARMUP = {"ticks": 50, "floor": 0.1}  # the warm-up of the visitor presets green
 
 def _accumulator(intensity_percent: int, ticks: int, warmup: dict[str, Any] | None) -> list[int]:
     """The rule of decision 10 as written - a STORED carry from 0 at tick 0, `carry += r_t; n = floor(carry);
-    carry -= n` - with `r_t` = 20 x percent x the warm-up ramp of tick t (`floor + (1 - floor) * t / ticks` while
-    `t < ticks`). Returns ticks 1..`ticks` (tick 0 is never run by the heartbeat)."""
+    carry -= n` - with `r_t` = 20 x (min(p, 15 %) + ramp_t x max(p - 15 %, 0)), ramp_t the warm-up of tick t
+    (`floor + (1 - floor) * t / ticks` while `t < ticks`; 049 T4915, the closing review: the ramp scales only the tempo
+    above the visitor's «быстро» step). Returns ticks 1..`ticks` (tick 0 is never run by the heartbeat)."""
 
     carry, out = Fraction(0), []
+    p, fast = Fraction(intensity_percent, 100), Fraction(15, 100)
     for t in range(0, ticks + 1):
         ramp = Fraction(1)
         if warmup and t < warmup["ticks"]:
             floor_ = Fraction(str(warmup["floor"]))
             ramp = floor_ + (1 - floor_) * Fraction(t, warmup["ticks"])
-        carry += ACTIONS_PER_TICK_MAX * Fraction(intensity_percent, 100) * ramp
+        carry += ACTIONS_PER_TICK_MAX * (min(p, fast) + ramp * max(p - fast, Fraction(0)))
         n = math.floor(carry)
         carry -= n
         if t >= 1:
@@ -199,15 +201,13 @@ def test_every_tick_plans_what_the_stored_accumulator_would(intensity_percent: i
 
 
 def test_the_normal_step_during_the_presets_warm_up() -> None:
-    """5 % on a preset with the 50-tick ramp: the budget's first payment comes on tick 6 and it plans 28 in the ramp's
-    first 50 ticks; the opening window (ticks 1..5, all with share 0) adds one on each, so 33; no gap over 4 ticks."""
+    """5 % on a preset with the 50-tick ramp: the ramp does not touch it (below the «быстро» step), so the budget plans
+    one action on every one of the ramp's first 50 ticks and the opening window adds nothing. (Before the closing review
+    of 049 the ramp scaled 5 % too: the budget's first payment came on tick 6, 28 in 50 ticks, the window added 5.)"""
 
     planned = _planned_per_tick(_runner(), _run(5), range(1, 51), WARMUP)
-    budget = _accumulator(5, 50, WARMUP)
-    assert [t for t, n in zip(range(1, 51), budget) if n][0] == 6 and sum(budget) == 28, budget
-    with_action = [t for t, n in zip(range(1, 51), planned) if n]
-    assert with_action[:6] == [1, 2, 3, 4, 5, 6] and sum(planned) == 28 + 5, planned
-    assert max(b - a for a, b in zip(with_action, with_action[1:])) <= 4, with_action
+    assert _accumulator(5, 50, WARMUP) == [1] * 50
+    assert planned == [1] * 50, planned
 
 
 def _scripted_rejection(seq: int) -> _RealPaymentAction:
@@ -546,9 +546,10 @@ def test_the_window_adds_exactly_one_action_per_empty_share_and_nothing_after_it
 
 
 def test_the_presets_steps_get_an_extra_action_on_each_empty_window_tick() -> None:
-    """On the presets' warm-up the window's shares are 0 except at 15 % on ticks 2 and 4: 5, 5 and 3 extra actions."""
+    """On the presets' warm-up the window's shares are those without a ramp (the steps are not ramped): 2 % has 0 on
+    ticks 1, 3 and 5, 5 % and 15 % never - 3, 0 and 0 extra actions (5, 5 and 3 while the ramp scaled the whole tempo)."""
 
-    for intensity_percent, empty_window_ticks in ((2, 5), (5, 5), (15, 3)):
+    for intensity_percent, empty_window_ticks in ((2, 3), (5, 0), (15, 0)):
         budget = _accumulator(intensity_percent, 5, WARMUP)
         assert sum(1 for n in budget if n == 0) == empty_window_ticks, (intensity_percent, budget)
         assert sum(_launch_counts(intensity_percent, WARMUP, ticks=5)) == sum(budget) + empty_window_ticks
@@ -584,4 +585,97 @@ def test_an_intensity_change_inside_the_window_stays_within_the_new_rate(before:
         run.intensity_percent = after
         for t in range(change_at, change_at + 5):
             run.tick_index = t
+            assert len(runner._plan_real_payments(run, scenario)) <= ceiling, (before, after, change_at, t)
+
+
+# ── the warm-up ramps only the tempo above the «быстро» step (049 T4915, the closing review) ──────────────────────────
+#
+# THE DEFECT (red on `5ca1622b`, the closing Codex review of 049, class 2). After the opening window the scenario
+# warm-up (`settings.warmup`, 50 ticks from 0.1, the visitor presets) still scaled the WHOLE tempo: «медленно» (2 %)
+# planned its next actions on ticks 12 and 19 - about 7 s apart instead of every 2-3 ticks - and decision 10's
+# promise (1 per 2.5 s, 1 per s, 3 per s) held only after about 50 s.
+#
+# THE RULE (the advisor's decision). The tick's intensity is `min(p, 15 %) + ramp_t * max(p - 15 %, 0)`: the visitor's
+# three steps (2 / 5 / 15 %) run without the ramp, an operator tempo above 15 % keeps the ramp on its excess only
+# (burst protection at launch). Derived from `tick_index`; `_budget_through` stays an exact closed form.
+
+from app.core.simulator.real_payment_planner import (  # noqa: E402
+    VISITOR_FAST_STEP_PERCENT,
+    _budget_through,
+    _warmup_of,
+)
+
+
+def test_the_exempt_part_is_the_visitors_fast_step() -> None:
+    assert VISITOR_FAST_STEP_PERCENT == 15  # decision 10: «быстро» = 15 % (simulator-ui/v2 TopBar.vue, TEMPO_STEPS)
+
+
+def test_the_slow_step_keeps_its_rate_right_after_the_window_on_the_presets_warm_up() -> None:
+    """TARGET: 2 % on the 50-tick ramp - from tick 6 an action every 2-3 ticks, 10 over ticks 6..30
+    (`floor(0.4 * 31) - floor(0.4 * 6)` = 12 - 2), not the ramp's 7-tick gap."""
+
+    planned = _planned_per_tick(_runner(), _run(2), range(6, 31), WARMUP)
+    with_action = [t for t, n in zip(range(6, 31), planned) if n]
+    assert sum(planned) == 10, (planned, with_action)
+    assert {b - a for a, b in zip(with_action, with_action[1:])} <= {2, 3}, with_action
+
+
+@pytest.mark.parametrize(("intensity_percent", "per_tick"), [(5, 1), (15, 3)])
+def test_the_normal_and_fast_steps_keep_their_rate_from_tick_six_on_the_presets_warm_up(
+    intensity_percent: int, per_tick: int
+) -> None:
+    """TARGET: 5 % plans one action on every tick from tick 6, 15 % three - the ramp does not touch them."""
+
+    assert _planned_per_tick(_runner(), _run(intensity_percent), range(6, 61), WARMUP) == [per_tick] * 55
+
+
+def test_an_operator_tempo_above_the_fast_step_ramps_only_its_excess() -> None:
+    """Counter-check (the burst protection survives): 30 % on the ramp - 3 actions per tick are never ramped, the
+    excess 3 is: the first ticks after the window plan fewer than 6 (but at least 3), the plan rises, and from the
+    ramp's end every tick plans 6."""
+
+    planned = _planned_per_tick(_runner(), _run(30), range(6, 71), WARMUP)
+    first = planned[:5]  # ticks 6..10: r = 3 + 3 * (0.1 + 0.9 * t / 50), 3.6 .. 3.7
+    assert all(3 <= n < 6 for n in first), first
+    assert sum(first) < 5 * 6, first
+    assert planned[44:] == [6] * 21, planned  # ticks 50..70
+    tens = [sum(planned[i : i + 10]) for i in range(0, 40, 10)]  # ticks 6..45 in tens: rising
+    assert tens == sorted(tens) and tens[0] < tens[-1] < 60, tens
+
+
+@pytest.mark.parametrize("warmup", [None, WARMUP, {"ticks": 7, "floor": 0.0}, {"ticks": 1, "floor": 0.5}])
+def test_the_closed_form_budget_is_the_sum_of_the_ticks_intensities(warmup: dict | None) -> None:
+    """`_budget_through` against the plain per-tick sum of `min(p, 15 %) + ramp_k * max(p - 15 %, 0)`, k = 0..t, for
+    every integer percent and the first 120 ticks (the adversarial pass brute-forces wider)."""
+
+    ticks, floor_ = _warmup_of({"settings": {"warmup": warmup}} if warmup else {})
+    fast = Fraction(VISITOR_FAST_STEP_PERCENT, 100)
+    for percent in range(0, 101):
+        p = Fraction(percent, 100)
+        total = Fraction(0)
+        for t in range(0, 121):
+            ramp = floor_ + (1 - floor_) * Fraction(t, ticks) if t < ticks else Fraction(1)
+            total += min(p, fast) + ramp * max(p - fast, Fraction(0))
+            assert _budget_through(p, ticks, floor_, t) == total, (percent, warmup, t)
+        assert _budget_through(p, ticks, floor_, -1) == 0
+
+
+@pytest.mark.parametrize(("before", "after"), [(2, 100), (5, 100), (2, 30), (100, 2)])
+def test_a_tempo_raised_mid_warm_up_never_bursts_above_the_new_ramped_rate(before: int, after: int) -> None:
+    """Counter-check: an operator raising 2 % to 100 % at any tick of the ramp gets at most `ceil(r_t)` of the NEW rate
+    per tick, `r_t = 20 * (15 % + ramp_t * (after - 15 %))` - the unramped base does not release saved budget."""
+
+    runner, run, scenario = _runner(), _run(before), _mesh(warmup=WARMUP)
+    ticks, floor_ = _warmup_of(scenario)
+    fast = Fraction(VISITOR_FAST_STEP_PERCENT, 100)
+    a = Fraction(after, 100)
+    for change_at in range(6, 56, 7):
+        run.intensity_percent = before
+        run.tick_index = change_at - 1
+        runner._plan_real_payments(run, scenario)
+        run.intensity_percent = after
+        for t in range(change_at, change_at + 4):
+            run.tick_index = t
+            ramp = floor_ + (1 - floor_) * Fraction(t, ticks) if t < ticks else Fraction(1)
+            ceiling = math.ceil(ACTIONS_PER_TICK_MAX * (min(a, fast) + ramp * max(a - fast, Fraction(0))))
             assert len(runner._plan_real_payments(run, scenario)) <= ceiling, (before, after, change_at, t)

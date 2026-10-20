@@ -530,15 +530,22 @@ def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
 # advances it before each tick it runs, so tick 1 is the first tick a launch runs.
 LAUNCH_OPENING_TICKS = 5
 
+# 049 decision 10: the visitor's «быстро» step, 15 % (the steps 2 / 5 / 15 % live in the UI only:
+# simulator-ui/v2/src/components/TopBar.vue, `TEMPO_STEPS`). The scenario warm-up ramps only the tempo above it.
+VISITOR_FAST_STEP_PERCENT = 15
+
 
 def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
     """049 decision 10: the tick's share of a FRACTIONAL action budget, accumulated between ticks.
 
     The run's ticks spend the accumulator ``carry += r_t; actions = floor(carry); carry -= actions``, started at 0 at
     ``tick_index`` 0 (a created run; the heartbeat advances it before each tick, so the first tick run is 1), where
-    ``r_t`` is ``actions_per_tick_max`` times the tick's intensity (the run's percent, ramped by ``settings.warmup``).
-    At 20 actions and no ramp, 2 % (``r`` 0.4) is one action every 2-3 ticks, 5 % one per tick, 15 % three, 0 % none. Before 049
-    the tick planned ``max(1, int(r_t))`` - at least one action per tick at any intensity above zero.
+    ``r_t`` is ``actions_per_tick_max`` times the tick's intensity: the run's percent ``p`` as
+    ``min(p, 15 %) + ramp_t * max(p - 15 %, 0)`` - ``settings.warmup`` ramps only the tempo above the visitor's «быстро»
+    step (``VISITOR_FAST_STEP_PERCENT``; 049 T4915, the closing review). At 20 actions, 2 % (``r`` 0.4) is one action
+    every 2-3 ticks, 5 % one per tick, 15 % three, 0 % none - from the launch, ramp or not; 30 % on the presets' ramp
+    is 3 + 3 * ramp_t, six from the ramp's end. Before 049 the tick planned ``max(1, int(r_t))`` - at least one action
+    per tick at any intensity above zero.
 
     THE CARRY IS DERIVED, NOT STORED. The tick plans ``floor(B(t)) - floor(B(t - 1))``, ``B(t)`` being the budget ticks
     ``0..t`` accrue at the run's CURRENT percent (``_budget_through``); while the percent is unchanged this is exactly
@@ -553,14 +560,15 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
       ``B(t) - B(t - 1) = r_t``, so the next tick plans ``floor(r_t)`` or ``ceil(r_t)`` at the NEW rate - never more:
       a change cannot release budget saved at the old rate as a burst (the carry takes the new rate's phase).
     Tick 0 is never run by the heartbeat; its share is the carry the first tick starts with (a direct driver may
-    plan tick 0 itself: it gets ``floor(r_0)``, the warm-up floor's rate).
+    plan tick 0 itself: it gets ``floor(r_0)``, ``r_0`` taking the warm-up floor on the tempo above 15 % only).
 
     THE LAUNCH'S OPENING WINDOW (ticks ``1..LAUNCH_OPENING_TICKS``; a created or restarted run is at ``tick_index`` 0
     and the heartbeat advances it before each tick, so tick 1 is the first one run) plans ``max(1, share)`` at any
     intensity above zero; from tick ``LAUNCH_OPENING_TICKS + 1`` the share is planned unchanged. Spec 043 promises
     a first-time visitor a payment within 15 s of opening (1 s ticks, a few seconds of bootstrap). Before S2a the
     ``max(1, ...)`` above gave EVERY tick an attempt, and that - not the warm-up - kept the promise: with the warm-up
-    applied at a low tempo the share reaches one action only on tick 6 at 5 %, 12 at 2 %. A single action on tick 1
+    then applied to the whole tempo the share reached one action only on tick 6 at 5 %, 12 at 2 % (the ramp no longer
+    touches the visitor's steps: at 2 % the share is 0, 1, 0, 1, 0 on ticks 1..5). A single action on tick 1
     was not enough (049 T4915, measured): the plan can come out empty under candidate sampling, or its payment be
     rejected (``ROUTING_NO_ROUTE``), about 27 % of opening attempts together. So the window restores «an attempt on
     every tick» only for the opening, and a lost attempt is retried on the next tick: even after four losses in a row
@@ -599,7 +607,8 @@ def _base_intensity(run: Any) -> Fraction:
 def _warmup_of(scenario: dict[str, Any]) -> tuple[int, Fraction]:
     """``settings.warmup`` (Phase 1.1): ``(ticks, floor)``; ticks <= 0 means no ramp.
 
-    The ramp factor at tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``; from ``ticks`` on it is 1.
+    The ramp factor at tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``; from ``ticks`` on it is 1. It scales
+    only the tempo above ``VISITOR_FAST_STEP_PERCENT`` (``_budget_through``).
     """
 
     warmup_cfg = (scenario.get("settings") or {}).get("warmup") or {}
@@ -617,18 +626,28 @@ def _warmup_of(scenario: dict[str, Any]) -> tuple[int, Fraction]:
 
 
 def _budget_through(base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t: int) -> Fraction:
-    """Sum of the intensities of ticks ``0..t`` at ``base`` (0 for ``t < 0``): the ramped ticks ``0..min(t, ticks - 1)``
-    in closed form (``n * floor + (1 - floor) * n (n - 1) / (2 ticks)`` for ``n`` of them), the rest at ``base``."""
+    """Sum of the intensities of ticks ``0..t`` at ``base`` (0 for ``t < 0``), exact.
+
+    The intensity of tick ``k`` is ``min(base, fast) + ramp_k * max(base - fast, 0)``, ``fast`` being the visitor's
+    «быстро» step (``VISITOR_FAST_STEP_PERCENT``, 049 decision 10): the warm-up ramps only the part of the tempo above
+    it, so the visitor's steps 2 / 5 / 15 % run at their plain rate from the launch and an operator tempo above 15 %
+    keeps the ramp on its excess (049 T4915, the closing review: with the ramp on the WHOLE tempo «медленно» chosen at
+    launch planned its first actions after the window on ticks 12 and 19, then 5, 4, 4, 4, 3 ... ticks apart until the
+    ramp's end at about 50 s, instead of 2-3). The ramp factor of tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``, from
+    ``ticks`` on 1; its sum over ticks ``0..t`` is ``n * floor + (1 - floor) * n (n - 1) / (2 ticks)`` for the ``n``
+    ramped ones plus 1 per tick after them. So ``B(t) = (t + 1) * min(base, fast) + max(base - fast, 0) * R(t)``.
+    """
 
     if t < 0:
         return Fraction(0)
     if warmup_ticks > 0:
         last_ramped = min(t, warmup_ticks - 1)
         n = last_ramped + 1
-        total = n * warmup_floor + (1 - warmup_floor) * Fraction(n * (n - 1), 2 * warmup_ticks) + (t - last_ramped)
+        ramp_sum = n * warmup_floor + (1 - warmup_floor) * Fraction(n * (n - 1), 2 * warmup_ticks) + (t - last_ramped)
     else:
-        total = Fraction(t + 1)
-    return base * total
+        ramp_sum = Fraction(t + 1)
+    fast = Fraction(VISITOR_FAST_STEP_PERCENT, 100)
+    return (t + 1) * min(base, fast) + max(base - fast, Fraction(0)) * ramp_sum
 
 
 @dataclass

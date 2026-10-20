@@ -100,7 +100,7 @@
         "warmup": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Warm-up phase configuration: intensity ramps linearly from floor to 1.0 over the first N ticks",
+          "description": "Warm-up phase configuration: the part of the run intensity above 15 % (the visitor's fast step) ramps linearly from floor to 1.0 over the first N ticks; up to 15 % runs unramped",
           "properties": {
             "ticks": {
               "type": "integer",
@@ -113,7 +113,7 @@
               "minimum": 0.0,
               "maximum": 1.0,
               "default": 0.1,
-              "description": "Minimum intensity factor at tick 0 (e.g. 0.1 = 10% of target intensity)"
+              "description": "Ramp factor at tick 0 of the intensity above 15 % (e.g. 0.1 = 10% of that excess)"
             }
           }
         },
