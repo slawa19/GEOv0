@@ -525,6 +525,11 @@ def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
         return None
 
 
+# The first tick a launch runs: `run_lifecycle` creates and restarts a run at `tick_index` 0 and the heartbeat
+# (`runtime_impl._heartbeat_loop`) advances it before each tick it runs.
+LAUNCH_FIRST_TICK = 1
+
+
 def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
     """049 decision 10: the tick's share of a FRACTIONAL action budget, accumulated between ticks.
 
@@ -548,6 +553,15 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
       a change cannot release budget saved at the old rate as a burst (the carry takes the new rate's phase).
     Tick 0 is never run by the heartbeat; its share is the carry the first tick starts with (a direct driver may
     plan tick 0 itself: it gets ``floor(r_0)``, the warm-up floor's rate).
+
+    THE LAUNCH'S FIRST TICK (``LAUNCH_FIRST_TICK``, ``tick_index`` 1: a created or restarted run is at 0 and the
+    heartbeat advances it before each tick) plans ``max(1, share)`` at any intensity above zero - one extra action at
+    most, once per launch. Before S2a the ``max(1, ...)`` above gave every tick an action, so a launch's first payment
+    came on its first tick; spec 043's «a payment within 15 s of opening» rested on that, and with the warm-up applied
+    at a low tempo the share reaches one action only on tick 6 at 5 %, 12 at 2 %. Every other tick plans the share
+    unchanged, so the extra action is never repeated: a resume continues past tick 1, a percent change re-reads ``B``
+    on ticks whose share is untouched (and ``max(1, share) <= ceil(r_1)``: no burst on tick 1 either), a replay of
+    tick 1 plans the same, a restart returns to tick 0 and its next launch gets its one first action again.
     """
 
     base = _base_intensity(run)
@@ -556,9 +570,12 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
     warmup_ticks, warmup_floor = _warmup_of(scenario)
     t = max(0, int(getattr(run, "tick_index", 0) or 0))
     rate_max = int(actions_per_tick_max)
-    return math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
+    share = math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
         rate_max * _budget_through(base, warmup_ticks, warmup_floor, t - 1)
     )
+    if t == LAUNCH_FIRST_TICK:
+        return max(1, share)
+    return share
 
 
 def _base_intensity(run: Any) -> Fraction:
