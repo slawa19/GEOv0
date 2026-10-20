@@ -1,12 +1,7 @@
 import { createApp, h, nextTick, type Component } from 'vue'
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import InteractHistoryLog from './InteractHistoryLog.vue'
-
-function readHere(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8')
-}
 
 function mountInteractHistoryLog(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -46,14 +41,6 @@ describe('InteractHistoryLog', () => {
     host.remove()
   })
 
-  it('keeps token-driven bottom-overlay styling', () => {
-    const sfc = readHere('./InteractHistoryLog.vue')
-
-    expect(sfc).toContain('font-size: var(--ds-typo-section-label-font-size);')
-    expect(sfc).toContain('gap: var(--ds-ihl-list-gap);')
-    expect(sfc).toContain('transition: opacity var(--ds-dur-slow);')
-    expect(sfc).toContain('font-size: var(--ds-ihl-time-font-size);')
-    // How the root hosts it (the overlay shell, three lines) is observed in the root's DOM since 043 S1:
-    // SimulatorAppRoot.interact.test.ts, "043 S1: the history is three lines in the bottom overlay shell".
-  })
+  // How the root hosts it (the overlay shell, three lines) is observed in the root's DOM since 043 S1:
+  // SimulatorAppRoot.interact.test.ts, "043 S1: the history is three lines in the bottom overlay shell".
 })

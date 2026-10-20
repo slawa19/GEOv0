@@ -1,11 +1,7 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
-
-const edgeDetailPopupSource = readFileSync(resolve(process.cwd(), 'src/components/EdgeDetailPopup.vue'), 'utf8')
 
 function mountPopup(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -136,8 +132,19 @@ describe('EdgeDetailPopup', () => {
     host.remove()
   })
 
-  it('keeps the edge-detail inspector on WM/DS contracts without introducing ds-inspector-row', () => {
-    expect(edgeDetailPopupSource).toContain('class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"')
-    expect(edgeDetailPopupSource).not.toContain('ds-inspector-row')
+  // 041 T4107 (F-041-9): replaces the test that read EdgeDetailPopup.vue as text (the root's class list, no
+  // `ds-inspector-row`). The same contract, observed in the mounted DOM (as NodeCardOverlay.test.ts does for the card).
+  it('keeps the edge-detail inspector on WM/DS contracts without introducing ds-inspector-row', async () => {
+    const { app, host } = mountPopup()
+    await nextTick()
+
+    const root = host.querySelector('[data-testid="edge-detail-popup"]')!
+    for (const cls of ['popup', 'ds-ov-item', 'ds-ov-surface', 'ds-ov-edge-detail']) {
+      expect(root.classList.contains(cls), `root carries ${cls}`).toBe(true)
+    }
+    expect(host.querySelector('.ds-inspector-row')).toBeNull()
+
+    app.unmount()
+    host.remove()
   })
 })

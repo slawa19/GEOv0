@@ -1,12 +1,7 @@
 import { createApp, h, nextTick, ref, type Component } from 'vue'
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import SystemBalanceBar from './SystemBalanceBar.vue'
-
-function readHere(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8')
-}
 
 function mountSystemBalanceBar(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -83,12 +78,22 @@ describe('SystemBalanceBar', () => {
     }
   })
 
-  it('keeps the shared HudBar contract and token-driven progress geometry', () => {
-    const sfc = readHere('./SystemBalanceBar.vue')
-
-    expect(sfc).toContain('<HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">')
-    expect(sfc).toContain('width: var(--ds-sbb-track-width);')
-    expect(sfc).toContain('height: var(--ds-sbb-track-height);')
-    expect(sfc).toContain("<div class=\"ds-progress__bar\" :style=\"{ width: utilPct + '%' }\" />")
+  // 041 T4107 (F-041-9): replaces the test that read SystemBalanceBar.vue as text (HudBar markup, CSS literals of the
+  // track). What the source line stood for and a DOM can observe: the fill's width is the utilization, in whole percent.
+  it('the utilization bar fills to the utilization in whole percent, clamped to 0..100', async () => {
+    const fillOf = async (utilization: number) => {
+      const { app, host } = mountSystemBalanceBar({
+        balance: ref({ totalUsed: 1, totalAvailable: 2, activeTrustlines: 1, activeParticipants: 2, utilization }),
+        variant: 'metrics',
+      })
+      await nextTick()
+      const width = host.querySelector<HTMLElement>('.ds-progress__bar')?.style.width
+      app.unmount()
+      host.remove()
+      return width
+    }
+    expect(await fillOf(0.42)).toBe('42%')
+    expect(await fillOf(1.7), 'above 100 is clamped').toBe('100%')
+    expect(await fillOf(-0.3), 'below 0 is clamped').toBe('0%')
   })
 })
