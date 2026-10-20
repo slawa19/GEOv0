@@ -294,14 +294,17 @@ let rightRailAnchorActive = false
  */
 const topStackBottomPx = ref<number | null>(null)
 const bottomStackPublishedPx = ref(0)
+function syncTopStackBottom(): void {
+  const stackBottom = queryTopStackElement()?.getBoundingClientRect().bottom
+  topStackBottomPx.value = typeof stackBottom === 'number' && Number.isFinite(stackBottom) ? stackBottom : null
+}
 
 function applyPublishedTopStackHeightPx(nextPx: number): void {
   const host = getHostEl()
   if (!host) return
 
   host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
-  const stackBottom = queryTopStackElement()?.getBoundingClientRect().bottom
-  topStackBottomPx.value = typeof stackBottom === 'number' && Number.isFinite(stackBottom) ? stackBottom : null
+  syncTopStackBottom()
   wm.setGeometry({ dockedRightTopPx: nextPx })
   followTopStackWithRightRailAnchor()
   wm.reclampAll()
@@ -352,6 +355,10 @@ function bindOverlayGeometryPublishers(): void {
 
   topStackGeometryPublisher.publish(readPublishedStackHeightPx(topEl), topEpoch)
   bottomStackGeometryPublisher.publish(readPublishedStackHeightPx(bottomEl), bottomEpoch)
+  // 049 S2 (adversarial pass, P3): the publisher applies only a CHANGE of height - a first measured height equal to the
+  // fallback applies nothing, and the history would have no limit until the stack's height changed. The limit is taken
+  // from the first measurement itself.
+  syncTopStackBottom()
 
   topStackGeometryRo?.disconnect()
   bottomStackGeometryRo?.disconnect()

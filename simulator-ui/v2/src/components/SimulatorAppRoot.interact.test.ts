@@ -15,6 +15,7 @@ import { useOverlayState } from '../composables/useOverlayState'
 import { keyEdge } from '../utils/edgeKey'
 import type { TrustlinesFetchState } from '../composables/interact/trustlinesSourceState'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
+import { DEFAULT_HUD_STACK_HEIGHT_PX } from '../ui-kit/overlayGeometry'
 import { t } from '../i18n/t'
 import { setUiLocale } from '../i18n/locale'
 import { renderRunErrorLine, runStatusErrorLine } from '../utils/runErrorClassification'
@@ -6315,6 +6316,35 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(actions.setIntensityPercent.mock.invocationCallOrder[0]!, 'the percent is set before it is applied')
         .toBeLessThan(actions.applyIntensity.mock.invocationCallOrder[0]!)
     } finally {
+      done()
+    }
+  })
+
+  /**
+   * 049 S2 (adversarial pass, P3): the history's limit (the top stack's bottom edge) is taken from the FIRST measurement -
+   * the stack's publisher applies only a change of height, and a first height equal to its fallback (110 px) applied
+   * nothing: the history then had no limit until the stack's height changed. Red before: `null`.
+   */
+  it('049 S2: the history gets its top limit from the first measurement, also when the stack is exactly the fallback height', async () => {
+    setUrl('/?mode=real')
+    stubResizeObserverRecords() // `mount` of this block stubs ResizeObserver away; the publishers need one
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = (top: number, height: number, width = 1280) =>
+        ({ left: 0, top, width, height, right: width, bottom: top + height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+      if (this.classList.contains('root')) return box(0, 720)
+      if (this.classList.contains('ds-ov-top')) return box(12, DEFAULT_HUD_STACK_HEIGHT_PX)
+      return box(0, 0, 0)
+    })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    const done = () => { app.unmount(); host.remove(); vi.unstubAllGlobals() }
+    try {
+      await nextTick()
+      await nextTick()
+      expect(rootSetup(app).topStackBottomPx, 'the stack\'s bottom edge: 12 + 110').toBe(12 + DEFAULT_HUD_STACK_HEIGHT_PX)
+    } finally {
+      rectSpy.mockRestore()
       done()
     }
   })

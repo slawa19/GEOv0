@@ -390,12 +390,19 @@ const feedFitRule = (page: Page) => page.evaluate(() => {
   const items = [...log.querySelectorAll('.interact-history__item')].map((el) => el.getBoundingClientRect())
   const header = log.querySelector('.interact-history__header')!.getBoundingClientRect()
   const limit = top.getBoundingClientRect().bottom
-  const step = items.length > 1 ? items[1]!.top - items[0]!.top : null
+  // The clearance the component keeps between the stack and the heading: the list's own row gap (`--ds-ihl-list-gap`), as
+  // the page computes it - the component reads the same value (adversarial pass, P2-a).
+  const gap = Number.parseFloat(getComputedStyle(log.querySelector('.interact-history__list')!).rowGap) || 0
+  // One shown line: the step is its height and the gap (P3), as the component takes it.
+  const step = items.length > 1 ? items[1]!.top - items[0]!.top : items.length === 1 ? items[0]!.height + gap : null
   return {
     lines: items.length,
     crosses: header.top < limit,
-    oneMoreCrosses: step === null ? null : header.top - step < limit,
-    room: Math.round(header.top - limit),
+    // The component shows one more line only when its heading would stay `gap` below the stack - the same inequality.
+    oneMoreCrosses: step === null ? null : header.top - step < limit + gap,
+    room: Math.round((header.top - limit) * 10) / 10,
+    limit: Math.round(limit * 10) / 10,
+    gap,
   }
 })
 
@@ -564,11 +571,17 @@ for (const lang of ['ru', 'en'] as const) {
       type: 'clearing.done', plan_id: 'plan-p049-s2', cleared_cycles: 1, cleared_amount: '1.00',
       cycle_edges: [{ from: top.source, to: top.target }], edge_patch: [{ source: top.source, target: top.target, used: money(top.used), available: '0.00' }],
     })
+    // The precondition is read where the five fit for certain - the first view at 1366x768 (adversarial pass, P2-b: the
+    // viewport the loops above left, 1024x640 with «Подробнее», is where the rule may rightly show fewer).
+    await page.setViewportSize(FIT_VIEWPORTS[0])
+    await setDetails(false)
+    await settledLayout(page, '[feed on, precondition, 1366x768]')
     await expect(page.locator('.interact-history__item'), 'counter-check: five lines - the own one and four of the network').toHaveCount(5)
     await expect(page.locator('.interact-history__item[data-source="network"]')).toHaveCount(4)
     const FEED_SEEN = [...SEEN, '.interact-history__item[data-source="network"] .interact-history__text'] as const
     const feedSeen: string[] = []
     const fitLines: Record<string, number> = {}
+    const fitRules: Record<string, NonNullable<Awaited<ReturnType<typeof feedFitRule>>>> = {}
     /**
      * The lines shown overlap no neighbour and are whole in the viewport, the pair is clear of them, their text ends on the
      * control line - and they are as many as fit under the top stack (the rule above), at most five.
@@ -581,6 +594,7 @@ for (const lang of ['ru', 'en'] as const) {
       expect(rule!.lines).toBeLessThanOrEqual(5)
       if (rule!.lines < 5) expect(rule!.oneMoreCrosses, `${where} a line was left out only because it would cross the top stack: ${JSON.stringify(rule)}`).toBe(true)
       fitLines[where] = rule!.lines
+      fitRules[where] = rule!
       const fits = await feedFits(page)
       expect({ ...fits, lines: undefined }, `${where} the lines overlap no neighbour and are whole inside the viewport`)
         .toEqual({ present: true, lines: undefined, outside: [], overlaps: [] })
@@ -618,12 +632,28 @@ for (const lang of ['ru', 'en'] as const) {
     // taller must not put the history over it - reproduced by a taller metrics row of «Подробнее», the row the CI run hit.
     await setDetails(true)
     await page.setViewportSize(FIT_VIEWPORTS[1])
-    const taller = await page.addStyleTag({ content: '.ds-ov-top [data-testid="system-metrics"] { padding-bottom: 60px !important; }' })
-    const tallWhere = '[feed on, saas, details on, 1024x640, top stack +60 px]'
-    await settledLayout(page, tallWhere)
-    await expectFeedFits(tallWhere)
-    await taller.evaluate((el) => el.remove())
-    await settledLayout(page, `${tallWhere} restored`)
+    const base = fitRules['[feed on, saas, details on, 1024x640]']!
+    expect(base, 'counter-check: the unstressed combination was measured').toBeTruthy()
+    const taller = async (px: number, where: string) => {
+      const style = await page.addStyleTag({ content: `.ds-ov-top [data-testid="system-metrics"] { padding-bottom: ${px}px !important; }` })
+      await settledLayout(page, where)
+      await expectFeedFits(where)
+      const rule = fitRules[where]!
+      // Anti-vacuum of the stress (P3): the stack's bottom really moved down by the padding, and the history answered.
+      expect(Math.abs(rule.limit - base.limit - px), `${where} the stress took effect: the stack ends ${px} px lower ${JSON.stringify({ base, rule })}`).toBeLessThanOrEqual(1)
+      expect(rule.lines < base.lines || rule.room < base.room, `${where} the history answered the stress ${JSON.stringify({ base, rule })}`).toBe(true)
+      await style.evaluate((el) => el.remove())
+      await settledLayout(page, `${where} restored`)
+      return rule
+    }
+    const tall = await taller(60, '[feed on, saas, details on, 1024x640, top stack +60 px]')
+    expect(tall.lines, 'the taller stack leaves room for fewer lines').toBeLessThan(base.lines)
+    // The clearance itself (P2-a): a stack lowered until the five-line heading would stand 1.5 px under it - inside the gap
+    // the component keeps, so it shows four, and the stand must agree that the fifth would have crossed (gap included).
+    if (base.lines === 5) {
+      const edge = await taller(base.room - 1.5, `[feed on, saas, details on, 1024x640, heading 1.5 px under the stack]`)
+      expect(edge.lines, 'inside the clearance: the fifth line is left out').toBe(4)
+    }
     console.log('[049 S2 feed lines that fit]', JSON.stringify({ lang, fitLines }))
     const row = { lang, viewport: '1366x768', details: 'off', feed: 'on (5 lines)', shares }
     console.log('[049 S2 feed canvas share]', JSON.stringify(row))
