@@ -1,7 +1,7 @@
 """Unit-tests for Phase 1 Quick Wins: warm-up ramp and capacity-aware amounts.
 
 Covers:
-  - Warm-up ramp (Phase 1.1): linear intensity ramp via settings.warmup
+  - Warm-up ramp (Phase 1.1): linear ramp via settings.warmup of the tempo above 15 % (049 T4915)
   - Capacity-aware amounts (Phase 1.4): debt_snapshot reduces available limits
   - _load_debt_snapshot_by_pid(): PID-keyed mapping from DB
 

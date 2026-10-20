@@ -560,7 +560,7 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
       ``B(t) - B(t - 1) = r_t``, so the next tick plans ``floor(r_t)`` or ``ceil(r_t)`` at the NEW rate - never more:
       a change cannot release budget saved at the old rate as a burst (the carry takes the new rate's phase).
     Tick 0 is never run by the heartbeat; its share is the carry the first tick starts with (a direct driver may
-    plan tick 0 itself: it gets ``floor(r_0)``, the warm-up floor's rate).
+    plan tick 0 itself: it gets ``floor(r_0)``, ``r_0`` taking the warm-up floor on the tempo above 15 % only).
 
     THE LAUNCH'S OPENING WINDOW (ticks ``1..LAUNCH_OPENING_TICKS``; a created or restarted run is at ``tick_index`` 0
     and the heartbeat advances it before each tick, so tick 1 is the first one run) plans ``max(1, share)`` at any
@@ -631,8 +631,9 @@ def _budget_through(base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t
     The intensity of tick ``k`` is ``min(base, fast) + ramp_k * max(base - fast, 0)``, ``fast`` being the visitor's
     «быстро» step (``VISITOR_FAST_STEP_PERCENT``, 049 decision 10): the warm-up ramps only the part of the tempo above
     it, so the visitor's steps 2 / 5 / 15 % run at their plain rate from the launch and an operator tempo above 15 %
-    keeps the ramp on its excess (049 T4915, the closing review: the ramp on the WHOLE tempo planned «медленно» about
-    7 s apart for the first ~50 s). The ramp factor of tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``, from
+    keeps the ramp on its excess (049 T4915, the closing review: with the ramp on the WHOLE tempo «медленно» chosen at
+    launch planned its first actions after the window on ticks 12 and 19, then 5, 4, 4, 4, 3 ... ticks apart until the
+    ramp's end at about 50 s, instead of 2-3). The ramp factor of tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``, from
     ``ticks`` on 1; its sum over ticks ``0..t`` is ``n * floor + (1 - floor) * n (n - 1) / (2 ticks)`` for the ``n``
     ramped ones plus 1 per tick after them. So ``B(t) = (t + 1) * min(base, fast) + max(base - fast, 0) * R(t)``.
     """
