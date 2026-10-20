@@ -1535,6 +1535,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     <div
       v-if="isLiveUi && interact.mode.history.length > 0"
       class="ds-ov-bottom sar-interact-history-overlay"
+      :class="{ 'sar-interact-history-overlay--over-navigator': detailsOpen && dataReady && !isE2eScreenshots }"
     >
       <InteractHistoryLog :entries="interact.mode.history" :max-visible="3" />
     </div>
@@ -1611,14 +1612,28 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 }
 
 .sar-interact-history-overlay {
-  right: var(--ds-sar-interact-history-right);
+  /*
+    049 S1 (decision 4): the right edge of the history's text is the CONTROL LINE - safe-area + `--ds-ov-inset` + the
+    HudBar's padding `--ds-hud-bar-px`, where the bars' controls and the bottom-right column end (it stood at 12px with a
+    10px padding: its text ended 6px past that line, F-049-4). No horizontal padding: the box is the text.
+  */
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px) + var(--ds-hud-bar-px, var(--ds-space-3, 12px)));
   left: auto;
-  /* 039 D-fix: above the measured bottom bar (its inset + published height), not a fixed distance from the viewport. */
+  /* 039 D-fix: above the measured bottom bar (its inset + published height), not a fixed distance from the viewport;
+     049 S1: and above the bar's edge column (the plate and the sentence, out of the bar's flow - `SystemBalanceBar.vue`). */
   bottom: calc(
     var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px) + var(--ds-hud-bottom-stack-height, 56px) +
-      var(--ds-sar-interact-history-clear, 4rem)
+      var(--ds-control-height, 34px) + var(--ds-sar-interact-history-clear, 3.5rem)
   );
-  padding: var(--ds-sar-interact-history-pad-y) var(--ds-sar-interact-history-pad-x);
+  padding: var(--ds-sar-interact-history-pad-y) 0;
   pointer-events: none;
+}
+
+/* With "Подробнее" on the edge column rises by 2rem over "Найти на графе" (`SystemBalanceBar.vue`); the history with it. */
+.sar-interact-history-overlay--over-navigator {
+  bottom: calc(
+    var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px) + var(--ds-hud-bottom-stack-height, 56px) +
+      var(--ds-control-height, 34px) + var(--ds-sar-interact-history-clear, 3.5rem) + 2rem
+  );
 }
 </style>

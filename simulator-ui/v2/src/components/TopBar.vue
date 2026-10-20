@@ -514,7 +514,7 @@ function onApplyIntensity() {
            `data-request-id` (AGENTS.md section 12). -->
       <div
         v-if="ctx.lastError.value"
-        class="ds-alert ds-alert--err"
+        class="ds-alert ds-alert--err tb-edge-alert"
         :aria-label="t('topBar.errorAria')"
         role="alert"
         aria-atomic="true"
@@ -540,7 +540,7 @@ function onApplyIntensity() {
 
       <!-- 048 S1 (decision 2): the one diagnosis a visitor gets - on the first view, not behind "Подробнее"; 046 wave 1: the
            words of §G, one sentence with its action. Shown only while payments stall: `consec_all_rejected_ticks` >= threshold. -->
-      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" :aria-label="t('topBar.stallAria')" data-testid="capacity-stall">
+      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn tb-edge-alert" :aria-label="t('topBar.stallAria')" data-testid="capacity-stall">
         <span class="ds-alert__icon">!</span>
         <span class="ds-value tb-fade-92">{{ t('topBar.stall') }}</span>
       </div>
@@ -713,6 +713,18 @@ function onApplyIntensity() {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+  049 S1 (decision 2): the run's error line and the stall plaque stand in the horizontal grid of the controls - their
+  outer edges are the control line (safe-area + `--ds-ov-inset` + the HudBar's padding `--ds-hud-bar-px`), not the edges
+  of the stack. Until S1 they were direct children of the stack outside any HudBar, wider than the controls by that
+  padding on each side (owner frame 17, 2026-10-20). They stay children of the stack (their readers: the stack's row rule,
+  `.ds-ov-top [data-testid="capacity-stall"]`): the same padding is their margin. The stand holds it
+  (`e2e/qa/edge-line.qa.ts`, reproducer (б)).
+*/
+.tb-edge-alert {
+  margin-inline: var(--ds-hud-bar-px, var(--ds-space-3, 12px));
 }
 
 .tb-retry {

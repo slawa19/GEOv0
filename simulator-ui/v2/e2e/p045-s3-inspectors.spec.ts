@@ -5,7 +5,8 @@
  * Measured in the DOM at 1366x768, in both product themes (`saas`, `hud`), on the mocked backend of the 037 specs
  * (`helpers/p037Mock.ts`; Alice holds the line Bob -> Alice, and with `aliceLines` eight more lines Alice -> x01..x08):
  *
- *   (е1) card: the head is one block - name and role on a line, balance and close beside it (the meta line under the name);
+ *   (е1) card: the head is two rows since 049 S1 (decision 3) - the name and close; under them the role and the balance (was
+ *        one block: name and role on a line, balance and close beside it);
  *   (е2) card: the statistics are one line (Out, In - Degree was dropped in S4: the group counters carry the number of lines);
  *   (е3) card: a row of a line has no third column - what is available is in the row's `title`;
  *   (е4) card: with nine lines the list shows at most five rows and scrolls;
@@ -136,7 +137,7 @@ for (const theme of THEMES) {
       expect(await position(edge.locator('[data-testid="edge-detail-popup"]')), 'the line window is a static block').toBe('static')
     })
 
-    test('(е1)(е2) card: the head is one line, the statistics are one line', async ({ page }, info) => {
+    test('(е1)(е2) card: the head is two rows (049 S1), the statistics are one line', async ({ page }, info) => {
       await open(page, theme)
       const card = await openCard(page)
       const head = {
@@ -151,11 +152,11 @@ for (const theme of THEMES) {
       const values = await card.locator('.ds-ov-node-card__stats .ds-value').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }))
       info.annotations.push({ type: 'P045S3-e1e2', description: JSON.stringify({ head, stats, values }) })
       const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs)
-      // 045 S3 round (Codex P2, 2026-10-18): the head is one block - name and role on a line, the meta line (type · status)
-      // under the name; balance and close share a line, beside the name (within the block, not a row of their own).
-      expect(spread([head.name, head.role]), `name and role are one line: ${JSON.stringify(head)}`).toBeLessThan(4)
-      expect(spread([head.balance, head.close]), `balance and close are one line: ${JSON.stringify(head)}`).toBeLessThan(4)
-      expect(Math.abs(head.balance - head.name), `balance is beside the name: ${JSON.stringify(head)}`).toBeLessThan(12)
+      // 049 S1 (decision 3, 2026-10-20; was one line, 045 S3): two rows - the name and the close button; under them the
+      // role and the balance on one line (the type · status line with them, `p049-s1-card-head.spec.ts` holds the rest).
+      expect(spread([head.name, head.close]), `name and close are one row: ${JSON.stringify(head)}`).toBeLessThan(4)
+      expect(spread([head.role, head.balance]), `role and balance are one row: ${JSON.stringify(head)}`).toBeLessThan(4)
+      expect(head.role - head.name, `the role and the balance are the row under the name: ${JSON.stringify(head)}`).toBeGreaterThan(10)
       expect(spread([...stats, ...values]), `the statistics are one line: ${JSON.stringify({ stats, values })}`).toBeLessThan(4)
     })
 

@@ -561,6 +561,42 @@ export async function camera(page: Page): Promise<{ panX: number; panY: number; 
   })
 }
 
+/**
+ * 049 S1 (§15 Codex P3, 2026-10-20): what a geometry check measures must also be SEEN - a box on the right line with
+ * nothing drawn in it passes every coordinate assertion (`opacity: 0` keeps the box; Playwright's `toBeVisible()` does not
+ * reject opacity 0). For each element of each selector: a positive width AND height, `visibility: visible`, no ancestor
+ * (itself included) with `display: none` or opacity 0, and - where the element takes the pointer - the element under its
+ * centre is the element or inside it (nothing drawn over it). An element with `pointer-events: none` (the bottom-right
+ * column, the history's heading and rows) is invisible to `elementFromPoint` by design: for it only the style and area
+ * checks apply. Returns the problems by a readable name; an absent selector is a problem too.
+ */
+export function renderedProblems(page: Page, selectors: readonly string[]): Promise<string[]> {
+  return page.evaluate((sels) => {
+    const out: string[] = []
+    const name = (el: Element) => `${el.tagName.toLowerCase()}${el.getAttribute('data-testid') ? `[${el.getAttribute('data-testid')}]` : ''}.${String(el.className).split(' ')[0]}`
+    for (const sel of sels) {
+      const els = [...document.querySelectorAll(sel)]
+      if (!els.length) out.push(`${sel}: absent`)
+      for (const el of els) {
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        if (!(r.width > 0 && r.height > 0)) out.push(`${sel}: no area (${r.width}x${r.height})`)
+        if (cs.visibility !== 'visible') out.push(`${sel}: visibility ${cs.visibility}`)
+        for (let n: Element | null = el; n; n = n.parentElement) {
+          const c = getComputedStyle(n)
+          if (c.display === 'none') out.push(`${sel}: display none on ${name(n)}`)
+          if (Number(c.opacity) === 0) out.push(`${sel}: opacity 0 on ${name(n)}`)
+        }
+        if (cs.pointerEvents !== 'none' && r.width > 0 && r.height > 0) {
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          if (!hit || !(hit === el || el.contains(hit))) out.push(`${sel}: covered at its centre by ${hit ? name(hit) : 'nothing'}`)
+        }
+      }
+    }
+    return out
+  }, [...selectors])
+}
+
 /** Node centres in CSS pixels of the canvas: world * zoom + pan (the transform `useRenderLoop` applies). */
 export async function screenNodes(page: Page): Promise<Map<string, Pt>> {
   const [nodes, cam] = await Promise.all([layoutNodes(page), camera(page)])

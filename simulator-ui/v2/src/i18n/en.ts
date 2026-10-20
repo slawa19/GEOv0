@@ -344,6 +344,8 @@ export const en = {
     lineOverLimit: 'over limit by {amount} {unit}',
     pin: 'Pin',
     unpin: 'Unpin',
+    /** 049 S1 (decision 3): the head of a card whose balance did not arrive - one message, never a zero. */
+    balanceUnavailable: 'Balance unavailable',
     // The sums of the limits of the participant's lines: as the creditor (`from`) and as the debtor (`to`).
     trustsOthers: 'Trusts others',
     trustedBy: 'Trusted by',

@@ -287,17 +287,17 @@
   --ds-z-analytics-dock: 41;
 
   /* SimulatorAppRoot (Interact Mode history overlay) */
-  --ds-sar-interact-history-right: 12px;
   /*
-    039 D-fix (2026-10-19): the history stands this far above the TOP of the bottom bar (was a fixed 120px from the
-    viewport's bottom). The room in between is the bottom bar's own: the clearing's "was -> now" (about 24px over the
-    bar, 58px with "Подробнее" on, where it clears "Найти на графе"). At 120px the history lay over that sentence with
-    "Подробнее" on, and over the bar itself when the bar's rows wrap. 4rem keeps the first view where it was (12 + 42 +
-    64 = 118px).
+    039 D-fix (2026-10-19): the history stands above the TOP of the bottom bar (was a fixed 120px from the viewport's
+    bottom); the room in between is the bottom bar's own. 049 S1 (decision 1, option B): that room is the edge column of
+    the bar - the "Общий долг" plate (`--ds-control-height`, added where the history is placed: `SimulatorAppRoot.vue`)
+    and, over it, the clearing's "was -> now" (about 22px a line, two lines at 1024px where it wraps, and the column's
+    gaps). This token is that room and a margin; with "Подробнее" on the column rises by 2rem over "Найти на графе" and the
+    history with it. 049 S1 (decision 4): the history's right edge is the control line, computed there; its own
+    horizontal padding is gone.
   */
-  --ds-sar-interact-history-clear: 4rem;
+  --ds-sar-interact-history-clear: 3.5rem;
   --ds-sar-interact-history-pad-y: 6px;
-  --ds-sar-interact-history-pad-x: 10px;
 
   /* App.css (world labels / overlays) */
   --ds-app-drag-preview-border: 1px solid rgba(255, 255, 255, 0.25);

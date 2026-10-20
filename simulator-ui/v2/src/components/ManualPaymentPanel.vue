@@ -685,6 +685,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
   label: toOptionLabel(participant),
   disabled: routesLoading.value && !toListWhileUpdating.value,
 })))
+
+/** 049 S1 (decision 9): a chosen name the select cuts by an ellipsis is whole in its `title`. */
+const optionTitle = (options: ReadonlyArray<{ value: string; label: string }>, pid: string | null | undefined) =>
+  options.find((o) => o.value === pid)?.label || undefined
 </script>
 
 <template>
@@ -755,6 +759,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           id="mp-from"
           :model-value="state.fromPid ?? null"
           :options="fromOptions"
+          :title="optionTitle(fromOptions, state.fromPid)"
           :disabled="busy"
           labelledBy="mp-from-label"
           :triggerLabel="t('payment.fromTrigger')"
@@ -774,6 +779,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           ref="toSelect"
           :model-value="state.toPid ?? null"
           :options="toOptions"
+          :title="optionTitle(toOptions, state.toPid)"
           :disabled="busy || !state.fromPid || toKnownEmpty"
           labelledBy="mp-to-label"
           :triggerLabel="t('payment.toTrigger')"

@@ -220,7 +220,8 @@ describe('046 wave 3 - one set of role words: the card says what the legend says
         await settle()
         const el = card.host.querySelector('[data-testid="node-card-role"]')!
         const role = el.getAttribute('data-role')!
-        const expected = [legendWord(role)]
+        // 049 S1 (decision 3): a node with no sign and no amount says the one message of an absent balance, not «unknown».
+        const expected = [role === 'unknown' ? t('card.balanceUnavailable', {}, locale) : legendWord(role)]
         if (node.status === 'frozen') expected.push(legendWord('frozen'))
         if (node.type === 'hub') expected.push(legendWord('hub'))
         expect(el.querySelector('.nco-role__words')!.textContent!.trim(), `${locale} ${node.id}`).toBe(expected.join(' · '))

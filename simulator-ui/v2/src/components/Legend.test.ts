@@ -176,14 +176,18 @@ describe('the canvas, the legend and the node card agree', () => {
       const onCanvas = canvasFill(node)
       const legend = mount(Legend, { nodes: SCENE, equivalent: 'UAH', palette: PALETTE })
       const inLegend = rgbOf(swatch(legend.host, legendEntryOf[node.id]!).style.backgroundColor)
+      // 049 S1 (decision 3): the card draws a balance only when one arrived - each node with a known sign is given an amount
+      // (atoms are a magnitude; the sign is the node's), so the balance's colour is held for every one of them.
+      const withAmount = node.net_sign == null ? node : { ...node, net_balance_atoms: '4200' }
       const card = mount(NodeCardOverlay, {
-        node, edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined,
+        node: withAmount, edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined,
       })
       const cardSwatch = card.host.querySelector<HTMLElement>('[data-testid="node-card-role-swatch"]')!
-      const balance = card.host.querySelector<HTMLElement>('.ds-ov-node-card__balance')!
+      const balance = card.host.querySelector<HTMLElement>('.ds-ov-node-card__balance')
       expect(inLegend, 'legend == canvas').toBe(onCanvas)
       expect(rgbOf(cardSwatch.style.backgroundColor), 'card swatch == canvas').toBe(onCanvas)
-      expect(rgbOf(balance.style.color), 'card balance == canvas').toBe(onCanvas)
+      if (node.net_sign == null) expect(balance, 'no balance arrived: none is drawn (049 S1)').toBeNull()
+      else expect(rgbOf(balance!.style.color), 'card balance == canvas').toBe(onCanvas)
       // And the sign: the card shows the glyph of the same classifier answer the legend entry of the ROLE shows.
       const roleEntry = { debtor: 'debtor', creditor: 'creditor', even: 'neutral', unknown: 'unknown', 'frozen-creditor': 'creditor', shop: 'debtor', hub: 'neutral' }[node.id]!
       expect(cardSwatch.textContent).toBe(swatch(legend.host, roleEntry).textContent)
@@ -211,7 +215,8 @@ describe('the canvas, the legend and the node card agree', () => {
     expect(words(SCENE[0]!)).toEqual({ text: '− owes more', role: 'debtor' })
     expect(words(SCENE[1]!)).toEqual({ text: '+ is owed more', role: 'creditor' })
     expect(words(SCENE[2]!)).toEqual({ text: '0 even', role: 'neutral' })
-    expect(words(SCENE[3]!)).toEqual({ text: '? unknown', role: 'unknown' })
+    // 049 S1 (decision 3): no sign and no amount - the one message of an absent balance, in place of the legend's «unknown».
+    expect(words(SCENE[3]!)).toEqual({ text: '? Balance unavailable', role: 'unknown' })
     expect(words(SCENE[4]!)).toEqual({ text: '+ is owed more · frozen', role: 'creditor' })
     expect(words(SCENE[6]!)).toEqual({ text: '0 even · hub', role: 'neutral' })
   })
@@ -219,12 +224,14 @@ describe('the canvas, the legend and the node card agree', () => {
   it('an unknown sign shows no balance in the card: magnitude atoms are not printed as a positive amount', () => {
     const balanceOf = (over: Partial<GraphNode>) => {
       const c = mount(NodeCardOverlay, { node: n('x', over), edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined })
-      const text = c.host.querySelector('.ds-ov-node-card__balance')!.textContent
+      const text = c.host.querySelector('.ds-ov-node-card__balance')?.textContent ?? null
+      const words = c.host.querySelector('.nco-role__words')!.textContent!.trim()
       c.done()
-      return text
+      return text ?? `none: ${words}`
     }
-    expect(balanceOf({ net_sign: null, net_balance_atoms: '4200' })).toBe('—')
-    expect(balanceOf({ net_balance_atoms: '4200' })).toBe('—')
+    // 049 S1 (decision 3): was '—' beside the unit; now no figure at all, and the one message of an absent balance.
+    expect(balanceOf({ net_sign: null, net_balance_atoms: '4200' })).toBe('none: Balance unavailable')
+    expect(balanceOf({ net_balance_atoms: '4200' })).toBe('none: Balance unavailable')
     // Counter-checks: the known signs still print, and zero is zero.
     expect(balanceOf({ net_sign: 1, net_balance_atoms: '4200' })).toBe('42.00')
     expect(balanceOf({ net_sign: -1, net_balance_atoms: '4200' })).toBe('-42.00')
