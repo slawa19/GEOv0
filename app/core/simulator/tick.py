@@ -1760,13 +1760,16 @@ class RealTick:
                 if not eq_upper:
                     continue
                 only_edges = (decay_res.touched_edges_by_eq or {}).get(eq_upper)
-                edge_patch = await rr._build_edge_patch_for_equivalent(
-                    session=session,
-                    run=run,
-                    equivalent_code=eq_upper,
-                    only_edges=only_edges,
-                    include_width_keys=True,
-                )
+                # 049 S2a: the patch is READ on the tail's session and its failure swallowed below - in a SAVEPOINT,
+                # so a failed read does not leave the tail's transaction aborted (see `populate_per_eq_metric_values`).
+                async with session.begin_nested():
+                    edge_patch = await rr._build_edge_patch_for_equivalent(
+                        session=session,
+                        run=run,
+                        equivalent_code=eq_upper,
+                        only_edges=only_edges,
+                        include_width_keys=True,
+                    )
                 rr._broadcast_topology_edge_patch(
                     run_id=run_id,
                     run=run,
@@ -1819,28 +1822,33 @@ class RealTick:
 
         if should_refresh_total_debt:
             try:
-                eq_rows = (
-                    await session.execute(
-                        select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents)))
-                    )
-                ).all()
-                eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
-                with rr._lock:
-                    perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
-                for eq_code, eq_id in eq_id_by_code.items():
-                    # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
-                    # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
-                    total = (
+                # 049 S2a: the reads run in a SAVEPOINT of the tail's session. A failed read is swallowed below, and
+                # without the savepoint it left the transaction ABORTED on PostgreSQL: every later statement of the
+                # tail failed ("current transaction is aborted") - the metrics write was lost every such tick. The
+                # savepoint rolls back only the failed read; the tail goes on in a usable transaction.
+                async with session.begin_nested():
+                    eq_rows = (
                         await session.execute(
-                            select(func.coalesce(func.sum(Debt.amount), 0)).where(
-                                Debt.equivalent_id == eq_id,
-                                Debt.debtor_id.in_(perimeter_ids),
-                                Debt.creditor_id.in_(perimeter_ids),
-                            )
+                            select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents)))
                         )
-                    ).scalar_one()
-                    # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
-                    total_debt_by_eq[str(eq_code)] = total if isinstance(total, Decimal) else Decimal(str(total))
+                    ).all()
+                    eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
+                    with rr._lock:
+                        perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
+                    for eq_code, eq_id in eq_id_by_code.items():
+                        # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
+                        # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
+                        total = (
+                            await session.execute(
+                                select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                                    Debt.equivalent_id == eq_id,
+                                    Debt.debtor_id.in_(perimeter_ids),
+                                    Debt.creditor_id.in_(perimeter_ids),
+                                )
+                            )
+                        ).scalar_one()
+                        # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
+                        total_debt_by_eq[str(eq_code)] = total if isinstance(total, Decimal) else Decimal(str(total))
 
                 with rr._lock:
                     run._real_total_debt_by_eq = dict(total_debt_by_eq)
