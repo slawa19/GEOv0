@@ -1,8 +1,14 @@
 import { readonly, shallowRef, type Ref } from 'vue'
 
+import { en } from './en'
+import { ru } from './ru'
+
 /**
  * 046 wave 0 (T4601), decision 2: the language of the interface. ONE module chooses it and is the ONLY writer of
- * `<html lang>` in product code; everything else reads.
+ * `<html lang>` in product code; everything else reads. 046 closing (2026-10-20): it is also the only writer of the
+ * browser tab's title (`document.title`, the dictionary's `locale.documentTitle`), at the same moments as `<html lang>`
+ * - the first import, a switch, `popstate`; the static `<title>` of `index.html` is the English text for the instant
+ * before this module runs.
  *
  * Priority, on load and on `popstate`:
  *   1. `?lang=` of the address - a link chooses for this visit and is NEVER written into storage;
@@ -138,9 +144,15 @@ const current = shallowRef<UiLocale>(DEFAULT_UI_LOCALE)
 /** The language of the interface, reactive: a template that reads it renders again on a switch. */
 export const uiLocaleRef: Readonly<Ref<UiLocale>> = readonly(current)
 
+/** The tab title in each language: read from the dictionaries directly (`t.ts` imports this module, not back). */
+const DOCUMENT_TITLE: Readonly<Record<UiLocale, string>> = Object.freeze({ en: en.locale.documentTitle, ru: ru.locale.documentTitle })
+
 function apply(l: UiLocale): void {
   current.value = l
-  if (typeof document !== 'undefined') document.documentElement.lang = l
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = l
+    document.title = DOCUMENT_TITLE[l]
+  }
 }
 
 let initialised = false
