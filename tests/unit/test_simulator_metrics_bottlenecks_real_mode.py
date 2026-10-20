@@ -560,8 +560,32 @@ async def test_real_mode_bottlenecks_without_storage_raises(
 # --- writer stage: the tick producer must not invent measurements -----------
 
 
-class _RaisingSession:
+class _Savepoint:
+    """`AsyncSession.begin_nested()` as the producer uses it (049 S2a: the snapshot reads run in a savepoint):
+    records how each savepoint ended - released, or rolled back by the exception that left it."""
+
+    def __init__(self, ends: list[str]) -> None:
+        self._ends = ends
+
+    async def __aenter__(self) -> "_Savepoint":
+        return self
+
+    async def __aexit__(self, exc_type: Any, *_exc: Any) -> bool:
+        self._ends.append("rolled_back" if exc_type is not None else "released")
+        return False
+
+
+class _SavepointSession:
     def __init__(self) -> None:
+        self.savepoints: list[str] = []
+
+    def begin_nested(self) -> _Savepoint:
+        return _Savepoint(self.savepoints)
+
+
+class _RaisingSession(_SavepointSession):
+    def __init__(self) -> None:
+        super().__init__()
         self.execute_calls = 0
 
     async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
@@ -569,7 +593,7 @@ class _RaisingSession:
         raise RuntimeError("snapshot failed")
 
 
-class _DebtSession:
+class _DebtSession(_SavepointSession):
     """First execute() resolves equivalents, the next ones return debt sums.
 
     `SUM(debts.amount)` over a Numeric(20, 8) column yields a Decimal, which is
@@ -577,6 +601,7 @@ class _DebtSession:
     """
 
     def __init__(self, total: Decimal) -> None:
+        super().__init__()
         self.execute_calls = 0
         self._total = total
 
@@ -649,6 +674,8 @@ async def test_failed_total_debt_snapshot_is_not_reported_as_measurement(
     values = await _populate(_tick_metrics(), _tick_run(), session)
 
     assert session.execute_calls == 1
+    # 049 S2a: the failed read rolled back only its own savepoint - the tail's transaction stays usable.
+    assert session.savepoints == ["rolled_back"]
     assert "total_debt" not in values["UAH"]
     # No successful route this tick: the average is undefined, not zero.
     assert "avg_route_length" not in values["UAH"]
