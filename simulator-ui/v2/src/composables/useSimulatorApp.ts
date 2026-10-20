@@ -893,6 +893,7 @@ export function useSimulatorApp(opts?: {
   const interactMode = useInteractMode({
     showPid: participantDisplayIdFor(() => shownScenarioId.value),
     eventsFeedOn: opts?.eventsFeedOn,
+    sceneSource: () => state.sourcePath,
     actions: interactActions,
     runId: interactRunId,
     equivalent: sceneEq,

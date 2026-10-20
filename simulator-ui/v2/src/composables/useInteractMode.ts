@@ -100,6 +100,12 @@ export function useInteractMode(opts: {
   showPid?: (pid: string) => string
   /** 049 S2 (decision 5): is «Show events» on (the network's events are written into the history)? Omitted: off. */
   eventsFeedOn?: () => boolean
+  /**
+   * The source of the scene on screen (`state.sourcePath`: a run's snapshot, a scenario's preview). Another source is
+   * another context for the history, as another run or equivalent is (closing Codex review of PR #341, P2-1). Omitted:
+   * the run and the equivalent alone.
+   */
+  sceneSource?: () => string
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
@@ -294,6 +300,19 @@ export function useInteractMode(opts: {
     { flush: 'sync' },
   )
   watch(feedOn, () => historyStore.clearFeed(), { flush: 'sync' })
+  // The picture on screen is another context when its source changes - a stopped run's picture replaced by another
+  // scenario's preview keeps the run id and the equivalent (closing Codex review of PR #341, P2-1). An empty source is
+  // the moment between two loads (`clearScene`), not a context: the same source loaded again clears nothing.
+  let shownSource: string | null = null
+  watch(
+    () => String(opts.sceneSource?.() ?? '').trim(),
+    (source) => {
+      if (!source) return
+      if (shownSource !== null && source !== shownSource) historyStore.clearAll()
+      shownSource = source
+    },
+    { flush: 'sync', immediate: true },
+  )
 
   const dataCache = useInteractDataCache({
     actions: opts.actions,
