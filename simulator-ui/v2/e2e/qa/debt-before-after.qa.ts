@@ -272,7 +272,8 @@ async function settledLayout(page: Page, where: string): Promise<void> {
     same = g.published === g.actual && g.key === prev ? same + 1 : 0
     prev = g.key
     return same >= 2
-  }, { message: `${where} the layout settles: the published bar height equals the actual one and the groups stop moving (${last})`, intervals: [50, 100, 100, 150] }).toBe(true)
+  }, { message: `${where} the layout settles: the published bar height equals the actual one and the groups stop moving`, intervals: [50, 100, 100, 150] }).toBe(true)
+    .catch((e: Error) => { throw new Error(`${e.message}\nlast read: ${last}`) })
 }
 
 /**

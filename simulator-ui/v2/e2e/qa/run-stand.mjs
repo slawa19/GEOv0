@@ -226,8 +226,18 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   test, about 5 s for each new one - about +6.4 s; no CI number for them yet. Forecast from CI figures only: 569 s
  *   (the line above; the brief of the D-fix says about 555 s) plus that difference scaled by the CI/local ratio of the
  *   whole step (about 1.12: 546-569 s in CI against 486-504 s locally) - about 563-577 s, under 600 s.
+ * - 2026-10-20 (049 S1, decisions 1-4: one control line for the edge groups): gate 138 -> 140, full 230 -> 232 (counted
+ *   with `playwright test --list`: 140 without `@extended`, 232 in all). One new file, `edge-line.qa.ts`, two tests in the
+ *   gate (`[ru]`, `[en]`): the run's error line and the stall plaque on the control line, both themes, "Подробнее" off and
+ *   on, 1366x768 and 1024x640 - red on `1cf1ae81` (the alerts 14 px wider than the line on each side). The two "pair fits"
+ *   tests of `debt-before-after.qa.ts` now also hold the three right edges of the bottom-right group and the history's
+ *   text on the line at totals 49745.90 and 1049745.90, a seven-digit clearing pair, no node under the floating column,
+ *   and wait for the layout to settle (BACKLOG 048-10) - 20 combinations instead of 8. Cost, locally: the two "pair fits"
+ *   tests 5 s -> 8.6-9.1 s each, the two new tests 5.0 s each - about +17 s; no CI number for them yet. Forecast from CI
+ *   figures only: the step's last CI runs 512-569 s with 138 tests (the brief of S1; 569 s above) plus that difference
+ *   scaled by the CI/local ratio of the whole step (about 1.12) - about 531-588 s, under 600 s.
  */
-export const EXPECTED = { gate: 138, full: 230 }
+export const EXPECTED = { gate: 140, full: 232 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
