@@ -3,6 +3,7 @@ import type { Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ActionBar from './ActionBar.vue'
+import { setUiLocale } from '../i18n/locale'
 
 function mountActionBar(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -144,6 +145,31 @@ describe('ActionBar', () => {
     app.unmount()
     host.remove()
   })
+
+  // 049 closing polish (advisor 2026-10-21; spec 048 table «Экран после ревизии»: «Платёж / Линия доверия / Клиринг»): the
+  // English buttons are plain words of the visitor, not commands of a console («Send Payment / Manage Trustline / Run
+  // Clearing»). The name a screen reader announces is the button's text (no aria-label overrides it).
+  it('the three actions are named by their words in both languages (their accessible names)', async () => {
+    const names = (host: HTMLElement) => ['payment', 'trustline', 'clearing'].map((k) => {
+      const b = host.querySelector(`[data-testid="actionbar-${k}"]`) as HTMLButtonElement
+      expect(b.getAttribute('aria-label'), `${k}: the text is the name`).toBeNull()
+      return b.textContent?.trim()
+    })
+    try {
+      setUiLocale('en')
+      const en = mountActionBar()
+      await nextTick()
+      expect(names(en.host)).toEqual(['Send payment', 'Trust line', 'Clear mutual debts'])
+      en.app.unmount()
+      en.host.remove()
+      setUiLocale('ru')
+      const ru = mountActionBar()
+      await nextTick()
+      expect(names(ru.host), 'the Russian words are unchanged').toEqual(['Платёж', 'Линия доверия', 'Клиринг'])
+      ru.app.unmount()
+      ru.host.remove()
+    } finally {
+      setUiLocale('en')
+    }
+  })
 })
-
-

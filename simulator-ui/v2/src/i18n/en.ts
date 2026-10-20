@@ -536,9 +536,9 @@ export const en = {
    */
   actions: {
     aria: 'Interact actions',
-    payment: 'Send Payment',
-    trustline: 'Manage Trustline',
-    clearing: 'Run Clearing',
+    payment: 'Send payment',
+    trustline: 'Trust line',
+    clearing: 'Clear mutual debts',
     paymentHint: 'The amount reaches the recipient along a chain of trust.',
     trustlineHint: 'Sets how much one participant may owe another.',
     clearingHint: 'Debts that run around a cycle cancel out — each participant in the cycle owes less.',
