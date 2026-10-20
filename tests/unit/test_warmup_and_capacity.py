@@ -141,8 +141,8 @@ class TestWarmupRamp:
         """At tick_index=0 with warmup(ticks=50, floor=0.1), intensity ≈ 10%.
 
         ramp_factor = 0.1 + 0.9 * (0 / 50) = 0.1
-        target_actions = 5 (tick 0 is planned as the run's first tick: floor(50 * 0.118);
-        049 fractional budget, ``_actions_this_tick``)
+        target_actions = floor(50 * B(0)) = floor(50 * 0.1) = 5
+        (049 fractional budget, ``_actions_this_tick``: B(t) sums the ramped intensities of ticks 0..t)
         """
         runner = _runner(actions_per_tick_max=50)
 
@@ -165,7 +165,7 @@ class TestWarmupRamp:
         """At tick_index=25 (half of warmup_ticks=50), ramp_factor ≈ 0.55.
 
         ramp_factor = 0.1 + 0.9 * (25 / 50) = 0.55
-        target_actions = floor(B(25)) - floor(B(24)) = 417 - 390 = 27 at rate 27.5
+        target_actions = floor(50 * B(25)) - floor(50 * B(24)) = 422 - 395 = 27 at rate 27.5
         (049 fractional budget, ``_actions_this_tick``)
         """
         runner = _runner(actions_per_tick_max=50)
