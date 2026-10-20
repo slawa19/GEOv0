@@ -220,22 +220,37 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     h.rm.stopSse()
   })
 
-  it('a series of 6 payments within 1 s is ONE line: «За 2 с: 6 платежей; последний — …»', async () => {
+  // 049 closing polish (advisor 2026-10-21): the series lead is the count alone - «последний —» is gone and its room is the
+  // names' («За 2 с: 2 отказа; последни… A.. → L..» showed neither the names nor the whole count).
+  it('a series of 6 payments within 1 s is ONE line: «За 2 с: 6 платежей; Анна → Вера: 6.00 UAH»', async () => {
     const h = await harness()
     for (let i = 1; i <= 6; i += 1) {
       emit(payment(`evt_r1_${i}`, 'A', i % 2 ? 'B' : 'C', `${i}.00`))
       later(150)
     }
-    expect(h.lines()).toEqual([`За 2 с: 6 платежей; последний — Анна → Вера: 6.00${NBSP}UAH`])
+    expect(h.lines()).toEqual([`За 2 с: 6 платежей; Анна → Вера: 6.00${NBSP}UAH`])
     // Failures are a series of their own, and a payment after the window opens a new line.
     emit(failure('evt_r1_7', 'ROUTING_NO_ROUTE'))
     later()
     emit(payment('evt_r1_8'))
     expect(h.lines()).toEqual([
-      `За 2 с: 6 платежей; последний — Анна → Вера: 6.00${NBSP}UAH`,
+      `За 2 с: 6 платежей; Анна → Вера: 6.00${NBSP}UAH`,
       'Анна → Пекарня: не прошёл — нет маршрута',
       `Анна → Пекарня: 120.00${NBSP}UAH`,
     ])
+    h.rm.stopSse()
+  })
+
+  it('a series of failures: the count says they failed, the latest pair and its reason follow without «не прошёл»', async () => {
+    const h = await harness()
+    emit(failure('evt_r1_1', 'ROUTING_NO_ROUTE'))
+    later(150)
+    expect(h.lines(), 'one failure is its own full line').toEqual(['Анна → Пекарня: не прошёл — нет маршрута'])
+    emit(failure('evt_r1_2', 'ROUTING_NO_ROUTE'))
+    later(150)
+    expect(h.lines()).toEqual(['За 2 с: 2 отказа; Анна → Пекарня: нет маршрута'])
+    emit(failure('evt_r1_3', 'SOMETHING_ELSE'))
+    expect(h.lines(), 'an unknown reason: the pair alone, no diagnosis').toEqual(['За 2 с: 3 отказа; Анна → Пекарня'])
     h.rm.stopSse()
   })
 
@@ -387,7 +402,7 @@ describe('049 decision 9 (owner review 2026-10-20): the parts of a line - the na
       'name:A', 'value: → ', 'name:B', 'value:: не прошёл — превысил бы лимит линии',
     ])
     const series = entry({ key: 'feed.payment', vars: { from: 'A', to: 'B', amount: '6.00', unit: 'UAH' } }, { plural: 'feed.paymentSeries', count: 6 })
-    expect(roles(series)[0]).toBe('lead:За 2 с: 6 платежей; последний — ')
+    expect(roles(series)[0]).toBe('lead:За 2 с: 6 платежей; ')
     expect(roles(entry({ plural: 'feed.clearing', count: 1, vars: { amount: '30.00', unit: 'UAH' } }))).toEqual([
       `value:Клиринг: общий долг −30.00${NBSP}UAH; 1 круг`,
     ])

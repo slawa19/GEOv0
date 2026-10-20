@@ -13,7 +13,7 @@ import type { RealEventFeedItem } from '../realEventPipeline'
  *
  * 049 S2 (decision 5): two sources. `own` - a result of the person's own action, known locally and for certain (the lines
  * the history always had); `network` - an accepted SSE event of the run (the network's events, written only while «Show
- * events» is on). A network line of a series carries its `lead` («In 2 s: 6 payments; latest — ») before `line`.
+ * events» is on). A network line of a series carries its `lead` («In 2 s: 6 payments; ») before `line`.
  */
 export type InteractHistoryEntry = {
   id: number
@@ -49,7 +49,7 @@ export function historyEntryText(entry: Pick<InteractHistoryEntry, 'line' | 'lea
 /**
  * A part of a history line by its role (049 decision 9, owner's review of the final frames 2026-10-20): `name` - a
  * participant's name (the `{from}` / `{to}` of a line), the part that gives way first, cut by an ellipsis; `lead` - the
- * count of a series («За 2 с: 6 платежей; последний — »), giving way only after the names; `value` - everything else (the
+ * count of a series («За 2 с: 6 платежей; »), giving way only after the names; `value` - everything else (the
  * amount with its unit, the reason of a failure, the figures of a clearing, the words between them), never cut - so every
  * line's values must fit the column with the names at their least (`feedLineBudget.p049.test.ts`).
  */
@@ -93,7 +93,22 @@ export const FAILURE_LINE: Readonly<Record<string, MessageKey>> = Object.freeze(
   PAYMENT_TIMEOUT: 'feed.failedTimeout',
 })
 
-export type FeedLine = { kind: RealEventFeedItem['kind']; icon: string; line: KeptText }
+/**
+ * 049 closing polish (advisor 2026-10-21): the line of a failure after a series' count («За 2 с: 2 отказа; ») - the count
+ * says it failed, so the line is the pair and the reason without «не прошёл», its room given to the names.
+ */
+export const FAILURE_SERIES_LINE: Readonly<Record<string, MessageKey>> = Object.freeze({
+  ROUTING_NO_CAPACITY: 'feed.seriesNoCapacity',
+  ROUTING_NO_ROUTE: 'feed.seriesNoRoute',
+  TRUSTLINE_LIMIT_EXCEEDED: 'feed.seriesLimit',
+  TRUSTLINE_NOT_ACTIVE: 'feed.seriesLineInactive',
+  PAYMENT_TIMEOUT: 'feed.seriesTimeout',
+})
+/** The same for a failure without a known reason: the pair alone. */
+export const SERIES_FAILED_LINE: MessageKey = 'feed.seriesFailed'
+
+/** `seriesLine` - the line written after a series' count when the event joins a series (a failure's short form). */
+export type FeedLine = { kind: RealEventFeedItem['kind']; icon: string; line: KeptText; seriesLine?: KeptText }
 
 /**
  * 049 S2 (decision 5): the line of an accepted event, or null when the event does not carry what the line says (a line is
@@ -109,8 +124,13 @@ export function feedLineOf(item: RealEventFeedItem, name: (pid: string) => strin
       return { kind: 'payment', icon: '💸', line: { key: 'feed.payment', vars: { from: name(item.from), to: name(item.to), amount: money(item.amount), unit } } }
     }
     case 'failure': {
-      const key = FAILURE_LINE[item.code.toUpperCase()] ?? 'feed.failed'
-      return { kind: 'failure', icon: '✕', line: { key, vars: { from: name(item.from), to: name(item.to) } } }
+      const code = item.code.toUpperCase()
+      const vars = { from: name(item.from), to: name(item.to) }
+      return {
+        kind: 'failure', icon: '✕',
+        line: { key: FAILURE_LINE[code] ?? 'feed.failed', vars },
+        seriesLine: { key: FAILURE_SERIES_LINE[code] ?? SERIES_FAILED_LINE, vars },
+      }
     }
     case 'clearing': {
       const drop = item.debtDrop !== null && moneyText(item.debtDrop) !== null ? money(item.debtDrop) : null
@@ -177,7 +197,7 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
         feed.splice(at, 1)
         feed.push({
           ...open,
-          line: l.line,
+          line: l.seriesLine ?? l.line,
           lead: { plural: seriesKind === 'payment' ? 'feed.paymentSeries' : 'feed.failureSeries', count },
           timeText: timeTextOf(nowMs),
           timestampMs: nowMs,
