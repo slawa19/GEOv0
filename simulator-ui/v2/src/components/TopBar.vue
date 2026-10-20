@@ -36,13 +36,18 @@ const props = withDefaults(
     debug?: boolean
     /** 048 S2 (amendment 10): the analytics dock (spec 007) is the developer's: its toggle is shown with `debug` only. */
     analyticsOpen?: boolean
+    /** 049 S2 (decision 5): «Показывать события» - the network's events in the history (owned and remembered by the root). */
+    eventsFeedOn?: boolean
   }>(),
-  { detailsOpen: false, debug: false, analyticsOpen: false },
+  { detailsOpen: false, debug: false, analyticsOpen: false, eventsFeedOn: false },
 )
 
 const emit = defineEmits<{
   (e: 'toggle-details'): void
   (e: 'toggle-analytics'): void
+  (e: 'toggle-events-feed'): void
+  /** 049 S2 (decision 10): a step of the visitor's tempo - its percent. */
+  (e: 'set-tempo', percent: number): void
 
   (e: 'update:selected-scenario-id', v: string): void
   (e: 'update:intensity-percent', v: number): void
@@ -289,6 +294,27 @@ const statusHasContent = computed(
   () => ctx.apiMode.value === 'real' && (props.debug || showStopReason.value || showRunPayments.value),
 )
 
+/**
+ * 049 S2 (decision 10, the owner's word of 2026-10-20): the visitor's tempo in «Подробнее» - three steps by words only, no
+ * figure and no promise of payments per second on the screen (the percent and what it means per tick are in the runbook,
+ * `docs/ru/simulator/backend/real-mode-runbook.md`). The scenario and Start/Stop stay the administrator's, who keeps the
+ * percent field with «Применить» instead of the steps. The step shown is the RUN's tempo (`intensity_percent` of its
+ * status): a tempo that is none of the three (set by the administrator) shows no step - there is no fourth.
+ */
+const TEMPO_STEPS = [
+  { id: 'slow', percent: 2, key: 'topBar.tempoSlow' },
+  { id: 'normal', percent: 5, key: 'topBar.tempoNormal' },
+  { id: 'fast', percent: 15, key: 'topBar.tempoFast' },
+] as const
+const runTempo = computed(() => {
+  const v = ctx.runStatus.value?.intensity_percent
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+})
+/** Shown to a visitor (no admin token) while the run is living - running or paused; nothing to set otherwise. */
+const showTempoSteps = computed(() => showRunControls.value && !showAdminControls.value && flowState.value !== null)
+/** 049 S2 (decision 5): the switch is offered wherever the history can show the network's events - the server source. */
+const showFeedToggle = computed(() => showRunControls.value)
+
 function onStartRun() {
   emit('start-run')
 }
@@ -468,6 +494,34 @@ function onApplyIntensity() {
               <span class="ds-badge ds-badge--warn">{{ t('topBar.noScenarios') }}</span>
             </div>
           </div>
+
+          <!-- 049 S2: the visitor's tempo (decision 10) and the switch of the network's events (decision 5). -->
+          <div v-if="showTempoSteps || showFeedToggle" class="ds-row tb-view-row">
+            <div v-if="showTempoSteps" class="ds-row tb-tempo-steps" role="group" :aria-label="t('topBar.tempoStepsAria')" data-testid="tempo-steps">
+              <span class="ds-label" aria-hidden="true">{{ t('topBar.tempoStepsLabel') }}</span>
+              <button
+                v-for="step in TEMPO_STEPS"
+                :key="step.id"
+                type="button"
+                :class="['ds-btn', 'ds-btn--sm', runTempo === step.percent ? 'ds-btn--primary' : 'ds-btn--secondary']"
+                :aria-pressed="runTempo === step.percent ? 'true' : 'false'"
+                :data-testid="`tempo-step-${step.id}`"
+                @click="emit('set-tempo', step.percent)"
+              >
+                {{ t(step.key) }}
+              </button>
+            </div>
+            <label v-if="showFeedToggle" class="tb-feed-toggle">
+              <input
+                type="checkbox"
+                class="tb-feed-toggle__box"
+                :checked="props.eventsFeedOn"
+                data-testid="events-feed-toggle"
+                @change="emit('toggle-events-feed')"
+              />
+              <span>{{ t('topBar.feedToggle') }}</span>
+            </label>
+          </div>
         </div>
 
         <div class="hud-bar__right" :aria-label="statusHasContent ? t('topBar.statusAria') : undefined">
@@ -510,8 +564,8 @@ function onApplyIntensity() {
       </HudBar>
 
       <!-- 048 S3 (decision 3): the run's failure - one sentence of the interface, no «Error» word before it; the technical
-           text (the HTTP status, the server's message) is the title only; the request id is a quieter line of its own and
-           `data-request-id` (AGENTS.md section 12). -->
+           text (the HTTP status, the server's message, the code) is the title only. 049 S2 (decision 7, the owner's word of
+           2026-10-20): the request id is not drawn - it is `data-request-id` and the console line (AGENTS.md section 12). -->
       <div
         v-if="ctx.lastError.value"
         class="ds-alert ds-alert--err tb-edge-alert"
@@ -524,7 +578,6 @@ function onApplyIntensity() {
         <span class="ds-alert__icon" aria-hidden="true">✕</span>
         <span class="tb-error-lines">
           <span class="ds-value ds-mono tb-fade-92" data-testid="error-text" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
-          <span v-if="ctx.lastErrorRef?.value" class="ds-mono tb-error-ref" data-testid="error-request-id">{{ t('common.requestId', { id: ctx.lastErrorRef.value }) }}</span>
         </span>
         <!-- 046 wave 1: a start refused by the limit of runs (409 global_active_limit) can be tried again from here, on the first view. -->
         <button
@@ -592,6 +645,12 @@ function onApplyIntensity() {
     min-content is kept small by the cap on the select below.
   */
   min-width: min-content;
+  /*
+    049 S2: the middle holds the administrator's run row AND the line of the network's events switch (the visitor's tempo
+    steps share that line); when the two lines stack, they are as close as the theme and the language of the left column
+    (`.tb-mode-row`), so the row stays two lines of controls tall (`e2e/p046-w1-first-screen.spec.ts` (2)).
+  */
+  row-gap: var(--ds-space-1, 4px);
 }
 
 /* The Scenario select at desktop sizes: capped, its text cut by the control; the whole option is its `title`. */
@@ -732,15 +791,39 @@ function onApplyIntensity() {
   flex-shrink: 0;
 }
 
-/* 048 S3: the sentence and, under it, the request id - one column beside the icon. */
+/* 048 S3: the sentence - one column beside the icon (049 S2: the request id is `data-request-id` and the console only). */
 .tb-error-lines {
   display: flex;
   flex-direction: column;
   min-width: 0;
   gap: 2px;
 }
-.tb-error-ref {
-  font-size: 0.85em;
+
+/* 049 S2: the visitor's tempo steps and the switch of the network's events - one line, wrapped as a whole on narrow rows. */
+.tb-view-row,
+.tb-tempo-steps {
+  gap: var(--ds-space-2, 8px);
+  align-items: center;
+}
+.tb-view-row {
+  flex-wrap: wrap;
+}
+.tb-tempo-steps {
+  flex-wrap: nowrap;
+}
+.tb-feed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1, 4px);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* A pointer target of at least 24x24 CSS px (WCAG 2.2 "Target Size (Minimum)", the stand's `small-target`). */
+.tb-feed-toggle__box {
+  accent-color: var(--ds-accent);
+  margin: 0;
+  width: 24px;
+  height: 24px;
 }
 
 .tb-run-controls {

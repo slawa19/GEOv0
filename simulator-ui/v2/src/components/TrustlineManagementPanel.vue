@@ -528,8 +528,8 @@ defineExpose({
         role="status"
         :data-request-id="sourceUnavailableRef || undefined"
       >
+        <!-- 049 S2 (decision 7): the request id is `data-request-id` only (AGENTS.md section 12), not a drawn line. -->
         <span>{{ sourceUnavailableText }}</span>
-        <span v-if="sourceUnavailableRef" class="tl-source-ref" data-testid="error-request-id">{{ t('common.requestId', { id: sourceUnavailableRef }, uiLocaleRef) }}</span>
       </div>
 
       <!--
@@ -635,14 +635,11 @@ defineExpose({
   }
 }
 
-/* 048 S3: the notice and, under it, the request id of the failed read. */
+/* 048 S3: the notice of the failed read (049 S2: its request id is `data-request-id`, not a line). */
 .tl-source-unavailable {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-}
-.tl-source-ref {
-  font-size: 0.85em;
 }
 </style>
 

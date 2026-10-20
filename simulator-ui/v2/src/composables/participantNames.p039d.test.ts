@@ -108,7 +108,7 @@ describe('039 D - the Interact history names participants the run list does not 
       // 046 wave 3 (2026-10-19): a history line is kept as its key and data and drawn by `historyEntryText` (BACKLOG 046-3).
       const texts = im.history.map((e) => historyEntryText(e))
       expect(texts).toHaveLength(1)
-      for (const text of [texts[0]!, String(im.successMessage.value)]) {
+      for (const text of [texts[0]!]) {
         expect(text).toContain('Carol Dean')
         expect(text).toContain('Bob Carter')
         expect(text).not.toContain(RUN)

@@ -218,6 +218,8 @@ for (const theme of THEMES) {
         // On the first view ("Подробнее" closed): the line says what to do.
         await expect(page.locator(DETAILS)).toHaveAttribute('aria-expanded', 'false')
         await expect(page.getByTestId('top-error'), `${lang} ${ending}`).toContainText(t(key, { code: 'REAL_MODE_TICK_FAILED' }, lang))
+        // 049 S2 (decision 7): the code is not drawn in brackets - it is the title (and the console).
+        await expect(page.getByTestId('top-error'), `${lang} ${ending}`).not.toContainText('REAL_MODE_TICK_FAILED')
         for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) {
           await expect(page.getByTestId(id)).toBeDisabled()
           await expect(page.getByTestId(id), 'the reason names the reload').toHaveAttribute('title', t('actions.noRun', undefined, lang))

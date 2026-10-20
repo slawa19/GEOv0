@@ -705,12 +705,10 @@ const optionTitle = (options: ReadonlyArray<{ value: string; label: string }>, p
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="success" ref="resultEl" class="ds-stack" tabindex="-1" role="status" data-testid="mp-result">
+      <!-- 049 S2 (decision 7): the payment's number is not drawn (no use to a viewer); it stays `data-payment-id` of the
+           result, for finding the payment in the server's log. The route stays. -->
+      <div v-if="success" ref="resultEl" class="ds-stack" tabindex="-1" role="status" data-testid="mp-result" :data-payment-id="success.paymentId">
         <div class="ds-h2" data-testid="mp-result-title">{{ t('payment.resultTitle') }}</div>
-        <div class="ds-row ds-row--space">
-          <div class="ds-label">{{ t('payment.resultPaymentId') }}</div>
-          <div class="ds-value ds-mono" data-testid="mp-result-payment-id">{{ success.paymentId }}</div>
-        </div>
         <div class="ds-row ds-row--space">
           <div class="ds-label">{{ t('payment.resultStatus') }}</div>
           <div class="ds-value ds-mono" data-testid="mp-result-status">{{ paymentStatusText(success.status) }}</div>
@@ -886,15 +884,14 @@ const optionTitle = (options: ReadonlyArray<{ value: string; label: string }>, p
         </div>
         <!-- What the last attempt said (the error text) replaces the generic sentence, so the same thing is not shown twice. -->
         <template v-if="!confirmingDiscard">
-          <div class="ds-help" data-testid="mp-outcome-unknown-message">{{ state.error || unknownOutcome.message }}</div>
-          <!-- 048 S3 (§12): the request id of that attempt, on its own line - it is no longer glued into the sentence. -->
+          <!-- 048 S3 (§12): the request id of that attempt is apart from the sentence; 049 S2 (decision 7): not drawn - it is
+               the message's `data-request-id` (and the console), the identifiers its `title`. -->
           <div
-            v-if="state.error && state.errorRef"
             class="ds-help"
-            data-testid="mp-outcome-unknown-request-id"
-            :data-request-id="state.errorRef"
-            :title="state.errorDetail || undefined"
-          >{{ t('common.requestId', { id: state.errorRef }) }}</div>
+            data-testid="mp-outcome-unknown-message"
+            :data-request-id="(state.error && state.errorRef) || undefined"
+            :title="(state.error && state.errorDetail) || undefined"
+          >{{ state.error || unknownOutcome.message }}</div>
           <div v-if="unknownOutcome.runMismatch" class="ds-help" data-testid="mp-outcome-other-run">
             {{ t('payment.unknownOtherRun') }}
           </div>

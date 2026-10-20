@@ -29,7 +29,6 @@ export const ru = {
     commaRefused: 'Введите сумму с точкой: {example}',
     stepHint: '{eq}: не больше {precision} знаков после точки; сервер такую сумму не примет.',
     overLimit: 'сверх лимита на {amount}',
-    requestId: 'код запроса: {id}',
   },
 
   participantStatus: {
@@ -85,7 +84,6 @@ export const ru = {
     noSelection: 'Сначала выберите, от кого и кому',
 
     resultTitle: 'Платёж отправлен',
-    resultPaymentId: 'Номер платежа',
     resultStatus: 'Статус',
     resultAmount: 'Сумма',
     resultParties: 'От кого → кому',
@@ -206,7 +204,7 @@ export const ru = {
     noRoute: 'Нет маршрута платежа между этими участниками.',
     noRouteMax: 'Нет маршрута платежа между этими участниками (сейчас доступно: {max} {eq}).',
     insufficientCapacity: 'Недостаточно доступного лимита на маршруте.',
-    insufficientCapacityMax: 'Недостаточно доступного лимита: сейчас можно отправить не больше {max} {eq}.',
+    insufficientCapacityMax: 'Платёж не прошёл: сейчас доступно не больше {max} {eq}. Уменьшите сумму.',
     policy: 'Маршрут нарушает правила линии доверия.',
     participantSuspended: 'Участник платежа заморожен.',
     amountPrecisionExceeded: '{eq}: не больше {precision} знаков после точки.',
@@ -261,7 +259,7 @@ export const ru = {
     INVALID_JSON: 'Ответ сервера не удалось прочитать.',
     NETWORK: 'Нет связи с сервером — повторите.',
     noRun: 'Нет активного прогона.',
-    unknown: 'Действие не выполнено (код {code}).',
+    unknown: 'Действие не выполнено.',
     httpFailed: 'Сервер не выполнил действие — повторите позже.',
   },
 
@@ -273,11 +271,8 @@ export const ru = {
   },
 
   history: {
-    paymentToast: 'Платёж отправлен: {amount} {unit}',
     payment: 'Платёж {amount} {unit}: {from} → {to}',
-    trustlineCreatedToast: 'Линия доверия открыта: {from} → {to}',
     trustlineCreated: 'Линия доверия открыта: {from} → {to} ({limit} {unit})',
-    limitUpdatedToast: 'Лимит изменён: {limit} {unit}',
     trustlineUpdated: 'Линия доверия изменена: {from} → {to}, лимит {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
     closeRequested: 'Запрошено закрытие: {from} → {to} (линия закроется, когда долг будет погашен)',
@@ -288,7 +283,6 @@ export const ru = {
       other: 'Клиринг: {count} цикла, −{amount} {unit}',
     }),
     clearingNothing: 'Клиринг: замкнутых цепочек долгов не найдено',
-    clearingToast: 'Клиринг выполнен: циклов {cleared}/{total}',
   },
 
   // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and
@@ -300,7 +294,7 @@ export const ru = {
     lineOverLimit: 'сверх лимита на {amount} {unit}',
     pin: 'Закрепить',
     unpin: 'Открепить',
-    balanceUnavailable: 'Баланс не получен',
+    balanceUnavailable: 'Баланс не получен.',
     trustsOthers: 'Доверяет:',
     trustedBy: 'Доверяют:',
     trustsOthersHint: 'Сумма лимитов, которые этот участник открыл другим как кредитор.',
@@ -446,6 +440,12 @@ export const ru = {
     tempoGroupAria: 'Темп автоплатежей',
     tempoLabel: 'Темп автоплатежей, %',
     tempoAria: 'Темп автоплатежей, процентов',
+    tempoStepsAria: 'Темп платежей',
+    tempoStepsLabel: 'Темп',
+    tempoSlow: 'медленно',
+    tempoNormal: 'обычно',
+    tempoFast: 'быстро',
+    feedToggle: 'Показывать события',
     apply: 'Применить',
     noScenarios: 'Сценарии не загрузились — попробуйте позже',
     statusAria: 'Состояние',
@@ -453,7 +453,7 @@ export const ru = {
     payments: 'Платежи: {ok} из {total} прошли',
     paymentsNone: 'Платежей ещё не было',
     stallAria: 'Платежи стоят',
-    stall: 'Платежи не проходят: лимиты исчерпаны — проведите клиринг или увеличьте лимит',
+    stall: 'Последние платежи не проходят. Попробуйте клиринг или увеличьте лимит нужной линии.',
   },
 
   actions: {
@@ -499,10 +499,14 @@ export const ru = {
     balanceAria: 'Баланс сети',
     metricsAria: 'Показатели сети',
     totalDebt: 'Общий долг',
-    available: 'Доступно для платежей',
+    available: 'Свободно по линиям',
     trustlines: 'Линии доверия',
     participants: 'Участники',
     utilization: 'Занято лимитов',
+    availableHint: 'Сумма свободных лимитов по всем линиям доверия; не обещает, что пройдёт любой платёж.',
+    trustlinesHint: 'Сколько линий доверия действует в сети.',
+    participantsHint: 'Сколько участников активно в сети.',
+    utilizationHint: 'Какая доля лимитов доверия занята долгами.',
     clearingChange: 'клиринг: было {before} → стало {after} {unit}',
   },
 
@@ -548,11 +552,46 @@ export const ru = {
   recentActions: {
     aria: 'История действий',
     title: 'Последние действия',
+    feedTitle: 'События сети',
+    feedAria: 'События сети',
   },
 
-  toast: {
-    successAria: 'Уведомление об успехе',
-    dismiss: 'Закрыть',
+  // 049 S2 (решение 5): строки событий сети в истории; см. `en.ts`.
+  feed: {
+    payment: '{from} → {to}: {amount}\u00a0{unit}',
+    failed: '{from} → {to}: платёж не прошёл',
+    failedNoCapacity: '{from} → {to}: платёж не прошёл — не хватило лимита на маршруте',
+    failedNoRoute: '{from} → {to}: платёж не прошёл — нет маршрута',
+    failedLimit: '{from} → {to}: платёж не прошёл — был бы превышен лимит линии доверия',
+    failedLineInactive: '{from} → {to}: платёж не прошёл — линия доверия не действует',
+    failedTimeout: '{from} → {to}: платёж не прошёл — истекло время ожидания',
+    paymentSeries: plural({
+      one: 'За 2 с: {count} платёж; последний — ',
+      few: 'За 2 с: {count} платежа; последний — ',
+      many: 'За 2 с: {count} платежей; последний — ',
+      other: 'За 2 с: {count} платежа; последний — ',
+    }),
+    failureSeries: plural({
+      one: 'За 2 с: {count} отказ; последний — ',
+      few: 'За 2 с: {count} отказа; последний — ',
+      many: 'За 2 с: {count} отказов; последний — ',
+      other: 'За 2 с: {count} отказа; последний — ',
+    }),
+    clearing: plural({
+      one: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круг',
+      few: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
+      many: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} кругов',
+      other: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
+    }),
+    clearingCycles: plural({
+      one: 'Клиринг: {count} круг',
+      few: 'Клиринг: {count} круга',
+      many: 'Клиринг: {count} кругов',
+      other: 'Клиринг: {count} круга',
+    }),
+    clearingDebt: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}',
+    trustGrowth: 'После клиринга выросли лимиты доверия',
+    you: 'вы',
   },
 
   scene: {
@@ -566,7 +605,7 @@ export const ru = {
     notFound: 'Сервер не нашёл запрошенные данные. Перезагрузите страницу.',
     serverFailed: 'Сервер не смог выполнить запрос. Попробуйте позже или перезагрузите страницу.',
     viewFailed: 'Не удалось обновить картину сети. Перезагрузите страницу.',
-    streamFailed: 'Поток событий прервался — картина сети могла отстать. Перезагрузите страницу.',
+    streamFailed: 'Обновления сети прервались; показанные данные могут быть устаревшими. Перезагрузите страницу.',
   },
 
   // The subject is «прогон» (м. р.).
@@ -575,7 +614,7 @@ export const ru = {
     admin_stop: 'остановлен оператором',
     admin_stop_all: 'остановлен оператором (все прогоны)',
     idle_no_subscribers: 'остановлен сервером: его никто не смотрел',
-    unknown: 'остановлен ({code})',
+    unknown: 'остановлен',
   },
 
   runStart: {
@@ -594,8 +633,8 @@ export const ru = {
     idleStopped: 'Прогон остановлен сервером: его долго никто не смотрел. Чтобы запустить снова, перезагрузите страницу.',
     zeroIntensity: 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.',
     stopped: 'Прогон остановлен. Чтобы запустить снова, перезагрузите страницу.',
-    errorStopped: 'Прогон остановился с ошибкой ({code}). Чтобы запустить снова, перезагрузите страницу.',
-    runningError: 'Во время прогона произошёл сбой ({code}); прогон продолжается.',
+    errorStopped: 'Демо остановилось из-за сбоя. Перезагрузите страницу, чтобы начать новый прогон.',
+    runningError: 'Во время прогона произошёл сбой; прогон продолжается.',
   },
 
   windowShell: {

@@ -229,6 +229,12 @@ ull, the caller defaults it); remembered in this browser, applied without
   const ONBOARDING_DISMISSED_KEY = 'geo.sim.v2.onboarding.dismissed'
 
   /**
+   * 049 S2 (decision 5): «Показывать события» - the network's events in the history. Default off (an absent key reads null,
+   * the caller defaults it); remembered like the theme and the language. Only the preference: the lines are not kept.
+   */
+  const EVENTS_FEED_ON_KEY = 'geo.sim.v2.eventsFeed.on'
+
+  /**
    * Read persisted UI theme (null if absent). A value the app no longer offers (`shadcn`, `library`, anything
    * unknown; 039 B3) is normalised to `saas` and written back here, so it is rewritten once: the next read finds a
    * valid value and writes nothing, and a valid value is never touched.
@@ -260,6 +266,13 @@ ull, the caller defaults it); remembered in this browser, applied without
     storage01.write01(DETAILS_OPEN_KEY, v)
   }
 
+  function readEventsFeedOn(): boolean | null {
+    return storage01.read01(EVENTS_FEED_ON_KEY)
+  }
+  function writeEventsFeedOn(v: boolean) {
+    storage01.write01(EVENTS_FEED_ON_KEY, v)
+  }
+
   function readOnboardingDismissed(): boolean | null {
     return storage01.read01(ONBOARDING_DISMISSED_KEY)
   }
@@ -278,6 +291,10 @@ ull, the caller defaults it); remembered in this browser, applied without
     // 043 S1: the "Подробнее" toggle.
     readDetailsOpen,
     writeDetailsOpen,
+
+    // 049 S2: the network's events in the history.
+    readEventsFeedOn,
+    writeEventsFeedOn,
 
     // 043 S2: the onboarding hint does not come back once dismissed.
     readOnboardingDismissed,

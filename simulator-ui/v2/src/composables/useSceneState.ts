@@ -2,6 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
 import { failureRunErrorLine, renderRunErrorLine, runErrorLineLog, runErrorLineRef, type RunErrorLine } from '../utils/runErrorClassification'
+import { logFailureLine } from '../utils/errorMessage'
 import type { GraphSnapshot } from '../types'
 import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
@@ -245,7 +246,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // (`writeRunErrorLine`) - the overlay draws the sentence, the title only the identifiers.
       const log = runErrorLineLog(line)
       const ref = runErrorLineRef(line)
-      if (log || ref) console.warn('[scene] load failed:', ...(log ? [log] : []), ...(ref ? [`(request id: ${ref})`] : []))
+      logFailureLine('[scene] load failed:', log, ref)
       if (input.rethrow) throw error
       return false
     } finally {

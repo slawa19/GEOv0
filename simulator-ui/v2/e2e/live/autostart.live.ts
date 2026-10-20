@@ -23,6 +23,29 @@ type Diag = { events_by_type?: Record<string, number> }
 
 const txUpdatedSeen = (page: Page) =>
   page.evaluate(() => Number(((globalThis as unknown as { __geo_real_mode_diag?: Diag }).__geo_real_mode_diag?.events_by_type ?? {})['tx.updated'] ?? 0))
+/** 049 S2: the payments the run attempted, as the client accepted them - committed (`tx.updated`) and failed (`tx.failed`). */
+const attemptsSeen = (page: Page) =>
+  page.evaluate(() => {
+    const by = (globalThis as unknown as { __geo_real_mode_diag?: Diag }).__geo_real_mode_diag?.events_by_type ?? {}
+    return Number(by['tx.updated'] ?? 0) + Number(by['tx.failed'] ?? 0)
+  })
+
+/**
+ * 049 S2 (decision 10): the rate of the run's payment attempts at a tempo step, measured by WAITING for events - the time
+ * the next `count` attempts take to arrive (no sleep; the timeout bounds a run that stopped paying). Attempts per second.
+ */
+async function attemptRate(page: Page, count: number, timeoutMs: number, warm = 2): Promise<number> {
+  // The first attempts after a step may be the ones planned before it: `warm` of them are let pass before the clock starts.
+  const warmFrom = await attemptsSeen(page)
+  await expect.poll(async () => (await attemptsSeen(page)) - warmFrom, { timeout: timeoutMs, intervals: [100], message: `${warm} attempts after the step` })
+    .toBeGreaterThanOrEqual(warm)
+  const from = await attemptsSeen(page)
+  const started = Date.now()
+  await expect.poll(async () => (await attemptsSeen(page)) - from, { timeout: timeoutMs, intervals: [100], message: `${count} payment attempts arrive` })
+    .toBeGreaterThanOrEqual(count)
+  const got = (await attemptsSeen(page)) - from
+  return got / ((Date.now() - started) / 1000)
+}
 /** Screen pixels around a node left out of the beam sample: the outer reach of a node burst's glow (`renderFrame.ts`). */
 const NODE_CLEAR_PX = 45
 
@@ -106,11 +129,39 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   console.log(`043 S2 LIVE ${JSON.stringify({ tookMs, beam: seen, creates, pauses: pauses.length })}`)
 
   expect(creates, 'exactly one run was created, by the product itself').toHaveLength(1)
-  // 044 stage 2: the live config empties the dev token, so this is a visitor - the visitor tempo 15.
-  expect(creates[0], 'at the visitor default intensity').toMatchObject({ intensity_percent: 15 })
+  // 044 stage 2: the live config empties the dev token, so this is a visitor - the visitor tempo (049 S2: 5, «обычно»).
+  expect(creates[0], 'at the visitor default intensity').toMatchObject({ intensity_percent: 5 })
   expect(pauses, 'nothing paused it').toEqual([])
   // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page). The live config is English (Chromium en-US).
   await expectNetworkState(page, 'running') // the attribute and its word in the page's language (§15 Codex round)
+
+  // 049 S2 (decision 5; spec item 3): «Показывать события» on a real run. Anti-vacuum first: payments arrived above with
+  // the switch off (its default) and the history shows no line of the network.
+  await expect(page.locator('.interact-history__item[data-source="network"]'), 'switch off: no network line').toHaveCount(0)
+  await page.getByTestId('details-toggle').click()
+  const feedBox = page.getByTestId('events-feed-toggle')
+  await expect(feedBox, 'off by default').not.toBeChecked()
+  await feedBox.check()
+  const network = page.locator('.interact-history__item[data-source="network"]')
+  await expect(page.getByTestId('recent-actions')).toHaveAttribute('data-feed', 'on')
+  await expect.poll(() => network.count(), { timeout: 15_000, message: 'the automatic payments of the run appear as lines' }).toBeGreaterThan(0)
+
+  // The manual payment of spec item 3 is not made here: the backend of CI (job `ui-smoke`) runs with
+  // `SIMULATOR_ACTIONS_ENABLE` off, so the actions are disabled on this screen (049 S2, recorded in the spec). That a
+  // manual payment is ONE line - its `tx.updated` - is held by `src/composables/eventFeed.p049s2.test.ts` and was run
+  // once by hand on a backend with the actions enabled (spec 049, S2 changelog).
+
+  // 049 S2 (decision 10): the tempo by words reaches the run. «быстро» (15 %) against «медленно» (2 %): the slow step pays
+  // less often - a generous comparison of the two rates, not a promise of a rate (the planner's budget is the backend's,
+  // 049 S2a: one attempt in about 2.5 s at 2 %, about three a second at 15 %).
+  await page.getByTestId('tempo-step-fast').click()
+  await expect(page.getByTestId('tempo-step-fast')).toHaveAttribute('aria-pressed', 'true')
+  const fast = await attemptRate(page, 10, 30_000)
+  await page.getByTestId('tempo-step-slow').click()
+  await expect(page.getByTestId('tempo-step-slow')).toHaveAttribute('aria-pressed', 'true')
+  const slow = await attemptRate(page, 4, 45_000)
+  console.log(`049 S2 LIVE tempo ${JSON.stringify({ fastPerSec: Math.round(fast * 100) / 100, slowPerSec: Math.round(slow * 100) / 100 })}`)
+  expect(slow, `«медленно» pays less often than «быстро» (${slow.toFixed(2)}/s against ${fast.toFixed(2)}/s)`).toBeLessThan(fast)
 
   // Leave the backend as found: stop the run this test started. 048 S2 (amendment 8): a visitor has no Stop in the UI
   // (the run row is the administrator's), so the stop goes where the product's own Stop goes - `POST

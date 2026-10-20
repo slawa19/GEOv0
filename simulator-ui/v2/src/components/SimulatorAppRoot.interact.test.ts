@@ -15,6 +15,7 @@ import { useOverlayState } from '../composables/useOverlayState'
 import { keyEdge } from '../utils/edgeKey'
 import type { TrustlinesFetchState } from '../composables/interact/trustlinesSourceState'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
+import { DEFAULT_HUD_STACK_HEIGHT_PX } from '../ui-kit/overlayGeometry'
 import { t } from '../i18n/t'
 import { setUiLocale } from '../i18n/locale'
 import { renderRunErrorLine, runStatusErrorLine } from '../utils/runErrorClassification'
@@ -74,6 +75,9 @@ const __GEO_TEST_SIM_STORAGE = {
   writeDetailsOpen: vi.fn<(isOpen: boolean) => void>(),
   readOnboardingDismissed: vi.fn<() => boolean | null>(() => null),
   writeOnboardingDismissed: vi.fn<(dismissed: boolean) => void>(),
+  // 049 S2: «Показывать события». `null` = never chosen (off).
+  readEventsFeedOn: vi.fn<() => boolean | null>(() => null),
+  writeEventsFeedOn: vi.fn<(on: boolean) => void>(),
 } as const
 
 // Vitest 4 widened the bare `vi.fn()` type to `Mock<Procedure | Constructable>`, which is not
@@ -107,7 +111,6 @@ type GeoTestGlobals = {
   __GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID?: TestFnMock
   __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE?: TestFnMock
   __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE?: TestFnMock
-  __GEO_TEST_INTERACT_SUCCESS_MESSAGE?: Ref<string | null>
   __GEO_TEST_INTERACT_HISTORY?: Array<Record<string, unknown>>
   __GEO_TEST_INTERACT_BUSY_REF?: Ref<boolean>
   __GEO_TEST_TRUSTLINES_LOADING_REF?: Ref<boolean>
@@ -412,9 +415,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        // кнопки, мок отдаёт его наружу так же, как закрытие.
        const confirmTrustlineCreate = vi.fn(async () => undefined)
        setGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE', confirmTrustlineCreate)
-
-       const successMessage = ref<string | null>(null)
-       setGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE', successMessage)
+       const historyList = reactive<Array<Record<string, unknown>>>(getGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY') ?? [])
 
       const trustlinesLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF', trustlinesLoading)
@@ -616,8 +617,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
                paymentTargetsLastError,
                state: interactState,
 
-              successMessage,
-
              availableCapacity: ref('0'),
               paymentToTargetIds,
               participants: ref<ParticipantInfo[]>([]),
@@ -656,11 +655,13 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
              confirmTrustlineCreate,
              confirmTrustlineUpdate: vi.fn(async () => undefined),
              confirmTrustlineClose,
-              confirmClearing: vi.fn(async () => {
-                successMessage.value = 'Clearing done: 1/1 cycles'
-              }),
+              confirmClearing: vi.fn(async () => undefined),
               cancel,
-              history: reactive<Array<Record<string, unknown>>>(getGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY') ?? []),
+              history: historyList,
+              // 049 S2: the root shows `shownHistory` (own lines; own and network with «Показывать события» on).
+              shownHistory: computed(() => historyList),
+              feed: [],
+              pushFeedItem: vi.fn(),
             },
           systemBalance: computed(() => ({
             totalUsed: 0,
@@ -1270,10 +1271,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(setGeometry).toHaveBeenCalledWith({ dockedRightTopPx: 144 })
       expect(reclampAll).toHaveBeenCalled()
 
-      getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE').value = 'Geometry-aware toast'
-      await nextTick()
-      expect(host.querySelector('.success-toast')).toBeTruthy()
-
       topHeight = 184
       bottomHeight = 96
 
@@ -1295,7 +1292,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       rectSpy.mockRestore()
       clearGeoTestGlobals(
         '__GEO_TEST_INTERACT_PHASE',
-        '__GEO_TEST_INTERACT_SUCCESS_MESSAGE',
         '__GEO_TEST_WM_SET_GEOMETRY',
         '__GEO_TEST_WM_RECLAMP_ALL',
       )
@@ -4980,52 +4976,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {
-    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
-    setUrl('/?mode=real&ui=interact')
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = mountSimulatorAppRoot(host)
-    await nextTick()
-
-    // Start flow (idle -> confirm-clearing)
-    const btnStart = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
-    expect(btnStart).toBeTruthy()
-    btnStart?.click()
-    await nextTick()
-
-    // Confirm clearing
-    const btnConfirm = host.querySelector('[data-testid="clearing-panel"] button.ds-btn--primary') as HTMLButtonElement | null
-    expect(btnConfirm).toBeTruthy()
-    btnConfirm?.click()
-    await Promise.resolve()
-    await nextTick()
-
-    const toast = host.querySelector('.success-toast') as HTMLElement | null
-    expect(toast).toBeTruthy()
-    expect(toast?.textContent ?? '').toContain('Clearing done: 1/1 cycles')
-
-    // Dismiss via close button (should clear interact.mode.successMessage in parent handler)
-    const successMessage = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE')
-    expect(successMessage.value).toContain('Clearing done')
-
-    const btnDismiss = toast?.querySelector('button.ds-ov-toast__close') as HTMLButtonElement | null
-    expect(btnDismiss).toBeTruthy()
-    btnDismiss?.click()
-    await nextTick()
-
-    expect(successMessage.value).toBeNull()
-    // Vue Transition keeps the leaving element in DOM briefly.
-    const toastAfter = host.querySelector('.success-toast') as HTMLElement | null
-    expect(toastAfter).toBeTruthy()
-    expect(toastAfter?.className ?? '').toContain('success-toast-leave')
-
-    app.unmount()
-    host.remove()
-    clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_SUCCESS_MESSAGE')
-  })
+  // 049 S2 (decision 6): the test of the success toast after a clearing is removed - the contract is removed (no toast).
 
   // -----------------------------------------------------------------------
   // P0-2: busy-gate tests (ESC and outside-click while interact.mode.busy)
@@ -6240,10 +6191,13 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       // 046 wave 1, full (2026-10-19): the controls carry test ids (their words are the dictionary's).
       bottom: ['equivalent-text', 'layout-select', 'graph-navigator-summary'],
     }
+    // 049 S2: a visitor's living run has the tempo by words (decision 10); everyone has «Показывать события» (decision 5).
+    const TEMPO = ['tempo-step-slow', 'tempo-step-normal', 'tempo-step-fast']
+    const FEED = 'events-feed-toggle'
     for (const [who, token, ownRun] of [
-      ['a visitor (no token)', '', [] as string[]],
-      ['a visitor (a participant JWT)', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl', [] as string[]],
-      ['the administrator (an admin token)', 'admin-token', ['scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', 'run-payments']],
+      ['a visitor (no token)', '', [...TEMPO, FEED] as string[]],
+      ['a visitor (a participant JWT)', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwIn0.c2lnbmF0dXJl', [...TEMPO, FEED] as string[]],
+      ['the administrator (an admin token)', 'admin-token', ['scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', FEED, 'run-payments']],
     ] as const) {
       storedDetails(true)
       setGeoTestGlobal('__GEO_TEST_ACCESS_TOKEN', token)
@@ -6256,7 +6210,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         // A stopped run with a reason: the reason is passive text for everyone (044); Start replaces Stop in the row.
         real.runStatus = { run_id: 'run-mock', scenario_id: 'sc1', state: 'stopped', stop_source: 'server', stop_reason: 'idle_no_subscribers' }
         await nextTick()
-        const stoppedRow = ownRun.length ? ['scenario-select', 'run-start', 'intensity-input', 'intensity-apply', 'stop-reason', 'run-payments'] : ['stop-reason']
+        const stoppedRow = token === 'admin-token' ? ['scenario-select', 'run-start', 'intensity-input', 'intensity-apply', FEED, 'stop-reason', 'run-payments'] : [FEED, 'stop-reason']
         expect(contents(host).top, `${who}, a stopped run`).toEqual([...VISITOR.top, ...stoppedRow])
       } finally {
         done()
@@ -6296,6 +6250,101 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(items).toHaveLength(3)
       expect(items[0]).toContain('action → 5')
     } finally {
+      done()
+    }
+  })
+
+  /**
+   * 049 S2 (decision 5): «Показывать события» - off by default (nothing remembered: «Последние действия», three lines, no
+   * «вы»); on: remembered like the theme, the history is «События сети», five lines, an own line marked «вы». The lines
+   * the composable gives are mocked here (what it writes: `eventFeed.p049s2.test.ts`); the switch and the log are the root's.
+   */
+  it('049 S2: «Показывать события» - off by default; on: remembered, «Network events», five lines, own lines marked «you»', async () => {
+    storedDetails(true)
+    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5, 6].map((i) => ({
+      id: `h${i}`, seq: i, icon: '•', source: i === 6 ? 'own' : 'network', timeText: `10:0${i}`,
+      line: { key: 'history.trustlineClosed', vars: { from: 'action', to: String(i) } },
+    })))
+    const { host, done } = mount('/?mode=real')
+    try {
+      await nextTick()
+      const box = () => host.querySelector<HTMLInputElement>('[data-testid="events-feed-toggle"]')
+      const log = () => host.querySelector<HTMLElement>('.sar-interact-history-overlay [data-testid="recent-actions"]')!
+      const items = () => [...log().querySelectorAll('.interact-history__text')].map((e) => e.textContent!.trim())
+      expect(box(), 'the switch is behind «Подробнее»').not.toBeNull()
+      expect(box()!.checked, 'off by default (nothing remembered)').toBe(false)
+      expect(log().querySelector('.interact-history__header')!.textContent).toBe('Recent actions')
+      expect(items(), 'off: three lines, no mark').toHaveLength(3)
+      expect(items()[0]).toBe('Trustline closed: action → 6')
+
+      box()!.click()
+      await nextTick()
+      expect(getSimStorage().writeEventsFeedOn, 'remembered like the theme').toHaveBeenLastCalledWith(true)
+      expect(log().getAttribute('data-feed')).toBe('on')
+      expect(log().querySelector('.interact-history__header')!.textContent).toBe('Network events')
+      expect(items(), 'on: five lines').toHaveLength(5)
+      expect(items()[0], 'an own line is marked').toBe('you · Trustline closed: action → 6')
+      expect(items()[1], 'a network line is not').toBe('Trustline closed: action → 5')
+
+      box()!.click()
+      await nextTick()
+      expect(getSimStorage().writeEventsFeedOn).toHaveBeenLastCalledWith(false)
+      expect(items()).toHaveLength(3)
+    } finally {
+      getSimStorage().writeEventsFeedOn.mockClear()
+      done()
+    }
+  })
+
+  it("049 S2 (decision 10): a visitor's tempo step reaches the run - the same action as the administrator's Apply", async () => {
+    storedDetails(true)
+    const { host, app, done } = mount('/?mode=real')
+    try {
+      await nextTick()
+      const setup = rootSetup(app)
+      const real = setup.real as Record<string, unknown>
+      const actions = setup.realActions as Record<string, Mock>
+      real.runId = 'run-1'
+      real.runStatus = { run_id: 'run-1', state: 'running', intensity_percent: 5 }
+      await nextTick()
+      for (const fn of Object.values(actions)) fn.mockClear?.()
+      const step = (id: string) => host.querySelector<HTMLButtonElement>(`[data-testid="tempo-step-${id}"]`)!
+      expect(step('normal').getAttribute('aria-pressed'), "the run's tempo is pressed").toBe('true')
+      step('slow').click()
+      expect(actions.setIntensityPercent).toHaveBeenCalledWith(2)
+      expect(actions.applyIntensity).toHaveBeenCalledTimes(1)
+      expect(actions.setIntensityPercent.mock.invocationCallOrder[0]!, 'the percent is set before it is applied')
+        .toBeLessThan(actions.applyIntensity.mock.invocationCallOrder[0]!)
+    } finally {
+      done()
+    }
+  })
+
+  /**
+   * 049 S2 (adversarial pass, P3): the history's limit (the top stack's bottom edge) is taken from the FIRST measurement -
+   * the stack's publisher applies only a change of height, and a first height equal to its fallback (110 px) applied
+   * nothing: the history then had no limit until the stack's height changed. Red before: `null`.
+   */
+  it('049 S2: the history gets its top limit from the first measurement, also when the stack is exactly the fallback height', async () => {
+    setUrl('/?mode=real')
+    stubResizeObserverRecords() // `mount` of this block stubs ResizeObserver away; the publishers need one
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = (top: number, height: number, width = 1280) =>
+        ({ left: 0, top, width, height, right: width, bottom: top + height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+      if (this.classList.contains('root')) return box(0, 720)
+      if (this.classList.contains('ds-ov-top')) return box(12, DEFAULT_HUD_STACK_HEIGHT_PX)
+      return box(0, 0, 0)
+    })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    const done = () => { app.unmount(); host.remove(); vi.unstubAllGlobals() }
+    try {
+      await nextTick()
+      await nextTick()
+      expect(rootSetup(app).topStackBottomPx, 'the stack\'s bottom edge: 12 + 110').toBe(12 + DEFAULT_HUD_STACK_HEIGHT_PX)
+    } finally {
+      rectSpy.mockRestore()
       done()
     }
   })
@@ -6548,7 +6597,6 @@ describe('048 S3: a window error is the window block alone - no toast, and it do
       expect(block(), 'anti-vacuum: the window shows the failure').not.toBeNull()
       expect(block()!.getAttribute('data-request-id')).toBe('req-win-1')
       expect(host.querySelector('[data-testid="error-toast"]'), 'no second place: the toast is gone').toBeNull()
-      expect(host.querySelector('.ds-ov-toast--error')).toBeNull()
 
       await vi.advanceTimersByTimeAsync(10_000)
       await nextTick()
@@ -6570,7 +6618,7 @@ describe('048 S3: a window error is the window block alone - no toast, and it do
  * it; after the toast's removal it was shown nowhere. Red before the fix: no `edge-detail-error`.
  */
 describe('048 S3: a failure of the edge popup is shown in the popup\'s window', () => {
-  it('editing-trustline with the quick popup and a failure: the window block under the popup, with its request id', async () => {
+  it('editing-trustline with the quick popup and a failure: the window block under the popup, with its request id (data-request-id)', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
     stubMissingResizeObserver()
@@ -6597,7 +6645,8 @@ describe('048 S3: a failure of the edge popup is shown in the popup\'s window', 
       expect(block, 'the failure is shown').not.toBeNull()
       expect(popup!.contains(block), 'in the popup\'s own window').toBe(true)
       expect(block!.getAttribute('data-request-id')).toBe('req-edge-1')
-      expect(block!.querySelector('[data-testid="error-request-id"]')).not.toBeNull()
+      // 049 S2 (decision 7): the id is the attribute only - no drawn line.
+      expect(block!.querySelector('[data-testid="error-request-id"]')).toBeNull()
     } finally {
       app.unmount()
       host.remove()

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { useInteractMode } from './useInteractMode'
+import { historyEntryText } from './interact/useInteractHistory'
 
 type InteractModeOptions = Parameters<typeof useInteractMode>[0]
 type InteractActions = InteractModeOptions['actions']
@@ -145,7 +146,8 @@ describe('useInteractMode', () => {
 
     await im.confirmPayment('1.00')
     expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH', expect.anything())
-    expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
+    // 049 S2 (decision 6): no success toast - the committed payment is its history line (and the window's result).
+    expect(im.history.map((e) => historyEntryText(e))).toEqual(['Payment 1.00 UAH: Alice → Bob'])
     // 037 A2: a committed payment is not closed silently - the result stays until it is dismissed.
     expect(im.phase.value).toBe('confirm-payment')
     expect(im.paymentOutcome.value).toMatchObject({ kind: 'success', paymentId: 'payment-1', fromName: 'Alice', toName: 'Bob' })
@@ -378,9 +380,9 @@ describe('useInteractMode', () => {
     // Old submit was aborted => must not produce a "commit".
     await p1
     expect(commits).toBe(1)
-    expect(im2.successMessage.value).toBe('Payment sent: 2.00 UAH')
+    expect(im2.history.map((e) => historyEntryText(e))).toEqual([expect.stringContaining('Payment 2.00 UAH')])
     // Cancelled instance must not be updated by any late/aborted result.
-    expect(im1.successMessage.value).toBe(null)
+    expect(im1.history).toHaveLength(0)
   })
 
   // 037 C: the result of a clearing is left by the user, not by a timer (the old contract: preview >= 800 ms -> running -> idle).
@@ -506,51 +508,7 @@ describe('useInteractMode', () => {
       snapshot: ref<GraphSnapshot | null>(null) })
     im.selectEdge('alice→bob')
     await im.confirmTrustlineClose()
-    expect(im.successMessage.value).toBe('Close requested: alice → bob (closes when the debt is repaid)')
-  })
-
-  it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {
-    const origQueueMicrotask = globalThis.queueMicrotask
-    const scheduled: Array<() => void> = []
-    globalThis.queueMicrotask = (fn: () => void) => {
-      scheduled.push(fn)
-    }
-
-    const snapshot = ref<GraphSnapshot | null>({
-      equivalent: 'UAH',
-      generated_at: '2026-01-01T00:00:00Z',
-      nodes: [
-        { id: 'alice', status: 'active' },
-        { id: 'bob', status: 'active' },
-      ],
-      links: [{ source: 'alice', target: 'bob', used: '0.00', available: '10.00', status: 'active' }],
-    })
-
-    const actions = mkActions()
-    const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
-
-    try {
-      im.selectEdge('alice→bob')
-      await im.confirmTrustlineClose()
-
-      const msg = 'Trustline closed: alice → bob'
-      expect(im.successMessage.value).toBe(msg)
-
-      // Repeat the exact same success message.
-      im.selectEdge('alice→bob')
-      await im.confirmTrustlineClose()
-
-      // The repeated-message path clears to null, and schedules a microtask to set it back.
-      expect(im.successMessage.value).toBe(null)
-      expect(scheduled.length).toBeGreaterThanOrEqual(1)
-
-      // Flush scheduled microtasks manually.
-      while (scheduled.length) scheduled.shift()?.()
-      expect(im.successMessage.value).toBe(msg)
-    } finally {
-      globalThis.queueMicrotask = origQueueMicrotask
-    }
+    expect(historyEntryText(im.history.at(-1)!)).toBe('Close requested: alice → bob (closes when the debt is repaid)')
   })
 
   it('MP-6a: startPaymentFlow prefetches trustlines even when cache is warm', async () => {

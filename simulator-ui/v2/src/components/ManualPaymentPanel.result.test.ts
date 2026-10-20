@@ -66,11 +66,14 @@ async function typeAmount(host: HTMLElement, value: string) {
 }
 
 describe('the result screen', () => {
-  it('shows the payment id, status, amount and the parties by NAME; the selectors are gone', async () => {
+  it('shows the status, amount and the parties by NAME (049 S2: not the payment id); the selectors are gone', async () => {
     const { host } = mount({ paymentOutcome: success() })
     await nextTick()
 
-    expect(text(host, 'mp-result-payment-id')).toBe('man:9f2c')
+    // 049 S2 (decision 7): the payment's number is not drawn; it is `data-payment-id` of the result (red before: a row).
+    expect(host.querySelector('[data-testid="mp-result-payment-id"]')).toBeNull()
+    expect(host.querySelector('[data-testid="mp-result"]')!.getAttribute('data-payment-id')).toBe('man:9f2c')
+    expect(host.querySelector('[data-testid="mp-result"]')!.textContent).not.toContain('man:9f2c')
     expect(text(host, 'mp-result-status')).toBe('COMMITTED')
     expect(text(host, 'mp-result-amount')).toBe('10.00 UAH')
     expect(text(host, 'mp-result-parties')).toBe('Alice → Bob')

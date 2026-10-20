@@ -12,7 +12,6 @@ export type OverlaySurfaceFamily =
   | 'inspector-card'
   | 'hud-bar'
   | 'hud-dropdown'
-  | 'notification-toast'
   | 'bottom-overlay'
   | 'dev-overlay'
   | 'tooltip'
@@ -38,7 +37,6 @@ export type OverlayPositioningOwner =
   | 'root-top-stack'
   | 'root-bottom-stack'
   | 'details-shell'
-  | 'bottom-stack-offset'
   | 'fixed-corner'
   | 'cursor-following-shell'
   | 'viewport'
@@ -56,7 +54,6 @@ export type OverlayWidthOwner =
   | 'measured-fallback'
   | 'stack-container'
   | 'dropdown-token-contract'
-  | 'toast-clamp-tokens'
   | 'overlay-max-width-contract'
   | 'content'
   | 'viewport'
@@ -121,7 +118,6 @@ export type OverlaySurfaceKey =
   | 'top-hud-stack'
   | 'bottom-hud-stack'
   | 'hud-dropdown'
-  | 'success-toast'
   | 'interact-history-overlay'
   | 'dev-perf-overlay'
   | 'edge-tooltip'
@@ -213,20 +209,6 @@ export const overlaySurfaceCatalog = {
     widthOwner: 'dropdown-token-contract',
     heightOwner: 'dropdown-token-contract',
     zLayerToken: '--ds-z-inset',
-  },
-  'success-toast': {
-    key: 'success-toast',
-    family: 'notification-toast',
-    sizingMode: 'intrinsic',
-    positioningOwner: 'bottom-stack-offset',
-    widthOwner: 'toast-clamp-tokens',
-    heightOwner: 'content',
-    zLayerToken: '--ds-z-alert',
-    a11y: {
-      role: 'status',
-      ariaLive: 'polite',
-      ariaLabel: 'Success notification',
-    },
   },
   'interact-history-overlay': {
     key: 'interact-history-overlay',

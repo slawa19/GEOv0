@@ -190,14 +190,18 @@ async function openList(page: Page, panelButton: string, id: string): Promise<vo
   if (!(await page.locator(`#${id}__surface`).isVisible())) await page.locator(`#${id}__trigger`).click()
 }
 
-/** Run a clearing through the panel: the answer of the backend is what puts a toast and a history line on screen. */
-async function runClearing(page: Page, toast: string): Promise<void> {
-  await page.clock.resume() // the flow is driven by real clicks; the toast is frozen below, before its timer fires
+/**
+ * Run a clearing through the panel: the answer of the backend is what puts a history line on screen. 049 S2 (decision 6):
+ * no success toast any more - the history's latest line is waited for, fully drawn (its opacity transition is over).
+ */
+async function runClearing(page: Page): Promise<void> {
+  await page.clock.resume() // the flow is driven by real clicks; the clock is frozen again below, once the line is drawn
   await page.locator('[data-testid="actionbar-clearing"]').click()
   await page.locator('[data-testid="clearing-confirm"]').click()
-  await expect(page.locator(toast)).toBeVisible()
-  await expect.poll(() => page.locator(toast).evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
-  // `pauseAt` cannot go back, and the clock is running: a quarter of a second ahead of the read, far from the toast's 2.5 s.
+  const latest = page.locator('.sar-interact-history-overlay .interact-history__item--latest')
+  await expect(latest).toBeVisible()
+  await expect.poll(() => latest.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+  // `pauseAt` cannot go back, and the clock is running: a quarter of a second ahead of the read.
   await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 250))
 }
 
@@ -282,13 +286,11 @@ export const MATRIX: Entry[] = [
     details: { hiddenByDefault: '[data-testid="bottom-details-row"]' },
     root: '.ds-ov-bottom:not(.sar-interact-history-overlay)', open: async () => {}, policies: { inside: 'viewport' } },
 
-  // toasts, history, tooltip, analytics: no Escape, no focus, no outside click declared
-  { id: 'toast-success', catalogue: 'success-toast', clock: true,
-    gesture: 'run a clearing that clears a cycle ("Run Clearing", "Confirm")', beforeLoad: (p) => routeClearing(p, 'cycles'),
-    root: '.ds-ov-toast--success', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
+  // history, tooltip, analytics: no Escape, no focus, no outside click declared. 049 S2 (decision 6): `toast-success` is
+  // gone with its surface (the success toast was a third record of the result: the window and the history line remain).
   // 048 S3 (decision 3): `toast-error` is gone with its surface - a window's failure is the window's own block, and the
   // error toast that duplicated it was removed. §15 Codex (STAND-RECIPES WEAK): the in-window refusal is a surface of its
-  // own then - the clearing window holding its error block (`WindowErrorBlock`, role="alert", the request id line), so
+  // own then - the clearing window holding its error block (`WindowErrorBlock`, role="alert", its request id in `data-request-id`), so
   // geometry and axe run over it. Only `inside` is declared: Escape and an outside click on a HELD result are the
   // clearing window's own rules (037 C), judged by `p037-c-clearing.spec.ts`, not re-declared here.
   { id: 'clearing-refused', catalogue: 'wm-interact-window',
@@ -302,7 +304,7 @@ export const MATRIX: Entry[] = [
     policies: { inside: 'wm-pad' } },
   { id: 'interact-history', catalogue: 'interact-history-overlay', clock: true,
     gesture: 'appears after the first completed action (here: a clearing)', beforeLoad: (p) => routeClearing(p, 'cycles'),
-    root: '.sar-interact-history-overlay', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
+    root: '.sar-interact-history-overlay', open: (page) => runClearing(page), policies: { inside: 'viewport' } },
   { id: 'edge-tooltip', catalogue: 'edge-tooltip', followsPointer: true,
     gesture: 'click a node, then move the mouse over one of its trust lines', root: '.ds-ov-tooltip',
     open: async (page) => {
@@ -393,7 +395,6 @@ export const SURFACE_DOM: Array<{ selector: string; key: string | null }> = [
   { selector: '.ds-ov-top', key: 'top-hud-stack' },
   { selector: '.sar-interact-history-overlay', key: 'interact-history-overlay' },
   { selector: '.ds-ov-bottom', key: 'bottom-hud-stack' },
-  { selector: '.ds-ov-toast--success', key: 'success-toast' },
   { selector: '.ds-ov-tooltip', key: 'edge-tooltip' },
   { selector: '[data-surface="real-metrics-panel"]', key: 'real-metrics-panel' },
   { selector: '.labels-layer', key: 'canvas-labels-overlay' },
@@ -408,8 +409,8 @@ export type Claim = { el: string; key: string | null | undefined }
 /**
  * Every element that can be an overlay surface, and the key `SURFACE_DOM` gives it (`undefined`: nobody claims it).
  * Candidates are structural, not a list of names: the children of `.root` (the scene is two canvases, everything else
- * there is laid over it), the children of the window layer, whatever was teleported to `body`, every window shell,
- * dropdown surface and toast. An element counts as on screen when it OR ANY DESCENDANT has a box - a 0x0 portal with
+ * there is laid over it), the children of the window layer, whatever was teleported to `body`, every window shell and
+ * dropdown surface (049 S2: no toast any more). An element counts as on screen when it OR ANY DESCENDANT has a box - a 0x0 portal with
  * a `position: fixed` child is on screen.
  *
  * WHAT THIS DOES NOT SEE (038 S2, D3; injected and confirmed): an arbitrary descendant of a container that is itself
@@ -425,7 +426,7 @@ export async function claims(page: Page): Promise<Claim[]> {
     for (const el of root?.children ?? []) set.add(el)
     for (const el of document.querySelectorAll('.wm-layer > *')) set.add(el)
     for (const el of document.body.children) if (!el.contains(root) && !['SCRIPT', 'STYLE', 'LINK'].includes(el.tagName)) set.add(el)
-    for (const el of document.querySelectorAll('.ws-shell, .ds-ov-dropdown, .ds-ov-toast')) set.add(el)
+    for (const el of document.querySelectorAll('.ws-shell, .ds-ov-dropdown')) set.add(el)
     const boxed = (el: Element) => {
       const r = el.getBoundingClientRect()
       const s = getComputedStyle(el)

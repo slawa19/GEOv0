@@ -77,30 +77,28 @@ function isSaturatedAvailable(v: unknown): boolean {
 const look = computed(() => classifyNode(props.node))
 const nodeColor = computed(() => fillOf(look.value, props.palette))
 /**
- * The role in the legend's words; a freeze and a hub mark are said after it. 046 wave 3: the very entries of the legend
- * (`legend.entry.*`) - one set of words; until wave 3 the card had its own English words («Even overall» beside «even»).
+ * The role in the legend's words. 046 wave 3: the very entries of the legend (`legend.entry.*`) - one set of words; until
+ * wave 3 the card had its own English words («Even overall» beside «even»).
+ *
+ * 049 S2 (decision 3: the second row is «человек · активен», the state of the balance, the balance): the role words are
+ * the STATE OF THE BALANCE only. A freeze and a hub are the participant's status and type - the meta beside them says them
+ * already («хаб · заморожен»), so until S2 the row said «заморожен» / «хаб» twice (S1 internal adversarial pass). The meta
+ * keeps the word because it is the participant's own data (type and status as the server gives them, `suspended` said
+ * «приостановлен» as it is); the swatch keeps the freeze's colour and the canvas's sign - the card's link to the node.
  */
-const roleWords = computed(() => [
-  t(`legend.entry.${look.value.role}`),
-  look.value.frozen ? t('legend.entry.frozen') : '',
-  look.value.hub ? t('legend.entry.hub') : '',
-].filter(Boolean).join(' · '))
+const roleWords = computed(() => t(`legend.entry.${look.value.role}`))
 
 /**
  * 049 S1 (decision 3): the balance of the head, or null when it did not arrive - then no figure, no dash and no unit is
  * drawn, never a zero. A participant whose balance did not arrive at all (no sign, no amount: the role "unknown") says
- * ONE thing: the role's words become «Баланс не получен» (a freeze and a hub are still added). Until S1 the head said
- * «неизвестно» beside «— UAH»: two half-messages of one absence (owner frame 18). The swatch stays - the card's link to
- * the node on the canvas (`?` there as well). A known sign without an amount keeps its role's words.
+ * ONE thing: the role's words become «Баланс не получен.» (049 S2: decision 8's text, with its period). Until S1 the head
+ * said «неизвестно» beside «— UAH»: two half-messages of one absence (owner frame 18). The swatch stays - the card's link
+ * to the node on the canvas (`?` there as well). A known sign without an amount keeps its role's words.
  */
 const balanceText = computed(() => netText(props.node))
 const roleText = computed(() => {
   if (balanceText.value !== null || look.value.role !== 'unknown') return roleWords.value
-  return [
-    t('card.balanceUnavailable'),
-    look.value.frozen ? t('legend.entry.frozen') : '',
-    look.value.hub ? t('legend.entry.hub') : '',
-  ].filter(Boolean).join(' · ')
+  return t('card.balanceUnavailable')
 })
 
 /**

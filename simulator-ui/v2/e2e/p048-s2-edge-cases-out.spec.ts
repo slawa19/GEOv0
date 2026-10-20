@@ -89,6 +89,9 @@ function contents(page: Page) {
   })
 }
 
+// 049 S2: «Показывать события» for everyone (decision 5); a visitor's living run has the tempo by words (decision 10).
+const FEED = 'events-feed-toggle'
+const TEMPO = ['tempo-step-slow', 'tempo-step-normal', 'tempo-step-fast']
 const VISITOR = {
   top: ['theme-select', 'language-select'],
   figures: ['sbb-available', 'sbb-trustlines', 'sbb-participants', 'sbb-utilization'],
@@ -97,12 +100,12 @@ const VISITOR = {
 }
 
 test.describe('048 S2 (amendment 12): what "Подробнее" holds, by addressee', () => {
-  test('a visitor: theme, language, the network figures, equivalent, layout, "Inspect graph" - nothing of the run, no menu', async ({ page }) => {
+  test('a visitor: theme, language, the run\'s tempo by words and the events switch (049 S2), the network figures, equivalent, layout, "Inspect graph" - no menu', async ({ page }) => {
     await open(page, { visitor: true })
     await page.locator(DETAILS).click()
     await expect(page.locator('[data-testid="top-details-row"]')).toBeVisible()
     await expect(page.locator('[data-testid="system-metrics"]')).toBeVisible()
-    expect(await contents(page)).toEqual(VISITOR)
+    expect(await contents(page)).toEqual({ ...VISITOR, top: [...VISITOR.top, ...TEMPO, FEED] })
     for (const id of ['own-run-row', 'scenario-select', 'run-payments', 'admin-summary', 'admin-menu', 'labels-select', 'analytics-toggle']) {
       await expect(page.getByTestId(id), `${id}: not rendered for a visitor`).toHaveCount(0)
     }
@@ -114,7 +117,7 @@ test.describe('048 S2 (amendment 12): what "Подробнее" holds, by addres
     await open(page, { visitor: false })
     await page.locator(DETAILS).click()
     await expect(page.getByTestId('own-run-row')).toBeVisible()
-    expect(await contents(page)).toEqual({ ...VISITOR, top: [...VISITOR.top, 'scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', 'run-payments'] })
+    expect(await contents(page)).toEqual({ ...VISITOR, top: [...VISITOR.top, 'scenario-select', 'run-stop', 'intensity-input', 'intensity-apply', FEED, 'run-payments'] })
     for (const id of ['admin-summary', 'admin-menu', 'labels-select', 'analytics-toggle']) {
       await expect(page.getByTestId(id), `${id}: not rendered`).toHaveCount(0)
     }
@@ -157,7 +160,7 @@ test.describe('048 S2 (amendment 8): a visitor whose run was stopped has no Star
     await page.locator(DETAILS).click()
     await expect(page.getByTestId('stop-reason'), 'why it stopped - passive text').toBeVisible()
     await expect(page.getByTestId('own-run-row'), 'no run row: by the rule, no new control for this path').toHaveCount(0)
-    expect(await contents(page), 'the visitor\'s "Подробнее" with the stop reason').toEqual({ ...VISITOR, top: [...VISITOR.top, 'stop-reason'] })
+    expect(await contents(page), 'the visitor\'s "Подробнее" with the stop reason').toEqual({ ...VISITOR, top: [...VISITOR.top, FEED, 'stop-reason'] })
 
     await page.reload()
     await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })

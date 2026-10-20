@@ -59,11 +59,14 @@ const VISITOR = ['theme-select', 'language-select']
 // 046 wave 1, full (2026-10-19): Start, Stop, the tempo and Apply carry test ids now (`rowContents` reads the test id
 // first) - their words and accessible names are the dictionary's, in the language of the interface.
 const OWN_RUN_ROW_RUNNING = ['scenario-select', 'run-stop', 'intensity-input', 'intensity-apply']
+// 049 S2: the visitor's tempo by words on a living run (decision 10) and «Показывать события» for everyone (decision 5).
+const TEMPO_STEPS = ['tempo-step-slow', 'tempo-step-normal', 'tempo-step-fast']
+const FEED = 'events-feed-toggle'
 
 describe('048 S2 - the service row of the top bar, by addressee (amendment 12)', () => {
-  it('a visitor - no token, or a participant JWT: the theme and the language; nothing of the run but its stop reason', async () => {
+  it('a visitor - no token, or a participant JWT: the theme and the language; of the run its tempo by words (049 S2) and its stop reason', async () => {
     for (const [why, token] of [['no token', null], ['a participant JWT', JWT]] as const) {
-      for (const [state, status, extra] of [['running', running, []], ['stopped with a reason', stopped, ['stop-reason']]] as const) {
+      for (const [state, status, extra] of [['running', running, [...TEMPO_STEPS, FEED]], ['stopped with a reason', stopped, [FEED, 'stop-reason']]] as const) {
         const { host, done } = mountTopBar(context({ accessToken: ref(token), runStatus: ref(status) }))
         await nextTick()
         expect(rowContents(host), `${why}, ${state}`).toEqual([...VISITOR, ...extra])
@@ -76,14 +79,15 @@ describe('048 S2 - the service row of the top bar, by addressee (amendment 12)',
   it('the administrator (an admin token): the same plus the row of the own run and the payments badge', async () => {
     const live = mountTopBar(context({ accessToken: ref('admin-token') }))
     await nextTick()
-    expect(rowContents(live.host)).toEqual([...VISITOR, ...OWN_RUN_ROW_RUNNING, 'run-payments'])
+    // 049 S2: the administrator keeps the percent field with Apply - no tempo steps beside it (no fourth control).
+    expect(rowContents(live.host)).toEqual([...VISITOR, ...OWN_RUN_ROW_RUNNING, FEED, 'run-payments'])
     expect(live.host.querySelector('details'), 'no menu ("Admin ▾" is gone) for the administrator either').toBeNull()
     live.done()
 
     // A stopped run: Start instead of Stop, Apply disabled, the stop reason (passive, as for everyone) and the badge.
     const ended = mountTopBar(context({ accessToken: ref('admin-token'), runStatus: ref(stopped) }))
     await nextTick()
-    expect(rowContents(ended.host)).toEqual([...VISITOR, 'scenario-select', 'run-start', 'intensity-input', 'intensity-apply', 'stop-reason', 'run-payments'])
+    expect(rowContents(ended.host)).toEqual([...VISITOR, 'scenario-select', 'run-start', 'intensity-input', 'intensity-apply', FEED, 'stop-reason', 'run-payments'])
     ended.done()
   })
 

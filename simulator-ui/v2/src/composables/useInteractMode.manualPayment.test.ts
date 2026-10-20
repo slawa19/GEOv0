@@ -264,7 +264,8 @@ describe('what a success-shaped answer is allowed to say', () => {
 
     await im.confirmPayment('10.00')
 
-    expect(im.successMessage.value).toBe('Payment sent: 10.00 UAH')
+    // 049 S2 (decision 6): no success toast; the committed payment is one history line.
+    expect(im.history).toHaveLength(1)
     expect(im.phase.value).toBe('confirm-payment')
     const outcome = im.paymentOutcome.value
     expect(outcome).toMatchObject({ kind: 'success', paymentId: 'man:0123', status: 'COMMITTED', fromName: 'Alice', toName: 'Bob' })
@@ -280,7 +281,6 @@ describe('what a success-shaped answer is allowed to say', () => {
 
     await im.confirmPayment('10.00')
 
-    expect(im.successMessage.value).toBeNull()
     expect(im.paymentOutcome.value).toBeNull()
     expect(im.state.error).toContain('did not confirm')
     expect(im.history.length).toBe(0)
@@ -294,7 +294,7 @@ describe('what a success-shaped answer is allowed to say', () => {
 
     await im.confirmPayment('10.00')
 
-    expect(im.successMessage.value).toBeNull()
+    expect(im.history).toHaveLength(0)
     expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown' })
     await im.confirmPayment('10.00')
     expect(keyOf(send, 1)).toBe(keyOf(send, 0))

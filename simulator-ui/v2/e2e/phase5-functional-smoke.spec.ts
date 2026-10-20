@@ -609,9 +609,12 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     const amount = page.getByLabel('Amount')
     await amount.fill('1.00')
     await amount.press('Enter')
-    await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
+    // 049 S2 (decisions 6, 7): no success toast - the result is in the window and in the history line; the payment's number
+    // is not drawn, it is the result's `data-payment-id`.
+    await expect(page.getByTestId('recent-actions')).toContainText('Payment 1.00 UAH: Alice → Bob')
+    await expect(page.getByTestId('success-toast')).toHaveCount(0)
     // 037 A2: a committed payment stays on screen, with the focus on its result; closing it returns the focus to the opener.
-    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText('payment-1')
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', 'payment-1')
     await expect(page.locator('[data-testid="mp-result"]')).toBeFocused()
     await activateButton(page, 'Close')
     await expect(page.locator('[data-testid="actionbar-payment"]')).toBeFocused()
@@ -637,7 +640,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'carol', /Carol/, true)
     await page.getByLabel('Limit').fill('15.00')
     await activateButton(page, 'Create')
-    await expect(page.getByTestId('success-toast')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
+    await expect(page.getByTestId('recent-actions')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineCreateRequests).toHaveLength(1)
 
@@ -646,7 +649,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
     await page.getByLabel('New limit').fill('20.00')
     await activateButton(page, 'Update')
-    await expect(page.getByTestId('success-toast')).toContainText('Limit updated: 20.00 UAH')
+    await expect(page.getByTestId('recent-actions')).toContainText('Trustline updated: Alice → Bob → limit 20.00 UAH')
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineUpdateRequests).toHaveLength(1)
 
@@ -665,7 +668,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await expect(page.getByTestId('clearing-panel')).toContainText('Clearing result')
     // 046 (advisor, 2026-10-18): "{creditor} → {debtor}: debt reduced by ..." (was "{debtor}’s debt to {creditor} ...").
     await expect(page.getByTestId('clearing-panel')).toContainText('debt reduced by')
-    await expect(page.getByTestId('success-toast')).toContainText('Clearing done: 1/1 cycles')
+    await expect(page.getByTestId('recent-actions')).toContainText('Clearing: 1 cycle')
     expect(mock.clearingRequests).toHaveLength(1)
     await activateButton(page, 'Close')
     await expect(page.getByTestId('clearing-panel')).toBeHidden()

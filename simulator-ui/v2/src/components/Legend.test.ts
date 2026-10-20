@@ -203,22 +203,30 @@ describe('the canvas, the legend and the node card agree', () => {
 
   // 046 wave 1 (2026-10-19): the card kept its own English words (`ROLE_TEXT`) until wave 3; 046 wave 3 (2026-10-19): the
   // card says the legend's words (`legend.entry.*`) - the equality of the two in both languages is held by
-  // `inspectors.p046w3.test.ts`. What is held here is the card: the role first, a freeze and a hub added, never replacing it.
-  it('the card says the role in the words of the legend; a freeze and a hub are added, the role is not replaced', () => {
+  // `inspectors.p046w3.test.ts`. What is held here is the card: the role in the legend's words. 049 S2 (decision 3, the S1
+  // adversarial finding): the role words are the state of the balance only - a freeze and a hub are said by the meta
+  // («type · status») beside them, once; until S2 they were added here as well and the row said them twice.
+  it('the card says the role in the words of the legend; a freeze and a hub are said once, by the meta', () => {
     const words = (node: GraphNode) => {
       const c = mount(NodeCardOverlay, { node, edgeStats: null, equivalentText: 'UAH', palette: PALETTE, showPinActions: false, isPinned: false, pin: () => undefined, unpin: () => undefined })
       const el = c.host.querySelector<HTMLElement>('[data-testid="node-card-role"]')!
-      const out = { text: [...el.children].map((c) => c.textContent!.trim()).join(' '), role: el.getAttribute('data-role') }
+      const meta = c.host.querySelector('[data-testid="node-card-meta"]')!.textContent!.trim()
+      const out = { text: [...el.children].map((c) => c.textContent!.trim()).join(' '), role: el.getAttribute('data-role'), meta }
       c.done()
       return out
     }
-    expect(words(SCENE[0]!)).toEqual({ text: '− owes more', role: 'debtor' })
-    expect(words(SCENE[1]!)).toEqual({ text: '+ is owed more', role: 'creditor' })
-    expect(words(SCENE[2]!)).toEqual({ text: '0 even', role: 'neutral' })
-    // 049 S1 (decision 3): no sign and no amount - the one message of an absent balance, in place of the legend's «unknown».
-    expect(words(SCENE[3]!)).toEqual({ text: '? Balance unavailable', role: 'unknown' })
-    expect(words(SCENE[4]!)).toEqual({ text: '+ is owed more · frozen', role: 'creditor' })
-    expect(words(SCENE[6]!)).toEqual({ text: '0 even · hub', role: 'neutral' })
+    expect(words(SCENE[0]!)).toMatchObject({ text: '− owes more', role: 'debtor' })
+    expect(words(SCENE[1]!)).toMatchObject({ text: '+ is owed more', role: 'creditor' })
+    expect(words(SCENE[2]!)).toMatchObject({ text: '0 even', role: 'neutral' })
+    // 049 S1 (decision 3): no sign and no amount - the one message of an absent balance, in place of the legend's «unknown»
+    // (049 S2: decision 8's text, with its period).
+    expect(words(SCENE[3]!)).toMatchObject({ text: '? Balance unavailable.', role: 'unknown' })
+    const frozen = words(SCENE[4]!)
+    expect(frozen).toMatchObject({ text: '+ is owed more', role: 'creditor' })
+    expect(frozen.meta, 'the freeze is said by the meta').toMatch(/· frozen$/)
+    const hub = words(SCENE[6]!)
+    expect(hub).toMatchObject({ text: '0 even', role: 'neutral' })
+    expect(hub.meta, 'the hub is said by the meta').toMatch(/^hub ·/)
   })
 
   it('an unknown sign shows no balance in the card: magnitude atoms are not printed as a positive amount', () => {
@@ -230,8 +238,8 @@ describe('the canvas, the legend and the node card agree', () => {
       return text ?? `none: ${words}`
     }
     // 049 S1 (decision 3): was '—' beside the unit; now no figure at all, and the one message of an absent balance.
-    expect(balanceOf({ net_sign: null, net_balance_atoms: '4200' })).toBe('none: Balance unavailable')
-    expect(balanceOf({ net_balance_atoms: '4200' })).toBe('none: Balance unavailable')
+    expect(balanceOf({ net_sign: null, net_balance_atoms: '4200' })).toBe('none: Balance unavailable.')
+    expect(balanceOf({ net_balance_atoms: '4200' })).toBe('none: Balance unavailable.')
     // Counter-checks: the known signs still print, and zero is zero.
     expect(balanceOf({ net_sign: 1, net_balance_atoms: '4200' })).toBe('42.00')
     expect(balanceOf({ net_sign: -1, net_balance_atoms: '4200' })).toBe('-42.00')

@@ -35,7 +35,6 @@ import EdgeDetailPopup from './EdgeDetailPopup.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import Legend from './Legend.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
-import SuccessToast from './SuccessToast.vue'
 import ClearingPanel from './ClearingPanel.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import { useInteractFSM } from '../composables/interact/useInteractFSM'
@@ -152,10 +151,13 @@ describe('046 wave 3 - the inspectors in one language', () => {
     for (const id of [
       'node-card-name', 'node-card-role', 'node-card-meta', 'node-card-stats', 'node-card-send-payment', 'node-card-new-trustline',
       'node-card-actions-reason', 'node-card-line-available', 'edge-detail-popup', 'edge-stats', 'edge-status', 'edge-source-unavailable',
-      'error-request-id', 'edge-no-trustline', 'edge-frozen-figures', 'edge-close-requested', 'edge-close-request-note',
+      'edge-no-trustline', 'edge-frozen-figures', 'edge-close-requested', 'edge-close-request-note',
       'edge-payment-direction', 'edge-send-payment', 'edge-change-limit', 'edge-close-line-btn', 'edge-close-line-cancel',
     ]) expect(document.querySelector(`[data-testid="${id}"]`), id).not.toBeNull()
     expect(document.querySelectorAll('.nco-trustline-row').length, 'rows of both groups').toBeGreaterThan(3)
+    // 049 S2 (decision 7): the failed read's request id is not drawn; it stays the warning's `data-request-id` (section 12).
+    expect([...document.querySelectorAll('[data-testid="edge-source-unavailable"]')].map((e) => e.getAttribute('data-request-id'))).toContain('req-1234')
+    expect(document.querySelector('[data-testid="error-request-id"]'), 'no drawn request-id line').toBeNull()
   })
 
   it('in Russian: no Latin word of the interface - only data (red before: "Pay", "New line", "Edit trustline", "Close line"...)', async () => {
@@ -221,10 +223,16 @@ describe('046 wave 3 - one set of role words: the card says what the legend says
         const el = card.host.querySelector('[data-testid="node-card-role"]')!
         const role = el.getAttribute('data-role')!
         // 049 S1 (decision 3): a node with no sign and no amount says the one message of an absent balance, not «unknown».
-        const expected = [role === 'unknown' ? t('card.balanceUnavailable', {}, locale) : legendWord(role)]
-        if (node.status === 'frozen') expected.push(legendWord('frozen'))
-        if (node.type === 'hub') expected.push(legendWord('hub'))
-        expect(el.querySelector('.nco-role__words')!.textContent!.trim(), `${locale} ${node.id}`).toBe(expected.join(' · '))
+        // 049 S2: the role words are the state of the balance only; a freeze and a hub are said ONCE - by the meta.
+        const expected = role === 'unknown' ? t('card.balanceUnavailable', {}, locale) : legendWord(role)
+        expect(el.querySelector('.nco-role__words')!.textContent!.trim(), `${locale} ${node.id}`).toBe(expected)
+        const meta = card.host.querySelector('[data-testid="node-card-meta"]')!.textContent!
+        const row = card.host.querySelector('.ds-ov-node-card__facts')!.textContent!
+        for (const [on, word] of [[node.status === 'frozen', legendWord('frozen')], [node.type === 'hub', legendWord('hub')]] as const) {
+          if (!on) continue
+          expect(meta, `${locale} ${node.id}: the meta says «${word}»`).toContain(word)
+          expect(row.split(word).length - 1, `${locale} ${node.id}: «${word}» once in the row`).toBe(1)
+        }
         card.app.unmount()
       }
     })
@@ -280,7 +288,7 @@ function interactMode(over: Partial<Record<keyof Actions, unknown>> = {}) {
 }
 
 describe('046 wave 3 - BACKLOG 046-3: what an action leaves behind follows the language of NOW', () => {
-  it('the history and the success notification re-render on a switch (red before: they kept the language they were made in)', async () => {
+  it('the history re-renders on a switch (red before: it kept the language it was made in; 049 S2: no success notification any more)', async () => {
     setUiLocale('en')
     const im = interactMode()
     im.startPaymentFlow()
@@ -294,23 +302,18 @@ describe('046 wave 3 - BACKLOG 046-3: what an action leaves behind follows the l
     im.selectNode('vera')
     await im.confirmTrustlineCreate('10.00')
     const history = mount(InteractHistoryLog, { entries: im.history, maxVisible: 8 })
-    const toast = mount(SuccessToast, { message: im.successMessage, onDismiss: vi.fn() })
     await settle()
     const items = () => [...history.host.querySelectorAll('.interact-history__text')].map((e) => e.textContent!.trim())
-    const toastText = () => toast.host.querySelector('[data-testid="success-toast"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(items(), 'counter-check: two lines, in English').toEqual([
       t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00', unit: 'UAH' }, 'en'),
       t('history.payment', { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' }, 'en'),
     ])
-    expect(toastText()).toContain(t('history.trustlineCreatedToast', { from: 'Борис', to: 'Вера' }, 'en'))
     setUiLocale('ru')
     await settle()
     expect(items()).toEqual([
       t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00', unit: 'UAH' }, 'ru'),
       t('history.payment', { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' }, 'ru'),
     ])
-    expect(toastText()).toContain(t('history.trustlineCreatedToast', { from: 'Борис', to: 'Вера' }, 'ru'))
-    expect(String(im.successMessage.value)).toBe(t('history.trustlineCreatedToast', { from: 'Борис', to: 'Вера' }, 'ru'))
   })
 
   it('a plural history line (clearing) takes the form of the language of now', async () => {

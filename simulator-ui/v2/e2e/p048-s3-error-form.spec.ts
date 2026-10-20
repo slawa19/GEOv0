@@ -42,12 +42,13 @@ async function neverShown(page: Page, testid: string, ms = 1500): Promise<void> 
   }
 }
 
-/** The block of a failure: its sentence, its id line, its attributes - read in one place. */
+/** The block of a failure: its sentence and its attributes - read in one place. 049 S2 (decision 7): the id is `data-request-id`, not a drawn line. */
 async function expectShown(page: Page, testid: string, lang: Lang, id: string, title: RegExp): Promise<void> {
   const block = page.getByTestId(testid)
   await expect(block).toBeVisible()
   await expect(block).toHaveAttribute('data-request-id', id)
-  await expect(block.getByTestId('error-request-id')).toHaveText(t('common.requestId', { id }, lang))
+  await expect(block.getByTestId('error-request-id'), 'the id is not drawn').toHaveCount(0)
+  expect((await block.textContent()) ?? '', 'nothing of the id on screen').not.toContain(id)
   const sentence = block.getByTestId('error-text')
   await expect(sentence).not.toHaveText('')
   expect((await sentence.textContent()) ?? '', 'the sentence holds no id, no HTTP, no «Error», no class name').not.toMatch(FORBIDDEN)
@@ -125,11 +126,11 @@ for (const lang of ['en', 'ru'] as Lang[]) {
     const notice = page.getByTestId('tl-source-unavailable')
     await expect(notice).toBeVisible()
     await expect(notice).toHaveAttribute('data-request-id', 'req-s3-tl-list')
-    await expect(notice.getByTestId('error-request-id')).toHaveText(t('common.requestId', { id: 'req-s3-tl-list' }, lang))
+    await expect(notice).not.toContainText('req-s3-tl-list') // 049 S2 (decision 7): not drawn
   })
 
   test.describe(`048 S3 [${lang}]: the run's error line and the scene's failure`, () => {
-    test('a failed status read: one sentence, no «Error» before it, the id on its own line, the status in the title', async ({ page }) => {
+    test('a failed status read: one sentence, no «Error» before it, the id in data-request-id, the status in the title', async ({ page }) => {
       await openWith(page, lang, async (p) => {
         await p.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, { error: { code: 'E000', message: 'boom' } }, 500, { 'X-Request-ID': 'req-s3-run' }))
       })
@@ -151,7 +152,7 @@ for (const lang of ['en', 'ru'] as Lang[]) {
       await expect(overlay).toHaveAttribute('role', 'alert')
       await expect(overlay).toHaveAttribute('data-request-id', 'req-s3-scene')
       await expect(overlay.getByTestId('error-text')).toHaveText(t('failure.serverFailed', {}, lang))
-      await expect(overlay.getByTestId('error-request-id')).toHaveText(t('common.requestId', { id: 'req-s3-scene' }, lang))
+      await expect(overlay, '049 S2 (decision 7): the id is not drawn').not.toContainText('req-s3-scene')
       expect((await overlay.textContent()) ?? '').not.toMatch(/\bError\b|Ошибка|HTTP/)
       // The run line does not repeat it. Bounded claim (mutation M6b, 2026-10-19): on this mock a status read rewrites the line
       // right after, so a copy written back would be overwritten here as well - the browser cannot tell; "no copy" is held

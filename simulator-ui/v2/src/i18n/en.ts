@@ -37,11 +37,6 @@ export const en = {
     stepHint: '{eq} allows at most {precision} decimal places; the server will refuse this amount.',
     /** 026 `T2602`: a negative `available` is the debt's excess over a lowered limit. */
     overLimit: 'over limit by {amount}',
-    /**
-     * 034 S5a / AGENTS section 12: the server's correlation id of a failure. 048 S3 (decision 3): a line of its own under
-     * the sentence (and `data-request-id`) - no longer glued into the sentence.
-     */
-    requestId: 'request id: {id}',
   },
 
   /** Participant statuses (`chk_participant_status`, plus the scenario's `frozen`); an unknown one is shown as it came. */
@@ -101,7 +96,6 @@ export const en = {
 
     // The result screen of a committed payment.
     resultTitle: 'Payment sent',
-    resultPaymentId: 'Payment ID',
     resultStatus: 'Status',
     resultAmount: 'Amount',
     resultParties: 'From → To',
@@ -237,7 +231,7 @@ export const en = {
     noRoute: 'No payment route between these participants.',
     noRouteMax: 'No payment route between these participants (available now: {max} {eq}).',
     insufficientCapacity: 'Not enough capacity on the route.',
-    insufficientCapacityMax: 'Not enough capacity: at most {max} {eq} can be sent now.',
+    insufficientCapacityMax: 'Payment declined: at most {max} {eq} is available now. Reduce the amount.',
     policy: 'The route breaks a trust line policy.',
     participantSuspended: 'A participant of this payment is suspended.',
     amountPrecisionExceeded: '{eq} allows at most {precision} decimal places.',
@@ -298,7 +292,7 @@ export const en = {
     /** 046 fix-delta F2: `fetch` rejected (a `TypeError`) - no answer reached the client. */
     NETWORK: 'No connection to the server — try again.',
     noRun: 'No active run_id',
-    unknown: 'The action failed ({code}).',
+    unknown: 'The action failed.',
     /** 048 S3: an answer that named no code of its own (the client's `HTTP_<status>`): the status is not printed. */
     httpFailed: 'The server did not carry out the action — try again later.',
   },
@@ -314,19 +308,15 @@ export const en = {
     participant_suspended: 'The participant is suspended — operations with this participant are unavailable.',
   },
 
-  /** Toasts and history lines of the actions (`useInteractMode.ts`). Amounts arrive as decimal strings. */
+  /** History lines of the actions (`useInteractMode.ts`; 049 S2: the success toasts are gone). Amounts arrive as decimal strings. */
   history: {
-    paymentToast: 'Payment sent: {amount} {unit}',
     payment: 'Payment {amount} {unit}: {from} → {to}',
-    trustlineCreatedToast: 'Trustline created: {from} → {to}',
     trustlineCreated: 'Trustline created: {from} → {to} ({limit} {unit})',
-    limitUpdatedToast: 'Limit updated: {limit} {unit}',
     trustlineUpdated: 'Trustline updated: {from} → {to} → limit {limit} {unit}',
     trustlineClosed: 'Trustline closed: {from} → {to}',
     closeRequested: 'Close requested: {from} → {to} (closes when the debt is repaid)',
     clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
     clearingNothing: 'Clearing: no cycles found',
-    clearingToast: 'Clearing done: {cleared}/{total} cycles',
   },
 
   /**
@@ -345,7 +335,7 @@ export const en = {
     pin: 'Pin',
     unpin: 'Unpin',
     /** 049 S1 (decision 3): the head of a card whose balance did not arrive - one message, never a zero. */
-    balanceUnavailable: 'Balance unavailable',
+    balanceUnavailable: 'Balance unavailable.',
     // The sums of the limits of the participant's lines: as the creditor (`from`) and as the debtor (`to`).
     trustsOthers: 'Trusts others',
     trustedBy: 'Trusted by',
@@ -517,6 +507,14 @@ export const en = {
     tempoGroupAria: 'Auto-payment tempo',
     tempoLabel: 'Auto-payment tempo, %',
     tempoAria: 'Auto-payment tempo, percent',
+    /** 049 S2 (decision 10): the visitor's tempo - three steps by words; the percent each step sets is in the runbook. */
+    tempoStepsAria: 'Payment tempo',
+    tempoStepsLabel: 'Tempo',
+    tempoSlow: 'slow',
+    tempoNormal: 'normal',
+    tempoFast: 'fast',
+    /** 049 S2 (decision 5): the one switch of the network's events in the history. */
+    feedToggle: 'Show events',
     apply: 'Apply',
     noScenarios: 'No scenarios could be loaded — try again later',
     statusAria: 'Status',
@@ -525,7 +523,7 @@ export const en = {
     paymentsNone: 'No payments yet',
     stallAria: 'Payments stalled',
     /** 048 decision 2: the one diagnosis a visitor gets; it claims no more than the mechanism (`consec_all_rejected_ticks`). */
-    stall: 'Payments are not going through: limits are exhausted — run clearing or raise a limit',
+    stall: "Recent payments are not going through. Try clearing or increase the relevant trustline's limit.",
   },
 
   /**
@@ -582,10 +580,15 @@ export const en = {
     balanceAria: 'System balance',
     metricsAria: 'System metrics',
     totalDebt: 'Total debt',
-    available: 'Available for payments',
+    available: 'Free on lines',
     trustlines: 'Trust lines',
     participants: 'Participants',
     utilization: 'Limits in use',
+    /** 049 S2 (decision 8): the short definitions of the figures - the `title` of their plaques, not text on the screen. */
+    availableHint: 'The sum of the free limits of all trustlines; it does not promise that every payment gets through.',
+    trustlinesHint: 'How many trustlines are active in the network.',
+    participantsHint: 'How many participants are active in the network.',
+    utilizationHint: 'The share of the trust limits taken by debts.',
     // 039 slice D: the total debt just before and just after the last clearing, shown above the current total.
     clearingChange: 'clearing: was {before} → became {after} {unit}',
   },
@@ -639,12 +642,36 @@ export const en = {
   recentActions: {
     aria: 'Action history',
     title: 'Recent actions',
+    /** 049 S2 (decision 5): the title while the network's events are shown. */
+    feedTitle: 'Network events',
+    feedAria: 'Network events',
   },
 
-  /** The notification of a successful action (`SuccessToast.vue`; 048 S3: the error toast is gone - a window's failure is its block). */
-  toast: {
-    successAria: 'Success notification',
-    dismiss: 'Dismiss',
+  /**
+   * 049 S2 (decision 5): the lines of the network's events in the history (`InteractHistoryLog.vue`), shown while
+   * «Show events» is on. Built from accepted SSE events only (`realEventPipeline.ts` `feedItemOf`); a missing field writes
+   * no line. A failure has no amount (`tx.failed` carries none) and an unknown reason gets no diagnosis. A series within
+   * 2 s is one line: its lead (`paymentSeries`, `failureSeries`) and the latest event's line after it.
+   */
+  feed: {
+    payment: '{from} → {to}: {amount}\u00a0{unit}',
+    failed: '{from} → {to}: payment did not go through',
+    failedNoCapacity: '{from} → {to}: payment did not go through — not enough capacity on the route',
+    failedNoRoute: '{from} → {to}: payment did not go through — no route',
+    failedLimit: '{from} → {to}: payment did not go through — a trustline limit would be exceeded',
+    failedLineInactive: '{from} → {to}: payment did not go through — a trustline is not active',
+    failedTimeout: '{from} → {to}: payment did not go through — the payment timed out',
+    paymentSeries: plural({ one: 'In 2 s: {count} payment; latest — ', other: 'In 2 s: {count} payments; latest — ' }),
+    failureSeries: plural({ one: 'In 2 s: {count} failure; latest — ', other: 'In 2 s: {count} failures; latest — ' }),
+    clearing: plural({
+      one: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycle',
+      other: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycles',
+    }),
+    clearingCycles: plural({ one: 'Clearing: {count} cycle', other: 'Clearing: {count} cycles' }),
+    clearingDebt: 'Clearing: total debt down by {amount}\u00a0{unit}',
+    trustGrowth: 'Trust limits grew after the clearing',
+    /** The mark of a line of the person's own action while the network's events are shown beside it. */
+    you: 'you',
   },
 
   /** The scene's loading overlay of the root (048 S3: its error is a sentence of `failure.*`, without an «Error» title). */
@@ -664,7 +691,7 @@ export const en = {
     notFound: 'The server did not find what was asked for. Reload the page.',
     serverFailed: 'The server could not complete the request. Try again later or reload the page.',
     viewFailed: 'The picture of the network could not be updated. Reload the page.',
-    streamFailed: 'The event stream broke off — the picture of the network may be behind. Reload the page.',
+    streamFailed: 'Network updates stopped; the displayed data may be outdated. Reload the page.',
   },
 
   /**
@@ -678,7 +705,7 @@ export const en = {
     admin_stop: 'stopped by the operator',
     admin_stop_all: 'stopped by the operator (all runs)',
     idle_no_subscribers: 'stopped by the server: nobody watched it',
-    unknown: 'stopped ({code})',
+    unknown: 'stopped',
   },
 
   /** A start that did not begin a run (`startRunErrorText`, `noScenarioText`). The retry button is `topBar.retry`. */
@@ -708,9 +735,9 @@ export const en = {
      * not shown; the code correlates).
      */
     stopped: 'The run was stopped. To start again, reload the page.',
-    errorStopped: 'The run stopped with an error ({code}). To start again, reload the page.',
+    errorStopped: 'The demo stopped because of an error. Reload the page to start a new run.',
     /** 048 S3: a user-facing code of a run that goes on - the code correlates; the server's `CODE: message` is the title. */
-    runningError: 'Something failed during the run ({code}); the run goes on.',
+    runningError: 'Something failed during the run; the run goes on.',
   },
 
   /**

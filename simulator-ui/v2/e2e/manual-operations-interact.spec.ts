@@ -586,10 +586,12 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('#mp-amount').fill('1.00')
     await page.locator('[data-testid="manual-payment-confirm"]').click()
 
-    // Success toast visible; no NO_ROUTE failure (048 S3: a window's failure is its own block - the error toast is gone).
-    await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
+    // The result in the window and its history line (049 S2: no success toast); no NO_ROUTE failure (048 S3: a window's
+    // failure is its own block - the error toast is gone).
+    await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+    await expect(page.getByTestId('recent-actions')).toContainText('Payment 1.00 UAH: Alice → Bob')
     await expect(page.getByTestId('manual-payment-error')).toHaveCount(0)
-    await expect(page.getByTestId('success-toast')).not.toContainText('NO_ROUTE')
+    await expect(page.getByTestId('recent-actions')).not.toContainText('NO_ROUTE')
   })
 
   // 026 (owner В1/F-026-1, `T2602`): a limit below the debt is a trust change, not a debt change, and is

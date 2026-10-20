@@ -22,7 +22,7 @@ import { useInteractMode } from '../composables/useInteractMode'
 import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 import { setUiLocale, type UiLocale } from '../i18n/locale'
 import { t } from '../i18n/t'
-import { failureRunErrorLine, renderRunErrorLine, runErrorLineRef, runErrorLineTitle, startRunErrorLine } from '../utils/runErrorClassification'
+import { failureRunErrorLine, renderRunErrorLine, runEndedByErrorLine, runErrorLine, runErrorLineRef, runErrorLineTitle, startRunErrorLine } from '../utils/runErrorClassification'
 
 const PEOPLE = [
   { pid: 'alice', name: 'Алиса', type: 'person', status: 'active' },
@@ -87,7 +87,7 @@ const WINDOWS: Array<{ name: string; testid: string; mount: () => HTMLElement }>
   },
 ]
 
-describe('048 S3: the window error block - the sentence, the request id apart, the identifiers in the title', () => {
+describe('048 S3 / 049 S2: the window error block - the sentence, the request id in data-request-id only, the identifiers in the title', () => {
   for (const locale of ['en', 'ru'] as UiLocale[]) {
     it.each(WINDOWS.map((w) => [w.name, w] as const))(`%s [${locale}]`, async (_name, w) => {
       setUiLocale(locale)
@@ -95,11 +95,11 @@ describe('048 S3: the window error block - the sentence, the request id apart, t
       await settle()
       const block = host.querySelector<HTMLElement>(`[data-testid="${w.testid}"]`)
       expect(block, 'anti-vacuum: the window shows its failure').not.toBeNull()
-      // (§12) the id: in `data-request-id` and on a line of its own, in the language of the interface.
+      // (§12) the id: in `data-request-id`; 049 S2 (decision 7, reproducer (е)): no longer drawn - red before: the line
+      // «request id: req-7f3a» under the sentence.
       expect(block!.getAttribute('data-request-id')).toBe('req-7f3a')
-      const idLine = block!.querySelector('[data-testid="error-request-id"]')
-      expect(idLine, 'the id has its own line').not.toBeNull()
-      expect(idLine!.textContent!.trim()).toBe(t('common.requestId', { id: 'req-7f3a' }, locale))
+      expect(block!.querySelector('[data-testid="error-request-id"]'), 'no drawn id line').toBeNull()
+      expect(block!.textContent, 'nothing of the id is drawn').not.toMatch(/req-/)
       // The sentence holds no id, no HTTP, no «Error», no class name (red before: "… (ref: req-7f3a)" glued in).
       const sentence = block!.querySelector('[data-testid="error-text"]')!.textContent!.trim()
       expect(sentence.length).toBeGreaterThan(5)
@@ -180,14 +180,41 @@ describe('048 S3: the run error line - one sentence, no «Error» before it, the
       const el = host.querySelector<HTMLElement>('[data-testid="top-error"]')!
       expect(el, 'anti-vacuum: the line is shown').not.toBeNull()
       expect(el.getAttribute('data-request-id')).toBe('req-run-9')
-      expect(el.querySelector('[data-testid="error-request-id"]')!.textContent!.trim()).toBe(t('common.requestId', { id: 'req-run-9' }, locale))
+      // 049 S2 (decision 7): the id is not drawn (red before: «request id: req-run-9» under the sentence).
+      expect(el.querySelector('[data-testid="error-request-id"]')).toBeNull()
+      expect(el.textContent).not.toMatch(/req-/)
       const sentence = el.querySelector('[data-testid="error-text"]')!
       expect(sentence.textContent!.trim()).toBe(t('failure.serverFailed', {}, locale))
       expect(sentence.getAttribute('title')).toBe('HTTP 500')
-      // Nothing drawn but the icon, the sentence and the id line: no «Error» label (red before: `.ds-label` «Error»).
+      // Nothing drawn but the icon and the sentence: no «Error» label (red before: `.ds-label` «Error»), no id line (049 S2).
       expect(el.querySelector('.ds-label')).toBeNull()
       const drawn = [...el.querySelectorAll('span')].filter((s) => !s.querySelector('span')).map((s) => s.textContent!.trim()).filter(Boolean)
-      expect(drawn).toEqual(['✕', t('failure.serverFailed', {}, locale), t('common.requestId', { id: 'req-run-9' }, locale)])
+      expect(drawn).toEqual(['✕', t('failure.serverFailed', {}, locale)])
+    })
+
+    // 049 S2 (decision 7, reproducer (е)): a code of the run is no longer printed in brackets - it is the title and the
+    // console line. Red before: «The run stopped with an error (REAL_MODE_TICK_FAILED). …».
+    it(`a run's code is not drawn in brackets, it is the title [${locale}]`, async () => {
+      setUiLocale(locale)
+      for (const line of [
+        runEndedByErrorLine({ code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-20T00:00:00Z' }),
+        runErrorLine({ code: 'INTERNAL_ERROR', message: 'boom', at: '2026-10-20T00:00:00Z' }),
+      ]) {
+        const host = mountWith(TopBar, { detailsOpen: false }, topBarContext({
+          lastError: computed(() => renderRunErrorLine(line, locale)),
+          lastErrorTitle: computed(() => runErrorLineTitle(line)),
+          lastErrorRef: computed(() => runErrorLineRef(line)),
+        }))
+        await settle()
+        const el = host.querySelector<HTMLElement>('[data-testid="top-error"]')!
+        const sentence = el.querySelector('[data-testid="error-text"]')!
+        const code = line.kind === 'code' ? line.code : ''
+        expect(code, 'anti-vacuum: the line carries a code').not.toBe('')
+        expect(el.textContent, `${code} is not drawn`).not.toContain(code)
+        expect(el.textContent).not.toMatch(/\(\s*[A-Z_]{3,}\s*\)/)
+        expect(sentence.getAttribute('title'), 'the code is the title').toContain(code)
+        host.remove()
+      }
     })
   }
 
@@ -267,7 +294,7 @@ describe('048 S3 §15 item 1: a failed trust-lines read keeps its request id up 
     }
   })
 
-  it('the trust line window and the edge popup show the id as a line of its own and data-request-id', async () => {
+  it('the trust line window and the edge popup keep the id in data-request-id, not as a drawn line (049 S2)', async () => {
     const EdgeDetailPopup = (await import('./EdgeDetailPopup.vue')).default
     const failed = { kind: 'failed' as const, message: 'Trust lines could not be loaded.', ref: 'req-tl-list' }
     const tl = mountWith(TrustlineManagementPanel, {
@@ -284,7 +311,8 @@ describe('048 S3 §15 item 1: a failed trust-lines read keeps its request id up 
       const notice = host.querySelector(`[data-testid="${id}"]`)
       expect(notice, `${id}: anti-vacuum, the notice is shown`).not.toBeNull()
       expect(notice!.getAttribute('data-request-id'), id).toBe('req-tl-list')
-      expect(notice!.querySelector('[data-testid="error-request-id"]')!.textContent!.trim(), id).toBe(t('common.requestId', { id: 'req-tl-list' }, 'en'))
+      expect(notice!.querySelector('[data-testid="error-request-id"]'), id).toBeNull()
+      expect(notice!.textContent, id).not.toMatch(/req-/)
     }
   })
 })

@@ -13,7 +13,6 @@ import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
-import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import GraphNavigator from './GraphNavigator.vue'
 import Legend from './Legend.vue'
@@ -103,6 +102,7 @@ import type { BottleneckTarget } from '../api/simulatorTypes'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
+import { FEED_LINES_SHOWN, OWN_LINES_SHOWN } from '../composables/interact/useInteractHistory'
  import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
  import { keyEdge } from '../utils/edgeKey'
 import { renderRunErrorLine, runErrorLineRef, runErrorLineTitle, startRetryOffered } from '../utils/runErrorClassification'
@@ -212,6 +212,22 @@ function toggleDetails(): void {
   detailsOpen.value = !detailsOpen.value
 }
 
+/**
+ * 049 S2 (decision 5): «Показывать события» - the one switch of the network's events in the history, behind «Подробнее».
+ * Off by default; remembered in this browser like the theme and the language (the lines themselves are not kept).
+ */
+const eventsFeedOn = ref(simulatorStorage.readEventsFeedOn() ?? false)
+watch(
+  eventsFeedOn,
+  (on) => {
+    simulatorStorage.writeEventsFeedOn(on)
+  },
+  { flush: 'sync' },
+)
+function toggleEventsFeed(): void {
+  eventsFeedOn.value = !eventsFeedOn.value
+}
+
 const app = useSimulatorApp({
   uiCloseTopmostInspectorWindow,
   uiOpenOrUpdateEdgeDetail,
@@ -219,6 +235,7 @@ const app = useSimulatorApp({
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
   optionalFxEnabled: () => !reducedMotion.value,
   isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value && analyticsDebugUi.value,
+  eventsFeedOn: () => eventsFeedOn.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -271,11 +288,23 @@ function readPublishedStackHeightPx(el: HTMLElement | null): number | null {
 /** 043 S2 (fix-delta 3): the open interact window was placed by the action bar (see `followTopStackWithRightRailAnchor`). */
 let rightRailAnchorActive = false
 
+/**
+ * 049 S2 (CI run 39474653429): where the top stack ends on screen and how tall the bottom stack is, as published - the
+ * history shows only the lines that fit between them (`InteractHistoryLog.vue`, `topLimitPx`, `layoutKey`).
+ */
+const topStackBottomPx = ref<number | null>(null)
+const bottomStackPublishedPx = ref(0)
+function syncTopStackBottom(): void {
+  const stackBottom = queryTopStackElement()?.getBoundingClientRect().bottom
+  topStackBottomPx.value = typeof stackBottom === 'number' && Number.isFinite(stackBottom) ? stackBottom : null
+}
+
 function applyPublishedTopStackHeightPx(nextPx: number): void {
   const host = getHostEl()
   if (!host) return
 
   host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
+  syncTopStackBottom()
   wm.setGeometry({ dockedRightTopPx: nextPx })
   followTopStackWithRightRailAnchor()
   wm.reclampAll()
@@ -299,6 +328,7 @@ function applyPublishedBottomStackHeightPx(nextPx: number): void {
   if (!host) return
 
   host.style.setProperty('--ds-hud-bottom-stack-height', `${nextPx}px`)
+  bottomStackPublishedPx.value = nextPx
 }
 
 function bindOverlayGeometryPublishers(): void {
@@ -325,6 +355,10 @@ function bindOverlayGeometryPublishers(): void {
 
   topStackGeometryPublisher.publish(readPublishedStackHeightPx(topEl), topEpoch)
   bottomStackGeometryPublisher.publish(readPublishedStackHeightPx(bottomEl), bottomEpoch)
+  // 049 S2 (adversarial pass, P3): the publisher applies only a CHANGE of height - a first measured height equal to the
+  // fallback applies nothing, and the history would have no limit until the stack's height changed. The limit is taken
+  // from the first measurement itself.
+  syncTopStackBottom()
 
   topStackGeometryRo?.disconnect()
   bottomStackGeometryRo?.disconnect()
@@ -445,6 +479,16 @@ const {
 
 getHostEl = () => hostEl.value
 analyticsDebugUi.value = isDebugUi
+
+/**
+ * 049 S2 (decision 10): a step of the visitor's tempo («медленно / обычно / быстро» in «Подробнее») is applied through the
+ * same request as the administrator's percent field with «Применить» (`realActions.applyIntensity`, `POST .../intensity`):
+ * the step's percent becomes the tempo of this screen and is applied to the run.
+ */
+function onSetTempo(percent: number): void {
+  realActions.setIntensityPercent(percent)
+  void realActions.applyIntensity()
+}
 
 /** 039 slice B: the equivalent of the snapshot ON SCREEN - the legend's title. Never the selector's pending choice. */
 const shownSnapshotEquivalent = computed(() => canonicalEquivalent(state.snapshot?.equivalent))
@@ -1215,7 +1259,10 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :details-open="detailsOpen"
       :debug="isDebugUi"
       :analytics-open="analyticsPanelOpen"
+      :events-feed-on="eventsFeedOn"
       @toggle-details="toggleDetails"
+      @toggle-events-feed="toggleEventsFeed"
+      @set-tempo="onSetTempo"
       @toggle-analytics="toggleAnalyticsPanel"
       @set-ui-theme="setUiTheme"
       @start-run="realActions.startRun"
@@ -1496,7 +1543,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     </div>
     <!-- 048 S3 (decision 3): the ONE place of a scene-load failure - here, in the place of the picture that did not come
          (no longer copied to the run's error line as well). One sentence, without an «Error» title; the request id (if
-         any) on its own line, the identifiers (the HTTP status) in the title. -->
+         any) is `data-request-id` (049 S2, decision 7: no longer a drawn line), the identifiers (the HTTP status) in the title. -->
     <div
       v-else-if="sceneErrorShown"
       class="ds-ov-inset"
@@ -1507,7 +1554,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     >
       <div class="ds-ov-message" :title="sceneErrorShown.detail || undefined">
         <div class="ds-ov-message__text" data-testid="error-text">{{ sceneErrorShown.text }}</div>
-        <div v-if="sceneErrorShown.ref" class="ds-ov-message__text" data-testid="error-request-id">{{ t('common.requestId', { id: sceneErrorShown.ref }) }}</div>
       </div>
     </div>
 
@@ -1523,21 +1569,22 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 
     <DevPerfOverlay :enabled="showPerfOverlay" :perf="perf" />
 
-    <!-- BUG-6: the success toast of the windows. 048 S3: the error toast is gone - a window's failure is its own block. -->
-    <SuccessToast
-      v-if="isLiveUi"
-      :message="interact.mode.successMessage"
-      @dismiss="interact.mode.successMessage.value = null"
-    />
+    <!-- 049 S2 (decision 6): no success toast - the result is in the window and in the history line. 048 S3: no error toast. -->
 
-
-    <!-- BUG-5: Interact Mode inline history log. -->
+    <!-- BUG-5: Interact Mode inline history log. 049 S2 (decision 5): with «Показывать события» on, the network's events
+         beside the own actions - five lines instead of three. -->
     <div
-      v-if="isLiveUi && interact.mode.history.length > 0"
+      v-if="isLiveUi && interact.mode.shownHistory.value.length > 0"
       class="ds-ov-bottom sar-interact-history-overlay"
       :class="{ 'sar-interact-history-overlay--over-navigator': detailsOpen && dataReady && !isE2eScreenshots }"
     >
-      <InteractHistoryLog :entries="interact.mode.history" :max-visible="3" />
+      <InteractHistoryLog
+        :entries="interact.mode.shownHistory.value"
+        :max-visible="eventsFeedOn ? FEED_LINES_SHOWN : OWN_LINES_SHOWN"
+        :feed-on="eventsFeedOn"
+        :top-limit-px="topStackBottomPx"
+        :layout-key="`${bottomStackPublishedPx}|${detailsOpen ? 1 : 0}`"
+      />
     </div>
   </div>
 </template>

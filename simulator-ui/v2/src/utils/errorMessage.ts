@@ -35,6 +35,21 @@ function baseMessage(e: unknown): string {
   return String(e)
 }
 
+/**
+ * 049 S2 (§15 Codex P2, AGENTS.md section 12): THE one console line of a failure the screen shows - its scope, the
+ * technical text and the server's correlation id: `<scope> <what> (request id: <id>)`. The run's error line
+ * (`writeRunErrorLine`), a window's failure (`useInteractMode`), a scene that did not load (`useSceneState`) and a failed
+ * read of the trust lines (`useInteractDataCache`) all write through it, so a request id kept in `data-request-id` on the
+ * screen is also in the console, in one form. Nothing is written when there is neither a text nor an id.
+ */
+export function logFailureLine(scope: string, what: string | null | undefined, ref: string | null | undefined): void {
+  if (!what && !ref) return
+  const args: string[] = [scope]
+  if (what) args.push(what)
+  if (ref) args.push(`(request id: ${ref})`)
+  console.warn(...args)
+}
+
 /** The server's correlation id carried by an error (`ApiError.requestId`), or null. Duck-typed: no import cycle. */
 export function requestIdOf(e: unknown): string | null {
   if (e === null || typeof e !== 'object' || !('requestId' in e)) return null
@@ -44,8 +59,8 @@ export function requestIdOf(e: unknown): string | null {
 
 /**
  * 048 S3 (decision 3, «одна форма ошибки»): a failure as the viewer is shown it - the sentence of the interface (`text`)
- * and, APART from it, the server's correlation id (`ref`, AGENTS.md section 12): the id is a muted second line
- * («код запроса: <id>» / «request id: <id>») and `data-request-id`, never glued into the sentence. `detail` is the
+ * and, APART from it, the server's correlation id (`ref`, AGENTS.md section 12): `data-request-id` and the console line
+ * (`logFailureLine`), never glued into the sentence - since 049 S2 (decision 7) no longer a drawn line either. `detail` is the
  * failure's identifiers - the HTTP status and the code («HTTP 409 CONFLICT») - for the block's `title`
  * (data, not prose: no language of its own). `log` is the full technical text (with the server's or the runtime's own
  * English message) for one console line only. Neither is drawn.

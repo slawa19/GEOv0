@@ -114,13 +114,14 @@ afterEach(() => {
 const asVisitor = () => window.localStorage.setItem('geo.sim.v2.accessToken', '')
 
 describe('044 stage 2: the visitor tempo', () => {
-  it('a visitor (no admin token): the opening run starts at the visitor tempo 15, and the field shows 15', async () => {
+  // 049 S2 (decision 10): the visitor's default is the step «обычно» - 5 (was 15, 044 stage 2).
+  it('a visitor (no admin token): the opening run starts at the visitor tempo 5 («обычно»), and the tempo says 5', async () => {
     asVisitor()
     const app = boot()
     await settle()
     expect(createRun).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 15 })
-    expect(app.real.intensityPercent, 'the tempo field says what the run runs at').toBe(15)
+    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 5 })
+    expect(app.real.intensityPercent, 'the tempo field says what the run runs at').toBe(5)
   })
 
   it("the operator (an admin token): the opening run and Start keep 30", async () => {
@@ -131,11 +132,11 @@ describe('044 stage 2: the visitor tempo', () => {
     expect(app.real.intensityPercent).toBe(30)
   })
 
-  it('a participant JWT is not the operator: 15', async () => {
+  it('a participant JWT is not the operator: 5', async () => {
     window.localStorage.setItem('geo.sim.v2.accessToken', 'a.b.c')
     boot()
     await settle()
-    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 15 })
+    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 5 })
   })
 
   it("a stored preference still wins for the visitor (55)", async () => {

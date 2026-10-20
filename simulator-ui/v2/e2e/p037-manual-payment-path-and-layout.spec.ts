@@ -34,19 +34,27 @@ async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>)
   await c.type('Amount', '#mp-amount', '1.00')
   await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
 
-  await expect(page.getByTestId('success-toast')).toContainText('Payment sent: 1.00 UAH')
+  // 049 S2 (decision 6), reproducer (д): the result is in the window and ONE history line says it - no success toast (it was
+  // a third record of the same event). Counted at the moment the result appears: until 049 the toast came with it (and
+  // left after 2.5 s, so a waiting `toHaveCount(0)` would pass anyway).
+  await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+  expect(await page.getByTestId('success-toast').count(), 'no success toast beside the result').toBe(0)
+  await expect(page.locator('[data-testid="recent-actions"] .interact-history__item')).toHaveCount(1)
+  await expect(page.getByTestId('recent-actions')).toContainText('Payment 1.00 UAH: Alice → Bob')
   expect(bodies, 'precondition: the mocked payment-real was reached exactly once').toHaveLength(1)
   return { c, loads }
 }
 
 test.describe('037 A2 - manual payment path (current panel, mocked backend)', () => {
-  test('RESULT: the payment stays on screen with its id and its route by name, and the request carried a key', async ({ page }, testInfo) => {
+  test('RESULT: the payment stays on screen with its route by name (049 S2: its id as data-payment-id), and the request carried a key', async ({ page }, testInfo) => {
     const bodies: Array<Record<string, unknown>> = []
     const { c, loads } = await payAliceToBob(page, bodies)
 
     const panel = page.locator('[data-testid="manual-payment-panel"]')
     await expect(panel).toBeVisible()
-    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    // 049 S2 (decision 7): the payment's number is not drawn - it is the result's `data-payment-id`.
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', PAYMENT_ID)
+    await expect(page.locator('[data-testid="mp-result"]')).not.toContainText(PAYMENT_ID)
     await expect(page.locator('[data-testid="mp-result-route-chain"]')).toHaveText('Alice → Bob')
     await expect(page.locator('[data-testid="mp-result-parties"]')).toHaveText('Alice → Bob')
 
@@ -103,7 +111,7 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
 
     await page.locator('[data-testid="mp-retry"]').click()
-    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveAttribute('data-payment-id', PAYMENT_ID)
     expect(bodies).toHaveLength(2)
     expect(bodies[1]!.idempotency_key).toBe(bodies[0]!.idempotency_key)
     expect({ ...bodies[1]!, client_action_id: null }).toEqual({ ...bodies[0]!, client_action_id: null })
@@ -236,8 +244,10 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await page.locator('#mp-amount').fill('1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
-    // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
-    await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
+    // 049 S2 (decision 6): there is no success toast any more to wait out (it covered a corner of a phone screen); its wait
+    // also let the window settle - the settle is explicit now.
+    await expect(page.getByTestId('success-toast')).toHaveCount(0)
+    await settleShell(page)
     measurements.push(await measure(page, 'result'))
 
     const perPhase = measurements.map((m) => ({ phase: m.phase, scrollWidth: m.scrollWidth, container: m.container,

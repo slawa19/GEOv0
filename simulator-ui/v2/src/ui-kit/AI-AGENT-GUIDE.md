@@ -142,7 +142,6 @@ flowchart TD
 - `ds-ov-bar`: compact HUD-like surface shell; позиционирование остаётся у consumer layer.
 - `ds-ov-metric`: compact metric chip для `TopBar`, `BottomBar`, `SystemBalanceBar`; это shared primitive, а не runtime surface.
 - `ds-ov-dropdown`: bounded-intrinsic dropdown shell для HUD/details меню.
-- `ds-ov-toast`: shared notification-toast shell; bottom offset и clamp читаются только из DS tokens.
 - `ds-ov-message`: message/info overlay shell.
 - `ds-ov-panel--compact`: compact interact-panel padding modifier for WM-managed panels.
 - `ds-controls__row--compact`: compact form-row modifier for interact-panel field rows.
@@ -192,7 +191,6 @@ HUD — это **не отдельный CSS зоопарк**, а:
 | Top HUD stack | `hud-bar` | `stretch` | root top stack | stack container | content/min-row token | `--ds-z-top` |
 | Bottom HUD stack | `hud-bar` | `stretch` | root bottom stack | stack container | content/min-row token | `--ds-z-bottom` |
 | HUD menu of a bar (no instance since 048 S2, 2026-10-19: «Admin ▾» removed; «Artifacts» removed in 048 S1) — the family stays in the catalogue | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
-| Toast | `notification-toast` | `intrinsic` | bottom stack offset | DS toast clamp tokens | content | `--ds-z-alert` |
 | InteractHistoryLog | `bottom-overlay` | `intrinsic` | root bottom overlay | content | content | `--ds-z-bottom` |
 | DevPerfOverlay | `dev-overlay` | `intrinsic` | fixed corner | DS overlay max-width contract | content/max-height token | `--ds-z-dev` |
 | EdgeTooltip | `tooltip` | `intrinsic` | cursor-following shell | content | content | `--ds-z-tooltip` |
@@ -204,7 +202,7 @@ Validation outcome for current shipped scope:
 - Runtime code source of truth for the family matrix lives in `src/ui-kit/overlaySurfaceCatalog.ts`; this table must stay aligned with that file.
 - `EdgeTooltip` micro-layout lives in `designSystem.overlays.css`; the component only binds content and placement style.
 - `DevPerfOverlay` spacing/layout lives in `designSystem.overlays.css`; the component keeps only diagnostics/copy logic.
-- `InteractHistoryLog`, toasts, HUD dropdowns, `DevPerfOverlay`, `EdgeTooltip`, and canvas overlays all sit inside the current runtime family table and z-layer contract.
+- `InteractHistoryLog` (049 S2: the success toast is removed), HUD dropdowns, `DevPerfOverlay`, `EdgeTooltip`, and canvas overlays all sit inside the current runtime family table and z-layer contract.
 - Inspector extraction remains deferred: `NodeCardOverlay` stays on the `ds-ov-node-card` + `ds-node-card` contract, while `EdgeDetailPopup` stays on the `ds-ov-edge-detail` quick-info/action contract. No shared `ds-inspector-row` primitive is introduced until a repeated rail contract appears.
 - Compact interact-form rail proof lives in `src/components/compactOverlayFormRails.test.ts`; if a future form change reintroduces local width clamps, that file must be updated together with the DS contract.
 - Browser-level overlap proof for passive tooltip vs interactive WM shell lives in `e2e/manual-operations-interact.spec.ts` (`C3:` test). If pointer/wheel routing changes, update that proof instead of relying only on DOM-level mocks.
@@ -229,7 +227,7 @@ Source of truth stays in `App.css`; composition consumers in `designSystem.overl
 | `--ds-z-dev` | dev overlays and floating diagnostics |
 | `--ds-z-tooltip` | tooltip surfaces |
 | `--ds-z-inset` | dropdown/inset overlays above bars but below alerts |
-| `--ds-z-alert` | notification toasts and alert-level overlays |
+| `--ds-z-alert` | alert-level overlays (049 S2: no toast any more) |
 
 ### 6.3 Diagnostics and degraded behavior
 

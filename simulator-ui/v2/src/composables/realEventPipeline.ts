@@ -10,6 +10,7 @@ import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { runStatusErrorLine, writeRunErrorLine, type RunErrorLine } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
+import { compareMoney, moneyText, subMoney } from '../utils/money'
 import { debtChangeAround } from './debtChange'
 
 export type RealEventReplayRejection = {
@@ -149,8 +150,26 @@ export type RealEventStateDeps = {
   inc: (map: Record<string, number>, key: string) => void
 }
 
+/**
+ * 049 S2 (decision 5): what the line of the network's events says about one ACCEPTED event (after the context check and
+ * the deduplication by `event_id` of the replay owner - the only door here). Written only from the event's own fields: a
+ * payment with its explicit sides and amount; a failure with its sides and code (`tx.failed` carries no amount); a
+ * clearing with its cycles and the drop of the total debt - the difference of the before/after pair of ONE snapshot
+ * around its patches (`debtChange.ts`), never `cleared_amount` (a cycle of three debts cleared by 10 lowers the total by
+ * 30); the growth of trust after a clearing (`topology.changed` of reason `trust_drift_growth`). Nothing else is a line.
+ */
+export type RealEventFeedItem =
+  | { kind: 'payment'; eventId: string; equivalent: string; from: string; to: string; amount: string }
+  | { kind: 'failure'; eventId: string; equivalent: string; from: string; to: string; code: string }
+  | { kind: 'clearing'; eventId: string; equivalent: string; cycles: number | null; debtDrop: string | null }
+  | { kind: 'trustGrowth'; eventId: string; equivalent: string }
+
+/** The reason of the `topology.changed` the tick publishes when a clearing grew the limits (`app/core/simulator/tick.py`). */
+export const TRUST_DRIFT_GROWTH_REASON = 'trust_drift_growth'
+
 export type RealEventIntent =
   | { type: 'accepted-event' }
+  | { type: 'feed'; item: RealEventFeedItem }
   | { type: 'refresh-snapshot' }
   | { type: 'wake' }
   | { type: 'tx-fx'; event: TxUpdatedEvent }
@@ -369,6 +388,17 @@ export function applyAcceptedRealEvent(
     deps.patchApplier.applyNodePatches(event.node_patch)
     deps.patchApplier.applyEdgePatches(event.edge_patch)
 
+    // 049 S2: the explicit sides only - a side taken from the route's edges would be a guess of the line's.
+    const feedFrom = String(event.from ?? '').trim()
+    const feedTo = String(event.to ?? '').trim()
+    const feedAmount = moneyText(event.amount)
+    if (feedFrom && feedTo && feedAmount !== null) {
+      intents.push({
+        type: 'feed',
+        item: { kind: 'payment', eventId: event.event_id, equivalent: canonicalEquivalent(event.equivalent), from: feedFrom, to: feedTo, amount: feedAmount },
+      })
+    }
+
     intents.push({ type: 'tx-fx', event }, { type: 'wake' })
     const allowAmountFlyout = event.amount_flyout !== false
     if (!allowAmountFlyout) intents.push({ type: 'amount-flyout-suppressed' })
@@ -428,6 +458,14 @@ export function applyAcceptedRealEvent(
       draft.real.runStats.rejected += 1
       deps.inc(draft.real.runStats.rejectedByCode, code)
     }
+    const feedFrom = String(event.from ?? '').trim()
+    const feedTo = String(event.to ?? '').trim()
+    if (!otherEquivalent && feedFrom && feedTo) {
+      intents.push({
+        type: 'feed',
+        item: { kind: 'failure', eventId: event.event_id, equivalent: canonicalEquivalent(event.equivalent), from: feedFrom, to: feedTo, code },
+      })
+    }
     return intents
   }
 
@@ -439,11 +477,24 @@ export function applyAcceptedRealEvent(
       deps.patchApplier.applyNodePatches(event.node_patch)
       deps.patchApplier.applyEdgePatches(event.edge_patch)
     })
+    // 049 S2: the drop of the total is the pair this very event closed (before - after), or none.
+    const pair = draft.state.debtChange?.eventId === event.event_id ? draft.state.debtChange : null
+    const debtDrop = pair && compareMoney(pair.before, pair.after) === 1 ? subMoney(pair.before, pair.after) : null
+    const cycles = typeof event.cleared_cycles === 'number' ? event.cleared_cycles : null
+    intents.push({
+      type: 'feed',
+      item: { kind: 'clearing', eventId: event.event_id, equivalent: canonicalEquivalent(event.equivalent), cycles, debtDrop },
+    })
     intents.push({ type: 'clearing-fx', event }, { type: 'wake' })
     return intents
   }
 
-  if (isTopologyChangedEvent(event)) applyTopologyEvent(event, draft, deps, intents)
+  if (isTopologyChangedEvent(event)) {
+    if (!otherEquivalent && event.reason === TRUST_DRIFT_GROWTH_REASON) {
+      intents.push({ type: 'feed', item: { kind: 'trustGrowth', eventId: event.event_id, equivalent: canonicalEquivalent(event.equivalent) } })
+    }
+    applyTopologyEvent(event, draft, deps, intents)
+  }
   return intents
 }
 
@@ -455,6 +506,8 @@ export function executeRealEventIntents(
     getSceneEquivalent?: () => string | null
     optionalFxEnabled?: () => boolean
     onAnySseEvent?: () => void
+    /** 049 S2 (decision 5): the line of the network's events of an accepted event (`RealEventFeedItem`). */
+    onFeedItem?: (item: RealEventFeedItem) => void
     refreshSnapshot: () => void
     wakeUp?: () => void
     runRealTxFx: (event: TxUpdatedEvent) => void
@@ -473,6 +526,7 @@ export function executeRealEventIntents(
   for (const intent of intents) {
     deps.onIntentExecuted?.(intent)
     if (intent.type === 'accepted-event') deps.onAnySseEvent?.()
+    else if (intent.type === 'feed') deps.onFeedItem?.(intent.item)
     else if (intent.type === 'refresh-snapshot') deps.refreshSnapshot()
     else if (intent.type === 'wake') deps.wakeUp?.()
     else if (intent.type === 'tx-fx' && fxEnabled()) deps.runRealTxFx(intent.event)

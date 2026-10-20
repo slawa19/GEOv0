@@ -46,6 +46,7 @@ import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
   executeRealEventIntents,
+  type RealEventFeedItem,
   type RealEventIntent,
 } from './realEventPipeline'
 
@@ -185,6 +186,8 @@ export function useSimulatorRealMode(opts: {
   // Optional: notify on any accepted SSE event. No production caller since 043 S3 (its one caller kept the Demo UI
   // render loop awake); the tests of this module observe accepted events through it.
   onAnySseEvent?: () => void
+  /** 049 S2 (decision 5): the line of the network's events of each accepted event (the history decides whether to keep it). */
+  onFeedItem?: (item: RealEventFeedItem) => void
   // Optional visual-effects policy seam (e.g. reduced-motion integration).
   optionalFxEnabled?: () => boolean
 }): {
@@ -234,6 +237,7 @@ export function useSimulatorRealMode(opts: {
     runRealClearingDoneFx,
     wakeUp,
     onAnySseEvent,
+    onFeedItem,
     optionalFxEnabled,
   } = opts
 
@@ -701,6 +705,7 @@ export function useSimulatorRealMode(opts: {
       getSceneEquivalent: () => state.snapshot?.equivalent ?? null,
       optionalFxEnabled,
       onAnySseEvent,
+      onFeedItem,
       refreshSnapshot: () => void refreshSnapshot(),
       wakeUp,
       runRealTxFx,

@@ -8,7 +8,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { measure, problems } from './helpers/p037Fit.js'
-import { mockApp, ready } from './helpers/p037Mock.js'
+import { mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 type MockOpts = Parameters<typeof mockApp>[1]
 
@@ -70,7 +70,6 @@ test.describe('037 C - the clearing result in a real browser', () => {
 
     await expect(page.locator('[data-testid="clearing-nothing"]')).toHaveText('Nothing was cleared: no cycle of debts was found.')
     await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(0)
-    await expect(page.getByTestId('success-toast')).toHaveCount(0)
     await expect(page.locator('[data-testid="clearing-close"]')).toBeEnabled()
   })
 
@@ -144,7 +143,7 @@ for (const vp of VIEWPORTS) {
 
       await page.locator('[data-testid="clearing-confirm"]').tap()
       await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(5)
-      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
+      await settleShell(page, 'clearing-panel') // 049 S2: was the wait for the (removed) success toast, which also let the window settle
       const long = await measure(page, 'long-result', ['[data-testid="clearing-close"]'], 'clearing-panel')
 
       // The last line of the last cycle, with the body scrolled to its end, lies above Close (not under it) and is not covered.
@@ -181,7 +180,7 @@ for (const vp of VIEWPORTS) {
       await page.locator('[data-testid="actionbar-clearing"]').tap()
       await page.locator('[data-testid="clearing-confirm"]').tap()
       await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(2)
-      await expect(page.getByTestId('success-toast')).toBeHidden({ timeout: 15_000 })
+      await settleShell(page, 'clearing-panel') // 049 S2: as above
       const result = await measure(page, 'result', ['[data-testid="clearing-close"]'], 'clearing-panel')
       expect.soft(problems(result), `clearing result in ${vp.w}x${vp.h}`).toEqual([])
     })

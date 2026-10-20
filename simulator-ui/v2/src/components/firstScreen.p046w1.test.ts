@@ -31,7 +31,6 @@ import EdgeTooltip from './EdgeTooltip.vue'
 import GraphNavigator from './GraphNavigator.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import Legend from './Legend.vue'
-import SuccessToast from './SuccessToast.vue'
 import SystemBalanceBar from './SystemBalanceBar.vue'
 import TopBar from './TopBar.vue'
 
@@ -125,8 +124,10 @@ const bottomBarProps = () => ({
 async function mountFirstScreen(): Promise<void> {
   // The top bar: the administrator's "Подробнее" (it holds the visitor's and more), a stall and an error with "Try again".
   // The error line's holder renders its text in the current language (`useSimulatorRealMode.ts`); here a computed does.
-  // 048 S3: with its request id - the id's line is the interface's words too («код запроса» / «request id»; the id is data).
+  // 048 S3: with its request id (049 S2: `data-request-id` only, no drawn line).
   mount(TopBar, { detailsOpen: true }, context({ accessToken: ref(ADMIN), lastError: computed(() => t('runStart.limitBusy')), lastErrorRef: ref('1234-5678'), startRetryable: ref(true) } as Partial<TopBarContext>))
+  // 049 S2: a visitor's «Подробнее» on a living run - the tempo by words (decisions 10) and «Показывать события» (decision 5).
+  mount(TopBar, { detailsOpen: true, eventsFeedOn: true }, context({ runStatus: ref({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running', intensity_percent: 5 } as RunStatus) }))
   // A visitor's first row only, on a paused run (the other words of the flow button and of the state).
   mount(TopBar, { detailsOpen: false }, context({ runStatus: ref({ run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus) }))
   // A stopped run with a reason, and the administrator's empty catalogue ("No scenarios…").
@@ -148,11 +149,24 @@ async function mountFirstScreen(): Promise<void> {
   nav.querySelector('details')!.open = true
   // 046 wave 3: a history line is kept as its key and data (BACKLOG 046-3) - so it is the interface's words too.
   mount(InteractHistoryLog, { entries: [{ id: 'h1', icon: '💸', line: { key: 'history.payment', vars: { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' } }, timeText: '12:00' }] })
+  // 049 S2: «События сети» - every kind of a network line, a series and an own line marked «вы»: the interface's words too.
+  mount(InteractHistoryLog, {
+    feedOn: true,
+    maxVisible: 8,
+    entries: [
+      { id: 'o1', seq: 1, source: 'own', icon: '🔗', line: { key: 'history.trustlineClosed', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
+      { id: 'n1', seq: 2, source: 'network', icon: '💸', lead: { plural: 'feed.paymentSeries', count: 6 }, line: { key: 'feed.payment', vars: { from: 'Алиса', to: 'Борис', amount: '1.00', unit: 'UAH' } }, timeText: '12:00' },
+      { id: 'n2', seq: 3, source: 'network', icon: '✕', lead: { plural: 'feed.failureSeries', count: 2 }, line: { key: 'feed.failedNoCapacity', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
+      { id: 'n3', seq: 4, source: 'network', icon: '✕', line: { key: 'feed.failed', vars: { from: 'Алиса', to: 'Борис' } }, timeText: '12:00' },
+      { id: 'n4', seq: 5, source: 'network', icon: '🌀', line: { plural: 'feed.clearing', count: 2, vars: { amount: '30.00', unit: 'UAH' } }, timeText: '12:00' },
+      { id: 'n5', seq: 6, source: 'network', icon: '🌀', line: { plural: 'feed.clearingCycles', count: 1 }, timeText: '12:00' },
+      { id: 'n6', seq: 7, source: 'network', icon: '📈', line: { key: 'feed.trustGrowth' }, timeText: '12:00' },
+    ],
+  })
   mount(EdgeTooltip, {
     style: {}, getNodeName: (id: string) => NODES.find((n) => n.id === id)?.name ?? null,
     edge: { key: 'alice->bob', fromId: 'alice', toId: 'bob', amountText: '', trustLimit: '100.00', used: '12.00', available: '-3.00', equivalent: 'UAH' },
   })
-  mount(SuccessToast, { message: 'Алиса', onDismiss: vi.fn() })
   await settle()
 }
 
@@ -162,9 +176,10 @@ describe('046 wave 1, full - the first screen in one language', () => {
     for (const id of [
       'network-state', 'flow-toggle', 'details-toggle', 'top-details-row', 'own-run-row', 'run-payments', 'stop-reason', 'top-error',
       'start-retry', 'capacity-stall', 'no-scenarios', 'action-bar', 'actionbar-busy-hint', 'actionbar-locked-hint', 'bottom-details-row',
-      'layout-select', 'reset-view', 'system-balance', 'legend', 'graph-navigator', 'recent-actions', 'edge-tooltip', 'success-toast',
-      // 048 S3: the error toast is gone (a window's failure is its block); the error line's request id is its own line.
-      'error-request-id',
+      'layout-select', 'reset-view', 'system-balance', 'legend', 'graph-navigator', 'recent-actions', 'edge-tooltip',
+      // 048 S3: the error toast is gone (a window's failure is its block). 049 S2: the success toast and the drawn request
+      // id are gone; the visitor's tempo steps and the switch of the network's events are on «Подробнее».
+      'tempo-steps', 'events-feed-toggle',
     ]) expect(document.querySelector(`[data-testid="${id}"]`), id).not.toBeNull()
   })
 
@@ -251,7 +266,8 @@ describe('046 wave 1, full - the words of 048 §G and item 13 (a)', () => {
       expect(stall.getAttribute('aria-label'), locale).toBe(t('topBar.stallAria'))
       document.body.innerHTML = ''
     }
-    expect(t('topBar.stall', undefined, 'ru')).toBe('Платежи не проходят: лимиты исчерпаны — проведите клиринг или увеличьте лимит')
-    expect(t('topBar.stall', undefined, 'en')).toBe('Payments are not going through: limits are exhausted — run clearing or raise a limit')
+    // 049 S2 (decision 8): the spec's words - softer than «limits are exhausted», which the detector does not prove.
+    expect(t('topBar.stall', undefined, 'ru')).toBe('Последние платежи не проходят. Попробуйте клиринг или увеличьте лимит нужной линии.')
+    expect(t('topBar.stall', undefined, 'en')).toBe("Recent payments are not going through. Try clearing or increase the relevant trustline's limit.")
   })
 })
