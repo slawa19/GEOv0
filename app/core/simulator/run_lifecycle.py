@@ -599,8 +599,8 @@ class RunLifecycle:
             run.queue_depth = 0
             run.ops_sec = 0.0
             # 049 S2a: an empty share no longer clears the stall run nor the run of tick failures (`is_empty_share`),
-            # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch - whose
-            # first ticks may plan nothing at a slow step - starts both from zero here, like `errors_total` above.
+            # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch starts both
+            # from zero here, like `errors_total` above - the old launch's counts must not greet the new one.
             run._real_consec_all_rejected_ticks = 0
             run._real_consec_tick_failures = 0
             run.stopped_at = None

@@ -525,6 +525,12 @@ def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
         return None
 
 
+# The opening window of a launch: ticks 1..LAUNCH_OPENING_TICKS plan at least one action at any intensity above zero.
+# `run_lifecycle` creates and restarts a run at `tick_index` 0 and the heartbeat (`runtime_impl._heartbeat_loop`)
+# advances it before each tick it runs, so tick 1 is the first tick a launch runs.
+LAUNCH_OPENING_TICKS = 5
+
+
 def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
     """049 decision 10: the tick's share of a FRACTIONAL action budget, accumulated between ticks.
 
@@ -548,6 +554,25 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
       a change cannot release budget saved at the old rate as a burst (the carry takes the new rate's phase).
     Tick 0 is never run by the heartbeat; its share is the carry the first tick starts with (a direct driver may
     plan tick 0 itself: it gets ``floor(r_0)``, the warm-up floor's rate).
+
+    THE LAUNCH'S OPENING WINDOW (ticks ``1..LAUNCH_OPENING_TICKS``; a created or restarted run is at ``tick_index`` 0
+    and the heartbeat advances it before each tick, so tick 1 is the first one run) plans ``max(1, share)`` at any
+    intensity above zero; from tick ``LAUNCH_OPENING_TICKS + 1`` the share is planned unchanged. Spec 043 promises
+    a first-time visitor a payment within 15 s of opening (1 s ticks, a few seconds of bootstrap). Before S2a the
+    ``max(1, ...)`` above gave EVERY tick an attempt, and that - not the warm-up - kept the promise: with the warm-up
+    applied at a low tempo the share reaches one action only on tick 6 at 5 %, 12 at 2 %. A single action on tick 1
+    was not enough (049 T4915, measured): the plan can come out empty under candidate sampling, or its payment be
+    rejected (``ROUTING_NO_ROUTE``), about 27 % of opening attempts together. So the window restores «an attempt on
+    every tick» only for the opening, and a lost attempt is retried on the next tick: even after four losses in a row
+    the fifth tick attempts (about 6-8 s after the page opens). With 27 % lost independently, no attempt of five
+    landing is about 0.27 ** 5 = 0.14 % - an estimate: early losses may be correlated (a sparse early graph, the same
+    routes); the live first-visit test is the check.
+    * At most ``LAUNCH_OPENING_TICKS`` extra actions per launch - exactly the window's ticks whose share is 0 - so the
+      slow step is distorted by at most five payments.
+    * Derived from ``tick_index``, no state: a replay of a window tick plans the same; a resume past the window
+      gets nothing extra; a restart returns to tick 0 and the next launch has its window again.
+    * Never more than ``ceil(r_t)`` in a tick: ``max(1, share) <= ceil(r_t)`` for ``r_t > 0``, a percent change
+      inside the window included.
     """
 
     base = _base_intensity(run)
@@ -556,9 +581,12 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
     warmup_ticks, warmup_floor = _warmup_of(scenario)
     t = max(0, int(getattr(run, "tick_index", 0) or 0))
     rate_max = int(actions_per_tick_max)
-    return math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
+    share = math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
         rate_max * _budget_through(base, warmup_ticks, warmup_floor, t - 1)
     )
+    if 1 <= t <= LAUNCH_OPENING_TICKS:
+        return max(1, share)
+    return share
 
 
 def _base_intensity(run: Any) -> Fraction:

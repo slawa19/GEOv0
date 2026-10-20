@@ -12,7 +12,8 @@ a replay of the same tick's money phase (`money_replay.py`) with unchanged input
 `tick_index`, and a restart sets it to 0.
 
 The planner is driven with the configured `SIMULATOR_ACTIONS_PER_TICK_MAX` (20) on a mesh where every planning slot
-can be filled, so the planned count IS the budget (anti-vacuum: 15 % must fill 30 of 30).
+can be filled, so the planned count IS the budget (anti-vacuum: 15 % must fill 30 of 30). The launch's opening window
+(ticks 1..5) plans at least one action per tick at any intensity above zero (the section at the end of the module).
 """
 
 from __future__ import annotations
@@ -103,18 +104,19 @@ def test_the_configured_maximum_is_the_one_decision_10_counts_with() -> None:
     [(2, 4), (5, 10), (15, 30), (0, 0)],
 )
 def test_ten_ticks_plan_exactly_the_fractional_budget(intensity_percent: int, expected_in_ten_ticks: int) -> None:
-    """TARGET (049 (з)): 2 % plans 4 actions in 10 ticks (was 10), 5 % — 10, 15 % — 30, 0 % — 0."""
+    """TARGET (049 (з)): 2 % plans 4 actions in 10 ticks (was 10), 5 % — 10, 15 % — 30, 0 % — 0, in any ten ticks past
+    the launch's opening window (`LAUNCH_OPENING_TICKS`, ticks 1..5, which plan at least one each)."""
 
     runner = _runner()
-    for first_tick in (1, 7, 123):  # any ten consecutive ticks, not only the run's first ten
+    for first_tick in (6, 17, 123):  # any ten consecutive ticks past the opening window
         counts = _planned_per_tick(runner, _run(intensity_percent), range(first_tick, first_tick + 10))
         assert sum(counts) == expected_in_ten_ticks, (intensity_percent, first_tick, counts)
 
 
 def test_at_two_percent_a_payment_comes_every_two_or_three_ticks() -> None:
-    counts = _planned_per_tick(_runner(), _run(2), range(1, 41))
+    counts = _planned_per_tick(_runner(), _run(2), range(6, 46))  # past the opening window (an action each)
     assert set(counts) <= {0, 1}, counts
-    ticks_with_action = [t for t, n in zip(range(1, 41), counts) if n]
+    ticks_with_action = [t for t, n in zip(range(6, 46), counts) if n]
     gaps = {b - a for a, b in zip(ticks_with_action, ticks_with_action[1:])}
     assert gaps == {2, 3}, (ticks_with_action, gaps)
 
@@ -122,7 +124,7 @@ def test_at_two_percent_a_payment_comes_every_two_or_three_ticks() -> None:
 def test_a_zero_action_tick_is_an_ordinary_empty_plan() -> None:
     """At 2 % most ticks plan nothing: the planner returns an empty list, it does not raise."""
 
-    counts = _planned_per_tick(_runner(), _run(2), range(5, 7))  # ticks 5 and 6: carry 0.0 -> 0.4 -> 0.8
+    counts = _planned_per_tick(_runner(), _run(2), range(15, 17))  # ticks 15 and 16: carry 0.0 -> 0.4 -> 0.8
     assert counts == [0, 0]
 
 
@@ -138,9 +140,10 @@ def test_a_replanned_tick_spends_its_budget_once() -> None:
 
 
 def test_the_slow_step_from_a_runs_first_tick() -> None:
-    """The carry starts at 0 at tick 0 (never run by the heartbeat): the first payment comes on tick 2."""
+    """The carry starts at 0 at tick 0 (never run by the heartbeat); the opening window (ticks 1..5,
+    `LAUNCH_OPENING_TICKS`) plans one action on each tick, and from tick 6 the budget's 2-3 tick pattern resumes."""
 
-    assert _planned_per_tick(_runner(), _run(2), range(1, 11)) == [0, 1, 0, 1, 0, 0, 1, 0, 1, 0]
+    assert _planned_per_tick(_runner(), _run(2), range(1, 16)) == [1] * 5 + [0, 1, 0, 1, 0, 0, 1, 0, 1, 0]
 
 
 @pytest.mark.parametrize(("before", "after"), [(15, 2), (2, 15), (100, 2), (2, 5), (5, 2), (15, 0)])
@@ -189,16 +192,21 @@ def test_every_tick_plans_what_the_stored_accumulator_would(intensity_percent: i
     current RATE alone would drift from it while the ramp changes the rate every tick)."""
 
     planned = _planned_per_tick(_runner(), _run(intensity_percent), range(1, 121), warmup)
-    assert planned == _accumulator(intensity_percent, 120, warmup)
+    budget = _accumulator(intensity_percent, 120, warmup)
+    # The opening window (ticks 1..5) plans at least one at an intensity above zero; from tick 6 it is the budget.
+    assert planned[:5] == [max(1, n) if intensity_percent > 0 else 0 for n in budget[:5]]
+    assert planned[5:] == budget[5:]
 
 
 def test_the_normal_step_during_the_presets_warm_up() -> None:
-    """5 % on a preset with the 50-tick ramp: the first payment on tick 6, 28 in the ramp's first 50 ticks, no gap
-    longer than 4 ticks."""
+    """5 % on a preset with the 50-tick ramp: the budget's first payment comes on tick 6 and it plans 28 in the ramp's
+    first 50 ticks; the opening window (ticks 1..5, all with share 0) adds one on each, so 33; no gap over 4 ticks."""
 
     planned = _planned_per_tick(_runner(), _run(5), range(1, 51), WARMUP)
+    budget = _accumulator(5, 50, WARMUP)
+    assert [t for t, n in zip(range(1, 51), budget) if n][0] == 6 and sum(budget) == 28, budget
     with_action = [t for t, n in zip(range(1, 51), planned) if n]
-    assert with_action[0] == 6 and sum(planned) == 28, planned
+    assert with_action[:6] == [1, 2, 3, 4, 5, 6] and sum(planned) == 28 + 5, planned
     assert max(b - a for a, b in zip(with_action, with_action[1:])) <= 4, with_action
 
 
@@ -262,8 +270,8 @@ async def test_real_outcomes_still_drive_the_stall_counter_as_before() -> None:
 
 
 async def test_restart_starts_the_stall_run_from_zero(clock) -> None:  # noqa: F811
-    """A restarted launch at the slow step plans nothing on its first ticks, which no longer clear the counter: the
-    restart itself does (`run_lifecycle.restart`), or the old launch's Stall plaque would greet the new one."""
+    """Empty ticks no longer clear the counter, so the restart itself does (`run_lifecycle.restart`), or the old
+    launch's Stall plaque and failure count would greet the new one."""
 
     run = await _started(clock, "anon:p049-s2a-restart")
     run._real_consec_all_rejected_ticks = 4
@@ -477,3 +485,103 @@ async def test_where_no_tick_is_an_empty_share_the_counter_behaves_as_before(
     _run, runner, counters = await _drive(monkeypatch, intensity_percent, script)
     assert counters == expected, counters
     assert _stops(runner) == stops
+
+
+# ── the first payment within 15 s: the launch's opening window (049 T4915, after S2a) ─────────────────────────────────
+#
+# THE DEFECT (red on `51058522`). Before S2a `max(1, int(r_t))` planned an action on every tick at any intensity above
+# zero, so a launch's first payment came within 2-4 s of opening; that, not the warm-up, kept spec 043's «a payment
+# within 15 s». S2a made the warm-up (`settings.warmup`, 50 ticks from 0.1) really apply at a low tempo: at 5 % the
+# budget reaches one action on tick 6, at 2 % on tick 12 - ui-smoke's live step on PR #339 (visitor default 5 %) timed
+# out at 15 s. One action on tick 1 was not enough (measured): the plan can come out empty under candidate sampling or
+# its payment be rejected (about 27 % of opening attempts), and the next attempt was the budget's again.
+#
+# THE RULE. The launch's opening window - ticks 1..`LAUNCH_OPENING_TICKS` (5), tick 1 being the first the heartbeat
+# runs (a created or restarted run is at 0 and the heartbeat advances it before each tick) - plans `max(1, share)` at
+# any intensity above zero; from tick 6 every tick plans exactly the budget's share as before; 0 % plans nothing.
+
+from app.core.simulator.real_payment_planner import LAUNCH_OPENING_TICKS  # noqa: E402
+
+
+def _launch_counts(intensity_percent: int, warmup: dict[str, Any] | None, ticks: int = 20) -> list[int]:
+    return _planned_per_tick(_runner(), _run(intensity_percent), range(1, ticks + 1), warmup)
+
+
+def test_the_opening_window_is_the_first_five_ticks() -> None:
+    assert LAUNCH_OPENING_TICKS == 5
+
+
+@pytest.mark.parametrize("warmup", [None, WARMUP], ids=["no-warmup", "warmup-50"])
+@pytest.mark.parametrize("intensity_percent", [2, 5, 15])
+def test_every_tick_of_the_opening_window_plans_a_payment(intensity_percent: int, warmup: dict | None) -> None:
+    """TARGET: ticks 1..5 plan at least one at 2 %, 5 % and 15 %, on the presets' warm-up too; tick 6 plans the share."""
+
+    planned = _launch_counts(intensity_percent, warmup, ticks=6)
+    budget = _accumulator(intensity_percent, 6, warmup)
+    assert all(n >= 1 for n in planned[:5]), (intensity_percent, warmup, planned)
+    assert planned[5] == budget[5], (planned[5], budget[5])
+
+
+@pytest.mark.parametrize("warmup", [None, WARMUP], ids=["no-warmup", "warmup-50"])
+def test_at_intensity_zero_the_opening_window_plans_nothing(warmup: dict | None) -> None:
+    """Counter-check: the window does not plan at 0 % - the run attempts nothing."""
+
+    assert _launch_counts(0, warmup, ticks=20) == [0] * 20
+
+
+@pytest.mark.parametrize("warmup", [None, WARMUP], ids=["no-warmup", "warmup-50"])
+@pytest.mark.parametrize("intensity_percent", [2, 5, 7, 15, 30])
+def test_the_window_adds_exactly_one_action_per_empty_share_and_nothing_after_it(
+    intensity_percent: int, warmup: dict | None
+) -> None:
+    """The extra actions of a launch are exactly the window's ticks whose share is 0 (at most 5): the window plans
+    `max(1, share)`, every tick after it the share."""
+
+    planned = _launch_counts(intensity_percent, warmup, ticks=80)
+    budget = _accumulator(intensity_percent, 80, warmup)
+    assert planned[:5] == [max(1, n) for n in budget[:5]]
+    assert planned[5:] == budget[5:]
+    extra = sum(planned) - sum(budget)
+    assert extra == sum(1 for n in budget[:5] if n == 0) and extra <= LAUNCH_OPENING_TICKS, (extra, budget[:5])
+
+
+def test_the_presets_steps_get_an_extra_action_on_each_empty_window_tick() -> None:
+    """On the presets' warm-up the window's shares are 0 except at 15 % on ticks 2 and 4: 5, 5 and 3 extra actions."""
+
+    for intensity_percent, empty_window_ticks in ((2, 5), (5, 5), (15, 3)):
+        budget = _accumulator(intensity_percent, 5, WARMUP)
+        assert sum(1 for n in budget if n == 0) == empty_window_ticks, (intensity_percent, budget)
+        assert sum(_launch_counts(intensity_percent, WARMUP, ticks=5)) == sum(budget) + empty_window_ticks
+
+
+def test_a_restarted_launch_has_its_window_again_a_replay_the_same_count_and_a_resume_no_extra() -> None:
+    """Restart sets `tick_index` to 0 (`run_lifecycle.restart`, asserted above): the heartbeat's next ticks are 1..5
+    again and plan one each; a replay of a window tick plans the same; a run resumed past the window gets no extra."""
+
+    runner, run, scenario = _runner(), _run(5), _mesh(warmup=WARMUP)
+    _planned_per_tick(runner, run, range(1, 30), WARMUP)
+    run.tick_index = 0  # restart
+    for t in range(1, LAUNCH_OPENING_TICKS + 1):
+        run.tick_index = t  # the heartbeat's ticks of the new launch
+        plan = runner._plan_real_payments(run, scenario)
+        assert len(plan) >= 1, t
+        assert runner._plan_real_payments(run, scenario) == plan  # replay
+    budget = _accumulator(5, 40, WARMUP)
+    assert _planned_per_tick(runner, run, range(6, 41), WARMUP) == budget[5:]  # resume-like continuation: no extra
+
+
+@pytest.mark.parametrize(("before", "after"), [(15, 2), (2, 15), (100, 2), (2, 5), (5, 2), (15, 0), (0, 2)])
+def test_an_intensity_change_inside_the_window_stays_within_the_new_rate(before: int, after: int) -> None:
+    """With the presets' warm-up, a change on any window tick: that tick and the next ones plan at most
+    `ceil(20 * after / 100)` (`max(1, share) <= ceil(r)` for `r > 0`)."""
+
+    runner, run, scenario = _runner(), _run(before), _mesh(warmup=WARMUP)
+    ceiling = math.ceil(ACTIONS_PER_TICK_MAX * after / 100)
+    for change_at in range(1, LAUNCH_OPENING_TICKS + 1):
+        run.intensity_percent = before
+        run.tick_index = change_at - 1
+        runner._plan_real_payments(run, scenario)
+        run.intensity_percent = after
+        for t in range(change_at, change_at + 5):
+            run.tick_index = t
+            assert len(runner._plan_real_payments(run, scenario)) <= ceiling, (before, after, change_at, t)
