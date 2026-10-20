@@ -31,7 +31,7 @@ async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topolo
         json={
             "scenario_id": "trust-drift-decay-minimal",
             # Keep intensity low so we don't spam the single edge.
-            # Planner guarantees >=1 action/tick when intensity>0.
+            # 5 % of 20 actions is exactly one action per tick (049 decision 10: fractional budget).
             "mode": "real",
             "intensity_percent": 5,
         },

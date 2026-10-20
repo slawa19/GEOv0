@@ -64,7 +64,7 @@ from app.core.simulator.money_replay import (
     run_money_phase_with_bounded_replay,
 )
 from app.core.simulator.net_balance_utils import to_money_str
-from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult
+from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult, is_empty_share
 from app.core.simulator.real_scenario_seeder import (
     SCENARIO_TRUSTLINE_REFUSED,
     SIMULATOR_PID_TAKEN,
@@ -289,6 +289,7 @@ class RealTick:
         # updates under Postgres).
         await self._await_pending_clearing(run_id, run=run)
 
+        money = None  # read by the failure accounting below: None until the money phase has completed
         try:
             money = await self._open_money_phase(run_id=run_id, run=run, scenario=scenario)
             if money is None:
@@ -369,6 +370,15 @@ class RealTick:
                         per_eq_edge_stats=payments_phase.per_eq_edge_stats,
                         payments_result=payments_phase,
                     )
+
+                    # 049 S2a: the tick has SUCCEEDED - the place that clears the run of consecutive tick failures
+                    # (until 049 the executor cleared it as soon as the payments ran, so a failure after them - a
+                    # landed commit whose outcome still failed the tick, a failing tail - could never reach the limit).
+                    # An empty share attempted nothing and clears nothing (`is_empty_share`), like its failure counts
+                    # nothing below: three consecutive ATTEMPTED failing ticks stop the run at every tempo.
+                    if not is_empty_share(run, len(payments_phase.planned)):
+                        with rr._lock:
+                            run._real_consec_tick_failures = 0
 
                 except Exception as tick_error:
                     # CRITICAL: always attempt rollback on tick failure. Otherwise the pooled connection can be
@@ -472,7 +482,12 @@ class RealTick:
                 cutoff = time.time() - 60.0
                 while run._error_timestamps and run._error_timestamps[0] < cutoff:
                     run._error_timestamps.popleft()
-                run._real_consec_tick_failures += 1
+                # 049 S2a: a tick KNOWN to be an empty share (its money phase completed and planned nothing while the
+                # run plans payments) attempted nothing: its failure - only its tail can fail - is not one of the
+                # consecutive ATTEMPTED failures, just as its success does not clear them (`is_empty_share`). A failure
+                # before or inside the money phase counts: the tick may have attempted payments.
+                if not (money is not None and money.phase is not None and is_empty_share(run, len(money.phase.planned))):
+                    run._real_consec_tick_failures += 1
                 run.last_error = {
                     "code": "REAL_MODE_TICK_FAILED",
                     "message": str(e),
@@ -718,8 +733,10 @@ class RealTick:
         )
 
         stall_ticks = int(payments_res.stall_ticks)
-        # Stall warning, throttled: every 5 consecutive stall ticks.
-        if stall_ticks > 0 and stall_ticks % 5 == 0:
+        # Stall warning, throttled: every 5 consecutive stall ticks - logged by the tick that COUNTED the fifth (an
+        # attempted, all-rejected tick: one that planned something and left the counter above 0). Since 049 S2a an empty
+        # share holds the counter, and a multiple of 5 held over empty ticks must not log on every heartbeat.
+        if planned and stall_ticks > 0 and stall_ticks % 5 == 0:
             rr._logger.warning(
                 "simulator.real.all_rejected_stall run_id=%s tick=%s "
                 "consec_stall_ticks=%d planned=%d rejected=%d",
@@ -1743,13 +1760,16 @@ class RealTick:
                 if not eq_upper:
                     continue
                 only_edges = (decay_res.touched_edges_by_eq or {}).get(eq_upper)
-                edge_patch = await rr._build_edge_patch_for_equivalent(
-                    session=session,
-                    run=run,
-                    equivalent_code=eq_upper,
-                    only_edges=only_edges,
-                    include_width_keys=True,
-                )
+                # 049 S2a: the patch is READ on the tail's session and its failure swallowed below - in a SAVEPOINT,
+                # so a failed read does not leave the tail's transaction aborted (see `populate_per_eq_metric_values`).
+                async with session.begin_nested():
+                    edge_patch = await rr._build_edge_patch_for_equivalent(
+                        session=session,
+                        run=run,
+                        equivalent_code=eq_upper,
+                        only_edges=only_edges,
+                        include_width_keys=True,
+                    )
                 rr._broadcast_topology_edge_patch(
                     run_id=run_id,
                     run=run,
@@ -1802,28 +1822,33 @@ class RealTick:
 
         if should_refresh_total_debt:
             try:
-                eq_rows = (
-                    await session.execute(
-                        select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents)))
-                    )
-                ).all()
-                eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
-                with rr._lock:
-                    perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
-                for eq_code, eq_id in eq_id_by_code.items():
-                    # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
-                    # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
-                    total = (
+                # 049 S2a: the reads run in a SAVEPOINT of the tail's session. A failed read is swallowed below, and
+                # without the savepoint it left the transaction ABORTED on PostgreSQL: every later statement of the
+                # tail failed ("current transaction is aborted") - the metrics write was lost every such tick. The
+                # savepoint rolls back only the failed read; the tail goes on in a usable transaction.
+                async with session.begin_nested():
+                    eq_rows = (
                         await session.execute(
-                            select(func.coalesce(func.sum(Debt.amount), 0)).where(
-                                Debt.equivalent_id == eq_id,
-                                Debt.debtor_id.in_(perimeter_ids),
-                                Debt.creditor_id.in_(perimeter_ids),
-                            )
+                            select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents)))
                         )
-                    ).scalar_one()
-                    # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
-                    total_debt_by_eq[str(eq_code)] = total if isinstance(total, Decimal) else Decimal(str(total))
+                    ).all()
+                    eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
+                    with rr._lock:
+                        perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
+                    for eq_code, eq_id in eq_id_by_code.items():
+                        # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
+                        # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
+                        total = (
+                            await session.execute(
+                                select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                                    Debt.equivalent_id == eq_id,
+                                    Debt.debtor_id.in_(perimeter_ids),
+                                    Debt.creditor_id.in_(perimeter_ids),
+                                )
+                            )
+                        ).scalar_one()
+                        # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
+                        total_debt_by_eq[str(eq_code)] = total if isinstance(total, Decimal) else Decimal(str(total))
 
                 with rr._lock:
                     run._real_total_debt_by_eq = dict(total_debt_by_eq)

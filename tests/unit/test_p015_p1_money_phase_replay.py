@@ -334,8 +334,9 @@ async def test_a_discarded_attempt_publishes_nothing_and_moves_no_business_count
 async def test_a_discarded_attempt_leaves_no_counter_or_cache_behind() -> None:
     """State a superseded attempt touched is put back, because it never happened.
 
-    The executor advances the capacity-stall counter and CLEARS the tick-failure counter on every
-    call, and it caches a `VizPatchHelper` per equivalent built on the attempt's own session. Left
+    The executor advances the capacity-stall counter on every call that planned a payment, CLEARED
+    the tick-failure counter on every call until 049 S2a (the tick now clears it once it has succeeded,
+    so the emulation below keeps the old clear as the case the restore still guards), and it caches a `VizPatchHelper` per equivalent built on the attempt's own session. Left
     alone, a discarded attempt would log a stall the run did not have, forgive failures it did
     have, and keep a cache seeded from a rolled-back snapshot.
     """
@@ -349,7 +350,7 @@ async def test_a_discarded_attempt_leaves_no_counter_or_cache_behind() -> None:
     kept = _phase(run=run, emitter=emitter, effect=_PaymentEffect(), tx_id="tx-2")
 
     async def _attempt_that_dirties_the_run(_session):
-        # Exactly what the real executor does to the record on every call.
+        # What the real executor does to the record (the tick-failure clear: what it did until 049 S2a).
         run._real_consec_all_rejected_ticks += 1
         run._real_consec_tick_failures = 0
         run._real_viz_by_eq["EUR"] = object()
