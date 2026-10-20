@@ -11,7 +11,8 @@
  *                                   clearing states the pair, advisor's decision 2026-10-19, option (a));
  *   <theme>-<lang>-3-after-clearing a clearing took 10 off each line of the cycle: total 25.00 (slice D: "клиринг: было
  *                                   55.00 → стало 25.00 UAH" above it);
- *   <theme>-<lang>-4-bar            the bottom row alone, after the clearing;
+ *   <theme>-<lang>-4-bar            the bottom row with the column above its right end (049 S1: the pair and the total
+ *                                   stand out of the bar's flow), after the clearing;
  *   <theme>-<lang>-5-payment-after-clearing  a payment raised d>e to 27: total 27.00, the clearing's pair unchanged.
  * The last test lays `before` and `after` side by side into `compare/`.
  *
@@ -94,8 +95,16 @@ for (const theme of THEMES) {
       await page.screenshot({ path: join(dir, `${theme}-${lang}-3-after-clearing.png`) })
       // What makes the frame mean what the README says: the bar did not move (slice D only; the base has no "was").
       if (PHASE === 'after') expect(await barBox(), 'the bottom bar keeps its place and size with the pair').toEqual(settledBar)
-      const bar = page.locator('.ds-ov-bottom').first()
-      const box = await bar.boundingBox()
+      // 049 S1 (§15 Codex P3): the union of the bar and the column above its right end (on the base: the bar and the
+      // total inside it) - the bar's box alone no longer holds the pair and the total.
+      const box = await page.evaluate(() => {
+        const rects = [document.querySelector('.ds-ov-bottom'), document.querySelector('[data-testid="system-balance"]')]
+          .filter((el): el is Element => !!el).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+        if (!rects.length) return null
+        const x = Math.min(...rects.map((r) => r.left))
+        const y = Math.min(...rects.map((r) => r.top))
+        return { x, y, width: Math.max(...rects.map((r) => r.right)) - x, height: Math.max(...rects.map((r) => r.bottom)) - y }
+      })
       expect(box, 'the bottom row is on screen').not.toBeNull()
       await page.screenshot({ path: join(dir, `${theme}-${lang}-4-bar.png`), clip: box!, scale: 'device' })
 

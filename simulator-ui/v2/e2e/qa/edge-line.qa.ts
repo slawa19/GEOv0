@@ -19,7 +19,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { DETAILS_TOGGLE, RUN_ID, SCENARIO_ID, boot, pushEvent, ringSnapshot } from './stand.js'
+import { DETAILS_TOGGLE, RUN_ID, SCENARIO_ID, boot, pushEvent, renderedProblems, ringSnapshot } from './stand.js'
 import { VIEWPORT_MAIN, VIEWPORT_RESIZED } from './surfaceMatrix.js'
 
 const ALERTS = ['top-error', 'capacity-stall'] as const
@@ -88,6 +88,8 @@ for (const lang of ['ru', 'en'] as const) {
           await page.setViewportSize(vp)
           const where = `[${lang}, ${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}]`
           const b = await settledBoxes(page)
+          // §15 Codex P3: the alerts are SEEN, not boxes alone (opacity, visibility, area, nothing over their centre).
+          expect(await renderedProblems(page, ALERTS.map((id) => `[data-testid="${id}"]`)), `${where} both alerts are drawn and seen`).toEqual([])
           // Anti-vacuum: the line is inside the viewport and not the viewport's edge (a HudBar with its padding).
           expect(b.topLine!.left, `${where} counter-check: the control line is inset from the edge`).toBeGreaterThan(1)
           expect(b.topLine!.right, `${where} counter-check: the control line is inset from the edge`).toBeLessThan(vp.width - 1)

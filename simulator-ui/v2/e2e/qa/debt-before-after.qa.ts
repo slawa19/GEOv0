@@ -27,7 +27,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { DETAILS_TOGGLE, EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
+import { DETAILS_TOGGLE, EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, renderedProblems, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
 import { DEBT } from './p039-repro/contract.js'
 
 const USED: Record<string, string> = { 'a>b': '10.00', 'b>c': '10.00', 'c>a': '10.00', 'd>e': '18.00' }
@@ -334,6 +334,13 @@ async function setTotal(page: Page, lines: DebtLine[], target: string): Promise<
   await expect.poll(() => shownTotal(page), { message: `counter-check: the total is ${target}` }).toBe(`${target} ${EQ}`)
 }
 
+/**
+ * 049 S1 (§15 Codex P3): the subjects of the edge and overlap checks, each held as SEEN in every measured combination
+ * (`renderedProblems`, `stand.ts`) - a coordinate check alone passes an invisible plate.
+ */
+const SEEN = ['[data-testid="total-debt-change"]', '[data-testid="total-debt-before"]', '[data-testid="total-debt-after"]', '[data-testid="sbb-total-debt"]',
+  '[data-testid="reset-view"]', '.interact-history__header', '.interact-history__text', '.interact-history__time'] as const
+
 /** The viewports the pair is held at: the main desktop size of the demo and the narrowest the stand resizes a window to. */
 const FIT_VIEWPORTS = [{ width: 1366, height: 768 }, { width: 1024, height: 640 }] as const
 /** 049 S1 (decision 1): the total debt at five and at seven digits before the point - the spec's two figures. */
@@ -411,6 +418,7 @@ for (const lang of ['ru', 'en'] as const) {
             await setTotal(page, debts, total)
             const where = `[${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}, total ${total}]`
             await settledLayout(page, where)
+            expect(await renderedProblems(page, SEEN), `${where} every measured subject is drawn and seen`).toEqual([])
             expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
               .toEqual({ present: true, outside: [], overlaps: [] })
             const e = await edges(page)
@@ -450,6 +458,7 @@ for (const lang of ['ru', 'en'] as const) {
         await page.setViewportSize(vp)
         const where = `[hud, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}, pair 1049745.90 -> 1000000.00]`
         await settledLayout(page, where)
+        expect(await renderedProblems(page, SEEN), `${where} every measured subject is drawn and seen`).toEqual([])
         expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
           .toEqual({ present: true, outside: [], overlaps: [] })
         const e = await edges(page)
