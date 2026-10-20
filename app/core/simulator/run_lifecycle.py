@@ -598,6 +598,9 @@ class RunLifecycle:
             run.current_phase = None
             run.queue_depth = 0
             run.ops_sec = 0.0
+            # 049 S2a: a tick that plans nothing no longer clears the stall run (`real_payments_executor.py`), so the
+            # restarted launch - whose first ticks may plan nothing at a slow step - starts it from zero here.
+            run._real_consec_all_rejected_ticks = 0
             run.stopped_at = None
             run.state = "running"
             run.started_at = self._utc_now()

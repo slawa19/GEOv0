@@ -5,6 +5,7 @@ import math
 import random
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
+from fractions import Fraction
 from typing import Any, Callable
 
 from app.core.simulator.scenario_equivalent import effective_equivalent
@@ -265,6 +266,8 @@ class RealPaymentPlanner:
         - planning for a given (seed, tick_index, scenario) is deterministic.
         - changing intensity only changes *how many* actions we take from the same
           per-tick ordering (prefix-stable), so it doesn't affect later ticks.
+        - *how many* is the tick's share of a fractional budget (049 decision 10,
+          ``_actions_this_tick``): 2 % of 20 actions is one action every 2-3 ticks.
 
         Parameters
         ----------
@@ -280,7 +283,9 @@ class RealPaymentPlanner:
         """
 
         intensity = _effective_intensity(run, scenario)
-        target_actions = max(1, int(self._actions_per_tick_max * intensity)) if intensity > 0 else 0
+        target_actions = _actions_this_tick(
+            self._actions_per_tick_max, intensity, int(getattr(run, "tick_index", 0) or 0)
+        )
         if target_actions <= 0:
             return []
 
@@ -521,6 +526,34 @@ def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
         return items[-1][0]
     except Exception:
         return None
+
+
+def _actions_this_tick(actions_per_tick_max: int, intensity: float, tick_index: int) -> int:
+    """049 decision 10: the tick's share of a FRACTIONAL action budget, carried between ticks.
+
+    At rate ``r = actions_per_tick_max * intensity`` the run's ticks spend the accumulator
+    ``carry += r; actions = floor(carry); carry -= actions``, started at 0 on the run's first tick (``tick_index`` 1;
+    the heartbeat advances it before each tick). Tick ``t`` therefore plans ``floor(r * t) - floor(r * (t - 1))``: at
+    20 actions, 2 % (``r`` 0.4) is one action every 2-3 ticks, 5 % one per tick, 15 % three, 0 % none. Before 049
+    the tick planned ``max(1, int(r))`` - at least one action per tick at any intensity above zero.
+
+    THE CARRY IS DERIVED, NOT STORED: it is ``frac(r * (t - 1))``, a function of the tick number and the current rate.
+    * A replay of the tick's money phase (``money_replay.py``) replans the SAME tick and spends the same count - a
+      stored carry would be advanced once per attempt.
+    * Pause: the heartbeat does not advance ``tick_index`` (``runtime_impl._heartbeat_loop``), so nothing accrues.
+    * Restart: ``tick_index`` returns to 0 (``run_lifecycle.restart``), so the budget starts from zero; a new run
+      starts from zero; nothing outlives the run or crosses to another run.
+    * Intensity change (the admin's percent field, the visitor's step, a warm-up ramp): the next tick takes its share
+      at the NEW rate, ``floor(r)`` or ``ceil(r)`` - never more, so a change cannot release budget saved at the old
+      rate as a burst. A stored carry kept across the change has the same bound; the derived one needs no state.
+    Tick 0 is never a heartbeat tick; it is planned as a first tick (a direct driver may plan it).
+    """
+
+    if intensity <= 0 or actions_per_tick_max <= 0:
+        return 0
+    rate = int(actions_per_tick_max) * Fraction(intensity).limit_denominator(1_000_000)
+    t = max(1, int(tick_index))
+    return math.floor(rate * t) - math.floor(rate * (t - 1))
 
 
 def _effective_intensity(run: Any, scenario: dict[str, Any]) -> float:

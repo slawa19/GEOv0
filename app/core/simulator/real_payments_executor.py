@@ -856,10 +856,15 @@ class RealPaymentsExecutor:
             run.current_phase = None
             run._real_consec_tick_failures = 0
 
-            if len(planned) > 0 and committed == 0 and errors == 0:
-                run._real_consec_all_rejected_ticks += 1
-            else:
-                run._real_consec_all_rejected_ticks = 0
+            # 049 S2a: a tick that planned nothing (a fractional budget's empty share, intensity 0, a pruned plan) is no
+            # evidence either way - it neither extends nor breaks a run of all-rejected ATTEMPTED ticks. At the slow step
+            # the attempted ticks are 2-3 ticks apart; a reset on the empty ticks between them would keep the Stall
+            # plaque (threshold 3) from ever appearing.
+            if len(planned) > 0:
+                if committed == 0 and errors == 0:
+                    run._real_consec_all_rejected_ticks += 1
+                else:
+                    run._real_consec_all_rejected_ticks = 0
 
             stall_ticks = run._real_consec_all_rejected_ticks
 
