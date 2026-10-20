@@ -537,8 +537,9 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
     THE CARRY IS DERIVED, NOT STORED. The tick plans ``floor(B(t)) - floor(B(t - 1))``, ``B(t)`` being the budget ticks
     ``0..t`` accrue at the run's CURRENT percent (``_budget_through``); while the percent is unchanged this is exactly
     the accumulator above, ramp included.
-    * A replay of the tick's money phase (``money_replay.py``) replans the SAME tick and spends the same count - a
-      stored carry would be advanced once per attempt; and planning stays a function of (seed, tick, scenario, percent).
+    * A replay of the tick's money phase (``money_replay.py``) replans the SAME tick and, with unchanged inputs, plans
+      the same count (a percent edited between attempts re-reads ``B`` at the new percent, bounded as below); a stored
+      carry would be advanced once per attempt. Planning stays a function of (seed, tick, scenario, percent).
     * Pause: the heartbeat does not advance ``tick_index`` (``runtime_impl._heartbeat_loop``), so nothing accrues.
     * Restart: ``tick_index`` returns to 0 (``run_lifecycle.restart``), so the budget starts from zero; a new run
       starts from zero; nothing outlives the run or crosses to another run (the planner holds no per-run state).

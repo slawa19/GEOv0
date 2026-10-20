@@ -354,6 +354,15 @@ def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[st
     return status, code, err_details
 
 
+def is_empty_share(run: RunRecord, planned_len: int) -> bool:
+    """049 S2a: a tick that planned nothing WHILE THE RUN PLANS PAYMENTS (intensity above 0) - the empty share of a
+    fractional action budget (`real_payment_planner._actions_this_tick`) or a plan pruned to nothing. Such a tick
+    attempted nothing, so it is evidence neither of failing nor of healthy payments: the run's consecutive counters
+    skip it. At intensity 0 an empty tick is the normal state of a run that attempts nothing and keeps clearing them."""
+
+    return int(planned_len) == 0 and int(run.intensity_percent or 0) > 0
+
+
 class RealPaymentsExecutor:
     def __init__(
         self,
@@ -854,19 +863,21 @@ class RealPaymentsExecutor:
             run._real_in_flight = 0
             run.queue_depth = 0
             run.current_phase = None
-            run._real_consec_tick_failures = 0
 
-            # 049 S2a: while the run plans payments (intensity above 0), a tick that planned nothing (a fractional
-            # budget's empty share, a pruned plan) is no evidence either way - it neither extends nor breaks a run of
-            # all-rejected ATTEMPTED ticks. At the slow step the attempted ticks are 2-3 ticks apart; a reset on the empty
-            # ticks between them would keep the Stall plaque (threshold 3) from ever appearing. At intensity 0 nothing
-            # is being attempted, so an empty tick clears the run as before (no stale plaque on a stopped tempo).
+            # 049 S2a: the run of consecutive tick failures is no longer cleared here - the payments running to their end
+            # is not the tick succeeding (a commit that landed may still fail the tick, `money_replay.py`, and so may
+            # its tail); the tick clears it once it has succeeded (`tick.py`, end of `tick`).
+            # An EMPTY SHARE (`is_empty_share`) is no evidence either way: it neither extends nor breaks a run of
+            # all-rejected ATTEMPTED ticks. At the slow step the attempted ticks are 2-3 ticks apart; a reset on the
+            # empty ticks between them would keep the Stall plaque (threshold 3) from ever appearing. At intensity 0
+            # nothing is being attempted, so an empty tick clears it as before (no stale plaque on a stopped tempo).
+            empty_share = is_empty_share(run, len(planned))
             if len(planned) > 0:
                 if committed == 0 and errors == 0:
                     run._real_consec_all_rejected_ticks += 1
                 else:
                     run._real_consec_all_rejected_ticks = 0
-            elif int(run.intensity_percent or 0) <= 0:
+            elif not empty_share:
                 run._real_consec_all_rejected_ticks = 0
 
             stall_ticks = run._real_consec_all_rejected_ticks
