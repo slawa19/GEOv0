@@ -60,7 +60,12 @@ describe('049 decision 9: every history line fits the column with its names at t
       expect(all.filter((l) => !l.own).length, 'counter-check: the network lines are measured').toBeGreaterThanOrEqual(10)
       expect(all.some((l) => historyEntryParts({ line: l.line }, locale).some((p) => p.role === 'name')), 'counter-check: names are found').toBe(true)
       const over = all.map((l) => ({ name: l.name, need: least(l, locale) })).filter((x) => x.need > BUDGET)
-      expect(over, `[${locale}] lines whose values do not fit ${BUDGET} characters`).toEqual([])
+      expect(over, `[${locale}] lines whose values need more than ${BUDGET} characters. This guard checks a FORM, not the truth: `
+        + 'a count of characters for the hud monospace only, each name taken at 2 characters, no fonts and no pixels; the saas '
+        + 'face and real pixels are judged by the stand for the lines it draws. What decides whether a line fits: the stand '
+        + '(e2e/qa/debt-before-after.qa.ts, feedValuesWhole), npm --prefix simulator-ui/v2 run test:e2e:qa:gate. '
+        + 'Shorten the line with the same meaning (both dictionaries), or show on the stand that it fits and move the budget '
+        + 'with a dated reason').toEqual([])
     })
   }
 })

@@ -6,6 +6,7 @@ import { computed, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useInteractMode } from './useInteractMode'
+import { historyEntryText } from './interact/useInteractHistory'
 import type { GraphSnapshot } from '../types'
 
 type Actions = Parameters<typeof useInteractMode>[0]['actions']
@@ -98,6 +99,10 @@ describe('the clearing result stays until it is closed', () => {
     await runAndWait(empty)
     expect(empty.state.lastClearing).toEqual(none)
     expect(empty.phase.value).not.toBe('idle')
+    // Closing Codex review of PR #341 (P3-3): the history states the result, not a diagnosis - zero cycles cleared is also
+    // a pass that left out a suspended participant's lines while a cycle of debts exists. The same words in both languages.
+    expect(empty.history.map((e) => historyEntryText(e, 'ru'))).toEqual(['Клиринг: ничего не погашено'])
+    expect(empty.history.map((e) => historyEntryText(e, 'en'))).toEqual(['Clearing: nothing cleared'])
   })
 
   it('a refusal keeps the panel open with the error (no result, no stuck "preview"), and is not a success', async () => {

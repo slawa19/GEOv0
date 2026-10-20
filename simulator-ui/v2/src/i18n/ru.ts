@@ -282,7 +282,7 @@ export const ru = {
       many: 'Клиринг: {count} циклов, −{amount} {unit}',
       other: 'Клиринг: {count} цикла, −{amount} {unit}',
     }),
-    clearingNothing: 'Клиринг: замкнутых цепочек долгов нет',
+    clearingNothing: 'Клиринг: ничего не погашено',
   },
 
   // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and

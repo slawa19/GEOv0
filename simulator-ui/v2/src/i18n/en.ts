@@ -319,7 +319,7 @@ export const en = {
     trustlineClosed: 'Trustline closed: {from} → {to}',
     closeRequested: 'Closes once the debt is repaid: {from} → {to}',
     clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
-    clearingNothing: 'Clearing: no cycles found',
+    clearingNothing: 'Clearing: nothing cleared',
   },
 
   /**
