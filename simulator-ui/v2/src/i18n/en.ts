@@ -20,6 +20,8 @@ export const en = {
   locale: {
     switcherLabel: 'Language',
     switcherAria: 'Interface language',
+    /** 046 closing (2026-10-20): the browser tab's title, written by `locale.ts` on load and on a switch. */
+    documentTitle: 'GEO — mutual credit network demo',
   },
 
   /** Shared by the three windows of the actions. */
