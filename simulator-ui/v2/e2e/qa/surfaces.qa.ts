@@ -432,12 +432,10 @@ test('matrix [hud] node-card opened from the graph navigator: Escape returns the
 // stays unit-tested (`useHudDropdownFocus.test.ts`), and the scan of instances still reports a menu nobody opens (the
 // injected "fifth menu" above).
 
-// --- a defect outside the owner surface of 038: recorded as a reproducer, not fixed ---------------------------------
+// --- BACKLOG 037-4 (к): fixed by 048 T4840 (PR #329, 2026-10-20) - this reproducer passes, the `test.fail` annotation
+// is removed (the dispatch run 39382382179 reported «Expected to fail, but passed»); it now guards the fix. ---------
 
 test('reproducer (BACKLOG 037-4, Interact): Escape on the trust line popup releases the flow, and the same line opens the popup again @extended', async ({ page }) => {
-  test.fail(true, 'Product defect found by 038 S2 on 2026-10-11, not fixed here: the flow and its popup are owned by Interact '
-    + '(useWmEdgeDetail.ts, useInteractMode.ts, useWindowController.ts), outside the owner surface of 038. Recipient: the maintainer of the '
-    + 'Interact panels, BACKLOG 037-4. When it is fixed this test passes, the annotation fails the run - remove the annotation then.')
   await page.setViewportSize(VIEWPORT_MAIN)
   await boot(page, { snapshot: ringSnapshot(), clock: false })
   const popup = page.locator('.ws-shell[data-win-type="edge-detail"]')
