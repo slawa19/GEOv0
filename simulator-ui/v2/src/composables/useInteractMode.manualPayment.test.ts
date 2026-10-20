@@ -283,6 +283,9 @@ describe('what a success-shaped answer is allowed to say', () => {
 
     expect(im.paymentOutcome.value).toBeNull()
     expect(im.state.error).toContain('did not confirm')
+    // Owner's review of the final frames (2026-10-20): the status is a word in English as in Russian, not the server's code.
+    expect(im.state.error).toContain('rejected')
+    expect(im.state.error).not.toContain('ABORTED')
     expect(im.history.length).toBe(0)
     await im.confirmPayment('10.00')
     expect(keyOf(send, 1)).not.toBe(keyOf(send, 0))

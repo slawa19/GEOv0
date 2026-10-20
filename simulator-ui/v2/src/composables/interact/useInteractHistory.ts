@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 
 import { equivalentPrecision } from '../../config/equivalentPrecision'
-import { keptText, type KeptText, type MessageKey } from '../../i18n/t'
+import { keptText, templateParts, type KeptText, type MessageKey } from '../../i18n/t'
 import type { UiLocale } from '../../i18n/locale'
 import { formatMoney, moneyText } from '../../utils/money'
 import type { RealEventFeedItem } from '../realEventPipeline'
@@ -46,8 +46,46 @@ export function historyEntryText(entry: Pick<InteractHistoryEntry, 'line' | 'lea
   return (entry.lead ? keptText(entry.lead, locale) : '') + keptText(entry.line, locale)
 }
 
+/**
+ * A part of a history line by its role (049 decision 9, owner's review of the final frames 2026-10-20): `name` - a
+ * participant's name (the `{from}` / `{to}` of a line), the part that gives way first, cut by an ellipsis; `lead` - the
+ * count of a series («За 2 с: 6 платежей; последний — »), giving way only after the names; `value` - everything else (the
+ * amount with its unit, the reason of a failure, the figures of a clearing, the words between them), never cut - so every
+ * line's values must fit the column with the names at their least (`feedLineBudget.p049.test.ts`).
+ */
+export type HistoryLinePart = { text: string; role: 'name' | 'lead' | 'value' }
+
+/** The placeholders of the history's lines that carry a participant's name. */
+const NAME_PLACEHOLDERS: ReadonlySet<string> = new Set(['from', 'to'])
+
+/** The parts of a history line in `locale`, in order; together they are exactly `historyEntryText`. */
+export function historyEntryParts(entry: Pick<InteractHistoryEntry, 'line' | 'lead'>, locale?: UiLocale): HistoryLinePart[] {
+  const out: HistoryLinePart[] = []
+  const push = (text: string, role: HistoryLinePart['role']) => {
+    if (!text) return
+    const last = out[out.length - 1]
+    if (last && last.role === role && role !== 'name') last.text += text
+    else out.push({ text, role })
+  }
+  if (entry.lead) push(keptText(entry.lead, locale), 'lead')
+  const line = entry.line
+  if ('plural' in line) {
+    push(keptText(line, locale), 'value')
+    return out
+  }
+  for (const part of templateParts(line.key, locale)) {
+    if ('text' in part) {
+      push(part.text, 'value')
+      continue
+    }
+    const v = line.vars?.[part.name]
+    push(v === undefined ? `{${part.name}}` : String(v), NAME_PLACEHOLDERS.has(part.name) ? 'name' : 'value')
+  }
+  return out
+}
+
 /** The reason words of a failure by its code; any other code is a failure without a reason - no diagnosis is guessed. */
-const FAILURE_LINE: Readonly<Record<string, MessageKey>> = Object.freeze({
+export const FAILURE_LINE: Readonly<Record<string, MessageKey>> = Object.freeze({
   ROUTING_NO_CAPACITY: 'feed.failedNoCapacity',
   ROUTING_NO_ROUTE: 'feed.failedNoRoute',
   TRUSTLINE_LIMIT_EXCEEDED: 'feed.failedLimit',
@@ -174,6 +212,16 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
   }
 
   /**
+   * Drops every line, own and network (049 decision 5, «смена прогона или эквивалента очищает строки»; closing Codex review,
+   * 2026-10-20): the lines of another run or equivalent say nothing of the one on screen - an own payment of the old run
+   * must not come back under «События сети». The switch alone is `clearFeed`: the own lines are the current run's.
+   */
+  function clearAll() {
+    if (feed.length) feed.splice(0, feed.length)
+    if (history.length) history.splice(0, history.length)
+  }
+
+  /**
    * What the history shows, oldest first: with the events off exactly the own lines (as before 049); with them on the own
    * lines and the network's merged by the order of writing, without the own lines the network carries.
    */
@@ -182,5 +230,5 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
     return [...history.filter((e) => !e.shownByNetwork), ...feed].sort((a, b) => a.seq - b.seq)
   }
 
-  return { history, feed, pushHistory, pushFeedLine, clearFeed, shownEntries }
+  return { history, feed, pushHistory, pushFeedLine, clearFeed, clearAll, shownEntries }
 }

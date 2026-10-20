@@ -163,7 +163,7 @@ const CASES: Case[] = [
   {
     name: 'payment: the sender step',
     render: async () => { mountWith(ManualPaymentPanel, paymentProps('picking-payment-from', null, null)); await settle() },
-    en: ['Manual payment', 'From', 'To', 'Cancel', 'Confirm'],
+    en: ['Payment', 'From', 'To', 'Cancel', 'Confirm'],
     ru: [r('payment.title'), r('payment.fromLabel'), r('payment.toLabel'), r('common.cancel'), r('payment.confirm'), r('common.pickPlaceholder'),
       r('payment.panelAria'), r('payment.needsParties')],
   },
@@ -185,7 +185,7 @@ const CASES: Case[] = [
       await settle()
       await typeInto('#mp-amount', '1.5')
     },
-    en: ['Manual payment: Алиса → Борис', 'Amount', 'Direct', '(server)', 'Max', 'server estimate', '3 steps',
+    en: ['Payment: Алиса → Борис', 'Amount', 'Direct', '(server)', 'Max', 'server estimate', '3 steps',
       "The amount is above the server's estimate of the maximum (1.00 UAH); the server decides."],
     ru: [r('payment.titlePair', { from: 'Алиса', to: 'Борис' }), r('payment.amountLabel'), r('payment.directTitle'), `(${r('payment.sourceServer')})`,
       r('payment.estimateShort'), r('payment.estimateSource'), '3 шага', r('payment.estimateExceeded', { max: '1.00', unit: 'UAH' }), r('payment.confirm')],
@@ -213,7 +213,7 @@ const CASES: Case[] = [
   {
     name: 'payment: the result screen with two routes',
     render: async () => { mountWith(ManualPaymentPanel, paymentProps('confirm-payment', 'alice', 'bob', { paymentOutcome: SUCCESS })); await settle() },
-    en: ['Payment sent', 'Status', 'COMMITTED', 'Route 1 of 2', 'Another payment', 'Close'],
+    en: ['Payment sent', 'Status', 'completed', 'Route 1 of 2', 'Another payment', 'Close'],
     ru: [r('payment.resultTitle'), r('payment.resultStatus'), r('paymentStatus.COMMITTED'),
       r('payment.resultRoutes', { n: 1, total: 2 }), r('payment.resultAnother'), r('payment.resultClose'), 'Алиса → Вера: 6.00 UAH'],
   },
@@ -274,7 +274,7 @@ const CASES: Case[] = [
   {
     name: 'trust line: the backend answered there is no line',
     render: async () => { mountWith(TrustlineManagementPanel, trustlineProps('editing-trustline', 'alice', 'bob', { figuresSource: { kind: 'no-row' } })); await settle() },
-    en: ['The backend answered for this pair: there is no trustline.'],
+    en: ['The server answered for this pair: there is no trustline.'],
     ru: [r('trustlineSource.noRow')],
   },
   {
@@ -283,7 +283,7 @@ const CASES: Case[] = [
       mountWith(ClearingPanel, { phase: 'confirm-clearing', state: state('confirm-clearing', null, null), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
       await settle()
     },
-    en: ['Run clearing', 'This will run a clearing cycle in backend.', 'Cancel', 'Confirm'],
+    en: ['Run clearing', 'The server will reduce the debts that close into a loop.', 'Cancel', 'Confirm'],
     ru: [r('clearing.runTitle'), r('clearing.confirmHelp'), r('common.cancel'), r('clearing.confirm'), r('clearing.panelAria')],
   },
   {

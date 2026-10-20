@@ -24,7 +24,7 @@ describe('046 wave 1 - the window shell is named in the interface language', () 
     setUiLocale('en')
     const got = (['payment', 'trustline', 'clearing'] as const).map((p) => [resolveWindowSurfaceDescriptor(panel(p)).title, resolveWindowSurfaceDescriptor(panel(p)).ariaLabel])
     expect(got).toEqual([
-      ['Manual payment', 'Manual payment panel'],
+      ['Payment', 'Payment panel'],
       ['Trustline', 'Trustline management panel'],
       ['Clearing', 'Clearing panel'],
     ])
@@ -42,7 +42,7 @@ describe('046 wave 1 - the window shell is named in the interface language', () 
   it('a switch renames the shell at the next read (no cached English name)', () => {
     setUiLocale('en')
     const w = panel('payment')
-    expect(resolveWindowSurfaceDescriptor(w).ariaLabel).toBe('Manual payment panel')
+    expect(resolveWindowSurfaceDescriptor(w).ariaLabel).toBe('Payment panel')
     setUiLocale('ru')
     expect(resolveWindowSurfaceDescriptor(w).ariaLabel).toBe('Окно платежа')
   })

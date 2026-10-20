@@ -54,16 +54,19 @@ export const en = {
     closed: 'closed',
   },
 
-  /** Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. */
+  /**
+   * Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. Words, as in Russian
+   * (owner's review of the final frames, 2026-10-20: the result said «Status COMMITTED», the server's code).
+   */
   paymentStatus: {
-    COMMITTED: 'COMMITTED',
-    ABORTED: 'ABORTED',
+    COMMITTED: 'completed',
+    ABORTED: 'rejected',
   },
 
   payment: {
-    panelAria: 'Manual payment panel',
-    title: 'Manual payment',
-    titlePair: 'Manual payment: {from} → {to}',
+    panelAria: 'Payment panel',
+    title: 'Payment',
+    titlePair: 'Payment: {from} → {to}',
     fromLabel: 'From',
     toLabel: 'To',
     amountLabel: 'Amount',
@@ -91,7 +94,7 @@ export const en = {
     routesUpdatingLastAnswer: 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.',
     routesFailedUnreachable: 'Routes update failed; showing fallback data. Some recipients may be unreachable.',
     routesFailedMissing: 'Routes update failed; showing fallback data. Some recipients may be missing.',
-    exceedsDirect: 'Amount may exceed direct trustline capacity ({capacity} {unit}). Multi-hop may still succeed; backend will validate.',
+    exceedsDirect: 'The amount may exceed what the direct line allows ({capacity} {unit}). Through other participants the payment may still go through; the server will check.',
     noSelection: 'Select From and To first',
 
     // The result screen of a committed payment.
@@ -192,13 +195,13 @@ export const en = {
    * policy about buttons.
    */
   trustlineSource: {
-    neverAsked: 'Trustline data for this pair has not been requested from the backend; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.',
-    loading: 'Trustline data is still loading from the backend; the figures for this pair are not available yet.',
+    neverAsked: 'Trustline data for this pair has not been requested from the server; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.',
+    loading: 'Trustline data is still loading from the server; the figures for this pair are not available yet.',
     loadingFrozen: 'Trustline data for this pair was still being requested when this window was frozen; that request will not update these figures, and nothing has confirmed them for this pair.',
     failed: 'Trustline data could not be loaded: {message}. The figures for this pair are not available, and what the graph shows may be out of date.',
-    frozenAnswer: 'These figures are a frozen copy of an earlier backend answer, kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
+    frozenAnswer: 'These figures are a frozen copy of an earlier server answer, kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
     frozenOther: 'The figures in this window are a frozen copy kept as context for the action in progress; they are not being refreshed and may describe a different pair than the one now selected.',
-    noRow: 'The backend answered for this pair: there is no trustline. The figures on the graph come from the snapshot and do not describe an existing line — there is nothing to update or close here; create the line instead.',
+    noRow: 'The server answered for this pair: there is no trustline. The figures on the graph come from the snapshot and do not describe an existing line — there is nothing to update or close here; create the line instead.',
     trustlinesFailed: 'Trustlines refresh failed',
     paymentTargetsFailed: 'Payment targets refresh failed',
   },
@@ -206,7 +209,7 @@ export const en = {
   clearing: {
     panelAria: 'Clearing panel',
     runTitle: 'Run clearing',
-    confirmHelp: 'This will run a clearing cycle in backend.',
+    confirmHelp: 'The server will reduce the debts that close into a loop.',
     confirm: 'Confirm',
     runningShort: 'Running…',
     // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}").
@@ -311,12 +314,12 @@ export const en = {
   /** History lines of the actions (`useInteractMode.ts`; 049 S2: the success toasts are gone). Amounts arrive as decimal strings. */
   history: {
     payment: 'Payment {amount} {unit}: {from} → {to}',
-    trustlineCreated: 'Trustline created: {from} → {to} ({limit} {unit})',
-    trustlineUpdated: 'Trustline updated: {from} → {to} → limit {limit} {unit}',
+    trustlineCreated: 'New line: {from} → {to}, limit {limit} {unit}',
+    trustlineUpdated: 'New line limit: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Trustline closed: {from} → {to}',
-    closeRequested: 'Close requested: {from} → {to} (closes when the debt is repaid)',
+    closeRequested: 'Closes once the debt is repaid: {from} → {to}',
     clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
-    clearingNothing: 'Clearing: no cycles found',
+    clearingNothing: 'Clearing: nothing cleared',
   },
 
   /**
@@ -541,7 +544,7 @@ export const en = {
     clearingHint: 'Debts that run around a cycle cancel out — each participant in the cycle owes less.',
     cancellingTitle: 'Cancelling… please wait for the operation to finish.',
     cancellingHint: 'Cancelling… please wait.',
-    disabled: 'Actions are disabled by backend feature flags.',
+    disabled: 'Actions are turned off on the server.',
     /**
      * 048 S2 hand-over (P2-2): a visitor has no Start since S2, so the reason no longer sends them to one. A reload makes
      * the opening's one attempt again (`useInteractAutoBootstrapRun.ts`: an ended run is replaced by a new one).
@@ -652,23 +655,25 @@ export const en = {
    * «Show events» is on. Built from accepted SSE events only (`realEventPipeline.ts` `feedItemOf`); a missing field writes
    * no line. A failure has no amount (`tx.failed` carries none) and an unknown reason gets no diagnosis. A series within
    * 2 s is one line: its lead (`paymentSeries`, `failureSeries`) and the latest event's line after it.
+   * The reasons are short (owner's review of the final frames, 2026-10-20): a line is one row of a 448 px column, where only
+   * the names give way (decision 9) - the longest reason with two one-letter names must fit in the hud's monospace.
    */
   feed: {
     payment: '{from} → {to}: {amount}\u00a0{unit}',
     failed: '{from} → {to}: payment did not go through',
-    failedNoCapacity: '{from} → {to}: payment did not go through — not enough capacity on the route',
-    failedNoRoute: '{from} → {to}: payment did not go through — no route',
-    failedLimit: '{from} → {to}: payment did not go through — a trustline limit would be exceeded',
-    failedLineInactive: '{from} → {to}: payment did not go through — a trustline is not active',
-    failedTimeout: '{from} → {to}: payment did not go through — the payment timed out',
+    failedNoCapacity: '{from} → {to}: failed — route lacks capacity',
+    failedNoRoute: '{from} → {to}: failed — no route',
+    failedLimit: '{from} → {to}: failed — would exceed a line limit',
+    failedLineInactive: '{from} → {to}: failed — a trustline is not active',
+    failedTimeout: '{from} → {to}: failed — timed out',
     paymentSeries: plural({ one: 'In 2 s: {count} payment; latest — ', other: 'In 2 s: {count} payments; latest — ' }),
     failureSeries: plural({ one: 'In 2 s: {count} failure; latest — ', other: 'In 2 s: {count} failures; latest — ' }),
     clearing: plural({
-      one: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycle',
-      other: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycles',
+      one: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycle',
+      other: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycles',
     }),
     clearingCycles: plural({ one: 'Clearing: {count} cycle', other: 'Clearing: {count} cycles' }),
-    clearingDebt: 'Clearing: total debt down by {amount}\u00a0{unit}',
+    clearingDebt: 'Clearing: total debt −{amount}\u00a0{unit}',
     trustGrowth: 'Trust limits grew after the clearing',
     /** The mark of a line of the person's own action while the network's events are shown beside it. */
     you: 'you',

@@ -633,14 +633,14 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     // 048 S3: in the window's own block (the error toast is gone).
     await expect(page.getByTestId('manual-payment-error')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
-    await expect(page.getByLabel('Manual payment panel')).toBeHidden()
+    await expect(page.getByLabel('Payment panel')).toBeHidden()
 
     await activateTestId(page, 'actionbar-trustline')
     await chooseTrustlineFromWhenRequested(page)
     await chooseOverlayOption(page, 'To', 'carol', /Carol/, true)
     await page.getByLabel('Limit').fill('15.00')
     await activateButton(page, 'Create')
-    await expect(page.getByTestId('recent-actions')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
+    await expect(page.getByTestId('recent-actions')).toContainText('New line: Alice → Carol') // 044 `T4405`: names
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineCreateRequests).toHaveLength(1)
 
@@ -649,7 +649,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
     await page.getByLabel('New limit').fill('20.00')
     await activateButton(page, 'Update')
-    await expect(page.getByTestId('recent-actions')).toContainText('Trustline updated: Alice → Bob → limit 20.00 UAH')
+    await expect(page.getByTestId('recent-actions')).toContainText('New line limit: Alice → Bob, 20.00 UAH')
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineUpdateRequests).toHaveLength(1)
 

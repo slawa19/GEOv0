@@ -245,14 +245,14 @@ describe('who pays whom on the confirm step', () => {
   it('the title names who pays whom, in the order of the payment', async () => {
     const { host } = mountFlow({ phase: 'confirm-payment', fromPid: 'alice', toPid: 'bob' })
     await settle()
-    expect(titleOf(host)).toBe('Manual payment: Alice → Bob')
+    expect(titleOf(host)).toBe('Payment: Alice → Bob')
   })
 
   it('is right for the reversed order too (a payment started from an edge runs the other way) and never shows an id', async () => {
     const { host } = mountFlow({ phase: 'confirm-payment', fromPid: 'bob', toPid: 'alice' })
     await settle()
 
-    expect(titleOf(host)).toBe('Manual payment: Bob → Alice')
+    expect(titleOf(host)).toBe('Payment: Bob → Alice')
     expect(titleOf(host)).not.toMatch(/\b(alice|bob)\b/)
   })
 })
@@ -423,7 +423,7 @@ describe('the header and a payment of unknown result', () => {
     await settle()
 
     expect(text(host, 'mp-outcome-unknown-intent')).toContain('Alice → Bob')
-    expect(host.querySelector('.ds-h2')!.textContent).toContain('Manual payment: Alice → Bob')
+    expect(host.querySelector('.ds-h2')!.textContent).toContain('Payment: Alice → Bob')
     expect(host.querySelector('.ds-h2')!.textContent).not.toContain('Carol')
   })
 })

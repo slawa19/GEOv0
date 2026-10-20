@@ -96,6 +96,20 @@ for (const lang of ['ru', 'en'] as const) {
           // One line for every edge group (decision 1): the top and the bottom bar give the same line.
           expect(Math.abs(b.topLine!.left - b.bottomLine!.left), `${where} one control line, left: ${JSON.stringify(b)}`).toBeLessThanOrEqual(1)
           expect(Math.abs(b.topLine!.right - b.bottomLine!.right), `${where} one control line, right: ${JSON.stringify(b)}`).toBeLessThanOrEqual(1)
+          // Owner's review of the final frames (2026-10-20, frame 07): in hud a node of the graph showed through the stall
+          // plaque over its words. The alerts stand over the canvas: in hud the colour they paint first is opaque (alpha 1).
+          const backs = await page.evaluate((alerts) => Object.fromEntries(alerts.map((id) => {
+            const c = getComputedStyle(document.querySelector(`[data-testid="${id}"]`)!).backgroundColor
+            // `rgb(r, g, b)`, `rgba(r, g, b, a)` or a modern form with `/ a` (a `color-mix` serializes as `color(srgb ... / a)`).
+            const slash = c.match(/\/\s*([\d.]+)\s*\)$/)
+            const commas = c.match(/^rgba\([^)]*,\s*([\d.]+)\s*\)$/)
+            return [id, { colour: c, alpha: slash ? Number(slash[1]) : commas ? Number(commas[1]) : 1 }]
+          })), ALERTS as unknown as string[])
+          if (theme === 'hud') {
+            for (const id of ALERTS) expect(backs[id]!.alpha, `${where} ${id}: its background is opaque over the canvas: ${JSON.stringify(backs)}`).toBe(1)
+          } else if (details && vp === VIEWPORT_MAIN) {
+            console.log(`[049 alert backgrounds] ${where} ${JSON.stringify(backs)}`)
+          }
           for (const id of ALERTS) {
             const a = b[id]
             expect(a, `${where} ${id} is drawn`).not.toBeNull()

@@ -272,17 +272,17 @@ export const ru = {
 
   history: {
     payment: 'Платёж {amount} {unit}: {from} → {to}',
-    trustlineCreated: 'Линия доверия открыта: {from} → {to} ({limit} {unit})',
-    trustlineUpdated: 'Линия доверия изменена: {from} → {to}, лимит {limit} {unit}',
+    trustlineCreated: 'Новая линия: {from} → {to}, лимит {limit} {unit}',
+    trustlineUpdated: 'Новый лимит линии: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
-    closeRequested: 'Запрошено закрытие: {from} → {to} (линия закроется, когда долг будет погашен)',
+    closeRequested: 'Линия закроется после погашения: {from} → {to}',
     clearing: plural({
       one: 'Клиринг: {count} цикл, −{amount} {unit}',
       few: 'Клиринг: {count} цикла, −{amount} {unit}',
       many: 'Клиринг: {count} циклов, −{amount} {unit}',
       other: 'Клиринг: {count} цикла, −{amount} {unit}',
     }),
-    clearingNothing: 'Клиринг: замкнутых цепочек долгов не найдено',
+    clearingNothing: 'Клиринг: ничего не погашено',
   },
 
   // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and
@@ -560,11 +560,11 @@ export const ru = {
   feed: {
     payment: '{from} → {to}: {amount}\u00a0{unit}',
     failed: '{from} → {to}: платёж не прошёл',
-    failedNoCapacity: '{from} → {to}: платёж не прошёл — не хватило лимита на маршруте',
-    failedNoRoute: '{from} → {to}: платёж не прошёл — нет маршрута',
-    failedLimit: '{from} → {to}: платёж не прошёл — был бы превышен лимит линии доверия',
-    failedLineInactive: '{from} → {to}: платёж не прошёл — линия доверия не действует',
-    failedTimeout: '{from} → {to}: платёж не прошёл — истекло время ожидания',
+    failedNoCapacity: '{from} → {to}: не прошёл — мало лимита на маршруте',
+    failedNoRoute: '{from} → {to}: не прошёл — нет маршрута',
+    failedLimit: '{from} → {to}: не прошёл — превысил бы лимит линии',
+    failedLineInactive: '{from} → {to}: не прошёл — линия не действует',
+    failedTimeout: '{from} → {to}: не прошёл — истекло время ожидания',
     paymentSeries: plural({
       one: 'За 2 с: {count} платёж; последний — ',
       few: 'За 2 с: {count} платежа; последний — ',
@@ -578,10 +578,10 @@ export const ru = {
       other: 'За 2 с: {count} отказа; последний — ',
     }),
     clearing: plural({
-      one: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круг',
-      few: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
-      many: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} кругов',
-      other: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
+      one: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круг',
+      few: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круга',
+      many: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} кругов',
+      other: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круга',
     }),
     clearingCycles: plural({
       one: 'Клиринг: {count} круг',
@@ -589,7 +589,7 @@ export const ru = {
       many: 'Клиринг: {count} кругов',
       other: 'Клиринг: {count} круга',
     }),
-    clearingDebt: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}',
+    clearingDebt: 'Клиринг: общий долг −{amount}\u00a0{unit}',
     trustGrowth: 'После клиринга выросли лимиты доверия',
     you: 'вы',
   },

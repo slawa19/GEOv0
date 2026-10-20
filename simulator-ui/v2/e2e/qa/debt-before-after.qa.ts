@@ -29,6 +29,8 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { DETAILS_TOGGLE, EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, renderedProblems, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
 import { DEBT } from './p039-repro/contract.js'
+import { FAILURE_LINE } from '../../src/composables/interact/useInteractHistory'
+import { t, tn } from '../../src/i18n/t'
 
 const USED: Record<string, string> = { 'a>b': '10.00', 'b>c': '10.00', 'c>a': '10.00', 'd>e': '18.00' }
 
@@ -406,6 +408,77 @@ const feedFitRule = (page: Page) => page.evaluate(() => {
   }
 })
 
+/**
+ * 049 decision 9 (owner's review of the final frames, 2026-10-20: the ellipsis cut the amounts and the reasons): in every
+ * line shown, every character that does not give way - all but the participants' names and a series' count: the amount
+ * with its unit, a failure's reason, a clearing's figures, the «вы» mark and the words between them - is drawn inside what
+ * clips it: the line's box and every element between the character and the line that clips its overflow (internal
+ * adversarial pass, 2026-10-21: the first form checked the text box alone and missed an ellipsis inside a part). Read
+ * from the text itself (a range per text node and run), not from the component's parts. `giving` - the texts allowed to
+ * give way (the names, the series' leads); `namesCut` - lines where such a text was cut (anti-vacuum: the long names
+ * pressed the line); `runs` - the runs measured. Tolerance 0.05 px: an overflow of 0.14 px already draws an ellipsis.
+ */
+const feedValuesWhole = (page: Page, giving: readonly string[]) => page.evaluate((giving) => {
+  const offenders: string[] = []
+  let runs = 0
+  let namesCut = 0
+  const TOL = 0.05
+  for (const li of document.querySelectorAll('.interact-history__item')) {
+    const text = li.querySelector('.interact-history__text')
+    if (!text) {
+      offenders.push('a line without its text')
+      continue
+    }
+    const nodes: Array<{ node: Text; start: number }> = []
+    let all = ''
+    const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      nodes.push({ node: n as Text, start: all.length })
+      all += (n as Text).data
+    }
+    const gives = new Array<boolean>(all.length).fill(false)
+    for (const g of giving) {
+      for (let at = all.indexOf(g); at >= 0; at = all.indexOf(g, at + 1)) for (let i = at; i < at + g.length; i += 1) gives[i] = true
+    }
+    /** What clips a text node: the line's box and every element up to it whose overflow is not visible. */
+    const clipOf = (node: Text) => {
+      const lb = li.getBoundingClientRect()
+      const c = { left: lb.left, right: lb.right }
+      for (let el = node.parentElement; el && el !== li; el = el.parentElement) {
+        if (getComputedStyle(el).overflowX === 'visible') continue
+        const r = el.getBoundingClientRect()
+        c.left = Math.max(c.left, r.left)
+        c.right = Math.min(c.right, r.right)
+      }
+      return c
+    }
+    let cutHere = false
+    for (const { node, start } of nodes) {
+      const clip = clipOf(node)
+      for (let i = 0; i < node.data.length; ) {
+        const giveRun = gives[start + i]!
+        const s = i
+        while (i < node.data.length && gives[start + i] === giveRun) i += 1
+        const run = node.data.slice(s, i)
+        if (!run.trim()) continue
+        const r = document.createRange()
+        r.setStart(node, s)
+        r.setEnd(node, i)
+        const rects = [...r.getClientRects()].filter((x) => x.width > 0)
+        const out = rects.find((x) => x.left < clip.left - TOL || x.right > clip.right + TOL)
+        if (giveRun) {
+          if (out) cutHere = true
+          continue
+        }
+        runs += 1
+        if (out) offenders.push(`"${run.trim()}" [${out.left.toFixed(2)}, ${out.right.toFixed(2)}] outside what clips it [${clip.left.toFixed(2)}, ${clip.right.toFixed(2)}] in "${all.slice(0, 60)}"`)
+      }
+    }
+    if (cutHere) namesCut += 1
+  }
+  return { offenders, runs, namesCut }
+}, giving)
+
 /** The canvas share of 043 R9 (`layout.qa.ts`): the bars' rectangles against the viewport, and the hit-tested share. */
 const canvasShare = (page: Page) => page.evaluate(() => {
   const vh = window.innerHeight
@@ -561,9 +634,17 @@ for (const lang of ['ru', 'en'] as const) {
     await expect(log).toHaveAttribute('data-feed', 'on')
     // Four events of the network: a payment, a failure (no amount), the growth of trust, a clearing that lowers a debt by
     // 1.00 (the pair is restated, not dropped). With the own line: five lines.
-    const [d1, d2] = debts
+    // The payment and the failure name the participants with the LONGEST names of the scene (049 decision 9: the names give
+    // way, the amount and the reason do not), and the failure has the longest reason of the language.
+    const nameOf = new Map(snapshot.nodes.map((n) => [String(n.id), String((n as { name?: string }).name ?? n.id)]))
+    const nameLength = (x: DebtLine) => (nameOf.get(x.source) ?? '').length + (nameOf.get(x.target) ?? '').length
+    const [d1, d2] = [...debts].sort((x, y) => nameLength(y) - nameLength(x))
+    const longestFailure = Object.keys(FAILURE_LINE).sort((x, y) => t(FAILURE_LINE[y]!, {}, lang).length - t(FAILURE_LINE[x]!, {}, lang).length)[0]!
+    // The failure is a series of two (pushed together, inside the 2-second window): its line is the longest the feed draws -
+    // the count, the longest names, the longest reason (adversarial pass, 2026-10-21: no series line was measured).
+    const feedGiving = [...[d1!.source, d1!.target, d2!.source, d2!.target].map((id) => nameOf.get(id)!), tn('feed.failureSeries', 2, {}, lang)]
     await pushEvent(page, { type: 'tx.updated', from: d1!.target, to: d1!.source, amount: '12.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: d1!.target, to: d1!.source }] })
-    await pushEvent(page, { type: 'tx.failed', from: d2!.target, to: d2!.source, error: { code: 'ROUTING_NO_CAPACITY', message: 'no capacity', at: '2026-02-01T00:00:01.000Z' } })
+    for (const k of [1, 2]) await pushEvent(page, { type: 'tx.failed', from: d2!.target, to: d2!.source, error: { code: longestFailure, message: `refused ${k}`, at: '2026-02-01T00:00:01.000Z' } })
     await pushEvent(page, { type: 'topology.changed', reason: 'trust_drift_growth', payload: { added_nodes: [], removed_nodes: [], added_edges: [], removed_edges: [], edge_patch: [{ source: d2!.source, target: d2!.target, trust_limit: '999999.00' }] } })
     const top = [...debts].sort((x, y) => (y.used > x.used ? 1 : -1))[0]!
     top.used -= 100n
@@ -578,6 +659,7 @@ for (const lang of ['ru', 'en'] as const) {
     await settledLayout(page, '[feed on, precondition, 1366x768]')
     await expect(page.locator('.interact-history__item'), 'counter-check: five lines - the own one and four of the network').toHaveCount(5)
     await expect(page.locator('.interact-history__item[data-source="network"]')).toHaveCount(4)
+    await expect(page.locator('.interact-history__item', { hasText: tn('feed.failureSeries', 2, {}, lang).trim() }), 'counter-check: the two failures are one series line').toHaveCount(1)
     const FEED_SEEN = [...SEEN, '.interact-history__item[data-source="network"] .interact-history__text'] as const
     const feedSeen: string[] = []
     const fitLines: Record<string, number> = {}
@@ -604,7 +686,12 @@ for (const lang of ['ru', 'en'] as const) {
       const e = await edges(page)
       expect(e.historyText, `${where} counter-check: the heading and every line are measured`).toHaveLength(rule!.lines + 1)
       for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+      const values = await feedValuesWhole(page, feedGiving)
+      expect(values.runs, `${where} counter-check: the values of every line are measured`).toBeGreaterThanOrEqual(rule!.lines)
+      expect(values.offenders, `${where} no amount, reason or figure is cut - only names give way`).toEqual([])
+      namesCut[where] = values.namesCut
     }
+    const namesCut: Record<string, number> = {}
     const shares: Record<string, unknown> = {}
     for (const theme of ['hud', 'saas'] as const) {
       await setDetails(true)
@@ -627,6 +714,10 @@ for (const lang of ['ru', 'en'] as const) {
     expect(feedSeen, 'counter-check: every combination with the feed was measured').toHaveLength(8)
     // The first view has room for the five: the rule drops nothing there (anti-vacuum of the rule).
     for (const theme of ['hud', 'saas']) expect(fitLines[`[feed on, ${theme}, details off, 1366x768]`], `[${theme}] all five lines at 1366x768`).toBe(5)
+    // Anti-vacuum of the value check: the longest names really pressed the lines - cut in the hud's monospace at both sizes
+    // (the saas face is proportional and narrower: there the same lines may fit whole, recorded in the log line below).
+    for (const vp of ['1366x768', '1024x640']) expect(namesCut[`[feed on, hud, details off, ${vp}]`], `[hud, ${vp}] counter-check: long names were cut ${JSON.stringify(namesCut)}`).toBeGreaterThan(0)
+    console.log('[049 decision 9 feed lines with names cut]', JSON.stringify({ lang, namesCut }))
     // 049 S2 (CI run 39474653429, ubuntu): at 1024x640 with «Подробнее» on, the top stack of CI ended about 50 px lower than
     // here (49 px of room between it and the heading here, -1 px there): its rows wrap with other fonts. A top stack 60 px
     // taller must not put the history over it - reproduced by a taller metrics row of «Подробнее», the row the CI run hit.

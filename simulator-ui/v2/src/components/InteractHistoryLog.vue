@@ -16,7 +16,7 @@
  * left out, not rendered (never hidden by a style).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
-import { historyEntryText, type InteractHistoryEntry } from '../composables/interact/useInteractHistory'
+import { historyEntryParts, historyEntryText, type HistoryLinePart, type InteractHistoryEntry } from '../composables/interact/useInteractHistory'
 import { useUiLocale } from '../composables/useUiLocale'
 
 const props = withDefaults(
@@ -84,6 +84,15 @@ function lineText(entry: InteractHistoryEntry): string {
   const text = historyEntryText(entry, locale.value)
   return props.feedOn && entry.source === 'own' ? `${t('feed.you')} · ${text}` : text
 }
+
+/**
+ * The same line as its parts (049 decision 9): the names give way first, then a series' count; the amount with its unit,
+ * the reason of a failure and a clearing's figures never do. The «вы» mark is a value: it says whose the line is.
+ */
+function lineParts(entry: InteractHistoryEntry): HistoryLinePart[] {
+  const parts = historyEntryParts(entry, locale.value)
+  return props.feedOn && entry.source === 'own' ? [{ text: `${t('feed.you')} · `, role: 'value' }, ...parts] : parts
+}
 </script>
 
 <template>
@@ -105,7 +114,14 @@ function lineText(entry: InteractHistoryEntry): string {
         :data-source="entry.source"
       >
         <span class="interact-history__icon" aria-hidden="true">{{ entry.icon }}</span>
-        <span class="interact-history__text" :title="lineText(entry)">{{ lineText(entry) }}</span>
+        <span class="interact-history__text" :title="lineText(entry)"
+          ><span
+            v-for="(part, k) in lineParts(entry)"
+            :key="k"
+            :class="`interact-history__${part.role}`"
+            >{{ part.text }}</span
+          ></span
+        >
         <span class="interact-history__time ds-mono">{{ entry.timeText }}</span>
       </li>
     </ul>
@@ -117,6 +133,9 @@ function lineText(entry: InteractHistoryEntry): string {
   049 S1 (decisions 4 and 9): the history stands at the right edge of the screen (on the control line, placed by
   `SimulatorAppRoot.vue`), so its content is aligned to that side - the heading and every line end on the line, a shorter
   line starts further right. A long line is cut by an ellipsis inside a bounded width, its whole text is its `title`.
+  049 decision 9 (owner's review of the final frames, 2026-10-20): the cut falls on the names - one ellipsis per name, the
+  names first, then a series' count; the value part (the amount with its unit, a failure's reason, a clearing's figures)
+  never (below). One line per entry: the fit rule above counts lines of one height.
 */
 .interact-history {
   pointer-events: none;
@@ -164,13 +183,41 @@ function lineText(entry: InteractHistoryEntry): string {
 }
 
 .interact-history__text {
+  display: flex;
   flex: 0 1 auto;
   min-width: 0;
   /* The one part of the history a pointer reaches: the `title` of a cut line (decision 9). */
   pointer-events: auto;
   overflow: hidden;
+  white-space: pre;
+}
+
+/*
+  Who gives way: the names - each keeps its first letter and the ellipsis - and, only once they can give no more, a series'
+  count (the shrink factor is proportional to it and to the width, so the names' 10000 against the count's 1 is an order
+  in practice). A value never shrinks (internal adversarial pass, 2026-10-21: values that shrank by weight were cut together
+  with the count). Every line of the dictionaries fits with its names at their least in the hud's monospace at 1024x640 -
+  held for the lines the stand draws by `e2e/qa/debt-before-after.qa.ts` and for every key by
+  `src/composables/feedLineBudget.p049.test.ts`.
+*/
+.interact-history__name,
+.interact-history__lead {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.interact-history__name {
+  flex: 0 10000 auto;
+  min-width: 2ch;
+}
+
+.interact-history__lead {
+  flex: 0 1 auto;
+}
+
+.interact-history__value {
+  flex: none;
 }
 
 .interact-history__time {

@@ -74,7 +74,7 @@ describe('the result screen', () => {
     expect(host.querySelector('[data-testid="mp-result-payment-id"]')).toBeNull()
     expect(host.querySelector('[data-testid="mp-result"]')!.getAttribute('data-payment-id')).toBe('man:9f2c')
     expect(host.querySelector('[data-testid="mp-result"]')!.textContent).not.toContain('man:9f2c')
-    expect(text(host, 'mp-result-status')).toBe('COMMITTED')
+    expect(text(host, 'mp-result-status')).toBe('completed')
     expect(text(host, 'mp-result-amount')).toBe('10.00 UAH')
     expect(text(host, 'mp-result-parties')).toBe('Alice → Bob')
     expect(host.querySelector('#mp-from')).toBeNull()

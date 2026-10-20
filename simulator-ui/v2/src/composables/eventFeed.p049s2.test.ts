@@ -17,7 +17,7 @@ import type { GraphSnapshot } from '../types'
 import type { RealModeState } from './useSimulatorRealMode'
 import { useSimulatorRealMode } from './useSimulatorRealMode'
 import { useInteractMode } from './useInteractMode'
-import { historyEntryText } from './interact/useInteractHistory'
+import { historyEntryParts, historyEntryText, type InteractHistoryEntry } from './interact/useInteractHistory'
 
 vi.mock('../api/simulatorApi', () => ({
   artifactDownloadUrl: () => 'http://artifact',
@@ -182,7 +182,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     later()
     emit(failure('evt_r1_2', 'PAYMENT_REJECTED'))
     expect(h.lines()).toEqual([
-      'Анна → Пекарня: платёж не прошёл — не хватило лимита на маршруте',
+      'Анна → Пекарня: не прошёл — мало лимита на маршруте',
       'Анна → Пекарня: платёж не прошёл',
     ])
     for (const line of h.lines()) {
@@ -200,7 +200,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
         { source: 'A', target: 'B', used: '0.00' }, { source: 'B', target: 'C', used: '0.00' }, { source: 'C', target: 'A', used: '0.00' },
       ],
     })
-    expect(h.lines()).toEqual([`Клиринг: общий долг уменьшился на 30.00${NBSP}UAH; 1 круг`])
+    expect(h.lines()).toEqual([`Клиринг: общий долг −30.00${NBSP}UAH; 1 круг`])
     // A clearing that moved no debt of the snapshot (no patches): no pair - the cycles alone; nothing is made up.
     emit({ event_id: 'evt_r1_2', ts: TS, type: 'clearing.done', equivalent: 'UAH', plan_id: 'p2', cleared_cycles: 2, cleared_amount: '7.00' })
     expect(h.lines().at(-1)).toBe('Клиринг: 2 круга')
@@ -233,7 +233,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     emit(payment('evt_r1_8'))
     expect(h.lines()).toEqual([
       `За 2 с: 6 платежей; последний — Анна → Вера: 6.00${NBSP}UAH`,
-      'Анна → Пекарня: платёж не прошёл — нет маршрута',
+      'Анна → Пекарня: не прошёл — нет маршрута',
       `Анна → Пекарня: 120.00${NBSP}UAH`,
     ])
     h.rm.stopSse()
@@ -283,7 +283,64 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     h.rm.stopSse()
   })
 
-  it('a change of run clears the network\'s lines (and brings back the own lines they stood in for)', async () => {
+  /**
+   * Closing Codex review of 049 (2026-10-20), class 2: one `clearFeed` served the switch AND a change of run or equivalent,
+   * so the own payment of the old run - hidden behind its stream line - came back under «События сети» in the new context.
+   * Decision 5: a change of run or equivalent clears the lines - all of them; the switch alone clears the network's.
+   */
+  async function payByHand(h: Awaited<ReturnType<typeof harness>>, amount = '5.00') {
+    h.im.startPaymentFlow()
+    h.im.selectNode('A')
+    h.im.selectNode('B')
+    await flush()
+    expect(h.im.phase.value, 'counter-check: the payment reached its confirm step').toBe('confirm-payment')
+    await h.im.confirmPayment(amount)
+    expect(h.im.paymentOutcome.value, 'counter-check: the payment is committed').toMatchObject({ kind: 'success' })
+    h.im.dismissPaymentResult()
+    h.im.cancel()
+  }
+
+  it('a change of run clears every line of the old run: its own payment does not come back (switch on)', async () => {
+    const h = await harness()
+    await payByHand(h)
+    emit(payment('evt_r1_1', 'A', 'B', '5.00'))
+    expect(h.lines(), 'precondition: the own payment is shown as its stream line').toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
+    expect(h.im.history, 'precondition: the own line is kept, hidden').toHaveLength(1)
+    h.real.runId = 'r2'
+    await flush()
+    expect(h.lines(), 'another run: no line of the old one, own or network').toEqual([])
+    h.feedOn.value = false
+    expect(h.lines(), 'and the switch turned off does not bring the old run\'s own line back').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('a change of equivalent clears every line: the own payment in UAH does not come back under EUR, nor back in UAH', async () => {
+    const h = await harness()
+    await payByHand(h)
+    emit(payment('evt_r1_1', 'A', 'B', '5.00'))
+    expect(h.lines(), 'precondition: the own payment is shown as its stream line').toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
+    expect(h.im.history, 'precondition: the own line is kept, hidden').toHaveLength(1)
+    h.equivalent.value = 'EUR'
+    expect(h.lines(), 'another equivalent: no line of the old one, own or network').toEqual([])
+    h.equivalent.value = 'UAH'
+    expect(h.lines(), 'back to UAH: the cleared lines stay cleared').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('switch off: a toggle keeps the own lines of the current run; a change of run clears them', async () => {
+    const h = await harness({ feedOn: false })
+    await payByHand(h)
+    expect(h.lines()).toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    h.feedOn.value = true
+    h.feedOn.value = false
+    expect(h.lines(), 'a toggle keeps the own line of the current run').toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    h.real.runId = 'r2'
+    await flush()
+    expect(h.lines(), 'another run: the own line of the old one is gone').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('a change of run clears the network\'s lines', async () => {
     const h = await harness()
     emit(payment('evt_r1_1'))
     expect(h.network()).toHaveLength(1)
@@ -312,5 +369,33 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     emit(payment('evt_r1_2'))
     expect(g.lines()).toHaveLength(1)
     g.rm.stopSse()
+  })
+})
+
+describe('049 decision 9 (owner review 2026-10-20): the parts of a line - the names give way, the values do not', () => {
+  const entry = (line: InteractHistoryEntry['line'], lead?: InteractHistoryEntry['lead']) => ({ line, ...(lead ? { lead } : {}) })
+  const roles = (e: ReturnType<typeof entry>) => historyEntryParts(e, 'ru').map((p) => `${p.role}:${p.text}`)
+
+  it('a payment: the two names, then the amount with its unit as one value; the parts are the line', () => {
+    const e = entry({ key: 'feed.payment', vars: { from: 'Анна', to: 'Пекарня', amount: '120.00', unit: 'UAH' } })
+    expect(roles(e)).toEqual(['name:Анна', 'value: → ', 'name:Пекарня', `value:: 120.00${NBSP}UAH`])
+    expect(historyEntryParts(e, 'ru').map((p) => p.text).join('')).toBe(historyEntryText(e, 'ru'))
+  })
+
+  it('a failure: the reason is a value; a series: its count is the lead; a clearing (no names) is one value', () => {
+    expect(roles(entry({ key: 'feed.failedLimit', vars: { from: 'A', to: 'B' } }))).toEqual([
+      'name:A', 'value: → ', 'name:B', 'value:: не прошёл — превысил бы лимит линии',
+    ])
+    const series = entry({ key: 'feed.payment', vars: { from: 'A', to: 'B', amount: '6.00', unit: 'UAH' } }, { plural: 'feed.paymentSeries', count: 6 })
+    expect(roles(series)[0]).toBe('lead:За 2 с: 6 платежей; последний — ')
+    expect(roles(entry({ plural: 'feed.clearing', count: 1, vars: { amount: '30.00', unit: 'UAH' } }))).toEqual([
+      `value:Клиринг: общий долг −30.00${NBSP}UAH; 1 круг`,
+    ])
+  })
+
+  it('an own payment line: the amount before the names is a value too', () => {
+    expect(roles(entry({ key: 'history.payment', vars: { amount: '5.00', unit: 'UAH', from: 'A', to: 'B' } }))).toEqual([
+      'value:Платёж 5.00 UAH: ', 'name:A', 'value: → ', 'name:B',
+    ])
   })
 })

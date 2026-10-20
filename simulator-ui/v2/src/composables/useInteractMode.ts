@@ -100,6 +100,12 @@ export function useInteractMode(opts: {
   showPid?: (pid: string) => string
   /** 049 S2 (decision 5): is «Show events» on (the network's events are written into the history)? Omitted: off. */
   eventsFeedOn?: () => boolean
+  /**
+   * The source of the scene on screen (`state.sourcePath`: a run's snapshot, a scenario's preview). Another source is
+   * another context for the history, as another run or equivalent is (closing Codex review of PR #341, P2-1). Omitted:
+   * the run and the equivalent alone.
+   */
+  sceneSource?: () => string
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
@@ -286,11 +292,26 @@ export function useInteractMode(opts: {
     const line = feedLineOf(item, participantName)
     if (line) historyStore.pushFeedLine(line)
   }
-  // A change of run or equivalent, or of the switch, drops the network's lines (decision 5); the own lines stay.
+  // Decision 5: a change of run or equivalent drops every line, own and network - they belong to another context; the
+  // switch alone drops the network's lines and brings back the own lines they stood in for (closing Codex review, 2026-10-20).
   watch(
-    () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}|${feedOn() ? 1 : 0}`,
-    () => historyStore.clearFeed(),
+    () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}`,
+    () => historyStore.clearAll(),
     { flush: 'sync' },
+  )
+  watch(feedOn, () => historyStore.clearFeed(), { flush: 'sync' })
+  // The picture on screen is another context when its source changes - a stopped run's picture replaced by another
+  // scenario's preview keeps the run id and the equivalent (closing Codex review of PR #341, P2-1). An empty source is
+  // the moment between two loads (`clearScene`), not a context: the same source loaded again clears nothing.
+  let shownSource: string | null = null
+  watch(
+    () => String(opts.sceneSource?.() ?? '').trim(),
+    (source) => {
+      if (!source) return
+      if (shownSource !== null && source !== shownSource) historyStore.clearAll()
+      shownSource = source
+    },
+    { flush: 'sync', immediate: true },
   )
 
   const dataCache = useInteractDataCache({

@@ -508,7 +508,7 @@ describe('useInteractMode', () => {
       snapshot: ref<GraphSnapshot | null>(null) })
     im.selectEdge('alice→bob')
     await im.confirmTrustlineClose()
-    expect(historyEntryText(im.history.at(-1)!)).toBe('Close requested: alice → bob (closes when the debt is repaid)')
+    expect(historyEntryText(im.history.at(-1)!)).toBe('Closes once the debt is repaid: alice → bob')
   })
 
   it('MP-6a: startPaymentFlow prefetches trustlines even when cache is warm', async () => {
