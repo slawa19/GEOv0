@@ -286,12 +286,14 @@ export function useInteractMode(opts: {
     const line = feedLineOf(item, participantName)
     if (line) historyStore.pushFeedLine(line)
   }
-  // A change of run or equivalent, or of the switch, drops the network's lines (decision 5); the own lines stay.
+  // Decision 5: a change of run or equivalent drops every line, own and network - they belong to another context; the
+  // switch alone drops the network's lines and brings back the own lines they stood in for (closing Codex review, 2026-10-20).
   watch(
-    () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}|${feedOn() ? 1 : 0}`,
-    () => historyStore.clearFeed(),
+    () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}`,
+    () => historyStore.clearAll(),
     { flush: 'sync' },
   )
+  watch(feedOn, () => historyStore.clearFeed(), { flush: 'sync' })
 
   const dataCache = useInteractDataCache({
     actions: opts.actions,

@@ -283,7 +283,64 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     h.rm.stopSse()
   })
 
-  it('a change of run clears the network\'s lines (and brings back the own lines they stood in for)', async () => {
+  /**
+   * Closing Codex review of 049 (2026-10-20), class 2: one `clearFeed` served the switch AND a change of run or equivalent,
+   * so the own payment of the old run - hidden behind its stream line - came back under «События сети» in the new context.
+   * Decision 5: a change of run or equivalent clears the lines - all of them; the switch alone clears the network's.
+   */
+  async function payByHand(h: Awaited<ReturnType<typeof harness>>, amount = '5.00') {
+    h.im.startPaymentFlow()
+    h.im.selectNode('A')
+    h.im.selectNode('B')
+    await flush()
+    expect(h.im.phase.value, 'counter-check: the payment reached its confirm step').toBe('confirm-payment')
+    await h.im.confirmPayment(amount)
+    expect(h.im.paymentOutcome.value, 'counter-check: the payment is committed').toMatchObject({ kind: 'success' })
+    h.im.dismissPaymentResult()
+    h.im.cancel()
+  }
+
+  it('a change of run clears every line of the old run: its own payment does not come back (switch on)', async () => {
+    const h = await harness()
+    await payByHand(h)
+    emit(payment('evt_r1_1', 'A', 'B', '5.00'))
+    expect(h.lines(), 'precondition: the own payment is shown as its stream line').toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
+    expect(h.im.history, 'precondition: the own line is kept, hidden').toHaveLength(1)
+    h.real.runId = 'r2'
+    await flush()
+    expect(h.lines(), 'another run: no line of the old one, own or network').toEqual([])
+    h.feedOn.value = false
+    expect(h.lines(), 'and the switch turned off does not bring the old run\'s own line back').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('a change of equivalent clears every line: the own payment in UAH does not come back under EUR, nor back in UAH', async () => {
+    const h = await harness()
+    await payByHand(h)
+    emit(payment('evt_r1_1', 'A', 'B', '5.00'))
+    expect(h.lines(), 'precondition: the own payment is shown as its stream line').toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
+    expect(h.im.history, 'precondition: the own line is kept, hidden').toHaveLength(1)
+    h.equivalent.value = 'EUR'
+    expect(h.lines(), 'another equivalent: no line of the old one, own or network').toEqual([])
+    h.equivalent.value = 'UAH'
+    expect(h.lines(), 'back to UAH: the cleared lines stay cleared').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('switch off: a toggle keeps the own lines of the current run; a change of run clears them', async () => {
+    const h = await harness({ feedOn: false })
+    await payByHand(h)
+    expect(h.lines()).toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    h.feedOn.value = true
+    h.feedOn.value = false
+    expect(h.lines(), 'a toggle keeps the own line of the current run').toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    h.real.runId = 'r2'
+    await flush()
+    expect(h.lines(), 'another run: the own line of the old one is gone').toEqual([])
+    h.rm.stopSse()
+  })
+
+  it('a change of run clears the network\'s lines', async () => {
     const h = await harness()
     emit(payment('evt_r1_1'))
     expect(h.network()).toHaveLength(1)

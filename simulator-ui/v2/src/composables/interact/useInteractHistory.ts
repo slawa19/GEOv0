@@ -174,6 +174,16 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
   }
 
   /**
+   * Drops every line, own and network (049 decision 5, «смена прогона или эквивалента очищает строки»; closing Codex review,
+   * 2026-10-20): the lines of another run or equivalent say nothing of the one on screen - an own payment of the old run
+   * must not come back under «События сети». The switch alone is `clearFeed`: the own lines are the current run's.
+   */
+  function clearAll() {
+    if (feed.length) feed.splice(0, feed.length)
+    if (history.length) history.splice(0, history.length)
+  }
+
+  /**
    * What the history shows, oldest first: with the events off exactly the own lines (as before 049); with them on the own
    * lines and the network's merged by the order of writing, without the own lines the network carries.
    */
@@ -182,5 +192,5 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
     return [...history.filter((e) => !e.shownByNetwork), ...feed].sort((a, b) => a.seq - b.seq)
   }
 
-  return { history, feed, pushHistory, pushFeedLine, clearFeed, shownEntries }
+  return { history, feed, pushHistory, pushFeedLine, clearFeed, clearAll, shownEntries }
 }
