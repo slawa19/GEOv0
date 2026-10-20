@@ -314,10 +314,10 @@ export const en = {
   /** History lines of the actions (`useInteractMode.ts`; 049 S2: the success toasts are gone). Amounts arrive as decimal strings. */
   history: {
     payment: 'Payment {amount} {unit}: {from} → {to}',
-    trustlineCreated: 'Trustline created: {from} → {to} ({limit} {unit})',
-    trustlineUpdated: 'Trustline updated: {from} → {to} → limit {limit} {unit}',
+    trustlineCreated: 'New line: {from} → {to}, limit {limit} {unit}',
+    trustlineUpdated: 'New line limit: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Trustline closed: {from} → {to}',
-    closeRequested: 'Close requested: {from} → {to} (closes when the debt is repaid)',
+    closeRequested: 'Closes once the debt is repaid: {from} → {to}',
     clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
     clearingNothing: 'Clearing: no cycles found',
   },
@@ -669,11 +669,11 @@ export const en = {
     paymentSeries: plural({ one: 'In 2 s: {count} payment; latest — ', other: 'In 2 s: {count} payments; latest — ' }),
     failureSeries: plural({ one: 'In 2 s: {count} failure; latest — ', other: 'In 2 s: {count} failures; latest — ' }),
     clearing: plural({
-      one: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycle',
-      other: 'Clearing: total debt down by {amount}\u00a0{unit}; {count} cycles',
+      one: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycle',
+      other: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycles',
     }),
     clearingCycles: plural({ one: 'Clearing: {count} cycle', other: 'Clearing: {count} cycles' }),
-    clearingDebt: 'Clearing: total debt down by {amount}\u00a0{unit}',
+    clearingDebt: 'Clearing: total debt −{amount}\u00a0{unit}',
     trustGrowth: 'Trust limits grew after the clearing',
     /** The mark of a line of the person's own action while the network's events are shown beside it. */
     you: 'you',

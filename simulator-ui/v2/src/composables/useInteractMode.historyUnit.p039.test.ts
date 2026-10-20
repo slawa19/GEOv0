@@ -59,8 +59,8 @@ describe('039 closing, finding 1 - a trust line history line carries the equival
     expect(actions.createTrustline, 'counter-check: the request was made in the operation\'s equivalent').toHaveBeenCalledWith('pid-0002', 'pid-0003', '12345.67', EQ, expect.anything())
     expect(im.history, 'exactly one history line').toHaveLength(1)
     const entry = im.history[0]!
-    expect(historyEntryText(entry, 'en')).toBe('Trustline created: Bob Carter → Carol Dean (12345.67 HOUR)')
-    expect(historyEntryText(entry, 'ru')).toBe('Линия доверия открыта: Bob Carter → Carol Dean (12345.67 HOUR)')
+    expect(historyEntryText(entry, 'en')).toBe('New line: Bob Carter → Carol Dean, limit 12345.67 HOUR')
+    expect(historyEntryText(entry, 'ru')).toBe('Новая линия: Bob Carter → Carol Dean, лимит 12345.67 HOUR')
   })
 
   it('a trust line limit CHANGED: the new limit with its equivalent, in both languages', async () => {
@@ -69,7 +69,7 @@ describe('039 closing, finding 1 - a trust line history line carries the equival
     await im.confirmTrustlineUpdate('20.50')
     expect(im.history, 'exactly one history line').toHaveLength(1)
     const entry = im.history[0]!
-    expect(historyEntryText(entry, 'en')).toBe('Trustline updated: Alice Baker → Carol Dean → limit 20.50 HOUR')
-    expect(historyEntryText(entry, 'ru')).toBe('Линия доверия изменена: Alice Baker → Carol Dean, лимит 20.50 HOUR')
+    expect(historyEntryText(entry, 'en')).toBe('New line limit: Alice Baker → Carol Dean, 20.50 HOUR')
+    expect(historyEntryText(entry, 'ru')).toBe('Новый лимит линии: Alice Baker → Carol Dean, 20.50 HOUR')
   })
 })

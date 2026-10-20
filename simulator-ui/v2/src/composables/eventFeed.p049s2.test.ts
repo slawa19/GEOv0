@@ -200,7 +200,7 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
         { source: 'A', target: 'B', used: '0.00' }, { source: 'B', target: 'C', used: '0.00' }, { source: 'C', target: 'A', used: '0.00' },
       ],
     })
-    expect(h.lines()).toEqual([`Клиринг: общий долг уменьшился на 30.00${NBSP}UAH; 1 круг`])
+    expect(h.lines()).toEqual([`Клиринг: общий долг −30.00${NBSP}UAH; 1 круг`])
     // A clearing that moved no debt of the snapshot (no patches): no pair - the cycles alone; nothing is made up.
     emit({ event_id: 'evt_r1_2', ts: TS, type: 'clearing.done', equivalent: 'UAH', plan_id: 'p2', cleared_cycles: 2, cleared_amount: '7.00' })
     expect(h.lines().at(-1)).toBe('Клиринг: 2 круга')
@@ -389,7 +389,7 @@ describe('049 decision 9 (owner review 2026-10-20): the parts of a line - the na
     const series = entry({ key: 'feed.payment', vars: { from: 'A', to: 'B', amount: '6.00', unit: 'UAH' } }, { plural: 'feed.paymentSeries', count: 6 })
     expect(roles(series)[0]).toBe('lead:За 2 с: 6 платежей; последний — ')
     expect(roles(entry({ plural: 'feed.clearing', count: 1, vars: { amount: '30.00', unit: 'UAH' } }))).toEqual([
-      `value:Клиринг: общий долг уменьшился на 30.00${NBSP}UAH; 1 круг`,
+      `value:Клиринг: общий долг −30.00${NBSP}UAH; 1 круг`,
     ])
   })
 

@@ -50,8 +50,8 @@ export function historyEntryText(entry: Pick<InteractHistoryEntry, 'line' | 'lea
  * A part of a history line by its role (049 decision 9, owner's review of the final frames 2026-10-20): `name` - a
  * participant's name (the `{from}` / `{to}` of a line), the part that gives way first, cut by an ellipsis; `lead` - the
  * count of a series («За 2 с: 6 платежей; последний — »), giving way only after the names; `value` - everything else (the
- * amount with its unit, the reason of a failure, the figures of a clearing, the words between them), cut only when the
- * names and the count can give no more (`InteractHistoryLog.vue`).
+ * amount with its unit, the reason of a failure, the figures of a clearing, the words between them), never cut - so every
+ * line's values must fit the column with the names at their least (`feedLineBudget.p049.test.ts`).
  */
 export type HistoryLinePart = { text: string; role: 'name' | 'lead' | 'value' }
 

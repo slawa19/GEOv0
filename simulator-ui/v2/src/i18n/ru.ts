@@ -272,10 +272,10 @@ export const ru = {
 
   history: {
     payment: 'Платёж {amount} {unit}: {from} → {to}',
-    trustlineCreated: 'Линия доверия открыта: {from} → {to} ({limit} {unit})',
-    trustlineUpdated: 'Линия доверия изменена: {from} → {to}, лимит {limit} {unit}',
+    trustlineCreated: 'Новая линия: {from} → {to}, лимит {limit} {unit}',
+    trustlineUpdated: 'Новый лимит линии: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
-    closeRequested: 'Запрошено закрытие: {from} → {to} (линия закроется, когда долг будет погашен)',
+    closeRequested: 'Линия закроется после погашения: {from} → {to}',
     clearing: plural({
       one: 'Клиринг: {count} цикл, −{amount} {unit}',
       few: 'Клиринг: {count} цикла, −{amount} {unit}',
@@ -578,10 +578,10 @@ export const ru = {
       other: 'За 2 с: {count} отказа; последний — ',
     }),
     clearing: plural({
-      one: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круг',
-      few: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
-      many: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} кругов',
-      other: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}; {count} круга',
+      one: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круг',
+      few: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круга',
+      many: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} кругов',
+      other: 'Клиринг: общий долг −{amount}\u00a0{unit}; {count} круга',
     }),
     clearingCycles: plural({
       one: 'Клиринг: {count} круг',
@@ -589,7 +589,7 @@ export const ru = {
       many: 'Клиринг: {count} кругов',
       other: 'Клиринг: {count} круга',
     }),
-    clearingDebt: 'Клиринг: общий долг уменьшился на {amount}\u00a0{unit}',
+    clearingDebt: 'Клиринг: общий долг −{amount}\u00a0{unit}',
     trustGrowth: 'После клиринга выросли лимиты доверия',
     you: 'вы',
   },

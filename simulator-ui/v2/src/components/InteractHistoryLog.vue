@@ -135,7 +135,7 @@ function lineParts(entry: InteractHistoryEntry): HistoryLinePart[] {
   line starts further right. A long line is cut by an ellipsis inside a bounded width, its whole text is its `title`.
   049 decision 9 (owner's review of the final frames, 2026-10-20): the cut falls on the names - one ellipsis per name, the
   names first, then a series' count; the value part (the amount with its unit, a failure's reason, a clearing's figures)
-  only as the last resort (below). One line per entry: the fit rule above counts lines of one height.
+  never (below). One line per entry: the fit rule above counts lines of one height.
 */
 .interact-history {
   pointer-events: none;
@@ -193,14 +193,15 @@ function lineParts(entry: InteractHistoryEntry): HistoryLinePart[] {
 }
 
 /*
-  Who gives way, by the shrink factor (a flex item shrinks in proportion to it): the names first - each keeps its first
-  letter and the ellipsis - then a series' count, and a value only when the names and the count can give no more (a line
-  whose own words are longer than the column: it ends in an ellipsis instead of being cut off mid-letter). The feed's lines
-  fit with the names at their least in the hud's monospace at 1024x640 (`e2e/qa/debt-before-after.qa.ts`).
+  Who gives way: the names - each keeps its first letter and the ellipsis - and, only once they can give no more, a series'
+  count (the shrink factor is proportional to it and to the width, so the names' 10000 against the count's 1 is an order
+  in practice). A value never shrinks (internal adversarial pass, 2026-10-21: values that shrank by weight were cut together
+  with the count). Every line of the dictionaries fits with its names at their least in the hud's monospace at 1024x640 -
+  held for the lines the stand draws by `e2e/qa/debt-before-after.qa.ts` and for every key by
+  `src/composables/feedLineBudget.p049.test.ts`.
 */
 .interact-history__name,
-.interact-history__lead,
-.interact-history__value {
+.interact-history__lead {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -212,11 +213,11 @@ function lineParts(entry: InteractHistoryEntry): HistoryLinePart[] {
 }
 
 .interact-history__lead {
-  flex: 0 100 auto;
+  flex: 0 1 auto;
 }
 
 .interact-history__value {
-  flex: 0 1 auto;
+  flex: none;
 }
 
 .interact-history__time {
