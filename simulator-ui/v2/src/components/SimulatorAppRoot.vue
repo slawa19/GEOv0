@@ -288,11 +288,20 @@ function readPublishedStackHeightPx(el: HTMLElement | null): number | null {
 /** 043 S2 (fix-delta 3): the open interact window was placed by the action bar (see `followTopStackWithRightRailAnchor`). */
 let rightRailAnchorActive = false
 
+/**
+ * 049 S2 (CI run 39474653429): where the top stack ends on screen and how tall the bottom stack is, as published - the
+ * history shows only the lines that fit between them (`InteractHistoryLog.vue`, `topLimitPx`, `layoutKey`).
+ */
+const topStackBottomPx = ref<number | null>(null)
+const bottomStackPublishedPx = ref(0)
+
 function applyPublishedTopStackHeightPx(nextPx: number): void {
   const host = getHostEl()
   if (!host) return
 
   host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
+  const stackBottom = queryTopStackElement()?.getBoundingClientRect().bottom
+  topStackBottomPx.value = typeof stackBottom === 'number' && Number.isFinite(stackBottom) ? stackBottom : null
   wm.setGeometry({ dockedRightTopPx: nextPx })
   followTopStackWithRightRailAnchor()
   wm.reclampAll()
@@ -316,6 +325,7 @@ function applyPublishedBottomStackHeightPx(nextPx: number): void {
   if (!host) return
 
   host.style.setProperty('--ds-hud-bottom-stack-height', `${nextPx}px`)
+  bottomStackPublishedPx.value = nextPx
 }
 
 function bindOverlayGeometryPublishers(): void {
@@ -1565,6 +1575,8 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         :entries="interact.mode.shownHistory.value"
         :max-visible="eventsFeedOn ? FEED_LINES_SHOWN : OWN_LINES_SHOWN"
         :feed-on="eventsFeedOn"
+        :top-limit-px="topStackBottomPx"
+        :layout-key="`${bottomStackPublishedPx}|${detailsOpen ? 1 : 0}`"
       />
     </div>
   </div>

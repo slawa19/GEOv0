@@ -377,6 +377,28 @@ const feedFits = (page: Page) => page.evaluate(() => {
   return { present: true, lines: subjects.length - 1, outside, overlaps }
 })
 
+/**
+ * 049 S2 (CI run 39474653429, ubuntu fonts): the history shows as many of its newest lines as fit UNDER the top stack -
+ * between the stack's bottom edge and the history's own bottom anchor - never more than its five. Read from the page:
+ * the stack's bottom, the heading's top, the step between two lines. `oneMoreCrosses` - the line the rule left out would
+ * have crossed the stack (so the rule drops nothing needlessly); `crosses` - the heading is above the stack's bottom.
+ */
+const feedFitRule = (page: Page) => page.evaluate(() => {
+  const log = document.querySelector('.interact-history')
+  const top = document.querySelector('.ds-ov-top')
+  if (!log || !top) return null
+  const items = [...log.querySelectorAll('.interact-history__item')].map((el) => el.getBoundingClientRect())
+  const header = log.querySelector('.interact-history__header')!.getBoundingClientRect()
+  const limit = top.getBoundingClientRect().bottom
+  const step = items.length > 1 ? items[1]!.top - items[0]!.top : null
+  return {
+    lines: items.length,
+    crosses: header.top < limit,
+    oneMoreCrosses: step === null ? null : header.top - step < limit,
+    room: Math.round(header.top - limit),
+  }
+})
+
 /** The canvas share of 043 R9 (`layout.qa.ts`): the bars' rectangles against the viewport, and the hit-tested share. */
 const canvasShare = (page: Page) => page.evaluate(() => {
   const vh = window.innerHeight
@@ -546,6 +568,29 @@ for (const lang of ['ru', 'en'] as const) {
     await expect(page.locator('.interact-history__item[data-source="network"]')).toHaveCount(4)
     const FEED_SEEN = [...SEEN, '.interact-history__item[data-source="network"] .interact-history__text'] as const
     const feedSeen: string[] = []
+    const fitLines: Record<string, number> = {}
+    /**
+     * The lines shown overlap no neighbour and are whole in the viewport, the pair is clear of them, their text ends on the
+     * control line - and they are as many as fit under the top stack (the rule above), at most five.
+     */
+    const expectFeedFits = async (where: string) => {
+      const rule = await feedFitRule(page)
+      expect(rule, `${where} counter-check: the history and the top stack are measured`).not.toBeNull()
+      expect(rule!.crosses, `${where} the history's heading stays under the top stack: ${JSON.stringify(rule)}`).toBe(false)
+      expect(rule!.lines, `${where} at least one line and at most five: ${JSON.stringify(rule)}`).toBeGreaterThanOrEqual(1)
+      expect(rule!.lines).toBeLessThanOrEqual(5)
+      if (rule!.lines < 5) expect(rule!.oneMoreCrosses, `${where} a line was left out only because it would cross the top stack: ${JSON.stringify(rule)}`).toBe(true)
+      fitLines[where] = rule!.lines
+      const fits = await feedFits(page)
+      expect({ ...fits, lines: undefined }, `${where} the lines overlap no neighbour and are whole inside the viewport`)
+        .toEqual({ present: true, lines: undefined, outside: [], overlaps: [] })
+      expect(fits.lines, `${where} counter-check: the lines measured are the lines shown`).toBe(rule!.lines)
+      expect(await pairFits(page), `${where} the pair overlaps no neighbour - the lines neither`)
+        .toEqual({ present: true, outside: [], overlaps: [] })
+      const e = await edges(page)
+      expect(e.historyText, `${where} counter-check: the heading and every line are measured`).toHaveLength(rule!.lines + 1)
+      for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+    }
     const shares: Record<string, unknown> = {}
     for (const theme of ['hud', 'saas'] as const) {
       await setDetails(true)
@@ -558,13 +603,7 @@ for (const lang of ['ru', 'en'] as const) {
           const where = `[feed on, ${theme}, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}]`
           await settledLayout(page, where)
           expect(await renderedProblems(page, FEED_SEEN), `${where} every measured subject - the network's lines too - is drawn and seen`).toEqual([])
-          expect(await feedFits(page), `${where} the five lines overlap no neighbour and are whole inside the viewport`)
-            .toEqual({ present: true, lines: 5, outside: [], overlaps: [] })
-          expect(await pairFits(page), `${where} the pair overlaps no neighbour - the five lines neither`)
-            .toEqual({ present: true, outside: [], overlaps: [] })
-          const e = await edges(page)
-          expect(e.historyText, `${where} counter-check: the heading and the five lines are measured`).toHaveLength(6)
-          for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+          await expectFeedFits(where)
           // Measured and recorded, not asserted (spec 049, Verification plan 2): the canvas share of the first view with the feed.
           if (!details && vp.width === 1366) shares[theme] = await canvasShare(page)
           feedSeen.push(where)
@@ -572,6 +611,20 @@ for (const lang of ['ru', 'en'] as const) {
       }
     }
     expect(feedSeen, 'counter-check: every combination with the feed was measured').toHaveLength(8)
+    // The first view has room for the five: the rule drops nothing there (anti-vacuum of the rule).
+    for (const theme of ['hud', 'saas']) expect(fitLines[`[feed on, ${theme}, details off, 1366x768]`], `[${theme}] all five lines at 1366x768`).toBe(5)
+    // 049 S2 (CI run 39474653429, ubuntu): at 1024x640 with «Подробнее» on, the top stack of CI ended about 50 px lower than
+    // here (49 px of room between it and the heading here, -1 px there): its rows wrap with other fonts. A top stack 60 px
+    // taller must not put the history over it - reproduced by a taller metrics row of «Подробнее», the row the CI run hit.
+    await setDetails(true)
+    await page.setViewportSize(FIT_VIEWPORTS[1])
+    const taller = await page.addStyleTag({ content: '.ds-ov-top [data-testid="system-metrics"] { padding-bottom: 60px !important; }' })
+    const tallWhere = '[feed on, saas, details on, 1024x640, top stack +60 px]'
+    await settledLayout(page, tallWhere)
+    await expectFeedFits(tallWhere)
+    await taller.evaluate((el) => el.remove())
+    await settledLayout(page, `${tallWhere} restored`)
+    console.log('[049 S2 feed lines that fit]', JSON.stringify({ lang, fitLines }))
     const row = { lang, viewport: '1366x768', details: 'off', feed: 'on (5 lines)', shares }
     console.log('[049 S2 feed canvas share]', JSON.stringify(row))
     info.annotations.push({ type: '049-S2-feed-canvas-share', description: JSON.stringify(row) })

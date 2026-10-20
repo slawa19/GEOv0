@@ -7,8 +7,15 @@
  * 049 S2 (decision 5): with `feedOn` («Показывать события») the log is «События сети»: the network's events beside the
  * person's own actions, and an own line is marked «вы» - the one line known for certain to be the person's (a network
  * line is never marked: its event names no author). Off: exactly the own lines, as before.
+ *
+ * 049 S2 (CI run 39474653429): the log grows upwards from its bottom anchor, and with five lines and «Подробнее» open at
+ * 1024x640 its heading reached the top stack (on CI's fonts the stack's rows wrap and end about 50 px lower). The rule:
+ * the log shows as many of its newest lines as fit between its anchor and `topLimitPx` - the bottom edge of the top stack
+ * as the root measures it - never more than `maxVisible`, never fewer than one. Measured from the rendered lines (their
+ * step), again whenever the lines, the limit, the anchor (`layoutKey`) or the window change; the oldest lines are the ones
+ * left out, not rendered (never hidden by a style).
  */
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import { historyEntryText, type InteractHistoryEntry } from '../composables/interact/useInteractHistory'
 import { useUiLocale } from '../composables/useUiLocale'
 
@@ -19,16 +26,58 @@ const props = withDefaults(
     maxVisible?: number
     /** 049 S2: the network's events are shown (the title, and the «вы» mark of own lines). */
     feedOn?: boolean
+    /** 049 S2: the viewport y the heading must stay below (the top stack's bottom edge); null - no limit. */
+    topLimitPx?: number | null
+    /** 049 S2: changes whenever the log's bottom anchor may have moved (the bottom stack, «Подробнее»). */
+    layoutKey?: string
   }>(),
-  { maxVisible: 8, feedOn: false },
+  { maxVisible: 8, feedOn: false, topLimitPx: null, layoutKey: '' },
 )
 const { t, locale } = useUiLocale()
+
+const rootEl = ref<HTMLElement | null>(null)
+/** How many lines fit under the top stack (`Infinity` until measured or without a limit). */
+const fitCount = ref(Number.POSITIVE_INFINITY)
 
 const visible = computed(() => {
   // Show most recent entries at the top
   const e = props.entries
-  return e.slice(Math.max(0, e.length - props.maxVisible)).reverse()
+  const n = Math.min(props.maxVisible, fitCount.value)
+  return e.slice(Math.max(0, e.length - n)).reverse()
 })
+
+function measureFit(): void {
+  const el = rootEl.value
+  const limit = props.topLimitPx
+  if (!el || limit === null || limit === undefined || !Number.isFinite(limit)) {
+    if (fitCount.value !== Number.POSITIVE_INFINITY) fitCount.value = Number.POSITIVE_INFINITY
+    return
+  }
+  const items = el.querySelectorAll<HTMLElement>('.interact-history__item')
+  if (items.length === 0) return
+  const box = el.getBoundingClientRect()
+  const first = items[0]!.getBoundingClientRect()
+  const last = items[items.length - 1]!.getBoundingClientRect()
+  const list = el.querySelector('.interact-history__list')
+  const gap = list ? Number.parseFloat(getComputedStyle(list).rowGap) || 0 : 0
+  const step = items.length > 1 ? items[1]!.getBoundingClientRect().top - first.top : first.height + gap
+  if (!(step > 0)) return
+  // Bottom-anchored: with k lines the heading's top is `box.bottom - tail - first.height - (k - 1) * step - head`; it
+  // stays a gap below the limit.
+  const head = first.top - box.top
+  const tail = box.bottom - last.bottom
+  const room = box.bottom - limit - gap - tail - head - first.height
+  const k = Math.max(1, Math.floor(room / step) + 1)
+  if (k !== fitCount.value) fitCount.value = k
+}
+const onResize = () => measureFit()
+onMounted(() => {
+  measureFit()
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+onUpdated(measureFit)
+watch(() => [props.topLimitPx, props.layoutKey, props.maxVisible], () => void nextTick(measureFit))
 
 /** The text of a line: an own line is marked «вы» while the network's events are beside it. */
 function lineText(entry: InteractHistoryEntry): string {
@@ -40,6 +89,7 @@ function lineText(entry: InteractHistoryEntry): string {
 <template>
   <div
     v-if="entries.length > 0"
+    ref="rootEl"
     class="interact-history"
     :aria-label="feedOn ? t('recentActions.feedAria') : t('recentActions.aria')"
     data-testid="recent-actions"
