@@ -357,7 +357,7 @@ test('046 W2 frames: the result of a clearing, both themes and languages (P046_F
 })
 
 // 046 (advisor, 2026-10-18): the sum of a clearing result keeps its figure and unit on one line - in hud the label
-// «Погашено циклов: 2 · Сумма по циклам: 10.00 UAH» wraps, and before the no-break space the unit went alone to the next line.
+// «Погашено кругов: 2 · Сумма по кругам: 10.00 UAH» (049 closing polish: «круг») wraps, and before the no-break space the unit went alone to the next line.
 for (const theme of THEMES) {
   test(`046 W2 [${theme}] ru: the sum of a clearing result keeps "10.00 UAH" on one line`, async ({ page }, info) => {
     await open(page, theme, 'ru')

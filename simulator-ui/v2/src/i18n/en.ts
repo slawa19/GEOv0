@@ -209,7 +209,7 @@ export const en = {
   clearing: {
     panelAria: 'Clearing panel',
     runTitle: 'Run clearing',
-    confirmHelp: 'The server will reduce the debts that close into a loop.',
+    confirmHelp: 'The server will reduce the debts that run around a cycle.',
     confirm: 'Confirm',
     runningShort: 'Running…',
     // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}").

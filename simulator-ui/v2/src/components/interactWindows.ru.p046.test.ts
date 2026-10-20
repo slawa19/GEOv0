@@ -283,7 +283,7 @@ const CASES: Case[] = [
       mountWith(ClearingPanel, { phase: 'confirm-clearing', state: state('confirm-clearing', null, null), busy: false, equivalent: 'UAH', participants: PEOPLE, confirmClearing: vi.fn(), cancel: vi.fn() })
       await settle()
     },
-    en: ['Run clearing', 'The server will reduce the debts that close into a loop.', 'Cancel', 'Confirm'],
+    en: ['Run clearing', 'The server will reduce the debts that run around a cycle.', 'Cancel', 'Confirm'],
     ru: [r('clearing.runTitle'), r('clearing.confirmHelp'), r('common.cancel'), r('clearing.confirm'), r('clearing.panelAria')],
   },
   {
