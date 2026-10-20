@@ -106,6 +106,14 @@ export function useInteractMode(opts: {
    * the run and the equivalent alone.
    */
   sceneSource?: () => string
+  /**
+   * Argon's closing review of 049 (P2): the source the latest scene load ASKED for - read while the shown source is empty
+   * (between two loads, or a load that failed and cleared the scene), so a failed load of another scenario is a change of
+   * context too.
+   */
+  requestedSceneSource?: () => string | null
+  /** True for a picture of the CURRENT run: a run's arrival is the run id watcher's, its first picture is not a change. */
+  isCurrentRunSource?: (source: string) => boolean
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
@@ -301,15 +309,19 @@ export function useInteractMode(opts: {
   )
   watch(feedOn, () => historyStore.clearFeed(), { flush: 'sync' })
   // The picture on screen is another context when its source changes - a stopped run's picture replaced by another
-  // scenario's preview keeps the run id and the equivalent (closing Codex review of PR #341, P2-1). An empty source is
-  // the moment between two loads (`clearScene`), not a context: the same source loaded again clears nothing.
+  // scenario's preview keeps the run id and the equivalent (closing Codex review of PR #341, P2-1). The context is the
+  // IDENTITY of what is shown or asked for (Argon's closing review of 049, P2): an empty source - the moment between two
+  // loads, or a failed load that cleared the scene - is judged by the source that load asked for (the same source loaded
+  // again clears nothing, another scenario that failed does); a picture of the current run is never a change here - the
+  // run's arrival was the run id watcher's, and its first picture replacing the preview it started from is the same run.
   let shownSource: string | null = null
   watch(
     () => String(opts.sceneSource?.() ?? '').trim(),
     (source) => {
-      if (!source) return
-      if (shownSource !== null && source !== shownSource) historyStore.clearAll()
-      shownSource = source
+      const context = source || String(opts.requestedSceneSource?.() ?? '').trim()
+      if (!context) return
+      if (shownSource !== null && context !== shownSource && !opts.isCurrentRunSource?.(context)) historyStore.clearAll()
+      shownSource = context
     },
     { flush: 'sync', immediate: true },
   )

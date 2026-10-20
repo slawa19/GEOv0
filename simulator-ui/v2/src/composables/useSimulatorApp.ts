@@ -890,10 +890,18 @@ export function useSimulatorApp(opts?: {
 
   let resetClearingFxDedupImpl: () => void = () => undefined
 
+  // The source the LATEST scene load asked for, as the `sourcePath` its snapshot would carry. Written when the load
+  // is requested (before its first await); the scene owner reads it only for the latest load, when that load failed, and
+  // the history (`useInteractMode`, Argon's closing review of 049) while the shown source is empty. Declared before the
+  // interact mode, whose watcher reads it at once.
+  let requestedSceneSource: string | null = null
+
   const interactMode = useInteractMode({
     showPid: participantDisplayIdFor(() => shownScenarioId.value),
     eventsFeedOn: opts?.eventsFeedOn,
     sceneSource: () => state.sourcePath,
+    requestedSceneSource: () => requestedSceneSource,
+    isCurrentRunSource: (source) => !!real.runId && source.startsWith(runSnapshotSourcePath(real.apiBase, real.runId, '')),
     actions: interactActions,
     runId: interactRunId,
     equivalent: sceneEq,
@@ -1589,10 +1597,6 @@ export function useSimulatorApp(opts?: {
 
   const previewSourcePath = (scenarioId: string, eq: string) =>
     `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=real`
-  // The source the LATEST scene load asked for, as the `sourcePath` its snapshot would carry. Written when the load
-  // is requested (before its first await); the scene owner reads it only for the latest load, when that load failed.
-  let requestedSceneSource: string | null = null
-
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
     requestedSceneSource = null
     if (!isRealMode.value) return recordingSceneSource.load(eq)

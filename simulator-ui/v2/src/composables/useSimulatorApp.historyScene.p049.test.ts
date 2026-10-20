@@ -11,7 +11,7 @@
 import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, stopRun } from '../api/simulatorApi'
+import { createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, stopRun } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
 
@@ -140,5 +140,44 @@ describe('049 decision 5: the history follows the picture on screen', () => {
     await settle()
     expect(app.state.snapshot?.nodes.map((n) => n.id), 'counter-check: the run\'s picture was read again, in full').toEqual(['R_NODE', 'JOINED'])
     expect(app.interact.mode.shownHistory.value, 'the same source: the line stays').toHaveLength(1)
+  })
+
+  // Argon's closing review of 049 (P2), the two entrances the source alone did not see. The rule: the history follows the
+  // IDENTITY of the context on screen - another scenario asked for (shown or failed) or another run - not the source text.
+  it('(a) a stopped run, then another scenario whose preview FAILS: the old run\'s lines are not over its error', async () => {
+    const app = boot()
+    await settle()
+    ownLine(app)
+    await app.realActions.stop()
+    await settle()
+    vi.mocked(getScenarioPreview).mockRejectedValueOnce(new Error('500'))
+    app.realActions.setSelectedScenarioId('sc2')
+    await settle()
+    expect(app.state.snapshot, 'counter-check: scenario B failed - no picture').toBeNull()
+    expect(app.state.error, 'counter-check: the failure is shown').not.toBe('')
+    expect(app.real.runId, 'counter-check: the run id did not change').toBe('R')
+    expect(app.interact.mode.shownHistory.value.map((e) => e.source), 'the old run\'s lines are not over scenario B\'s failure').toEqual([])
+  })
+
+  it('(b) a run started over the preview, its first picture fails, the next one loads: the run\'s own lines stay', async () => {
+    vi.mocked(getActiveRun).mockResolvedValue({ run_id: null } as never)
+    let release: (() => void) | null = null
+    vi.mocked(createRun).mockImplementation((() => new Promise((resolve) => {
+      release = () => resolve({ run_id: 'R1' } as never)
+    })) as never)
+    vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => ({ ...status('running'), run_id: runId })) as never)
+    const app = boot()
+    await settle()
+    expect(app.state.snapshot?.nodes.map((n) => n.id), 'precondition: the preview is on screen, the run not started yet').toEqual(['PREVIEW_sc1'])
+    expect(release, 'precondition: the opening asked for a run').not.toBeNull()
+    vi.mocked(getSnapshot).mockRejectedValueOnce(new Error('500'))
+    release!()
+    await settle()
+    expect(app.real.runId, 'counter-check: the run started').toBe('R1')
+    ownLine(app)
+    await app.realActions.refreshSnapshot()
+    await settle()
+    expect(app.state.snapshot?.nodes.map((n) => n.id), 'counter-check: the run\'s picture replaced the preview').toEqual(['R1_NODE'])
+    expect(app.interact.mode.shownHistory.value, 'the same run: its own line stays').toHaveLength(1)
   })
 })
