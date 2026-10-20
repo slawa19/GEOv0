@@ -141,8 +141,9 @@ const clearingParts = computed(() => {
   z-index: -1;
   right: var(--ds-hud-bar-px, var(--ds-space-3, 12px));
   bottom: calc(100% + 2px);
-  /* A quarter of the screen at most: the clearing's phrase stays on one line at 1366 px and wraps between its parts at
-     1024 px (decision 1), so the column does not reach into the graph from the corner. */
+  /* A quarter of the screen at most, so the column does not reach into the graph from the corner: the clearing's phrase
+     wraps between its parts - at 1024 px for figures of five digits before the point (decision 1), at 1366 px too for
+     seven; two lines at most at these figures (the history's room above the column counts two: `designSystem.tokens.css`). */
   max-width: min(25vw, 100% - 2 * var(--ds-hud-bar-px, var(--ds-space-3, 12px)));
   display: flex;
   flex-direction: column;

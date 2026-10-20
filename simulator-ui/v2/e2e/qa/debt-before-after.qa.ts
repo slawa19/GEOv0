@@ -280,20 +280,23 @@ async function settledLayout(page: Page, where: string): Promise<void> {
  * the canvas shows there - no node of the graph under it (a node's centre inside the column grown by the node's radius on
  * screen). The node labels are DOM and are neighbours of `pairFits`; at rest the demo draws none (labels on selection).
  */
-const nodesUnderColumn = (page: Page) => page.evaluate(() => {
+const nodesUnderColumn = (page: Page, radiusById: Record<string, number>) => page.evaluate((radiusById) => {
   const sim = (window as unknown as { __geoSim?: { layoutNodes?: Array<{ id: string; x: number; y: number }>; camera: { panX: number; panY: number; zoom: number } } }).__geoSim!
   const canvas = document.querySelector('canvas')!.getBoundingClientRect()
   const boxes = ['[data-testid="total-debt-change"]', '[data-testid="sbb-total-debt"]'].map((s) => document.querySelector(s)?.getBoundingClientRect()).filter((r): r is DOMRect => !!r && r.width > 0)
   const cam = sim.camera
-  const radius = 12 * cam.zoom
   const nodes = sim.layoutNodes ?? []
+  let nearest = Infinity
   const under = nodes.filter((n) => {
+    // The node's own half-size on screen (its `viz_size`, the larger side), not one radius for all (adversarial pass, P3).
+    const radius = (radiusById[n.id] ?? 12) * cam.zoom
     const x = canvas.left + n.x * cam.zoom + cam.panX
     const y = canvas.top + n.y * cam.zoom + cam.panY
+    for (const r of boxes) nearest = Math.min(nearest, Math.max(r.left - x, 0, x - r.right) + Math.max(r.top - y, 0, y - r.bottom) - radius)
     return boxes.some((r) => x > r.left - radius && x < r.right + radius && y > r.top - radius && y < r.bottom + radius)
   }).map((n) => `${n.id}@${Math.round(canvas.left + n.x * cam.zoom + cam.panX)},${Math.round(canvas.top + n.y * cam.zoom + cam.panY)}`)
-  return { nodes: nodes.length, columns: boxes.length, under, boxes: boxes.map((r) => [r.left, r.top, r.right, r.bottom].map(Math.round)), zoom: cam.zoom }
-})
+  return { nodes: nodes.length, columns: boxes.length, under, nearestRimPx: Math.round(nearest), boxes: boxes.map((r) => [r.left, r.top, r.right, r.bottom].map(Math.round)), zoom: cam.zoom }
+}, radiusById)
 
 /**
  * A total of the bar set to an exact figure by one payment frame (exact cents): a rise goes onto one line, a fall is
@@ -305,8 +308,8 @@ function cents(text: string): bigint {
   const [int = '0', frac = ''] = text.replace(/[^0-9.-]/g, '').split('.')
   return BigInt(int) * 100n + BigInt((frac + '00').slice(0, 2))
 }
+const money = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, '0')}`
 async function setTotal(page: Page, lines: DebtLine[], target: string): Promise<void> {
-  const money = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, '0')}`
   let delta = cents(target) - cents((await shownTotal(page)) ?? '')
   const changed = new Set<DebtLine>()
   if (delta >= 0n) {
@@ -373,6 +376,11 @@ for (const lang of ['ru', 'en'] as const) {
     expect(await barBox(page), 'the bottom bar keeps its place and size with the pair').toEqual(settled)
     expect(await wasPlaced(page), 'the pair is whole on screen, just above the total').toEqual({ inViewport: true, abovePanel: true, drawn: true })
 
+    // 049 S1: each node's half-size (its `viz_size`, the larger side) for "no node under the floating column".
+    const radii = Object.fromEntries(snapshot.nodes.map((n) => {
+      const v = (n as { viz_size?: { w?: number; h?: number } }).viz_size
+      return [String(n.id), Math.max(Number(v?.w ?? 24), Number(v?.h ?? 24)) / 2]
+    }))
     // 049 S1: the test's copy of the debts (the cleared line is at 0.00 now), for totals set to an exact figure.
     const debts: DebtLine[] = snapshot.links.map((x) => ({
       source: String(x.source), target: String(x.target), used: x === l ? 0n : cents(String(x.used ?? '0')),
@@ -412,7 +420,7 @@ for (const lang of ['ru', 'en'] as const) {
             }
             expect(e.historyText.length, `${where} counter-check: the history heading and its line are measured`).toBeGreaterThanOrEqual(2)
             for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
-            const g = await nodesUnderColumn(page)
+            const g = await nodesUnderColumn(page, radii)
             expect(g.nodes, `${where} counter-check: the graph's nodes are read`).toBeGreaterThan(50)
             expect(g.columns, `${where} counter-check: the sentence and the plate are measured`).toBe(2)
             expect(g.under, `${where} no node of the graph under the floating column ${JSON.stringify(g)}`).toEqual([])
@@ -422,6 +430,36 @@ for (const lang of ['ru', 'en'] as const) {
       }
       await page.setViewportSize(FIT_VIEWPORTS[0])
     }
-    expect(seen, 'counter-check: every combination was measured').toHaveLength(16)
+
+    // 049 S1 (internal adversarial pass, P3): a clearing whose two figures have seven digits before the point - the
+    // longest phrase, two lines at 1366 px as well; the column grows upwards and the history above it must still clear it.
+    await setTotal(page, debts, '1049745.90')
+    const big = [...debts].sort((x, y) => (y.used > x.used ? 1 : -1))[0]!
+    big.used -= cents('49745.90')
+    await pushEvent(page, {
+      type: 'clearing.done', plan_id: 'plan-p049-s1-7', cleared_cycles: 1, cleared_amount: '49745.90',
+      cycle_edges: [{ from: big.source, to: big.target }],
+      edge_patch: [{ source: big.source, target: big.target, used: money(big.used), available: '0.00' }],
+    })
+    await expect.poll(async () => { const p = await pair(page); return `${p.before} -> ${p.after}` }, { message: 'counter-check: the seven-digit pair is stated' })
+      .toBe('1049745.90 -> 1000000.00')
+    for (const details of [false, true]) {
+      await setDetails(details)
+      for (const vp of FIT_VIEWPORTS) {
+        await page.setViewportSize(vp)
+        const where = `[hud, details ${details ? 'on' : 'off'}, ${vp.width}x${vp.height}, pair 1049745.90 -> 1000000.00]`
+        await settledLayout(page, where)
+        expect(await pairFits(page), `${where} the pair overlaps no neighbour and is whole inside the viewport`)
+          .toEqual({ present: true, outside: [], overlaps: [] })
+        const e = await edges(page)
+        for (const k of ['sentence', 'debt', 'fit'] as const) {
+          expect(Math.abs(e[k]! - e.line), `${where} ${k}: its right edge is the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+        }
+        for (const x of e.historyText) expect(Math.abs(x - e.line), `${where} the history text ends on the control line: ${JSON.stringify(e)}`).toBeLessThanOrEqual(1)
+        expect((await nodesUnderColumn(page, radii)).under, `${where} no node of the graph under the floating column`).toEqual([])
+        seen.push(where)
+      }
+    }
+    expect(seen, 'counter-check: every combination was measured').toHaveLength(20)
   })
 }
