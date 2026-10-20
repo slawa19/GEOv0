@@ -54,10 +54,13 @@ export const en = {
     closed: 'closed',
   },
 
-  /** Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. */
+  /**
+   * Payment statuses (`chk_transaction_payment_terminal`); an unknown one is shown as it came. Words, as in Russian
+   * (owner's review of the final frames, 2026-10-20: the result said «Status COMMITTED», the server's code).
+   */
   paymentStatus: {
-    COMMITTED: 'COMMITTED',
-    ABORTED: 'ABORTED',
+    COMMITTED: 'completed',
+    ABORTED: 'rejected',
   },
 
   payment: {
