@@ -162,8 +162,15 @@ export function useInteractHistory(o?: { max?: number; now?: () => number }) {
     if (feed.length > max) feed.splice(0, feed.length - max)
   }
 
+  /**
+   * Drops the network's lines. The own lines they stood in for come back (internal adversarial pass, 2026-10-20): an own
+   * line hidden because the network's line carried its event (`shownByNetwork`) would otherwise stay hidden after the
+   * network's line is gone - the switch turned off and on, another run or equivalent - and the person's own payment or
+   * clearing would leave no line at all.
+   */
   function clearFeed() {
     if (feed.length) feed.splice(0, feed.length)
+    for (const e of history) if (e.shownByNetwork) e.shownByNetwork = false
   }
 
   /**

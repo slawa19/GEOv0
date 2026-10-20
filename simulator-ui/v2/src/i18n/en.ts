@@ -308,7 +308,7 @@ export const en = {
     participant_suspended: 'The participant is suspended — operations with this participant are unavailable.',
   },
 
-  /** Toasts and history lines of the actions (`useInteractMode.ts`). Amounts arrive as decimal strings. */
+  /** History lines of the actions (`useInteractMode.ts`; 049 S2: the success toasts are gone). Amounts arrive as decimal strings. */
   history: {
     payment: 'Payment {amount} {unit}: {from} → {to}',
     trustlineCreated: 'Trustline created: {from} → {to} ({limit} {unit})',

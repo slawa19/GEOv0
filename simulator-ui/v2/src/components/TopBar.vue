@@ -818,9 +818,12 @@ function onApplyIntensity() {
   white-space: nowrap;
   cursor: pointer;
 }
+/* A pointer target of at least 24x24 CSS px (WCAG 2.2 "Target Size (Minimum)", the stand's `small-target`). */
 .tb-feed-toggle__box {
   accent-color: var(--ds-accent);
   margin: 0;
+  width: 24px;
+  height: 24px;
 }
 
 .tb-run-controls {

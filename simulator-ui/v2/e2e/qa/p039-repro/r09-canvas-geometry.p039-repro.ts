@@ -151,7 +151,7 @@ for (const [first, second] of PAIRS) {
   })
 }
 
-test('039 R9 - a toast and the history line of an action at 1366x768 lie over no HUD panel and over no window (already green; nodes under them are measured)', async ({ page }) => {
+test('039 R9 - the history line of an action (049 S2: no toast any more) at 1366x768 lie over no HUD panel and over no window (already green; nodes under them are measured)', async ({ page }) => {
   await page.setViewportSize(VIEWPORT_MAIN)
   await boot(page, {
     snapshot: ringSnapshot(), clock: false,

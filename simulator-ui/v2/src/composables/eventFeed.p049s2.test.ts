@@ -275,6 +275,21 @@ describe('049 S2 (г): the network events in the history, from accepted SSE even
     expect(h.lines()).toEqual([`Анна → Пекарня: 5.00${NBSP}UAH`])
     h.feedOn.value = false
     expect(h.lines(), 'off: exactly the own lines, as before 049').toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    // On again (internal adversarial pass, P2): the network's line is gone with the switch - the own line comes back,
+    // an own line (marked «вы» by the log); the payment never leaves the history.
+    h.feedOn.value = true
+    expect(h.lines()).toEqual(['Платёж 5.00 UAH: Анна → Пекарня'])
+    expect(h.im.shownHistory.value.map((e) => e.source)).toEqual(['own'])
+    h.rm.stopSse()
+  })
+
+  it('a change of run clears the network\'s lines (and brings back the own lines they stood in for)', async () => {
+    const h = await harness()
+    emit(payment('evt_r1_1'))
+    expect(h.network()).toHaveLength(1)
+    h.real.runId = 'r2'
+    await flush()
+    expect(h.network(), 'another run: the lines of the old one are gone').toEqual([])
     h.rm.stopSse()
   })
 

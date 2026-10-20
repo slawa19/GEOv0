@@ -290,7 +290,7 @@ export const MATRIX: Entry[] = [
   // gone with its surface (the success toast was a third record of the result: the window and the history line remain).
   // 048 S3 (decision 3): `toast-error` is gone with its surface - a window's failure is the window's own block, and the
   // error toast that duplicated it was removed. §15 Codex (STAND-RECIPES WEAK): the in-window refusal is a surface of its
-  // own then - the clearing window holding its error block (`WindowErrorBlock`, role="alert", the request id line), so
+  // own then - the clearing window holding its error block (`WindowErrorBlock`, role="alert", its request id in `data-request-id`), so
   // geometry and axe run over it. Only `inside` is declared: Escape and an outside click on a HELD result are the
   // clearing window's own rules (037 C), judged by `p037-c-clearing.spec.ts`, not re-declared here.
   { id: 'clearing-refused', catalogue: 'wm-interact-window',
