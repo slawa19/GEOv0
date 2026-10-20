@@ -187,8 +187,8 @@ class _AttemptRunState:
     not seed a cache from a snapshot that was rolled back.
 
     * `_real_consec_all_rejected_ticks` is the capacity-stall counter the executor advances on
-      every call (`real_payments_executor.py:826`); a discarded attempt would inflate it and, at
-      five, make the run log a stall it did not have.
+      every call that planned a payment (`real_payments_executor.py`, 049 S2a); a discarded attempt
+      would inflate it and, at five, make the run log a stall it did not have.
     * `_real_consec_tick_failures` is the error-budget counter the executor CLEARS on every call
       (`:824`); a discarded attempt would forgive failures the run really had.
     * `_real_viz_by_eq` caches a `VizPatchHelper` per equivalent, and one created during a

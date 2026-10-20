@@ -282,10 +282,7 @@ class RealPaymentPlanner:
         seed), so a step that draws keeps its place relative to the others.
         """
 
-        intensity = _effective_intensity(run, scenario)
-        target_actions = _actions_this_tick(
-            self._actions_per_tick_max, intensity, int(getattr(run, "tick_index", 0) or 0)
-        )
+        target_actions = _actions_this_tick(self._actions_per_tick_max, run, scenario)
         if target_actions <= 0:
             return []
 
@@ -528,62 +525,81 @@ def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
         return None
 
 
-def _actions_this_tick(actions_per_tick_max: int, intensity: float, tick_index: int) -> int:
-    """049 decision 10: the tick's share of a FRACTIONAL action budget, carried between ticks.
+def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
+    """049 decision 10: the tick's share of a FRACTIONAL action budget, accumulated between ticks.
 
-    At rate ``r = actions_per_tick_max * intensity`` the run's ticks spend the accumulator
-    ``carry += r; actions = floor(carry); carry -= actions``, started at 0 on the run's first tick (``tick_index`` 1;
-    the heartbeat advances it before each tick). Tick ``t`` therefore plans ``floor(r * t) - floor(r * (t - 1))``: at
-    20 actions, 2 % (``r`` 0.4) is one action every 2-3 ticks, 5 % one per tick, 15 % three, 0 % none. Before 049
-    the tick planned ``max(1, int(r))`` - at least one action per tick at any intensity above zero.
+    The run's ticks spend the accumulator ``carry += r_t; actions = floor(carry); carry -= actions``, started at 0 at
+    ``tick_index`` 0 (a created run; the heartbeat advances it before each tick, so the first tick run is 1), where
+    ``r_t`` is ``actions_per_tick_max`` times the tick's intensity (the run's percent, ramped by ``settings.warmup``).
+    At 20 actions and no ramp, 2 % (``r`` 0.4) is one action every 2-3 ticks, 5 % one per tick, 15 % three, 0 % none. Before 049
+    the tick planned ``max(1, int(r_t))`` - at least one action per tick at any intensity above zero.
 
-    THE CARRY IS DERIVED, NOT STORED: it is ``frac(r * (t - 1))``, a function of the tick number and the current rate.
+    THE CARRY IS DERIVED, NOT STORED. The tick plans ``floor(B(t)) - floor(B(t - 1))``, ``B(t)`` being the budget ticks
+    ``0..t`` accrue at the run's CURRENT percent (``_budget_through``); while the percent is unchanged this is exactly
+    the accumulator above, ramp included.
     * A replay of the tick's money phase (``money_replay.py``) replans the SAME tick and spends the same count - a
-      stored carry would be advanced once per attempt.
+      stored carry would be advanced once per attempt; and planning stays a function of (seed, tick, scenario, percent).
     * Pause: the heartbeat does not advance ``tick_index`` (``runtime_impl._heartbeat_loop``), so nothing accrues.
     * Restart: ``tick_index`` returns to 0 (``run_lifecycle.restart``), so the budget starts from zero; a new run
-      starts from zero; nothing outlives the run or crosses to another run.
-    * Intensity change (the admin's percent field, the visitor's step, a warm-up ramp): the next tick takes its share
-      at the NEW rate, ``floor(r)`` or ``ceil(r)`` - never more, so a change cannot release budget saved at the old
-      rate as a burst. A stored carry kept across the change has the same bound; the derived one needs no state.
-    Tick 0 is never a heartbeat tick; it is planned as a first tick (a direct driver may plan it).
+      starts from zero; nothing outlives the run or crosses to another run (the planner holds no per-run state).
+    * Percent change (the admin's field, the visitor's step): ``B`` is re-read at the new percent, and
+      ``B(t) - B(t - 1) = r_t``, so the next tick plans ``floor(r_t)`` or ``ceil(r_t)`` at the NEW rate - never more:
+      a change cannot release budget saved at the old rate as a burst (the carry takes the new rate's phase).
+    Tick 0 is never run by the heartbeat; its share is the carry the first tick starts with (a direct driver may
+    plan tick 0 itself: it gets ``floor(r_0)``, the warm-up floor's rate).
     """
 
-    if intensity <= 0 or actions_per_tick_max <= 0:
+    base = _base_intensity(run)
+    if base <= 0 or actions_per_tick_max <= 0:
         return 0
-    rate = int(actions_per_tick_max) * Fraction(intensity).limit_denominator(1_000_000)
-    t = max(1, int(tick_index))
-    return math.floor(rate * t) - math.floor(rate * (t - 1))
+    warmup_ticks, warmup_floor = _warmup_of(scenario)
+    t = max(0, int(getattr(run, "tick_index", 0) or 0))
+    rate_max = int(actions_per_tick_max)
+    return math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
+        rate_max * _budget_through(base, warmup_ticks, warmup_floor, t - 1)
+    )
 
 
-def _effective_intensity(run: Any, scenario: dict[str, Any]) -> float:
-    """Run intensity in [0, 1], ramped up by ``settings.warmup`` during the first ticks."""
+def _base_intensity(run: Any) -> Fraction:
+    """The run's percent as an exact fraction in [0, 1] (``intensity_percent`` is an integer on the wire)."""
 
-    intensity = max(0.0, min(1.0, float(getattr(run, "intensity_percent", 0)) / 100.0))
+    percent = max(0.0, min(100.0, float(getattr(run, "intensity_percent", 0) or 0)))
+    return Fraction(percent).limit_denominator(1_000_000) / 100
 
-    # ── Warm-up ramp (Phase 1.1) ──────────────────────────────────
-    # If the scenario defines settings.warmup, linearly ramp intensity
-    # from  floor  up to full value over the first *warmup_ticks* ticks.
-    # Formula:  ramp_factor = floor + (1 - floor) * (tick_index / warmup_ticks)
-    # After warmup_ticks the factor is ≥ 1.0, so intensity stays unchanged.
+
+def _warmup_of(scenario: dict[str, Any]) -> tuple[int, Fraction]:
+    """``settings.warmup`` (Phase 1.1): ``(ticks, floor)``; ticks <= 0 means no ramp.
+
+    The ramp factor at tick ``k < ticks`` is ``floor + (1 - floor) * k / ticks``; from ``ticks`` on it is 1.
+    """
+
     warmup_cfg = (scenario.get("settings") or {}).get("warmup") or {}
     warmup_ticks = int(warmup_cfg.get("ticks", 0) or 0)
-    if warmup_ticks > 0 and int(getattr(run, "tick_index", 0)) < warmup_ticks:
-        # IMPORTANT: allow an explicit floor=0.0 (do not treat as missing).
-        floor_raw = warmup_cfg.get("floor", None)
-        if floor_raw is None:
-            floor_raw = 0.1
-        try:
-            warmup_floor = float(floor_raw)
-        except Exception:
-            warmup_floor = 0.1
-        warmup_floor = max(0.0, min(1.0, warmup_floor))
-        ramp_factor = warmup_floor + (1.0 - warmup_floor) * (
-            int(getattr(run, "tick_index", 0)) / warmup_ticks
-        )
-        intensity = intensity * ramp_factor
-    # ── /Warm-up ──────────────────────────────────────────────────
-    return intensity
+    # IMPORTANT: allow an explicit floor=0.0 (do not treat as missing).
+    floor_raw = warmup_cfg.get("floor", None)
+    if floor_raw is None:
+        floor_raw = 0.1
+    try:
+        warmup_floor = float(floor_raw)
+    except Exception:
+        warmup_floor = 0.1
+    warmup_floor = max(0.0, min(1.0, warmup_floor))
+    return warmup_ticks, Fraction(warmup_floor).limit_denominator(1_000_000)
+
+
+def _budget_through(base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t: int) -> Fraction:
+    """Sum of the intensities of ticks ``0..t`` at ``base`` (0 for ``t < 0``): the ramped ticks ``0..min(t, ticks - 1)``
+    in closed form (``n * floor + (1 - floor) * n (n - 1) / (2 ticks)`` for ``n`` of them), the rest at ``base``."""
+
+    if t < 0:
+        return Fraction(0)
+    if warmup_ticks > 0:
+        last_ramped = min(t, warmup_ticks - 1)
+        n = last_ramped + 1
+        total = n * warmup_floor + (1 - warmup_floor) * Fraction(n * (n - 1), 2 * warmup_ticks) + (t - last_ramped)
+    else:
+        total = Fraction(t + 1)
+    return base * total
 
 
 @dataclass
