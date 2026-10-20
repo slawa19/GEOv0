@@ -298,14 +298,14 @@ describe('046 wave 3 - BACKLOG 046-3: what an action leaves behind follows the l
     const items = () => [...history.host.querySelectorAll('.interact-history__text')].map((e) => e.textContent!.trim())
     const toastText = () => toast.host.querySelector('[data-testid="success-toast"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(items(), 'counter-check: two lines, in English').toEqual([
-      t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00' }, 'en'),
+      t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00', unit: 'UAH' }, 'en'),
       t('history.payment', { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' }, 'en'),
     ])
     expect(toastText()).toContain(t('history.trustlineCreatedToast', { from: 'Борис', to: 'Вера' }, 'en'))
     setUiLocale('ru')
     await settle()
     expect(items()).toEqual([
-      t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00' }, 'ru'),
+      t('history.trustlineCreated', { from: 'Борис', to: 'Вера', limit: '10.00', unit: 'UAH' }, 'ru'),
       t('history.payment', { amount: '1.00', unit: 'UAH', from: 'Алиса', to: 'Борис' }, 'ru'),
     ])
     expect(toastText()).toContain(t('history.trustlineCreatedToast', { from: 'Борис', to: 'Вера' }, 'ru'))

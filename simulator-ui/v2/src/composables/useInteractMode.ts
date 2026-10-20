@@ -888,7 +888,7 @@ export function useInteractMode(opts: {
       setSuccessToastMessage({ key: 'history.trustlineCreatedToast', vars: { from: participantName(from), to: participantName(to) } })
 
       // BUG-5: log to history
-      pushHistory('🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit } })
+      pushHistory('🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit, unit: eq } })
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -909,7 +909,7 @@ export function useInteractMode(opts: {
       setSuccessToastMessage({ key: 'history.limitUpdatedToast', vars: { limit: newLimit, unit: eq } })
 
       // BUG-5: log to history
-      pushHistory('✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit } })
+      pushHistory('✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit, unit: eq } })
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
       patchTrustlineLimitLocal(from, to, newLimit, eq)
