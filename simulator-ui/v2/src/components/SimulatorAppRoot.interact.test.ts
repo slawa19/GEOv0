@@ -1569,7 +1569,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [
       // 046 wave 3 (2026-10-19): a history line is kept as its key and data (BACKLOG 046-3).
       { id: '1', icon: 'P', line: { key: 'history.payment', vars: { amount: '1.00', unit: 'UAH', from: 'Alice', to: 'Bob' } }, timeText: '10:00' },
-      { id: '2', icon: 'T', line: { key: 'history.trustlineUpdated', vars: { from: 'Alice', to: 'Bob', limit: '20.00' } }, timeText: '10:01' },
+      { id: '2', icon: 'T', line: { key: 'history.trustlineUpdated', vars: { from: 'Alice', to: 'Bob', limit: '20.00', unit: 'UAH' } }, timeText: '10:01' },
     ])
     setUrl('/?mode=real&ui=interact')
 

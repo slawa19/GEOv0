@@ -275,9 +275,9 @@ export const ru = {
     paymentToast: 'Платёж отправлен: {amount} {unit}',
     payment: 'Платёж {amount} {unit}: {from} → {to}',
     trustlineCreatedToast: 'Линия доверия открыта: {from} → {to}',
-    trustlineCreated: 'Линия доверия открыта: {from} → {to} ({limit})',
+    trustlineCreated: 'Линия доверия открыта: {from} → {to} ({limit} {unit})',
     limitUpdatedToast: 'Лимит изменён: {limit} {unit}',
-    trustlineUpdated: 'Линия доверия изменена: {from} → {to}, лимит {limit}',
+    trustlineUpdated: 'Линия доверия изменена: {from} → {to}, лимит {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
     closeRequested: 'Запрошено закрытие: {from} → {to} (линия закроется, когда долг будет погашен)',
     clearing: plural({

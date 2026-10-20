@@ -5,6 +5,7 @@ import type { TrustlineInfo } from '../api/simulatorTypes'
 import { classifyNode, fillOf, type DataPalette } from '../vizMapping'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { atomsToMoney, formatMoney } from '../utils/money'
 import { isOverLimit, renderOrDash } from '../utils/valueFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
@@ -137,7 +138,16 @@ function netText(node: GraphNode): string | null {
  * carries its own `equivalent`, so it does not have to borrow the card's.
  */
 function rowMoney(tl: TrustlineInfo, value: unknown): string {
-  return formatMoney(value, equivalentPrecision(tl.equivalent || props.equivalentText))
+  return formatMoney(value, equivalentPrecision(rowEquivalent(tl)))
+}
+
+/**
+ * The equivalent of a row: its own, else - a row without one (empty after trimming, as the line filter below reads it) -
+ * the card's. One answer for the precision and the unit of the row (039 closing review 2026-10-20: a row of blanks was
+ * listed after the filter moved to the shared semantics, and must not print its amounts without a unit).
+ */
+function rowEquivalent(tl: TrustlineInfo): string {
+  return canonicalEquivalent(tl.equivalent) || canonicalEquivalent(props.equivalentText)
 }
 
 /**
@@ -145,7 +155,7 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
  * and visible while the row holds the keyboard focus (the `title` of the row reaches a pointer only).
  */
 function rowAvailableText(tl: TrustlineInfo): string {
-  const unit = String(tl.equivalent || props.equivalentText || '').trim()
+  const unit = rowEquivalent(tl)
   const shown = renderOrDash(rowMoney(tl, tl.available))
   // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit - its own sentence, not "available over
   // limit by" (046 wave 3, internal adversarial pass: the row title made that contradiction visible).
@@ -175,19 +185,20 @@ const startBlockedReason = computed<string | null>(() => {
   return null
 })
 
-const sameEquivalent = (a: unknown, b: unknown) => String(a ?? '').trim().toUpperCase() === String(b ?? '').trim().toUpperCase()
-
 /**
  * Trustlines that involve this node (outgoing or incoming), in the equivalent the card is labelled with: a line of another
  * equivalent is never listed under this one (owner's principle: equivalents are not mixed). A row without its own
- * equivalent is the card's.
+ * equivalent is the card's, and a card without one restricts nothing - the guards of this site; "without" is empty after
+ * trimming (missing, '', blanks), as in `canonicalEquivalent`. The comparison is THE shared `sameEquivalent` (039 target
+ * item 9; closing review 2026-10-20 replaced a local copy that judged a row of blanks unlike a row of '').
  */
 const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   if (!props.interactMode || !props.interactTrustlines?.length) return []
   const id = props.node.id
+  const cardEq = canonicalEquivalent(props.equivalentText)
   return props.interactTrustlines.filter(
     (tl) => (tl.from_pid === id || tl.to_pid === id)
-      && (!tl.equivalent || !props.equivalentText || sameEquivalent(tl.equivalent, props.equivalentText)),
+      && (!cardEq || !canonicalEquivalent(tl.equivalent) || sameEquivalent(tl.equivalent, cardEq)),
   )
 })
 

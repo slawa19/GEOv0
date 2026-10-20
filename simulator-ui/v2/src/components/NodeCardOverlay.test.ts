@@ -342,6 +342,29 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     host.remove()
   })
 
+  // 039 closing review (finding 3): the card compares equivalents with THE shared `sameEquivalent` (039 target item 9),
+  // and an empty value means the same here as there - empty after trimming (missing, '', blanks) is "no equivalent".
+  // Red before (a local copy, `trim().toUpperCase()` of both sides, guards on the raw value): a row of blanks was
+  // dropped under UAH although a row of '' was listed, and a card labelled with blanks dropped every line that had one.
+  it('filters its lines with the shared equivalent semantics, empty values included', async () => {
+    const line = (to: string, equivalent: unknown) => ({ from_pid: 'alice', from_name: 'Alice', to_pid: to, to_name: to, equivalent, limit: '10.00', used: '1.00', available: '9.00', status: 'active' })
+    const lines = [line('same', ' uah '), line('other', 'HOUR'), line('near', 'UAH1'), line('missing', undefined), line('emptyStr', ''), line('blanks', '   ')]
+    const peersUnder = async (equivalentText: unknown) => {
+      const { app, host } = mountNodeCard({ equivalentText, interactTrustlines: lines })
+      await nextTick()
+      const peers = Array.from(host.querySelectorAll('.nco-trustline-row__peer')).map((e) => (e.textContent ?? '').trim()).sort()
+      app.unmount()
+      host.remove()
+      return peers
+    }
+    // Another equivalent is never listed; a row without its own equivalent (missing, '' or blanks alike) is the card's.
+    expect(await peersUnder('UAH')).toEqual(['blanks', 'emptyStr', 'missing', 'same'])
+    // A card without an equivalent restricts nothing - blanks mean the same as ''.
+    const all = ['blanks', 'emptyStr', 'missing', 'near', 'other', 'same']
+    expect(await peersUnder('')).toEqual(all)
+    expect(await peersUnder('   ')).toEqual(all)
+  })
+
   // 045 S3 round (Codex §15 P2, 2026-10-18): what the card says must reach a keyboard and assistive technology, not only a
   // pointer's `title`.
   it('P2: the type and status of the participant are visible text (the meta line)', async () => {
@@ -362,6 +385,26 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     expect(described).toBe('available 9.00 UAH')
     app.unmount()
     host.remove()
+  })
+
+  // 039 closing review (finding 3): a row whose equivalent is blanks is listed as the card's - and is told in the card's
+  // unit and precision, never as an amount without its equivalent.
+  it('a row without its own equivalent (blanks) is told in the card\'s unit and precision', async () => {
+    setEquivalentPrecisions([{ code: 'HOUR', precision: 1 }])
+    try {
+      const tl = { from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: '   ', limit: '10.0', used: '1.0', available: '9.0', status: 'active' }
+      const { app, host } = mountNodeCard({ equivalentText: 'HOUR', interactTrustlines: [tl] })
+      await nextTick()
+      const edit = host.querySelector('.nco-trustline-row__edit') as HTMLButtonElement
+      const ids = (edit.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+      const described = ids.map((id) => host.querySelector(`[id="${id}"]`)?.textContent?.trim() ?? '').join(' ')
+      expect(described).toBe('available 9.0 HOUR')
+      expect(host.querySelector('.nco-trustline-row__amounts')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('1.0 / 10.0')
+      app.unmount()
+      host.remove()
+    } finally {
+      resetEquivalentPrecisions()
+    }
   })
 
 })
