@@ -248,8 +248,24 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   39256014175. Forecast from CI figures only: the last CI 567 s with 140 tests (the brief of S2) - about 10 s
  *   (`toast-success`, by the `toast-error` figures) + the local growth of "pair fits" (about +6 s) scaled by the CI/local
  *   ratio of the whole step (about 1.12, about +7 s) - about 564 s, under 600 s.
+ * - 2026-10-21 (BACKLOG 049-10 - the "cancel the current action" hint in the first row of the top bar): gate 138 -> 139,
+ *   full 226 -> 227 (counted with `playwright test --list`: 139 without `@extended`, 227 in all). One test in
+ *   `edge-line.qa.ts`: the hint inside the control-line grid, over no node of the 100-node scene and over no other
+ *   surface, the stack and the first row's controls unmoved by it - both languages (one boot), both themes, "Подробнее"
+ *   off and on, 1366x768 and 1024x640; red on `3d8e6bde` (the hint at y 58-72.5 under the first row ending at 56, over
+ *   a node). Cost, locally: 14.0-15.2 s (one boot of the 100-node scene about 3.5 s; 32 settled measurements; the
+ *   combinations grouped by viewport, as a resize re-frames the scene - by language and theme first it took 20.7 s). No
+ *   CI number for it yet; the whole gate took 538 s locally with it.
+ *   Forecast from CI figures only: the last CI runs 527-580 s (the brief of 049-10) plus 15.2 s scaled by the CI/local
+ *   ratio of the whole step (about 1.12, about +17 s) - about 544-597 s, under 600 s, with little room left.
+ * - 2026-10-21 (BACKLOG 049-10, CI run 39553532984 red on the line above: with the ubuntu fonts the English hud hint
+ *   wrapped at 1024x640 and grew the first row 56 -> 61 px; the step took 576 s with 139 tests): counts unchanged. The
+ *   hint is one line, cut by an ellipsis, whole in its `title`, "Esc" in the shown part; the test also emulates a wider
+ *   face (letter spacing) and holds the same; "Подробнее" on is left out of its matrix (it adds rows under the first row
+ *   and leaves the first row as it is; measured green with it on in `cedb6353`): 8 combinations with the hint instead of
+ *   16. Cost, locally: 14.8 s in the last local gate -> 11.9 s (one debug run) - about -3 s, so the step does not grow.
  */
-export const EXPECTED = { gate: 138, full: 226 }
+export const EXPECTED = { gate: 139, full: 227 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

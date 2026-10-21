@@ -330,7 +330,8 @@ export const en = {
    * (`statusText.ts` `participantTypeText`); its status is `participantStatus.*`.
    */
   card: {
-    flowOpenReason: 'Cancel current action first (press ESC).',
+    // BACKLOG 049-10: the key first - in the first row of the top bar the line may be cut by an ellipsis at 1024 px.
+    flowOpenReason: 'ESC: cancel the current action first.',
     busyReason: 'Operation in progress… please wait.',
     lineAvailable: 'available {amount} {unit}',
     /** 046 wave 3: a negative `available` of a row - the debt's excess over a lowered limit (026 `T2602`). */

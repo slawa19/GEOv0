@@ -123,9 +123,9 @@ describe('ActionBar', () => {
     expect(btnClr.disabled).toBe(true)
 
     // UX: explain why locked.
-    expect(btnPay.title).toContain('Cancel current action first')
-    expect(btnTl.title).toContain('Cancel current action first')
-    expect(btnClr.title).toContain('Cancel current action first')
+    expect(btnPay.title).toContain('cancel the current action first')
+    expect(btnTl.title).toContain('cancel the current action first')
+    expect(btnClr.title).toContain('cancel the current action first')
     expect(btnPay.title).toContain('ESC')
     expect(btnTl.title).toContain('ESC')
     expect(btnClr.title).toContain('ESC')
