@@ -209,7 +209,7 @@ export const en = {
   clearing: {
     panelAria: 'Clearing panel',
     runTitle: 'Run clearing',
-    confirmHelp: 'The server will reduce the debts that close into a loop.',
+    confirmHelp: 'The server will reduce the debts that run around a cycle.',
     confirm: 'Confirm',
     runningShort: 'Running…',
     // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}").
@@ -536,9 +536,9 @@ export const en = {
    */
   actions: {
     aria: 'Interact actions',
-    payment: 'Send Payment',
-    trustline: 'Manage Trustline',
-    clearing: 'Run Clearing',
+    payment: 'Send payment',
+    trustline: 'Trust line',
+    clearing: 'Clear mutual debts',
     paymentHint: 'The amount reaches the recipient along a chain of trust.',
     trustlineHint: 'Sets how much one participant may owe another.',
     clearingHint: 'Debts that run around a cycle cancel out — each participant in the cycle owes less.',
@@ -654,7 +654,8 @@ export const en = {
    * 049 S2 (decision 5): the lines of the network's events in the history (`InteractHistoryLog.vue`), shown while
    * «Show events» is on. Built from accepted SSE events only (`realEventPipeline.ts` `feedItemOf`); a missing field writes
    * no line. A failure has no amount (`tx.failed` carries none) and an unknown reason gets no diagnosis. A series within
-   * 2 s is one line: its lead (`paymentSeries`, `failureSeries`) and the latest event's line after it.
+   * 2 s is one line: its lead (`paymentSeries`, `failureSeries`, the count alone - 049 closing polish, advisor 2026-10-21: the
+   * «latest —» it carried is the names' room) and the latest event's line after it (a failure's in its short `series*` form).
    * The reasons are short (owner's review of the final frames, 2026-10-20): a line is one row of a 448 px column, where only
    * the names give way (decision 9) - the longest reason with two one-letter names must fit in the hud's monospace.
    */
@@ -666,8 +667,19 @@ export const en = {
     failedLimit: '{from} → {to}: failed — would exceed a line limit',
     failedLineInactive: '{from} → {to}: failed — a trustline is not active',
     failedTimeout: '{from} → {to}: failed — timed out',
-    paymentSeries: plural({ one: 'In 2 s: {count} payment; latest — ', other: 'In 2 s: {count} payments; latest — ' }),
-    failureSeries: plural({ one: 'In 2 s: {count} failure; latest — ', other: 'In 2 s: {count} failures; latest — ' }),
+    /**
+     * 049 closing polish (advisor 2026-10-21): the line after a failure series' count («In 2 s: 2 failures; »). The count
+     * already says they failed, so the line is the latest pair and its reason, shorter - its room is the names'. An
+     * unknown reason: the pair alone (no diagnosis is guessed).
+     */
+    seriesFailed: '{from} → {to}',
+    seriesNoCapacity: '{from} → {to}: low capacity',
+    seriesNoRoute: '{from} → {to}: no route',
+    seriesLimit: '{from} → {to}: over a line limit',
+    seriesLineInactive: '{from} → {to}: line not active',
+    seriesTimeout: '{from} → {to}: timed out',
+    paymentSeries: plural({ one: 'In 2 s: {count} payment; ', other: 'In 2 s: {count} payments; ' }),
+    failureSeries: plural({ one: 'In 2 s: {count} failure; ', other: 'In 2 s: {count} failures; ' }),
     clearing: plural({
       one: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycle',
       other: 'Clearing: total debt −{amount}\u00a0{unit}; {count} cycles',

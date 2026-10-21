@@ -105,6 +105,16 @@ describe('the clearing result stays until it is closed', () => {
     expect(empty.history.map((e) => historyEntryText(e, 'en'))).toEqual(['Clearing: nothing cleared'])
   })
 
+  // 049 closing polish (advisor 2026-10-21): one word for a clearing cycle - the own line says «круг» like the feed's
+  // clearing line and the clearing window («Клиринг: 1 цикл, −49745.90 UAH» stood beside «…; 1 круг»).
+  it('the own clearing line names a cycle with the word of the feed: «круг» / «cycle»', async () => {
+    const im = mk(vi.fn(async () => twoCycles))
+    im.startClearingFlow()
+    await runAndWait(im)
+    expect(im.history.map((e) => historyEntryText(e, 'ru'))).toEqual(['Клиринг: 2 круга, −14.00 UAH'])
+    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual(['Clearing: 2 cycles, −14.00 UAH'])
+  })
+
   it('a refusal keeps the panel open with the error (no result, no stuck "preview"), and is not a success', async () => {
     const im = mk(vi.fn(async () => { throw new Error('boom') }))
     im.startClearingFlow()

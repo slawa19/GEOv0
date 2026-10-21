@@ -29,7 +29,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { DETAILS_TOGGLE, EQ, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, renderedProblems, ringSnapshot, sseFrame, type QaSnapshot } from './stand.js'
 import { DEBT } from './p039-repro/contract.js'
-import { FAILURE_LINE } from '../../src/composables/interact/useInteractHistory'
+import { FAILURE_SERIES_LINE } from '../../src/composables/interact/useInteractHistory'
 import { t, tn } from '../../src/i18n/t'
 
 const USED: Record<string, string> = { 'a>b': '10.00', 'b>c': '10.00', 'c>a': '10.00', 'd>e': '18.00' }
@@ -415,7 +415,7 @@ const feedFitRule = (page: Page) => page.evaluate(() => {
  * clips it: the line's box and every element between the character and the line that clips its overflow (internal
  * adversarial pass, 2026-10-21: the first form checked the text box alone and missed an ellipsis inside a part). Read
  * from the text itself (a range per text node and run), not from the component's parts. `giving` - the texts allowed to
- * give way (the names, the series' leads); `namesCut` - lines where such a text was cut (anti-vacuum: the long names
+ * give way (the names; a series' count no longer - 049 closing polish); `namesCut` - lines where such a text was cut (anti-vacuum: the long names
  * pressed the line); `runs` - the runs measured. Tolerance 0.05 px: an overflow of 0.14 px already draws an ellipsis.
  */
 const feedValuesWhole = (page: Page, giving: readonly string[]) => page.evaluate((giving) => {
@@ -639,10 +639,15 @@ for (const lang of ['ru', 'en'] as const) {
     const nameOf = new Map(snapshot.nodes.map((n) => [String(n.id), String((n as { name?: string }).name ?? n.id)]))
     const nameLength = (x: DebtLine) => (nameOf.get(x.source) ?? '').length + (nameOf.get(x.target) ?? '').length
     const [d1, d2] = [...debts].sort((x, y) => nameLength(y) - nameLength(x))
-    const longestFailure = Object.keys(FAILURE_LINE).sort((x, y) => t(FAILURE_LINE[y]!, {}, lang).length - t(FAILURE_LINE[x]!, {}, lang).length)[0]!
+    // The failure is drawn only as a series (below), so the longest is the longest line written after a series' count
+    // (049 closing polish, advisor 2026-10-21: a failure series writes the short form of its reason).
+    const longestFailure = Object.keys(FAILURE_SERIES_LINE).sort((x, y) => t(FAILURE_SERIES_LINE[y]!, {}, lang).length - t(FAILURE_SERIES_LINE[x]!, {}, lang).length)[0]!
     // The failure is a series of two (pushed together, inside the 2-second window): its line is the longest the feed draws -
     // the count, the longest names, the longest reason (adversarial pass, 2026-10-21: no series line was measured).
-    const feedGiving = [...[d1!.source, d1!.target, d2!.source, d2!.target].map((id) => nameOf.get(id)!), tn('feed.failureSeries', 2, {}, lang)]
+    // Only the names give way here: the series' count is held whole too (049 closing polish, advisor 2026-10-21 - the
+    // «последний —» it carried went to the names, so the count never has to give way; `feedLineBudget.p049.test.ts` holds
+    // it for every count as a form, this holds it in pixels for the line drawn).
+    const feedGiving = [d1!.source, d1!.target, d2!.source, d2!.target].map((id) => nameOf.get(id)!)
     await pushEvent(page, { type: 'tx.updated', from: d1!.target, to: d1!.source, amount: '12.00', amount_flyout: false, ttl_ms: 1200, edges: [{ from: d1!.target, to: d1!.source }] })
     for (const k of [1, 2]) await pushEvent(page, { type: 'tx.failed', from: d2!.target, to: d2!.source, error: { code: longestFailure, message: `refused ${k}`, at: '2026-02-01T00:00:01.000Z' } })
     await pushEvent(page, { type: 'topology.changed', reason: 'trust_drift_growth', payload: { added_nodes: [], removed_nodes: [], added_edges: [], removed_edges: [], edge_patch: [{ source: d2!.source, target: d2!.target, trust_limit: '999999.00' }] } })

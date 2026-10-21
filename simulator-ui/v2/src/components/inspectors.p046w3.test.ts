@@ -324,7 +324,7 @@ describe('046 wave 3 - BACKLOG 046-3: what an action leaves behind follows the l
     const history = mount(InteractHistoryLog, { entries: im.history, maxVisible: 8 })
     await settle()
     const text = () => history.host.querySelector('.interact-history__text')!.textContent!.trim()
-    expect(text()).toBe('Клиринг: 1 цикл, −5.00 UAH')
+    expect(text()).toBe('Клиринг: 1 круг, −5.00 UAH')
     setUiLocale('en')
     await settle()
     expect(text()).toBe('Clearing: 1 cycle, −5.00 UAH')
