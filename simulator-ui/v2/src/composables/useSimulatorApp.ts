@@ -63,7 +63,7 @@ import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 
 import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
-import { defaultIntensityPercentFor, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
+import { defaultIntensityPercentFor, pickDefaultScenarioId, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
@@ -559,8 +559,6 @@ export function useSimulatorApp(opts?: {
   // ignored: the same screen opens.
   const isLiveUi = computed(() => isRealMode.value)
 
-  const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100-realistic-v2'
-
   function lsGet(key: string, fallback = ''): string {
     try {
       const v = localStorage.getItem(key)
@@ -701,11 +699,7 @@ export function useSimulatorApp(opts?: {
     return isUserFacingRunErrorCode(code)
   }
 
-  function pickDefaultScenarioId(scenarios: ScenarioSummary[]): string {
-    const preferred = scenarios.find((s) => s.scenario_id === DEFAULT_REAL_SCENARIO_ID)?.scenario_id
-    return preferred ?? scenarios[0]?.scenario_id ?? ''
-  }
-
+  // 034 S9-A: the one rule of the network opened without a stored choice (`pickDefaultScenarioId`, shared with the autostart).
   function ensureScenarioSelectionValid() {
     if (!real.scenarios.length) return
     const hasSelected = real.scenarios.some((s) => s.scenario_id === real.selectedScenarioId)
