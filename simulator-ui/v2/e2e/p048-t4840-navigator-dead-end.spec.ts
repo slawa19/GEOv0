@@ -52,7 +52,8 @@ async function expectIdle(page: Page, when: string): Promise<void> {
     await expect(button, `${when}: ${id} is not the active action`).toHaveAttribute('data-active', '0')
     expect(LOCKED, `${when}: ${id} does not say "cancel the current action first"`).not.toContain(await button.getAttribute('title'))
   }
-  await expect(bar.getByTestId('actionbar-locked-hint'), `${when}: no "cancel the current action first" line`).toHaveCount(0)
+  // BACKLOG 049-10: the line is in the first row of the top bar, beside "Подробнее" - not inside the action bar.
+  await expect(page.getByTestId('actionbar-locked-hint'), `${when}: no "cancel the current action first" line`).toHaveCount(0)
 }
 
 /** The action bar locked by the open "trust line" action (the counter-check that the path did lock it). */
@@ -61,7 +62,7 @@ async function expectLockedByLine(page: Page): Promise<void> {
   await expect(bar.getByTestId('actionbar-trustline')).toHaveAttribute('data-active', '1')
   await expect(bar.getByTestId('actionbar-payment')).toBeDisabled()
   await expect(bar.getByTestId('actionbar-clearing')).toBeDisabled()
-  await expect(bar.getByTestId('actionbar-locked-hint')).toBeVisible()
+  await expect(page.getByTestId('actionbar-locked-hint')).toBeVisible()
 }
 
 /** "Подробнее" -> "Найти на графе" -> open the line (Bob -> Alice), by keyboard as the only keyboard route does. */

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
 import { type ActivePanelKey, useActivePanelStateShared } from '../composables/useActivePanelState'
@@ -53,6 +53,23 @@ function titleFor(_key: ActivePanelKey, idleTitle: string): string {
   return idleTitle
 }
 
+/**
+ * BACKLOG 049-10 (advisor 2026-10-21, owner frames 05/06 of 2026-10-20): the busy and the locked line hung absolutely
+ * under the actions, centred - over the graph (on the stand a node of the 100-node scene lay under the words at
+ * 1366x768). They move (`Teleport`, no new element) into the FIRST ROW of the top bar - the row whose content edges are
+ * the control line - into its right group, before "Подробнее": the band of the row is above the scene, so they lie over
+ * no node and add no height to the stack. A row of the stack under it (the place of the error line and the stall plaque,
+ * spec 049 decision 2) was measured and rejected: the scene is framed under the first row only, so such a row lay over
+ * nodes too (1 at 1366x768; 12-18 with "Подробнее" on, where it falls under the service rows) and pushed the window down.
+ * Mounted alone - the unit tests - there is no top bar, and the lines stay in the bar.
+ */
+const rootEl = ref<HTMLElement | null>(null)
+const rowSlotEl = shallowRef<HTMLElement | null>(null)
+onMounted(() => {
+  const row = rootEl.value?.closest('.tb-main-row')
+  rowSlotEl.value = (row?.querySelector(':scope > .hud-bar__right') as HTMLElement | null) ?? null
+})
+
 function guardedStart(fn: () => void) {
   // If ActionBar is globally disabled (busy/feature flags/run terminal) or a flow is active,
   // do nothing. Buttons are also disabled in template, but this is a safety guard.
@@ -62,7 +79,7 @@ function guardedStart(fn: () => void) {
 </script>
 
 <template>
-  <div class="action-bar" :aria-label="t('actions.aria')" data-testid="action-bar">
+  <div ref="rootEl" class="action-bar" :aria-label="t('actions.aria')" data-testid="action-bar">
     <HudBar variant="ghost" layout="start" fit>
       <button
         class="ds-btn ds-btn--secondary"
@@ -102,7 +119,9 @@ function guardedStart(fn: () => void) {
       >
         {{ t('actions.clearing') }}
       </button>
+    </HudBar>
 
+    <Teleport :to="rowSlotEl" :disabled="!rowSlotEl">
       <span
         v-if="busy"
         class="action-bar__hint"
@@ -123,7 +142,7 @@ function guardedStart(fn: () => void) {
       >
         {{ t('card.flowOpenReason') }}
       </span>
-    </HudBar>
+    </Teleport>
   </div>
 </template>
 
@@ -137,21 +156,19 @@ function guardedStart(fn: () => void) {
   opacity: var(--ds-ab-muted-opacity);
 }
 
-.action-bar {
-  position: relative;
-}
-
 /*
-  043 S2 (owner's decision on review item B2, 2026-10-17): the busy and locked lines are OUT of the row's layout -
-  under it, centred - so the three actions never move when a flow locks them (the line used to join the flex row and
-  push the centred group sideways). It does not take pointer input: the buttons' own titles carry the same reason.
+  043 S2 (owner's decision on review item B2, 2026-10-17): the busy and locked lines are OUT of the actions' row, so the
+  three actions never move when a flow locks them (the line used to join the flex row and push the centred group
+  sideways). It does not take pointer input: the buttons' own titles carry the same reason.
+  BACKLOG 049-10: in the right group of the first row (above), before "Подробнее" (`order`); it gives way to the button and
+  wraps its words inside the group's track (`TopBar.vue`, `.tb-main-row > .hud-bar__right`), so it never reaches the
+  actions. The stand holds it (`e2e/qa/edge-line.qa.ts`, 049-10).
 */
 .action-bar__hint {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
+  order: -1;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: end;
   pointer-events: none;
   opacity: var(--ds-ab-hint-opacity);
   font-size: var(--ds-ab-hint-font-size);
