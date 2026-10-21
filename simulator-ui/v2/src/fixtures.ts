@@ -1,4 +1,5 @@
 import type { GraphLink, GraphNode, GraphSnapshot } from './types'
+import { fetchBounded } from './api/http'
 import { isRecord } from './utils/isRecord'
 import { LEGACY_NODE_COLOR_KEYS, VIZ_LINK } from './vizMapping'
 
@@ -126,9 +127,12 @@ function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_shape_key' | 'viz_width_
 
 export async function loadJson<T>(path: string): Promise<T> {
   const cache: RequestCache | undefined = import.meta.env.DEV ? 'no-store' : undefined
-  const res = await fetch(path, { headers: { Accept: 'application/json' }, cache })
-  if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status} ${res.statusText}`)
-  return (await res.json()) as T
+  // BACKLOG 034-7: bounded like the REST client (`DEFAULT_REQUEST_TIMEOUT_MS`) - the answer AND the JSON body; a
+  // timeout is the client's `ApiError` (`API_TIMEOUT_CODE`), which the scene reports as "no answer".
+  return fetchBounded(path, { headers: { Accept: 'application/json' }, cache }, async (res, guard) => {
+    if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status} ${res.statusText}`)
+    return JSON.parse(await guard(res.text())) as T
+  })
 }
 
 /** The published root of the offline snapshots and their recorded playlists (`public/simulator-fixtures/v1`). */
