@@ -786,6 +786,25 @@ function onApplyIntensity() {
   margin-inline: var(--ds-hud-bar-px, var(--ds-space-3, 12px));
 }
 
+/*
+  BACKLOG 049-9: in saas the two alerts of the top stack painted only their variant's 5 % tint (alpha 0.05), so the graph
+  showed through their words (owner frames 07/08 saas, 2026-10-20; hud fixed by PR #341 in primitives.css). The same tint
+  is laid over the page colour - what an empty canvas shows (the rule of saas windows, overlays.css 045 S3): over an empty
+  canvas they look as before, over a drawn one they hide it. Only these two (`.tb-edge-alert`): an alert inside a window
+  stands on the window's surface and keeps its look. The stand holds alpha 1 in both themes (`e2e/qa/edge-line.qa.ts`).
+*/
+[data-theme='saas'] .tb-edge-alert.ds-alert--err {
+  background:
+    linear-gradient(color-mix(in srgb, var(--ds-err) 5%, transparent), color-mix(in srgb, var(--ds-err) 5%, transparent)),
+    var(--ds-page-bg);
+}
+
+[data-theme='saas'] .tb-edge-alert.ds-alert--warn {
+  background:
+    linear-gradient(color-mix(in srgb, var(--ds-warn) 5%, transparent), color-mix(in srgb, var(--ds-warn) 5%, transparent)),
+    var(--ds-page-bg);
+}
+
 .tb-retry {
   margin-left: auto;
   flex-shrink: 0;
