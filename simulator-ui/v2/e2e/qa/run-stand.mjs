@@ -264,6 +264,10 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   face (letter spacing) and holds the same; "Подробнее" on is left out of its matrix (it adds rows under the first row
  *   and leaves the first row as it is; measured green with it on in `cedb6353`): 8 combinations with the hint instead of
  *   16. Cost, locally: 14.8 s in the last local gate -> 11.9 s (one debug run) - about -3 s, so the step does not grow.
+ * - 2026-10-21 (the stand's time rule changed by the advisor; counts unchanged): CI run 39560472847 took 610 s with the
+ *   same 139 tests that took 576 s in run 39553532984 (603 s summed) - runner noise; the R3 rule could not apply (only
+ *   the two R3 tests kept by 048 S1's §15 P2 are left in the gate). From now on the budget of 600 s is judged by the
+ *   median of three consecutive CI runs of the gate, not by one run - see BACKLOG 049-7.
  */
 export const EXPECTED = { gate: 139, full: 227 }
 
