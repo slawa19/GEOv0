@@ -154,5 +154,7 @@ describe('049-8: an answer that comes after a context change writes no line into
     eq.value = 'UAH'
     created.release({ ok: true } as never); await made
     expect(lines(), 'trust line').toEqual([])
+    expect(created.fn, 'precondition: the trust line left in the equivalent of the action').toHaveBeenCalledWith('alice', 'bob', '5.00', 'EUR', expect.anything())
+    expect(im.phase.value, 'counter-check: the answer was taken to its end (the flow is reset after the line)').toBe('idle')
   })
 })

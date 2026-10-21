@@ -104,7 +104,9 @@ for (const lang of ['ru', 'en'] as const) {
             // `rgb(r, g, b)`, `rgba(r, g, b, a)` or a modern form with `/ a` (a `color-mix` serializes as `color(srgb ... / a)`).
             const slash = c.match(/\/\s*([\d.]+)\s*\)$/)
             const commas = c.match(/^rgba\([^)]*,\s*([\d.]+)\s*\)$/)
-            return [id, { colour: c, alpha: slash ? Number(slash[1]) : commas ? Number(commas[1]) : 1 }]
+            // A form not read here is not taken for opaque: its alpha is NaN, and the assertion below fails on it.
+            const opaque = /^rgb\([^)]*\)$/.test(c)
+            return [id, { colour: c, alpha: slash ? Number(slash[1]) : commas ? Number(commas[1]) : opaque ? 1 : Number.NaN }]
           })), ALERTS as unknown as string[])
           for (const id of ALERTS) expect(backs[id]!.alpha, `${where} ${id}: its background is opaque over the canvas: ${JSON.stringify(backs)}`).toBe(1)
           for (const id of ALERTS) {
