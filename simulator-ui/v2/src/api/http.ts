@@ -273,6 +273,22 @@ export async function httpText(cfg: HttpConfig, path: string, init?: HttpRequest
   })
 }
 
+/**
+ * A `fetch` of a full URL (not under an API base), bounded like every request of this client - the call AND the body
+ * the handler reads through `guard` (BACKLOG 034-7: the static snapshots and playlists of `?mode=fixtures`,
+ * `fixtures.ts` `loadJson`). The handler owns the answer: what a non-2xx means and how the body is parsed. Unlike the
+ * API calls, credentials follow the browser default unless `init` names them.
+ */
+export async function fetchBounded<T>(
+  url: string,
+  init: HttpRequestInit,
+  handle: (res: Response, guard: <V>(p: Promise<V>) => Promise<V>) => Promise<T>,
+): Promise<T> {
+  const { fetchInit, timeoutMs } = splitInit(init)
+  const method = String(fetchInit.method ?? 'GET')
+  return boundedRequest(method, url, url, { credentials: 'same-origin', ...fetchInit }, timeoutMs, (res, guard) => handle(res, guard))
+}
+
 export function httpUrl(cfg: HttpConfig, path: string): string {
   return joinUrl(cfg.apiBase, path)
 }
