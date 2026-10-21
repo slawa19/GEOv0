@@ -248,6 +248,10 @@ describe('034-7: a run stream that hangs without EOF', () => {
     h.stopSse()
     isRealModeRef.value = false
     await nextTick()
+    await vi.advanceTimersByTimeAsync(0)
+    // Counted before the idle bound could fire: a leaked transport timer is still pending here. (After stopSse the
+    // bound is already settled, so a leaked timer firing later would do nothing visible.)
+    expect(vi.getTimerCount(), 'a timer was left behind after stopSse').toBe(0)
     await vi.advanceTimersByTimeAsync(IDLE_UPPER_MS + BACKOFF_UPPER_MS)
 
     expect(conns.length, 'a stopped stream reconnected').toBe(1)
