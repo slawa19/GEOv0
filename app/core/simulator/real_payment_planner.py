@@ -532,7 +532,7 @@ LAUNCH_OPENING_TICKS = 5
 
 # 049 decision 10: the visitor's «быстро» step, 15 % (the steps 2 / 5 / 15 % live in the UI only:
 # simulator-ui/v2/src/components/TopBar.vue, `TEMPO_STEPS`). The scenario warm-up ramps only the tempo above it.
-VISITOR_FAST_STEP_PERCENT = 15
+VISITOR_FAST_STEP_PERCENT = 15  # twin of the `fast` percent in TopBar.vue `TEMPO_STEPS`; held equal by tooling-tests/portable/test_p049_12_policy_visitor_fast_step_matches_the_planner_threshold.py
 
 
 def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
