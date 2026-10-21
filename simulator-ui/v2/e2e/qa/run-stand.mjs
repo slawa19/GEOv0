@@ -253,11 +253,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   `edge-line.qa.ts`: the hint inside the control-line grid, over no node of the 100-node scene and over no other
  *   surface, the stack and the first row's controls unmoved by it - both languages (one boot), both themes, "Подробнее"
  *   off and on, 1366x768 and 1024x640; red on `3d8e6bde` (the hint at y 58-72.5 under the first row ending at 56, over
- *   a node). Cost, locally: 14.0 s (one boot of the 100-node scene about 3.5 s; 32 settled measurements; the
+ *   a node). Cost, locally: 14.0-15.2 s (one boot of the 100-node scene about 3.5 s; 32 settled measurements; the
  *   combinations grouped by viewport, as a resize re-frames the scene - by language and theme first it took 20.7 s). No
- *   CI number for it yet.
- *   Forecast from CI figures only: the last CI runs 527-580 s (the brief of 049-10) plus 14.0 s scaled by the CI/local
- *   ratio of the whole step (about 1.12, about +16 s) - about 543-596 s, under 600 s, with little room left.
+ *   CI number for it yet; the whole gate took 538 s locally with it.
+ *   Forecast from CI figures only: the last CI runs 527-580 s (the brief of 049-10) plus 15.2 s scaled by the CI/local
+ *   ratio of the whole step (about 1.12, about +17 s) - about 544-597 s, under 600 s, with little room left.
  */
 export const EXPECTED = { gate: 139, full: 227 }
 
