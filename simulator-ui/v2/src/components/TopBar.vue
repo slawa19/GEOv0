@@ -623,8 +623,11 @@ function onApplyIntensity() {
 .tb-main-row > .hud-bar__right {
   justify-self: end;
   /* BACKLOG 049-10: the action bar's busy or locked line joins this group before "Подробнее" (`ActionBar.vue`); on one
-     line the group wraps the line's words inside its track instead of putting the button on a line of its own. */
+     line the group gives the line's room inside its track instead of putting the button on a line of its own; the group is
+     capped by its track (a cut line's min-content is its whole sentence, which would otherwise widen the group over the
+     actions). */
   flex-wrap: nowrap;
+  max-width: 100%;
 }
 
 /* ...and the button keeps its size: the line gives way, never "Подробнее ▾" (at 1024x640 it broke before its arrow). */

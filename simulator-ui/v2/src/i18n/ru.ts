@@ -288,7 +288,8 @@ export const ru = {
   // The advisor's words of 2026-10-18: «Доверяет: / Доверяют:», «Доверяет (N) / Доверяют (N)»; «кредитор / должник» and
   // «этому участнику» only in the hints.
   card: {
-    flowOpenReason: 'Сначала отмените текущее действие (Esc).',
+    // BACKLOG 049-10: the key first - in the first row of the top bar the line may be cut by an ellipsis at 1024 px.
+    flowOpenReason: 'Esc: сначала отмените текущее действие.',
     busyReason: 'Идёт операция… подождите.',
     lineAvailable: 'доступно {amount} {unit}',
     lineOverLimit: 'сверх лимита на {amount} {unit}',

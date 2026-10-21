@@ -127,6 +127,7 @@ function guardedStart(fn: () => void) {
         class="action-bar__hint"
         data-testid="actionbar-busy-hint"
         :aria-label="t('actions.busyHintAria')"
+        :title="cancelling ? t('actions.cancellingHint') : t('card.busyReason')"
         role="status"
         aria-live="polite"
         aria-atomic="true"
@@ -139,6 +140,7 @@ function guardedStart(fn: () => void) {
         class="action-bar__hint"
         data-testid="actionbar-locked-hint"
         :aria-label="t('actions.lockedHintAria')"
+        :title="t('card.flowOpenReason')"
       >
         {{ t('card.flowOpenReason') }}
       </span>
@@ -159,17 +161,20 @@ function guardedStart(fn: () => void) {
 /*
   043 S2 (owner's decision on review item B2, 2026-10-17): the busy and locked lines are OUT of the actions' row, so the
   three actions never move when a flow locks them (the line used to join the flex row and push the centred group
-  sideways). It does not take pointer input: the buttons' own titles carry the same reason.
-  BACKLOG 049-10: in the right group of the first row (above), before "Подробнее" (`order`); it gives way to the button and
-  wraps its words inside the group's track (`TopBar.vue`, `.tb-main-row > .hud-bar__right`), so it never reaches the
-  actions. The stand holds it (`e2e/qa/edge-line.qa.ts`, 049-10).
+  sideways).
+  BACKLOG 049-10: in the right group of the first row (above), before "Подробнее" (`order`); it gives way to the button
+  inside the group's track (`TopBar.vue`, `.tb-main-row > .hud-bar__right`), so it never reaches the actions. It stays ONE
+  line in the room it has, cut by an ellipsis, the whole sentence its `title` (spec 049, decision 9): wrapped, it grew the
+  first row at 1024x640 with the CI fonts (run 39553532984: 56 -> 61 px). It takes the pointer now - for that `title`; in
+  the row it covers no canvas. The stand holds it (`e2e/qa/edge-line.qa.ts`, 049-10).
 */
 .action-bar__hint {
   order: -1;
   flex: 0 1 auto;
   min-width: 0;
-  text-align: end;
-  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: var(--ds-ab-hint-opacity);
   font-size: var(--ds-ab-hint-font-size);
   line-height: var(--ds-ab-hint-line-height);

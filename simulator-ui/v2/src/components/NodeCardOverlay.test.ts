@@ -300,7 +300,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     const line = host.querySelector('[data-testid="node-card-new-trustline"]') as HTMLButtonElement
     const reason = host.querySelector('[data-testid="node-card-actions-reason"]')
     expect([pay.disabled, line.disabled]).toEqual([true, true])
-    expect(reason?.textContent?.trim()).toBe('Cancel current action first (press ESC).')
+    expect(reason?.textContent?.trim()).toBe('ESC: cancel the current action first.')
     expect(pay.title).toBe(reason?.textContent?.trim())
     expect(pay.getAttribute('aria-describedby')).toBe('node-card-actions-reason')
     pay.click()
