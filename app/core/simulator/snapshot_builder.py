@@ -87,6 +87,12 @@ class SnapshotBuilder:
         Enrich scenario-topology snapshot with DB-derived state:
         - link.used/available based on Debt amounts
         - node.net_balance_atoms / node.net_sign
+
+        A scenario pid with NO participant row at all has no debt (a debt names both ends by row id), so its net is
+        zero, not unknown (BACKLOG 049-1, 2026-10-21): a run's participants are fresh rows under its own identities
+        (044 `T4405`) that only its first tick creates, and the UI reads this snapshot before that tick and then only
+        patches the participants a payment touches. A pid held by a row the simulator did not create is not read
+        (024 fix-delta B1) and stays null; so does every node when the equivalent has no row.
         """
 
         eq_code = str(equivalent or "").strip().upper()
@@ -103,16 +109,20 @@ class SnapshotBuilder:
             dict[str, uuid.UUID],
             dict[tuple[uuid.UUID, uuid.UUID], Decimal],
             dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]],
+            set[str],
         ] | None:
             eq = (await session.execute(select(Equivalent).where(Equivalent.code == eq_code))).scalar_one_or_none()
             if eq is None:
                 return None
 
+            stored_rows = (
+                await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+            ).scalars().all()
+            # BACKLOG 049-1: every pid that has a row, the simulator's or not - the rest have no debt (see above).
+            stored_pids = {p.pid for p in stored_rows}
             p_rows = [
                 p
-                for p in (
-                    await session.execute(select(Participant).where(Participant.pid.in_(pids)))
-                ).scalars().all()
+                for p in stored_rows
                 # Programme 024 (fix-delta B1): the pids come from a scenario anyone may upload, so
                 # only rows the simulator created are read; a real participant is treated as absent
                 # and never reaches the `Debt`/`TrustLine` queries below.
@@ -122,7 +132,7 @@ class SnapshotBuilder:
             pid_to_id = {p.pid: p.id for p in p_rows}
             participant_ids = [p.id for p in p_rows]
             if not participant_ids:
-                return None
+                return eq, {}, {}, {}, {}, stored_pids
 
             # Debts: debtor -> creditor in DB
             debt_rows = (
@@ -168,7 +178,7 @@ class SnapshotBuilder:
                 tl_by_pair[(r.from_participant_id, r.to_participant_id)] = (
                     r.limit or Decimal("0"), r.status, r.close_requested_at)
 
-            return eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair
+            return eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair, stored_pids
 
         if session is None:
             async with db_session.AsyncSessionLocal() as s:
@@ -179,7 +189,7 @@ class SnapshotBuilder:
         if loaded is None:
             return snap
 
-        eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair = loaded
+        eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair, stored_pids = loaded
 
         precision = int(2 if getattr(eq, "precision", None) is None else eq.precision)  # 024 T2416.1
 
@@ -283,11 +293,13 @@ class SnapshotBuilder:
         for node in snap.nodes:
             pid = str(node.id or "").strip()
             rec = pid_to_rec.get(pid)
-            if rec is None:
+            if rec is None and (not pid or pid in stored_pids):
+                # A row the simulator did not create (024): not read, so nothing is known - null stays.
                 continue
 
-            credit = credit_sum.get(rec.id, Decimal("0"))
-            debit = debit_sum.get(rec.id, Decimal("0"))
+            # No row at all (049-1): no debt can name it, so its net is zero.
+            credit = Decimal("0") if rec is None else credit_sum.get(rec.id, Decimal("0"))
+            debit = Decimal("0") if rec is None else debit_sum.get(rec.id, Decimal("0"))
             net = credit - debit
 
             # 012 / T1210 finding 6: these next four lines emit ONE net in TWO encodings -
@@ -308,6 +320,8 @@ class SnapshotBuilder:
                 debt_mags.append(abs(atoms))
 
             # Prefer DB metadata for status/type if scenario snapshot lacks them.
+            if rec is None:
+                continue
             if not (node.status and str(node.status).strip()):
                 if getattr(rec, "status", None) is not None:
                     node.status = str(rec.status)
