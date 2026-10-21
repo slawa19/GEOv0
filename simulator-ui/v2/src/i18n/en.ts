@@ -554,9 +554,10 @@ export const en = {
     lockedHintAria: 'Action Bar locked hint',
   },
 
-  /** 043 S1 / 048 item 13 (a): the one onboarding hint - the three actions in the words of the protocol. */
+  /** 043 S1 / 048 item 13 (a): the one onboarding hint - the three actions in the words of the protocol;
+   * 034 S9-A (the owner's answer П-S9-1 (а), 2026-10-21): why a clearing is not a trick - nobody pays, no balance moves. */
   onboarding: {
-    protocol: 'A payment travels along a chain of trust; a trust line is the limit up to which one trusts another; clearing cancels debts around a cycle.',
+    protocol: 'A payment travels along a chain of trust; a trust line is the limit up to which one trusts another; clearing cancels debts around a cycle. In a clearing nobody pays anything, and every balance stays the same.',
     explore: 'Choose a participant and hover over one of its lines: who trusts whom and who owes whom.',
     close: 'Close hint',
   },

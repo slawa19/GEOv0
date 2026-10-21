@@ -2,8 +2,14 @@ import type { RunStatus, ScenarioSummary } from '../api/simulatorTypes'
 import { isJwtLike } from '../utils/isJwtLike'
 import { isLiveRunState } from '../utils/status'
 
-/** The scenario started when none is selected yet and the catalogue offers it (unchanged since the Interact bootstrap). */
-export const INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'
+/**
+ * 034 S9-A (the owner's answer П-S9-1 (а), 2026-10-21): the network a person opens when no choice is stored - the
+ * 10-participant «Демо клиринга», on which a clearing is seen in the first minute (`s9-plan.md` §1.2). ONE rule for the
+ * catalogue load (`useSimulatorApp.ts`, `ensureScenarioSelectionValid`) and the opening's autostart below; until S9-A
+ * the catalogue load preferred `greenfield-village-100-realistic-v2` and the autostart's preference for this one was
+ * never reached.
+ */
+export const DEFAULT_SCENARIO_ID = 'clearing-demo-10'
 
 /** 043 S2 (decision 2): the operator's default intensity (an admin token is held) - Start and the opening's run. */
 export const AUTOSTART_DEFAULT_INTENSITY_PERCENT = 30
@@ -26,6 +32,17 @@ export function defaultIntensityPercentFor(accessToken: string | null | undefine
 
 function readScenarioId(scenario: ScenarioSummary | null | undefined): string {
   return String(scenario?.scenario_id ?? '').trim()
+}
+
+/**
+ * The scenario picked when no choice is stored, or the stored one is not in the catalogue: `DEFAULT_SCENARIO_ID` if the
+ * catalogue offers it, else the catalogue's first scenario ('' for an empty catalogue). A stored choice the catalogue
+ * offers (`geo.sim.v2.selectedScenarioId` - the administrator's under «Подробнее», or an earlier pick) is not replaced:
+ * the callers ask only when there is none.
+ */
+export function pickDefaultScenarioId(scenarios: readonly ScenarioSummary[] | null | undefined): string {
+  const list = scenarios ?? []
+  return list.find((s) => readScenarioId(s) === DEFAULT_SCENARIO_ID) ? DEFAULT_SCENARIO_ID : readScenarioId(list[0])
 }
 
 export type AutostartDecision = 'start' | 'attached' | 'unknown'
@@ -91,12 +108,7 @@ export function useInteractAutoBootstrapRun(deps: {
 
     // The catalogue was read by the opening itself (043 S2, review B5: no second read here - an empty or failed
     // catalogue has already ended the opening and put its reason on the error line).
-    if (!String(deps.real.selectedScenarioId ?? '').trim()) {
-      const scenarios = deps.real.scenarios ?? []
-      const preferred = scenarios.find((s) => readScenarioId(s) === INTERACT_AUTOSTART_SCENARIO_ID)
-      if (preferred) deps.real.selectedScenarioId = INTERACT_AUTOSTART_SCENARIO_ID
-      else if (scenarios.length > 0) deps.real.selectedScenarioId = readScenarioId(scenarios[0])
-    }
+    if (!String(deps.real.selectedScenarioId ?? '').trim()) deps.real.selectedScenarioId = pickDefaultScenarioId(deps.real.scenarios)
     if (!String(deps.real.selectedScenarioId ?? '').trim()) return 'no-scenario'
 
     await deps.realMode.startRun({

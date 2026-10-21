@@ -12,8 +12,8 @@
  * A painted point there is the beam's body or trail, not a burst. The FX canvas is cleared every frame, and the graph
  * lives on the base canvas, so nothing else paints there but an edge pulse of a clearing (counted separately, below).
  * WHAT IT DOES NOT SEE: a production build (no dev hook; the test runs the dev server as an anonymous visitor, see the
- * config), another scenario than the one the product picks by default, a backend under load. The run it starts is
- * stopped at the end.
+ * config), another scenario than the one the product picks by default (`clearing-demo-10` since 034 S9-A, asserted on
+ * the create), a backend under load. The run it starts is stopped at the end.
  */
 import { expect, test, type Page } from '@playwright/test'
 
@@ -131,6 +131,10 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   expect(creates, 'exactly one run was created, by the product itself').toHaveLength(1)
   // 044 stage 2: the live config empties the dev token, so this is a visitor - the visitor tempo (049 S2: 5, «обычно»).
   expect(creates[0], 'at the visitor default intensity').toMatchObject({ intensity_percent: 5 })
+  // 034 S9-A (the owner's answer П-S9-1 (а), 2026-10-21): nothing stored, and the backend's catalogue offers it (the default
+  // allowlist, `app/core/simulator/runtime_impl.py`) - the visitor opens the 10-participant «Демо клиринга». Until S9-A
+  // the village of 100 (`greenfield-village-100-realistic-v2`) was opened.
+  expect(creates[0], 'on the network a visitor opens by default').toMatchObject({ scenario_id: 'clearing-demo-10' })
   expect(pauses, 'nothing paused it').toEqual([])
   // 046 wave 1, full (2026-10-19): by test id / data attribute - the words are the dictionary's (language of the page). The live config is English (Chromium en-US).
   await expectNetworkState(page, 'running') // the attribute and its word in the page's language (§15 Codex round)
