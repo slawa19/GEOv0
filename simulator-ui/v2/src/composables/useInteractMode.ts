@@ -281,6 +281,9 @@ export function useInteractMode(opts: {
   const cancellingRef = ref(false)
   const cancelling = computed(() => cancellingRef.value)
 
+  /** What an operation remembers of the history's context when it begins (BACKLOG 049-8). */
+  type OperationContext = { historyContext: number; eq: string }
+
   // BUG-5: inline history log (last N actions). 049 S2: and the network's events beside them.
   const historyStore = useInteractHistory({ max: 20 })
   const { history, feed } = historyStore
@@ -289,7 +292,13 @@ export function useInteractMode(opts: {
    * An own line. 049 S2 (decision 5): `publishedToStream` - an event the run's stream publishes as well (a committed
    * payment, a clearing that cleared): written while the events are on, the network's line is its one line.
    */
-  function pushHistory(icon: string, line: KeptText, o?: { publishedToStream?: boolean }) {
+  function pushHistory(op: OperationContext, icon: string, line: KeptText, o?: { publishedToStream?: boolean }) {
+    // BACKLOG 049-8 (decision 5): the line of an operation answered in another context is not written - the history it
+    // belonged to was cleared by the change, and the old context does not come back. Its own context: no clear by a
+    // change of run, equivalent or picture since the operation began, and its equivalent the one on screen (the repeat
+    // of an unresolved payment carries the equivalent it was made in). The operation's outcome - the window's result,
+    // the payment's record - is not the history's and is kept as it is.
+    if (op.historyContext !== historyContext || !sameEquivalent(op.eq, opts.equivalent.value)) return
     historyStore.pushHistory(icon, line, { shownByNetwork: o?.publishedToStream === true && feedOn() })
   }
   const shownHistory = computed(() => historyStore.shownEntries(feedOn()))
@@ -302,9 +311,15 @@ export function useInteractMode(opts: {
   }
   // Decision 5: a change of run or equivalent drops every line, own and network - they belong to another context; the
   // switch alone drops the network's lines and brings back the own lines they stood in for (closing Codex review, 2026-10-20).
+  // Each clear by a change of context is a new context of the history (BACKLOG 049-8): an operation remembers the one it began in.
+  let historyContext = 0
+  function clearContext() {
+    historyContext += 1
+    historyStore.clearAll()
+  }
   watch(
     () => `${opts.runId.value}|${canonicalEquivalent(opts.equivalent.value)}`,
-    () => historyStore.clearAll(),
+    () => clearContext(),
     { flush: 'sync' },
   )
   watch(feedOn, () => historyStore.clearFeed(), { flush: 'sync' })
@@ -320,7 +335,7 @@ export function useInteractMode(opts: {
     (source) => {
       const context = source || String(opts.requestedSceneSource?.() ?? '').trim()
       if (!context) return
-      if (shownSource !== null && context !== shownSource && !opts.isCurrentRunSource?.(context)) historyStore.clearAll()
+      if (shownSource !== null && context !== shownSource && !opts.isCurrentRunSource?.(context)) clearContext()
       shownSource = context
     },
     { flush: 'sync', immediate: true },
@@ -702,7 +717,7 @@ export function useInteractMode(opts: {
   }
 
   async function runBusy<T>(
-    fn: (ctx: { isCurrent: () => boolean; resetToIdle: () => void; signal: AbortSignal }) => Promise<T>,
+    fn: (ctx: { isCurrent: () => boolean; resetToIdle: () => void; signal: AbortSignal; historyContext: number }) => Promise<T>,
   ): Promise<T | undefined> {
     if (busyRef.value) return undefined
     busyRef.value = true
@@ -716,6 +731,8 @@ export function useInteractMode(opts: {
     const ctrl = new AbortController()
     activeAbort = { epoch: myEpoch, ctrl }
     const isCurrent = () => epoch === myEpoch
+    // The context of the history the operation began in (BACKLOG 049-8): its line is written only into it.
+    const began = historyContext
 
     const resetToIdle = () => {
       // NOTE: do NOT bump epoch here; this is a success-path reset.
@@ -723,7 +740,7 @@ export function useInteractMode(opts: {
     }
 
     try {
-      return await fn({ isCurrent, resetToIdle, signal: ctrl.signal })
+      return await fn({ isCurrent, resetToIdle, signal: ctrl.signal, historyContext: began })
     } catch (error) {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
@@ -818,7 +835,7 @@ export function useInteractMode(opts: {
       return
     }
     const names = { from: participantName(from), to: participantName(to) }
-    await runBusy(async ({ isCurrent, signal }) => {
+    await runBusy(async ({ isCurrent, signal, historyContext: began }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
       if (!paymentIntents.markSent(record)) throw new ShownFailure(clientShownError('payment.storageRefused'))
@@ -894,7 +911,7 @@ export function useInteractMode(opts: {
         })),
       }
       // BUG-5: log to history (037 A2: names, not pids). The stream publishes the payment (`tx.updated`) as well.
-      pushHistory('💸', { key: 'history.payment', vars: { amount, unit: eq, from: names.from, to: names.to } }, { publishedToStream: true })
+      pushHistory({ historyContext: began, eq }, '💸', { key: 'history.payment', vars: { amount, unit: eq, from: names.from, to: names.to } }, { publishedToStream: true })
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
       // The panel stays on the result: it is dismissed by the user (`dismissPaymentResult` / `cancel`), not by a reset.
@@ -907,13 +924,13 @@ export function useInteractMode(opts: {
     const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noSelection'))
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
       // BUG-5: log to history. 044 `T4405`: the participants' names, not their ids (identities of the run).
-      pushHistory('🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit, unit: eq } })
+      pushHistory({ historyContext: began, eq }, '🔗', { key: 'history.trustlineCreated', vars: { from: participantName(from), to: participantName(to), limit, unit: eq } })
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -926,13 +943,13 @@ export function useInteractMode(opts: {
     const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       await opts.actions.updateTrustline(from, to, newLimit, eq, { signal })
       if (!isCurrent()) return
 
       // BUG-5: log to history
-      pushHistory('✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit, unit: eq } })
+      pushHistory({ historyContext: began, eq }, '✏️', { key: 'history.trustlineUpdated', vars: { from: participantName(from), to: participantName(to), limit: newLimit, unit: eq } })
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
       patchTrustlineLimitLocal(from, to, newLimit, eq)
@@ -948,7 +965,7 @@ export function useInteractMode(opts: {
     const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       const res = await opts.actions.closeTrustline(from, to, eq, { signal })
       if (!isCurrent()) return
@@ -958,7 +975,7 @@ export function useInteractMode(opts: {
       const msg: KeptText = { key: res.status === 'closed' ? 'history.trustlineClosed' : 'history.closeRequested', vars: pair }
 
       // BUG-5: log to history
-      pushHistory('🗑️', msg)
+      pushHistory({ historyContext: began, eq }, '🗑️', msg)
       if (res.status !== 'closed') dataCache.patchTrustlineLimitLocal(from, to, '0', eq)
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
@@ -1007,7 +1024,7 @@ export function useInteractMode(opts: {
     fsm.clearError()
     // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
     const eq = opts.equivalent.value
-    await runBusy(async ({ isCurrent, signal }) => {
+    await runBusy(async ({ isCurrent, signal, historyContext: began }) => {
       // 037 C: the phase after the confirm step is "the answer is awaited, then the result is shown" (its name, `clearing-preview`,
       // is the old one). It is left only by the user (Close/Esc -> `cancel()`) or by the next clearing: no timer ends it.
       fsm.enterClearingPreview()
@@ -1028,9 +1045,9 @@ export function useInteractMode(opts: {
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
         // The stream publishes a clearing that cleared (`clearing.done`) as well.
-        pushHistory('🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } }, { publishedToStream: true })
+        pushHistory({ historyContext: began, eq }, '🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } }, { publishedToStream: true })
       } else {
-        pushHistory('🌀', { key: 'history.clearingNothing' })
+        pushHistory({ historyContext: began, eq }, '🌀', { key: 'history.clearingNothing' })
       }
 
       // BUG-3: trigger FX animation immediately after receiving clearing response.

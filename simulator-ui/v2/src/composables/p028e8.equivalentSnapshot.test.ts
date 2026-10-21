@@ -61,7 +61,7 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
     expect(applyEdgePatches).not.toHaveBeenCalled()
     expect(intents.map((i) => i.type)).not.toContain('tx-fx')
   })
-  it('B1: an action finished after an equivalent switch is recorded in its own equivalent', async () => {
+  it('B1: an action finished after an equivalent switch keeps its own equivalent; its history line is not written', async () => {
     let release!: () => void
     const sendPayment = vi.fn(() => new Promise<never>((r) => { release = () => r({ ok: true, status: 'COMMITTED', payment_id: 'p', routes: [] } as never) }))
     const eq = ref('UAH')
@@ -71,8 +71,12 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
     const done = im.confirmPayment('1.00')
     eq.value = 'HOUR'
     release(); await done
-    // 049 S2: the toast is gone; the history line records the action in its own equivalent.
-    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual([expect.stringContaining('1.00 UAH')])
+    // B1: the action is of the equivalent it was made in, not the one selected when it returns - the request and the result.
+    expect(sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH', expect.anything())
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'success', amount: '1.00', equivalent: 'UAH' })
+    // 049 S2: the toast is gone. BACKLOG 049-8: until then the history line was written here in UAH, over the HOUR history;
+    // решение 5 049 (смена контекста очищает строки) сильнее - the switch cleared the history, the late line is not written.
+    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual([])
   })
   it('B4: the same participants in another equivalent are a new scene, not an increment', async () => {
     const eq = ref('UAH')
