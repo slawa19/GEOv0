@@ -2638,6 +2638,30 @@ async def _run_events_stream(
         await runtime.unsubscribe(run_id, sub)
 
 
+class _RunEventsResponse(StreamingResponse):
+    """The SSE stream of a subscription the route opened BEFORE streaming (a replay cursor `subscribe_with_status`
+    cannot serve is answered 410 before any byte, so the subscription cannot move into the generator).
+
+    BACKLOG 044-5: the response releases the subscription however it ends. A client gone one loop step after the
+    request reached the app makes Starlette's disconnect listener cancel the send of the first chunk; the generator
+    stays suspended at that `yield`, its `finally` does not run, and Starlette never closes the body iterator - the
+    subscription lived until a cyclic GC finalized the generator, and the run did not count as idle. A second
+    `unsubscribe` (the generator's own `finally`) is a no-op.
+    """
+
+    def __init__(self, content: AsyncIterator[str], *, run_id: str, subscription: _Subscription, **kwargs: Any) -> None:
+        super().__init__(content, **kwargs)
+        self._run_id = run_id
+        self._subscription = subscription
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # Reached under a cancelled scope too: `unsubscribe` has no checkpoint, so it completes.
+            await runtime.unsubscribe(self._run_id, self._subscription)
+
+
 # -----------------------------
 # Legacy (active run) endpoints
 # -----------------------------
@@ -2730,7 +2754,7 @@ async def events_stream_active_run(
     except SseReplayUnavailable as exc:
         raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
-    return StreamingResponse(
+    return _RunEventsResponse(
         _run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
@@ -2738,6 +2762,8 @@ async def events_stream_active_run(
             subscription=sub,
             initial_status_event_id=status_event_id,
         ),
+        run_id=run_id,
+        subscription=sub,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
@@ -3000,7 +3026,7 @@ async def run_events_stream(
     except SseReplayUnavailable as exc:
         raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
-    return StreamingResponse(
+    return _RunEventsResponse(
         _run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
@@ -3008,6 +3034,8 @@ async def run_events_stream(
             subscription=sub,
             initial_status_event_id=status_event_id,
         ),
+        run_id=run_id,
+        subscription=sub,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
