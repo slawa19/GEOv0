@@ -191,7 +191,9 @@ const hintGeometry = (page: Page, radiusById: Record<string, number>) => page.ev
   const w = hr ? hr.width : 0
   const h = hr ? hr.height : 0
   const centreUnder = under({ left: cx - w / 2, top: cy - h / 2, right: cx + w / 2, bottom: cy + h / 2 }).length
-  return { topLine, firstRow, stackBottom, rowControls, hint, overlaps, under: hint ? under(hint) : [], nodes: nodes.length, onScreen, centreUnder }
+  // The camera is part of the settle key: the node checks are read on a framed scene, not during a re-frame.
+  const camera = { panX: half(cam.panX), panY: half(cam.panY), zoom: Math.round(cam.zoom * 1000) / 1000 }
+  return { topLine, firstRow, stackBottom, rowControls, hint, overlaps, under: hint ? under(hint) : [], nodes: nodes.length, onScreen, centreUnder, camera }
 }, { hintSel: HINT, radiusById })
 
 test('049-10 [ru, en] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] - the "cancel the current action" hint stands inside the control-line grid, over no node and no other surface, and adds no band', async ({ page }) => {
@@ -218,7 +220,7 @@ test('049-10 [ru, en] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] -
     }
     await expect(page.locator('.root'), `counter-check: the theme is ${theme}`).toHaveAttribute('data-theme', theme)
   }
-  /** A condition, not a sleep: the same geometry on three reads in a row (the window follows the stack, the bars reflow). */
+  /** A condition, not a sleep: the same geometry on three reads in a row (the bars reflow, a resize re-frames the scene). */
   const settled = async () => {
     let prev = ''
     let same = 0
@@ -229,7 +231,7 @@ test('049-10 [ru, en] [100 nodes, saas|hud, details off|on, 1366x768|1024x640] -
       same = key === prev ? same + 1 : 0
       prev = key
       return same >= 2
-    }, { message: 'the hint, the window and the graph stop moving', intervals: [50, 100, 100, 150] }).toBe(true)
+    }, { message: 'the hint, the bars and the camera stop moving', intervals: [50, 100, 100, 150] }).toBe(true)
     return last!
   }
   type Combo = { theme: 'saas' | 'hud'; details: boolean; vp: typeof VIEWPORT_MAIN }
