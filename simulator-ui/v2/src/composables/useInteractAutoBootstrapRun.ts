@@ -20,7 +20,7 @@ export const AUTOSTART_DEFAULT_INTENSITY_PERCENT = 30
  * 1.24); at the operator's 30 the same 10 saturate the core. A stored preference still wins.
  *
  * 049 S2 (decision 10, the owner's word of 2026-10-20): 15 -> 5, the step «обычно» of the visitor's three (2 / 5 / 15 % -
- * «медленно / обычно / быстро», `TopBar.vue`): about one payment a second, slow enough to read the network's events.
+ * «медленно / обычно / быстро», `TopBar.vue`): about one payment ATTEMPT a second (049-11: part is refused for lack of a route), slow enough to read the network's events.
  */
 export const VISITOR_DEFAULT_INTENSITY_PERCENT = 5
 

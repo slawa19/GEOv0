@@ -301,6 +301,8 @@ const statusHasContent = computed(
  * percent field with «Применить» instead of the steps. The step shown is the RUN's tempo (`intensity_percent` of its
  * status): a tempo that is none of the three (set by the administrator) shows no step - there is no fourth.
  */
+// The `fast` percent twins the backend's `VISITOR_FAST_STEP_PERCENT` (app/core/simulator/real_payment_planner.py); the two are held
+// equal by tooling-tests/portable/test_p049_12_policy_visitor_fast_step_matches_the_planner_threshold.py - change both, not one.
 const TEMPO_STEPS = [
   { id: 'slow', percent: 2, key: 'topBar.tempoSlow' },
   { id: 'normal', percent: 5, key: 'topBar.tempoNormal' },

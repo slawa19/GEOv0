@@ -23,7 +23,7 @@ type Diag = { events_by_type?: Record<string, number> }
 
 const txUpdatedSeen = (page: Page) =>
   page.evaluate(() => Number(((globalThis as unknown as { __geo_real_mode_diag?: Diag }).__geo_real_mode_diag?.events_by_type ?? {})['tx.updated'] ?? 0))
-/** 049 S2: the payments the run attempted, as the client accepted them - committed (`tx.updated`) and failed (`tx.failed`). */
+/** 049 S2 / 049-11: the payment ATTEMPTS of the run (not only successful payments), as the client accepted them - committed (`tx.updated`) and failed (`tx.failed`). */
 const attemptsSeen = (page: Page) =>
   page.evaluate(() => {
     const by = (globalThis as unknown as { __geo_real_mode_diag?: Diag }).__geo_real_mode_diag?.events_by_type ?? {}
@@ -155,9 +155,10 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   // manual payment is ONE line - its `tx.updated` - is held by `src/composables/eventFeed.p049s2.test.ts` and was run
   // once by hand on a backend with the actions enabled (spec 049, S2 changelog).
 
-  // 049 S2 (decision 10): the tempo by words reaches the run. «быстро» (15 %) against «медленно» (2 %): the slow step pays
-  // less often - a generous comparison of the two rates, not a promise of a rate (the planner's budget is the backend's,
-  // 049 S2a: one attempt in about 2.5 s at 2 %, about three a second at 15 %).
+  // 049 S2 (decision 10): the tempo by words reaches the run. «быстро» (15 %) against «медленно» (2 %): the slow step plans
+  // fewer ATTEMPTS - a generous comparison of the two rates, not a promise of a rate (the planner's budget is the backend's,
+  // 049 S2a: one attempt in about 2.5 s at 2 %, about three a second at 15 %; the attempts count `tx.updated` + `tx.failed`,
+  // and routing refuses part of them - 049-11, `docs/ru/simulator/backend/real-mode-runbook.md`).
   await page.getByTestId('tempo-step-fast').click()
   await expect(page.getByTestId('tempo-step-fast')).toHaveAttribute('aria-pressed', 'true')
   const fast = await attemptRate(page, 10, 30_000)
@@ -165,7 +166,7 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
   await expect(page.getByTestId('tempo-step-slow')).toHaveAttribute('aria-pressed', 'true')
   const slow = await attemptRate(page, 4, 45_000)
   console.log(`049 S2 LIVE tempo ${JSON.stringify({ fastPerSec: Math.round(fast * 100) / 100, slowPerSec: Math.round(slow * 100) / 100 })}`)
-  expect(slow, `«медленно» pays less often than «быстро» (${slow.toFixed(2)}/s against ${fast.toFixed(2)}/s)`).toBeLessThan(fast)
+  expect(slow, `«медленно» plans fewer payment attempts per second than «быстро» (${slow.toFixed(2)}/s against ${fast.toFixed(2)}/s)`).toBeLessThan(fast)
 
   // Leave the backend as found: stop the run this test started. 048 S2 (amendment 8): a visitor has no Stop in the UI
   // (the run row is the administrator's), so the stop goes where the product's own Stop goes - `POST
