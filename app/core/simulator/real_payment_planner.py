@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_DOWN
 from fractions import Fraction
 from typing import Any, Callable
 
+from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
 from app.core.simulator.scenario_equivalent import effective_equivalent
 
 
@@ -121,6 +122,17 @@ class RealPaymentPlanner:
     def candidates_from_scenario(self, scenario: dict[str, Any]) -> list[dict[str, Any]]:
         tls = scenario.get("trustlines") or []
         out: list[dict[str, Any]] = []
+        active_pair_lines: dict[tuple[str, str, str], list[tuple[str, dict | None]]] = {}
+        for tl in tls:
+            if str(tl.get("status") or "active").strip().lower() != "active":
+                continue
+            eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
+            frm = str(tl.get("from") or "").strip()
+            to = str(tl.get("to") or "").strip()
+            if eq and frm and to:
+                pair = (eq, *sorted((frm, to)))
+                active_pair_lines.setdefault(pair, []).append((frm, tl.get("policy")))
+        rules_by_pair = {pair: pair_rules(lines) for pair, lines in active_pair_lines.items()}
         for tl in tls:
             status = str(tl.get("status") or "active").strip().lower()
             if status != "active":
@@ -148,6 +160,7 @@ class RealPaymentPlanner:
                     "sender_pid": to,
                     "receiver_pid": frm,
                     "limit": limit,
+                    "pair_rules": rules_by_pair[(eq, *sorted((frm, to)))],
                 }
             )
 
@@ -399,64 +412,40 @@ class RealPaymentPlanner:
         sender_pid: str,
         receiver_pid: str,
     ) -> Decimal:
-        """Upper bound for the amount: static trustline limits, minus used debt, plus reciprocity."""
+        """Static per-action hints for indirect paths, aggregate room and direct pair capacity.
 
-        # Bound by sender-side outgoing capacity upper bound, plus receiver-side incoming upper bound.
-        # For direct neighbors, also bound by the concrete direct edge limit.
-        # `candidates_from_scenario` yields only candidates with a Decimal limit > 0 and
-        # `_build_limit_graph` records every one of them under (sender, eq), so the sender-side
-        # lookup cannot miss for a candidate taken from `order`.
+        Aggregate outstanding debt belongs against the SUM of participant limits;
+        the largest single line remains only an indirect action-size hint. Dynamic
+        path/debt search and splitting stay with the router.
+        """
+
         out_limit_raw = ctx.max_outgoing_limit[(sender_pid, eq)]
         limit = out_limit_raw
         recv_cap = ctx.max_incoming_limit.get((receiver_pid, eq))
         if recv_cap is not None and recv_cap > 0:
             limit = min(limit, recv_cap)
-        direct_cap = ctx.direct_edge_limit.get((sender_pid, receiver_pid, eq))
-        if direct_cap is not None and direct_cap > 0:
-            limit = min(limit, direct_cap)
+        direct_cap = None
+        if (sender_pid, receiver_pid, eq) in ctx.direct_edge_limit:
+            direct_cap = _direct_capacity(ctx, sender_pid, receiver_pid, eq)
+            limit = max(_ZERO, direct_cap)
 
         debt_snapshot = ctx.debt_snapshot
-        # ── Phase 1.4: capacity-aware amounts ─────────────────────
-        # Reduce the static limit by already-used debt so generated
-        # amounts fit into the remaining trustline capacity.
+        static_limit = limit
+        available_out = ctx.total_outgoing_limit[(sender_pid, eq)]
+        available_in = ctx.total_incoming_limit.get((receiver_pid, eq), _ZERO)
         if debt_snapshot:
             eq_upper = eq.strip().upper()
-            static_limit = limit  # keep for debug logging
-
-            # 1) Sender total outgoing debt → cap max_outgoing_limit
             out_used = ctx.debt_out_agg.get((sender_pid, eq_upper), _ZERO)
-            available_out = max(_ZERO, out_limit_raw - out_used)
-            limit = min(limit, available_out)
-
-            # 2) Receiver total incoming debt → cap max_incoming_limit
-            recv_limit_raw = ctx.max_incoming_limit.get((receiver_pid, eq))
-            if recv_limit_raw is not None and recv_limit_raw > 0:
-                in_used = ctx.debt_in_agg.get((receiver_pid, eq_upper), _ZERO)
-                available_in = max(_ZERO, recv_limit_raw - in_used)
-                limit = min(limit, available_in)
-
-            # 3) Direct edge debt → cap direct_edge_limit
-            if direct_cap is not None and direct_cap > 0:
-                edge_used = debt_snapshot.get(
-                    (sender_pid, receiver_pid, eq_upper), _ZERO
-                )
-                available_direct = max(_ZERO, direct_cap - edge_used)
-                limit = min(limit, available_direct)
-
-            if limit < static_limit and static_limit > 0:
-                ratio = float(limit) / float(static_limit)
-                if ratio < 0.5:
-                    self._logger.debug(
-                        "capacity_aware: edge %s→%s eq=%s "
-                        "static_limit=%s available=%s (%.0f%%)",
-                        sender_pid,
-                        receiver_pid,
-                        eq,
-                        static_limit,
-                        limit,
-                        ratio * 100,
-                    )
-        # ── /Phase 1.4 ────────────────────────────────────────────
+            in_used = ctx.debt_in_agg.get((receiver_pid, eq_upper), _ZERO)
+            # Reciprocal debt can be repaid in addition to using fresh credit.
+            available_out = max(_ZERO, available_out - out_used + ctx.debt_in_agg.get((sender_pid, eq_upper), _ZERO))
+            available_in = max(_ZERO, available_in - in_used + ctx.debt_out_agg.get((receiver_pid, eq_upper), _ZERO))
+        limit = min(limit, available_out, available_in)
+        if debt_snapshot and static_limit > 0 and limit < static_limit / 2:
+            self._logger.debug(
+                "capacity_aware: edge %s→%s eq=%s static_limit=%s available=%s (%.0f%%)",
+                sender_pid, receiver_pid, eq, static_limit, limit, limit / static_limit * 100,
+            )
 
         # ── Reciprocity Bonus (Phase 4.2) ─────────────────────────
         if ctx.flow_reciprocity_bonus > 0 and debt_snapshot:
@@ -465,10 +454,12 @@ class RealPaymentPlanner:
                 (receiver_pid, sender_pid, _eq_upper_recip), _ZERO
             )
             if _reverse_debt > 0:
-                limit = limit * Decimal(str(1.0 + ctx.flow_reciprocity_bonus))
+                limit = limit * (Decimal(1) + Decimal(str(ctx.flow_reciprocity_bonus)))
         # ── /Reciprocity Bonus ────────────────────────────────────
 
-        return limit
+        # A preference bonus cannot create participant room or direct pair capacity.
+        limit = min(limit, available_out, available_in)
+        return min(limit, max(_ZERO, direct_cap)) if direct_cap is not None else limit
 
 
 _ZERO = Decimal("0")
@@ -674,7 +665,10 @@ class _PlanContext:
     adjacency_by_eq: dict[str, dict[str, list[tuple[str, Decimal]]]]
     max_outgoing_limit: dict[tuple[str, str], Decimal]
     max_incoming_limit: dict[tuple[str, str], Decimal]
+    total_outgoing_limit: dict[tuple[str, str], Decimal]
+    total_incoming_limit: dict[tuple[str, str], Decimal]
     direct_edge_limit: dict[tuple[str, str, str], Decimal]
+    rules_by_edge: dict[tuple[str, str, str], tuple[frozenset[str], frozenset[str]]]
     debt_snapshot: dict[tuple[str, str, str], Decimal] | None
     debt_out_agg: dict[tuple[str, str], Decimal]
     debt_in_agg: dict[tuple[str, str], Decimal]
@@ -710,7 +704,8 @@ def _build_plan_context(
     # Active stress multipliers (tx_rate) for this tick.
     mult_all, mult_by_group, mult_by_profile = stress
 
-    adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit = _build_limit_graph(candidates)
+    (adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit,
+     total_outgoing_limit, total_incoming_limit) = _build_limit_graph(candidates)
     debt_out_agg, debt_in_agg = _aggregate_debts(debt_snapshot)
 
     return _PlanContext(
@@ -729,7 +724,11 @@ def _build_plan_context(
         adjacency_by_eq=adjacency_by_eq,
         max_outgoing_limit=max_outgoing_limit,
         max_incoming_limit=max_incoming_limit,
+        total_outgoing_limit=total_outgoing_limit,
+        total_incoming_limit=total_incoming_limit,
         direct_edge_limit=direct_edge_limit,
+        rules_by_edge={(c["sender_pid"], c["receiver_pid"], c["equivalent"]): c["pair_rules"]
+                       for c in candidates},
         debt_snapshot=debt_snapshot,
         debt_out_agg=debt_out_agg,
         debt_in_agg=debt_in_agg,
@@ -779,6 +778,8 @@ def _build_limit_graph(
     dict[tuple[str, str], Decimal],
     dict[tuple[str, str], Decimal],
     dict[tuple[str, str, str], Decimal],
+    dict[tuple[str, str], Decimal],
+    dict[tuple[str, str], Decimal],
 ]:
     """Adjacency (payment direction debtor->creditor) and per-sender/receiver limit hints.
 
@@ -793,6 +794,8 @@ def _build_limit_graph(
     max_outgoing_limit: dict[tuple[str, str], Decimal] = {}
     max_incoming_limit: dict[tuple[str, str], Decimal] = {}
     direct_edge_limit: dict[tuple[str, str, str], Decimal] = {}
+    total_outgoing_limit: dict[tuple[str, str], Decimal] = {}
+    total_incoming_limit: dict[tuple[str, str], Decimal] = {}
     for c in candidates:
         eq = c["equivalent"]
         sender = c["sender_pid"]
@@ -805,11 +808,13 @@ def _build_limit_graph(
         direct_edge_limit[(sender, receiver, eq)] = limit
 
         k = (sender, eq)
+        total_outgoing_limit[k] = total_outgoing_limit.get(k, _ZERO) + limit
         prev = max_outgoing_limit.get(k)
         if prev is None or limit > prev:
             max_outgoing_limit[k] = limit
 
         k_in = (receiver, eq)
+        total_incoming_limit[k_in] = total_incoming_limit.get(k_in, _ZERO) + limit
         prev_in = max_incoming_limit.get(k_in)
         if prev_in is None or limit > prev_in:
             max_incoming_limit[k_in] = limit
@@ -819,7 +824,8 @@ def _build_limit_graph(
             # Deterministic neighbor order.
             edges.sort(key=lambda x: x[0])
 
-    return adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit
+    return (adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit,
+            total_outgoing_limit, total_incoming_limit)
 
 
 def _aggregate_debts(
@@ -858,6 +864,17 @@ def _accept_probability(
     return tx_rate * eq_weight
 
 
+def _direct_capacity(ctx: _PlanContext, sender: str, receiver: str, eq: str) -> Decimal:
+    debt = ctx.debt_snapshot or {}
+    eq_upper = eq.strip().upper()
+    return pair_capacity(
+        line_limit=ctx.direct_edge_limit.get((sender, receiver, eq)),
+        payer_owes=debt.get((sender, receiver, eq_upper), _ZERO),
+        payee_owes=debt.get((receiver, sender, eq_upper), _ZERO),
+        pair_has_active_line=True,  # Called only for a positive-limit candidate pair.
+    )
+
+
 def _reachable_nodes(
     ctx: _PlanContext, eq: str, sender: str, *, max_depth: int = 3, max_nodes: int = 200
 ) -> list[str]:
@@ -866,19 +883,26 @@ def _reachable_nodes(
         return []
 
     visited: set[str] = {sender}
-    # (node, depth)
-    queue: list[tuple[str, int]] = [(sender, 0)]
+    # Keep paths, not a global node expansion guard: a later edge may block an
+    # interior node of one path but permit another path to the same endpoint.
+    queue: list[list[str]] = [[sender]]
+    def rules(u: str, v: str) -> tuple[frozenset[str], frozenset[str]]:
+        return ctx.rules_by_edge[(u, v, eq)]
+
     qi = 0
     while qi < len(queue) and len(visited) < max_nodes:
-        node, depth = queue[qi]
+        path = queue[qi]
         qi += 1
-        if depth >= max_depth:
+        if len(path) - 1 >= max_depth:
             continue
-        for nxt, _lim in graph.get(node) or []:
-            if nxt in visited:
+        for nxt, _lim in graph.get(path[-1]) or []:
+            if nxt in path:
+                continue
+            next_path = [*path, nxt]
+            if route_breaks_policy(next_path, rules) is not None:
                 continue
             visited.add(nxt)
-            queue.append((nxt, depth + 1))
+            queue.append(next_path)
             if len(visited) >= max_nodes:
                 break
 
@@ -897,14 +921,18 @@ def _choose_receiver(
     participant_group_by_pid = ctx.participant_group_by_pid
     reachable = _reachable_nodes(ctx, eq, sender)
     if not reachable:
-        # Fallback to direct neighbors.
-        direct = [
-            pid
-            for (pid, _lim) in (ctx.adjacency_by_eq.get(eq) or {}).get(sender, [])
-        ]
-        reachable = sorted({p for p in direct if p and p != sender})
+        return None
+
+    direct = {pid for pid, _ in (ctx.adjacency_by_eq.get(eq) or {}).get(sender, [])}
+    # An exhausted direct member must not beat a deeper group member. Indirect
+    # path capacity remains the router's job; this checks only the direct pair.
+    eligible_direct = {pid for pid in direct if _direct_capacity(ctx, sender, pid, eq) > 0}
+    reachable = [pid for pid in reachable if pid not in direct or pid in eligible_direct]
     if not reachable:
         return None
+
+    def prefer_direct(pool: list[str]) -> list[str]:
+        return [pid for pid in pool if pid in eligible_direct] or pool
 
     # ── Flow Directionality (Phase 4.1) ──────────────────────
     if ctx.flow_enabled:
@@ -937,7 +965,7 @@ def _choose_receiver(
                             if participant_group_by_pid.get(pid) == target_group_flow
                         ]
                         if in_target:
-                            return rng.choice(in_target)
+                            return rng.choice(prefer_direct(in_target))
     # ── /Flow Directionality ─────────────────────────────────
 
     target_group = _pick_group(rng, sender_props)
@@ -948,7 +976,7 @@ def _choose_receiver(
             if participant_group_by_pid.get(pid) == target_group
         ]
         if in_group:
-            return rng.choice(in_group)
+            return rng.choice(prefer_direct(in_group))
 
     # If no group match (or no group weights), try any known group match, then any reachable.
     if ctx.all_group_ids:
@@ -961,9 +989,9 @@ def _choose_receiver(
                 if participant_group_by_pid.get(pid) == g
             ]
             if in_group:
-                return rng.choice(in_group)
+                return rng.choice(prefer_direct(in_group))
 
-    return rng.choice(reachable)
+    return rng.choice(prefer_direct(reachable))
 
 
 def _passes_periodicity(
