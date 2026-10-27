@@ -74,6 +74,18 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
     stopped_runs.append(run_id)
+    from app.core.simulator.runtime import runtime
+
+    observer = await runtime.subscribe(run_id, equivalent="UAH")
+    try:
+        async with asyncio.timeout(SEEDING_DEADLINE_S):
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") == "run_status" and event.get("state") == "running" and event.get("sim_time_ms", 0) >= 1000:
+                    await runtime.pause(run_id)
+                    break
+    finally:
+        await runtime.unsubscribe(run_id, observer)
 
     # Seeding occurs on the first real tick (heartbeat loop), on the runner's OWN session. Poll for
     # it to land - and end this session's read transaction before every poll.
@@ -123,17 +135,19 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     # participants are rows under identities of the run, so template pids name nothing here.
     stored = set((await db_session.execute(select(Participant.pid).where(Participant.pid.in_(never_active)))).scalars())
     assert stored == never_active, f"the exclusion names {len(never_active)} participants, the database holds {len(stored)} of them"
+    opening_pairs = {frozenset((e["from"], e["to"])) for e in scenario.get("events", []) if e.get("type") == "payment"}
     from_end, to_end = aliased(Participant), aliased(Participant)
     tl = (
         await db_session.execute(
-            select(TrustLine)
+            select(TrustLine, from_end.pid, to_end.pid)
             .join(from_end, from_end.id == TrustLine.from_participant_id)
             .join(to_end, to_end.id == TrustLine.to_participant_id)
             .where(TrustLine.equivalent_id == eq.id, from_end.pid.notin_(never_active), to_end.pid.notin_(never_active))
             .order_by(TrustLine.id)
         )
-    ).scalars().first()
-    assert tl is not None
+    ).all()
+    tl = next((line for line, creditor_pid, debtor_pid in tl if frozenset((creditor_pid, debtor_pid)) not in opening_pairs), None)
+    assert tl is not None, "no active pair outside opening debt (both directions excluded)"
 
     creditor = await db_session.get(Participant, tl.from_participant_id)
     debtor = await db_session.get(Participant, tl.to_participant_id)
@@ -222,17 +236,23 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
         expected_available = Decimal("0.00")
     assert link.get("available") == format(expected_available, "f")
 
-    # Net sign is derived from debts: creditor positive, debtor negative.
-    assert nodes[creditor_pid].get("net_sign") == 1
-    assert nodes[debtor_pid].get("net_sign") == -1
-
-    # UI node appearance is driven by viz_color_key (see simulator-ui/v2/src/vizMapping.ts).
-    # For debtors (negative net), backend should assign a debt bin key.
-    assert isinstance(nodes[debtor_pid].get("viz_color_key"), str)
-    assert str(nodes[debtor_pid].get("viz_color_key")).startswith("debt-")
-
-    # For creditors/neutral, backend should keep person/business semantics.
-    assert nodes[creditor_pid].get("viz_color_key") in ("person", "business")
+    # Net sign aggregates ALL debts, including opening rings elsewhere on either endpoint.
+    async with sessionmaker_of(db_session)() as read:
+        rows = (await read.execute(select(Debt).where(Debt.equivalent_id == eq_id))).scalars().all()
+    net = {creditor_id: Decimal(0), debtor_id: Decimal(0)}
+    for debt in rows:
+        if debt.creditor_id in net:
+            net[debt.creditor_id] += debt.amount
+        if debt.debtor_id in net:
+            net[debt.debtor_id] -= debt.amount
+    for pid, ident in ((creditor_pid, creditor_id), (debtor_pid, debtor_id)):
+        expected_sign = (net[ident] > 0) - (net[ident] < 0)
+        assert nodes[pid].get("net_sign") == expected_sign
+        color = nodes[pid].get("viz_color_key")
+        if expected_sign < 0:
+            assert isinstance(color, str) and color.startswith("debt-")
+        else:
+            assert color in ("person", "business")
 
     # Node sizing must be present (fixtures semantics).
     assert nodes[creditor_pid].get("viz_size") is not None

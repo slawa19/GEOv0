@@ -25,11 +25,12 @@ ROOT = Path(__file__).resolve().parents[2] / "fixtures" / "simulator"
 NEUTRAL = (1.0, {}, {})
 
 #: (sim time at the middle of the window) -> (mult_all, mult_by_group, mult_by_profile)
+# 050 (2026-10-27) moves the four windows after tick 100; their effects and durations stay pinned.
 WINDOWS = {
-    95_000: (1.0, {"households": 1.5, "retail": 1.3}, {}),  # weekend_market
-    160_000: (0.7, {}, {}),  # quiet_period
-    220_000: (1.0, {"producers": 2.0, "retail": 1.8, "households": 1.5}, {}),  # harvest_festival
-    257_500: (0.5, {}, {}),  # winter_lull
+    135_000: (1.0, {"households": 1.5, "retail": 1.3}, {}),  # weekend_market
+    190_000: (0.7, {}, {}),  # quiet_period
+    260_000: (1.0, {"producers": 2.0, "retail": 1.8, "households": 1.5}, {}),  # harvest_festival
+    307_500: (0.5, {}, {}),  # winter_lull
 }
 
 

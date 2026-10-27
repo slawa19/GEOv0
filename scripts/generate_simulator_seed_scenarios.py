@@ -111,11 +111,11 @@ ROLE_FLOW = {
 }
 ROLE_P50 = {
     "households": 100,
-    "retail": 500,
-    "producers": 300,
-    "anchors": 700,
-    "services": 150,
-    "agents": 400,
+    "retail": 200,
+    "producers": 150,
+    "anchors": 200,
+    "services": 120,
+    "agents": 150,
 }
 BALANCE_SEEDS = (42, 1729, 20261027)
 BALANCE_TICKS = 2000
