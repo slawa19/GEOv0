@@ -15,7 +15,7 @@
 ## Часть 1 — для пользователей (простыми словами)
 
 ### Что такое «сценарий»
-Сценарий — это **описание мира**, а не скрипт с заранее прописанными транзакциями.
+Сценарий — это **описание мира**: участники, кредитные связи и правила поведения. Он также может содержать события, например стартовые платежи realistic-v2.
 
 В сценарии описано:
 - **кто участвует** (участники: люди/бизнесы/хабы);
@@ -65,29 +65,29 @@
   - realistic v2 (UAH-only): [../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json](../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json)
 
 Примечание для realistic v2:
-- чтобы увидеть реалистичные суммы (сотни UAH), запускайте real mode с `SIMULATOR_REAL_AMOUNT_CAP=500` (дефолт `3.00` сохраняет старое поведение).
+- глобальный `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию не задан (`None`); суммы задают модель роли и доступная ёмкость. Явный положительный cap — opt-in, выставлять 500 для запуска не требуется.
 2) Скопируйте в новую папку:
   - `fixtures/simulator/<your-scenario-id>/scenario.json`
 3) Обязательные инварианты (частые ошибки):
   - `trustlines[].from → trustlines[].to` = creditor → debtor (направление нельзя «переворачивать»)
   - у каждого trustline должен быть `equivalent`
   - `trustlines[].equivalent` должен входить в `equivalents[]` (если используете `equivalents[]`)
-  - для real mode: `participants[].id` должны существовать в БД (они будут сидироваться)
+  - для real mode: участники должны быть объявлены в сценарии; runner создаст их в БД под идентичностями прогона (см. §2.4)
 
-Практическое правило для ручных платежей (Interact Mode):
-- чтобы отправить платёж `From=A` → `To=B`, в графе должен существовать активный trustline **`B → A`**
-  (получатель кредитует отправителя; trustline всегда creditor → debtor).
-  Пример: «Алиса покупает у Магазина» означает платёж `alice → shop`, поэтому нужен trustline `shop → alice`.
+Практическое правило для прямого ручного платежа:
+- чтобы создать **новый долг с нуля**, без встречного долга, прямым платежом `From=A` → `To=B`, нужна активная линия **`B → A`** с достаточным доступным лимитом: получатель кредитует отправителя; trustline всегда creditor → debtor.
+  Пример новой покупки: «Алиса покупает у Магазина» означает платёж `alice → shop`, поэтому при нулевых долгах нужен trustline `shop → alice`.
+  Если B уже должен A, платёж A→B может погасить этот встречный долг без создания линии B→A, пока у пары есть активная линия хотя бы в одном направлении. Доступную сумму определяет [pair_capacity](../../../app/core/payments/capacity.py): лимит B→A минус долг A→B плюс долг B→A.
 
 Правила «реалистичных сценариев» (realistic-v2) и чек-лист требований к входным данным:
-- `docs/ru/simulator/realistic-scenarios.md`
+- [realistic-scenarios.md](realistic-scenarios.md)
 
 **B) Проверить формат (schema)**
 
 Формальная схема: [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)
 
 Практика в репо:
-- генератор seed‑сценариев всегда прогоняет проверку формы сценариев по schema
+- генератор seed‑сценариев всегда проверяет JSON Schema и баланс модели экономики, в том числе при `--out-root`; подробности — [правила модели](realistic-scenarios.md#6-генерация-и-проверка-модели)
 
 Команда (Windows):
 
@@ -249,7 +249,7 @@ flowchart LR
 - `equivalents: string[]` — список эквивалентов.
   - Практика runtime: граф и события строятся по `trustlines[].equivalent`, а `equivalents[]` используется как список режимов/фильтров.
 - `participants[]`:
-  - `id` — PID, должен существовать в БД (в real mode) для сидирования.
+  - `id` — идентификатор шаблона; real mode привязывает его к свежей идентичности прогона и создаёт участника при сидировании (§2.4).
   - `type` — `person|business|hub`.
   - `status` — влияет на сидирование/фильтрацию (зависит от seed‑логики).
   - `groupId` — логическая роль (anchors/producers/…).
@@ -265,18 +265,15 @@ flowchart LR
 
 Подробное пояснение schema + MVP допущений: [backend/scenario-schema.md](backend/scenario-schema.md).
 
-### 2.7 Что сейчас НЕ используется движком (важно для ожиданий)
+### 2.7 Профили, события и границы планирования
 
-На текущем этапе (см. [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py)):
-- `events[]` присутствуют в schema, но на текущем этапе **ещё не интерпретируются** planner’ом (см. спецификацию).
-- `behaviorProfiles[]` в **real mode** интерпретируются частично: используется подмножество `behaviorProfiles.props` (`tx_rate`, `equivalent_weights`, `recipient_group_weights`, `amount_model[eq]`).
-- Подбор суммы в real mode ограничен сверху: `amount <= min(SIMULATOR_REAL_AMOUNT_CAP, trustline.limit, props.amount_model[eq].max)`.
-  - `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию `3.00` (backward-compatible). Для realistic-v2 рекомендуется запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
+[Планировщик](../../../app/core/simulator/real_payment_planner.py) использует `tx_rate`, `equivalent_weights`, `recipient_group_weights`, `amount_model[eq]` и flow-настройки. `tx_rate` — относительный вес в бюджете действий; `flow_chains` даёт предпочтение первого шага к группе (`chain[1]`), а не исполняет полный цикл торговли. Кольца realistic-v2 создаёт [модель экономики](realistic-scenarios.md#2-потоки-и-постоянные-контрагенты) на уровне назначенных участников.
 
-Это сознательные MVP‑ограничения: сценарий описывает сеть, но «экономическая модель поведения» пока минимальна.
+Планировщик проверяет статическую политику маршрута через импортированные правила пары, сопоставляет агрегатный долг с суммой лимитов и предпочитает пригодных прямых соседей целевой группы. Размер ограничивают модель суммы, шаг эквивалента, агрегатная доступность и ёмкость прямой пары; динамическую ёмкость непрямого маршрута проверяет роутер. Поэтому запланированный платёж может быть отказан. `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию `None`; только явный положительный cap добавляет глобальный потолок, применяемый в шаге каждого эквивалента ([app/config.py](../../../app/config.py)).
 
-Планируемая эволюция (спецификация, чтобы не ломать детерминизм/guardrails):
-- Поведенческая модель real mode (интерпретация `behaviorProfiles`/`events`, реалистичные суммы, выбор получателей): [backend/behavior-model-spec.md](backend/behavior-model-spec.md).
+`events[]` исполняются: stress влияет на веса планировщика, а [tick.py](../../../app/core/simulator/tick.py) обрабатывает scripted `payment`, `inject` и `clearing`. Инъекции требуют разрешения процесса. Стартовые платежи realistic-v2 — обычные события `payment` на тактах 1–20; они исполняются и при интенсивности 0. `/restart` повторяет их поверх сохранённых долгов; отказы допустимы. Подробности — [opening и рестарт](realistic-scenarios.md#4-как-появляются-стартовые-долги).
+
+Общие механизмы профилей описаны в [behavior-model-spec.md](backend/behavior-model-spec.md); текущие правила двух realistic-v2 сценариев — в [realistic-scenarios.md](realistic-scenarios.md).
 
 ### 2.8 Где лежат сценарии и как они попадают в runtime
 
@@ -287,122 +284,83 @@ flowchart LR
 Валидация:
 - При upload через API выполняется JSON Schema validation (см. `validate_scenario_or_400`).
 
-### 2.9 Как генерируются “seed” сценарии (Greenfield/Riverside)
+### 2.9 Как генерируются seed-сценарии (Greenfield/Riverside)
 
-Эта секция отвечает на вопросы:
-- что такое **seed‑сценарий** и чем он отличается от «обычного» сценария;
-- что такое **описание сообщества** и **фикстуры симулятора** в этом репозитории;
-- какой **полный процесс** подготовки данных: от человекочитаемой задумки сообщества → до `scenario.json` симулятора.
+#### 2.9.1 Состав сообщества и два пути подготовки данных
 
-(2026-10-07, 032 S4: пакет `admin-fixtures/`, его генераторы и копия в `admin-ui/public/` удалены вместе с mock-режимом Admin UI; раздел описывает текущий процесс. Прежние шаги «сгенерировать canonical admin fixtures» и «синхронизировать fixtures в Admin UI» больше не существуют.)
+Человекочитаемый замысел и общие правила состава находятся в [seed-документах](../seeds/README.md); общие поля переноса — в [fixtures-mapping.md](backend/fixtures-mapping.md). Утверждения этих справок о совпадении топологий community и симулятора для realistic-v2 исторические: текущие линии задают [правила модели 050](realistic-scenarios.md) и [генератор](../../../scripts/generate_simulator_seed_scenarios.py). Машиночитаемые входы — `seeds/communities/<id>/community.json` и `recipe.json`. С программы 050 важно различать два мира:
 
-#### 2.9.1 Терминология (быстро и без двусмысленности)
+| Поверхность | Откуда берётся состав | Откуда берутся линии и долги |
+|---|---|---|
+| Admin UI / база после рецепта | Описание сообщества | Линии community и настоящие операции recipe |
+| Realistic-v2 симулятора | Тот же состав, группы, типы, статусы, описательные роли | Генератор выводит линии из назначенных ролевых потоков; долг создают стартовые платежи сценария и дальнейшая торговля |
 
-**Seed‑документ (seed doc)**
-- Человекочитаемая спецификация демо‑сообщества: роли/экономическая логика/ожидаемые trustline‑паттерны/клиринговые циклы.
-- Живёт в `docs/ru/seeds/*`.
-- Регламент: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
+Линии community в realistic-v2 не переносятся. Это принятое разделение 050, решение 9; подробности и границы долга — [два мира одного сообщества](realistic-scenarios.md#1-два-мира-одного-сообщества). Рецепт админки не является подготовительным шагом для запуска сценария симулятора.
 
-**Описание сообщества (community description)**
-- Структура сообщества в машиночитаемом виде: `seeds/communities/<id>/community.json` (участники, группы, линии, эквиваленты) и рецепт операций `recipe.json`. Правится руками.
-- Из него выводятся и seed‑сценарии симулятора, и данные в базе (рецепт исполняется через доменные сервисы: `scripts/seed_db.py --source recipe --community <id>`).
-- Регламент: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
+#### 2.9.2 Генератор и контракт результата
 
-**Fixtures симулятора (фикстуры)**
-- Это `fixtures/simulator/<scenario_id>/scenario.json` и демо-снимки Simulator UI (`simulator-ui/v2/public/simulator-fixtures/`; статические версионируемые файлы) — *детерминированный источник* для генераторов/демо.
-- Важно: fixtures ≠ данные продакшена, это **контролируемые** (reproducible) датасеты.
+[generate_simulator_seed_scenarios.py](../../../scripts/generate_simulator_seed_scenarios.py) детерминированно строит:
 
-**Seed‑сценарий симулятора (seed scenario)**
-- Это `fixtures/simulator/<scenario_id>/scenario.json`, который:
-  - валиден по schema `fixtures/simulator/scenario.schema.json`;
-  - детерминированно построен из описания сообщества;
-  - отражает ту же «модель сообщества», что и данные в базе после рецепта (те же участники/лимиты/эквиваленты).
+- назначения конкретных контрагентов по роли и обратные им trustlines creditor→debtor;
+- профили «роль × число контрагентов», модели сумм и предпочтения получателей;
+- opening из обычных `payment`-событий, stress, warmup и trust drift.
 
-Простое правило: 
-- seed docs → «почему и как устроено сообщество»;
-- описание сообщества → «структура: кто есть кто и кто кому доверяет»;
-- seed scenarios → «каноничный `scenario.json` симулятора для тех же данных».
+Контракт формы — [scenario.schema.json](../../../fixtures/simulator/scenario.schema.json); правила экономики и измерения — [realistic-scenarios.md](realistic-scenarios.md). Профили и граф выводятся из общих правил генератора, отдельного сохранённого реестра назначений нет. Frozen остаются в составе без потоков модели.
 
-#### 2.9.2 Из чего конкретно строятся seed‑сценарии
+#### 2.9.3 Практический процесс
 
-Seed‑сценарии собираются **детерминированно** из описания сообщества:
-- **Вход (source of truth):** `seeds/communities/<id>/community.json`
-- **Правила mapping:** [backend/fixtures-mapping.md](backend/fixtures-mapping.md)
-- **Генератор seed‑сценариев:** [../../../scripts/generate_simulator_seed_scenarios.py](../../../scripts/generate_simulator_seed_scenarios.py)
-- **Контракт выхода (schema):** [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)
+Для изменений состава или ролей сначала измените описание сообщества, сверив замысел с [общими правилами состава seed-данных](../seeds/README.md), с оговоркой об исторической топологии из §2.9.1. Изменения потоков и профилей realistic-v2 принадлежат генератору; изменение административных линий/рецепта — отдельная поверхность.
 
-#### 2.9.3 Полный процесс подготовки сценариев (end‑to‑end)
-
-Ниже — «канонический» pipeline для Greenfield/Riverside (и любых последующих seed‑наборов).
-
-**Шаг 0. Спроектировать сообщество (seed doc) и перенести замысел в описание**
-- Внести/обновить seed‑документ в `docs/ru/seeds/`.
-- Проверить семантику направлений trustlines (creditor → debtor).
-- Описать структуру в `seeds/communities/<id>/community.json` (и рецепт в `recipe.json`).
-- Регламент и чек‑листы: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
-
-**Шаг 1. Засеять базу рецептом (для Admin UI и real mode)**
+Сначала сгенерируйте результат вне каноничных fixtures:
 
 ```powershell
-./.venv/Scripts/python.exe scripts/seed_db.py --source recipe --community riverside-town-50
+./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py --out-root .local-run/scenario-preview
 ```
 
-Рецепт исполняет настоящие операции через доменные сервисы; Admin UI затем читает эту базу через backend. Подробнее: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
-
-**Шаг 2. Сгенерировать seed‑сценарии симулятора из описания сообщества**
+Для согласованной регенерации двух tracked сценариев:
 
 ```powershell
 ./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py
 ```
 
-Результат:
-- перезаписываются (детерминированно) сценарии:
-  - `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json`
-  - `fixtures/simulator/riverside-town-50-realistic-v2/scenario.json`
+Обе команды выполняют JSON Schema и проверку баланса через настоящую `plan_payments` до публикации каждого файла. Validation subprocess получает изолированные ENV/state и task PostgreSQL URL; соединение с БД для офлайн-проверки не открывается. `--out-root` меняет только место вывода, не набор проверок. Параметры cohort и пороги — [§6 правил модели](realistic-scenarios.md#6-генерация-и-проверка-модели).
 
-В генераторе дополнительно есть встроенная проверка формы сценария по JSON schema.
+Затем поднимите стек и выберите сценарий в Simulator UI:
 
-**Шаг 3. Запуск симулятора и проверка поведения**
-
-Дальше вы выбираете сценарий в Simulator UI и запускаете его в режиме `real` (серверного режима `fixtures` с 2026-10-16 нет, 042).
-Быстрый старт полного стека:
 ```powershell
 ./scripts/run_full_stack.ps1 -Action start
 ```
 
-Если вы не видите сценарий в UI — проверьте allowlist:
-- `SIMULATOR_SCENARIO_ALLOWLIST=all` или список id.
+Runtime сам засевает участников и линии выбранного сценария. Если сценария нет в списке — проверьте `SIMULATOR_SCENARIO_ALLOWLIST` (список id или `all`). Публичный сценарий посетителя по умолчанию остаётся `clearing-demo-10`; realistic-v2 не становится default от регенерации. Отдельный путь подготовки базы **для Admin UI**:
 
-#### 2.9.4 Диаграмма процесса (seed → описание → scenario)
+```powershell
+./.venv/Scripts/python.exe scripts/seed_db.py --source recipe --community riverside-town-50
+```
+
+После изменения экономики проверяйте и офлайн-планы, и живое исполнение: [команды измерителя и границы метрик](realistic-scenarios.md#7-что-измерять).
+
+#### 2.9.4 Два пути от описания к работающему миру
 
 ```mermaid
 flowchart TD
-  A[Seed docs\n docs/ru/seeds/*] -->|design rules, by hand| CD[Community description\n seeds/communities/*/community.json]
-  CD -->|recipe through domain services| DB[Seeded database\n scripts/seed_db.py --source recipe]
-  CD -->|structure| E[Simulator seed-scenarios generator\n scripts/generate_simulator_seed_scenarios.py]
-  E -->|write| F[Seed scenarios\n fixtures/simulator/*/scenario.json]
-  F -->|schema validation| Fs[scenario.schema.json]
-
-  F -->|run| G[Simulator runtime\n real mode]
-  G -->|events/metrics| H[Simulator UI]
+  CD[Community description] -->|community + recipe| DB[Admin database]
+  CD -->|roster, groups, status, type, roles| E[Simulator generator]
+  M[Role economy rules in generator] -->|assignments, lines, profiles, opening| E
+  E -->|schema + economy validation| F[Realistic-v2 scenario.json]
+  F -->|seed own run, execute payments| G[Simulator runtime]
+  G -->|events and metrics| H[Simulator UI]
 ```
 
-#### 2.9.5 Почему это называется именно “seed” сценарии
+#### 2.9.5 Что означает seed-сценарий
 
-Слово **seed** здесь про «посевной/эталонный набор», который:
-- задаёт **каноничную** стартовую топологию сообщества;
-- должен быть **воспроизводимым** (одинаковые входы → одинаковые выходы);
-- служит опорой для сравнения изменений движка/визуализации/аналитики (чтобы UX и метрики сравнивались на одном и том же графе).
+Это воспроизводимый эталонный набор симулятора: одинаковые входы и правила генератора дают одинаковые файлы. Он служит опорой для сравнения движка и визуализации на одном графе, но не обещает совпадения с топологией административного рецепта. RNG seed прогона — отдельный параметр.
 
-То есть это не “seed” в смысле RNG‑seed, а “seed” в смысле **эталонной базы** данных/графа.
+#### 2.9.6 Владельцы правил
 
-#### 2.9.6 Где закреплены правила (что «регламентирует» процесс)
-
-- Терминология и дизайн сообщества: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md)
-- Описание сообщества и рецепт: `seeds/communities/<id>/community.json`, `recipe.json`
-- Mapping описания → scenario (контракт): [backend/fixtures-mapping.md](backend/fixtures-mapping.md)
-- Генератор seed‑сценариев: [../../../scripts/generate_simulator_seed_scenarios.py](../../../scripts/generate_simulator_seed_scenarios.py)
-- Schema сценария: [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)
+- Замысел, общие поля состава и административный рецепт: [seeds/README.md](../seeds/README.md), `seeds/communities/<id>/community.json`, `recipe.json`; прежние утверждения о единой топологии не применяются к realistic-v2 (§2.9.1).
+- Экономика realistic-v2 и способы проверки: [realistic-scenarios.md](realistic-scenarios.md).
+- Реализация модели: [генератор](../../../scripts/generate_simulator_seed_scenarios.py), `ROLE_FLOW`, `economy_model`, `behavior_profiles`, `opening_events`.
+- Форма сценария: [scenario.schema.json](../../../fixtures/simulator/scenario.schema.json).
 
 ### 2.10 Конфигурация runtime (env vars)
 
@@ -410,6 +368,7 @@ flowchart TD
 - `SIMULATOR_TICK_MS_BASE` — виртуальная длительность тика.
 - `SIMULATOR_ACTIONS_PER_TICK_MAX` — верхний лимит budget действий.
 - `SIMULATOR_CLEARING_EVERY_N_TICKS` — cadence клиринга в real mode.
+- `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` — мягкий бюджет прохода, по умолчанию 5000 мс; проверяется между выполнениями циклов. `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC` — hard timeout, по умолчанию 8 с. Это может дать заметную паузу; бюджет не является доказанным оптимумом. Источники — [app/config.py](../../../app/config.py) и [clearing/runner.py](../../../app/core/clearing/runner.py).
 - `SIMULATOR_SCENARIO_ALLOWLIST` — фильтр списка сценариев для UI; с 044 `T4405` — и допуск запуска и чтения сценария для не-администратора.
 
 SSE replay buffer:
@@ -422,6 +381,7 @@ Replay correctness не переключается env-флагом: любой 
 получает `HTTP 410`.
 
 Real mode guardrails:
+- `SIMULATOR_REAL_AMOUNT_CAP` — опциональный положительный cap, default `None`.
 - `SIMULATOR_REAL_MAX_IN_FLIGHT`
 - `SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK`
 - `SIMULATOR_REAL_MAX_ERRORS_TOTAL`
