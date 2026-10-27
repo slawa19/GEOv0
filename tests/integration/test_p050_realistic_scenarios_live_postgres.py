@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from contextlib import asynccontextmanager
 import copy
 from dataclasses import replace
 from decimal import Decimal
@@ -69,18 +70,58 @@ async def _get(client, auth, run_id, suffix="", **params):
     return response.json()
 
 
+@asynccontextmanager
+async def _hold_initial_heartbeat(stopped_runs=None):
+    """Test-only scheduler synchronization until HTTP pause establishes tick zero.
+
+    Lifecycle captures this callback when it creates the heartbeat task. After
+    release, the original loop (including its pacing and money work) is unchanged.
+    This creates no tasks; stopped_runs retains ownership of runtime cleanup.
+    """
+    lifecycle = runtime._run_lifecycle
+    original = lifecycle._heartbeat_loop
+    released = asyncio.Event()
+
+    async def wait_then_run(run_id):
+        await released.wait()
+        await original(run_id)
+
+    def gated(run_id):
+        # Capture synchronously, before create_task or create's storage awaits:
+        # cleanup still owns the run if HTTP create fails/cancels before return.
+        if stopped_runs is not None:
+            stopped_runs.append(run_id)
+        return wait_then_run(run_id)
+
+    lifecycle._heartbeat_loop = gated
+    try:
+        yield
+    finally:
+        lifecycle._heartbeat_loop = original
+        released.set()  # Also unblock captured callbacks after failure/cancellation.
+
+
+async def _restart_paused(client, auth, run_id):
+    # A stopped launch has no live loop that could bypass callback capture.
+    assert runtime.get_run(run_id).state == "stopped"
+    async with _hold_initial_heartbeat():
+        restarted = await _post(client, auth, run_id, "restart")
+        await _post(client, auth, run_id, "pause")
+    return restarted
+
+
 async def _start(client, auth, stopped_runs, monkeypatch, scenario_id, *, intensity):
     # A test-local playback copy changes only wall-clock pacing, never economy data.
     record = runtime.get_scenario(scenario_id)
     scenario = copy.deepcopy(record.raw)
     scenario.setdefault("settings", {}).setdefault("playback", {})["tick_seconds"] = .25
     monkeypatch.setitem(runtime._scenarios, scenario_id, replace(record, raw=scenario))
-    response = await client.post("/api/v1/simulator/runs", headers=auth,
-                                 json={"scenario_id": scenario_id, "mode": "real", "intensity_percent": intensity})
-    assert response.status_code == 200, response.text
-    run_id = response.json()["run_id"]
-    stopped_runs.append(run_id)
-    await _post(client, auth, run_id, "pause")
+    async with _hold_initial_heartbeat(stopped_runs):
+        response = await client.post("/api/v1/simulator/runs", headers=auth,
+                                     json={"scenario_id": scenario_id, "mode": "real", "intensity_percent": intensity})
+        assert response.status_code == 200, response.text
+        run_id = response.json()["run_id"]
+        await _post(client, auth, run_id, "pause")
     run = runtime.get_run(run_id)
     assert run.tick_index == 0, "initial money began before the initial snapshot"
     run.seed = 42  # the product's current HTTP API derives a seed from run_id; freeze this test's planner input.
@@ -225,8 +266,7 @@ async def test_realistic_economy_survives_100_completed_ticks_and_restart(client
         _dump(scenario, recording, report)
         _accept(report, scenario)
         before = await _db_debts(db_session, scenario)
-        restarted = await _post(client, auth_headers, run_id, "restart")
-        await _post(client, auth_headers, run_id, "pause")
+        restarted = await _restart_paused(client, auth_headers, run_id)
         assert restarted["sim_time_ms"] == 0 and not restarted.get("episode_progress"), restarted
         assert runtime.get_run(run_id)._launch_epoch == 1
         assert await _db_debts(db_session, scenario) == before, "restart reset the committed debt"
@@ -283,6 +323,54 @@ def _synthetic(monkeypatch, *, opening=False):
     }
     monkeypatch.setitem(runtime._scenarios, scenario_id, replace(record, raw=scenario))
     return scenario_id
+
+
+@pytest.mark.asyncio
+async def test_delayed_initial_pause_keeps_zero_tick_and_real_money_after_resume_and_restart(client, auth_headers, db_session, stopped_runs, monkeypatch):
+    scenario_id = _synthetic(monkeypatch, opening=True)
+    post = client.post
+    pause_delays = []
+
+    async def delayed_pause(url, **kwargs):
+        if str(url).endswith("/pause"):
+            started = asyncio.get_running_loop().time()
+            # Transport delay deliberately exceeds the unchanged .25s playback.
+            await asyncio.sleep(.5)
+            pause_delays.append(asyncio.get_running_loop().time() - started)
+        return await post(url, **kwargs)
+
+    with monkeypatch.context() as transport:
+        transport.setattr(client, "post", delayed_pause)
+        run_id, scenario = await _start(client, auth_headers, stopped_runs, monkeypatch, scenario_id, intensity=0)
+    run = runtime.get_run(run_id)
+    assert pause_delays[0] >= .5 > runtime._tick_seconds_of(run)
+    assert run.tick_index == 0 and run.sim_time_ms == 0
+    assert await _db_debts(db_session, scenario) == {}, "money preceded the initial snapshot"
+    people = {p["name"]: p["id"] for p in scenario["participants"]}
+    recording = {"launches": []}
+    try:
+        for epoch in (0, 1):
+            if epoch:
+                before = await _db_debts(db_session, scenario)
+                with monkeypatch.context() as transport:
+                    transport.setattr(client, "post", delayed_pause)
+                    restarted = await _restart_paused(client, auth_headers, run_id)
+                assert restarted["sim_time_ms"] == 0 and not restarted.get("episode_progress"), restarted
+                assert pause_delays[-1] >= .5
+                assert run.tick_index == 0 and run.sim_time_ms == 0 and run._launch_epoch == epoch
+                assert await _db_debts(db_session, scenario) == before, "restart moved initial money"
+            launch = await _capture(client, auth_headers, run_id, ticks=1)
+            recording["launches"].append(launch)
+            amount = Decimal("5.00") * (epoch + 1)
+            assert await _db_debts(db_session, scenario) == {
+                (people["S"], people["M"], "UAH"): amount,
+                (people["M"], people["D"], "UAH"): amount,
+            }
+            paid = [e["payload"] for e in launch["events"] if e["type"] == "tx.updated"]
+            assert len(paid) == 1 and len(paid[0]["edges"]) == 2, paid
+            assert Decimal(paid[0]["amount"]) == Decimal("5.00"), paid
+    finally:
+        _dump(scenario, recording)
 
 
 @pytest.mark.asyncio
