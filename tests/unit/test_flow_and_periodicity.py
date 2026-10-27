@@ -533,24 +533,15 @@ class TestPeriodicity:
 
 
 class TestReciprocityBonus:
-    """Tests for reciprocity bonus limit increase in _plan_real_payments().
+    """050: repayment headroom is capacity, independent of the preference bonus.
 
-    Setup: 2 participants A ↔ B, trustline limit=100 each direction.
-    debt_snapshot provides existing debt so capacity is narrowed:
-
-        A→B edge: used=90, available=10 (without bonus)
-        B→A reverse debt=50
-
-    With reciprocity_bonus=1.0:
-        limit_A→B = 10 * (1 + 1.0) = 20
-
-    This allows amounts up to 20 for A→B, exceeding the non-bonus cap of 10.
+    In this synthetic opposing-debt snapshot (live debts net), A→B has
+    100 - 90 + 50 = 60 capacity. A bonus must not exceed that pair bound.
+    Previously reverse debt was ignored and the bonus raised 10 to 20.
     """
 
     def test_reciprocity_increases_limit_with_reverse_debt(self) -> None:
-        """With reciprocity_bonus=1.0 and reverse debt (B→A = 50),
-        the A→B limit doubles from 10 to 20.  At least one A→B amount
-        must exceed the non-bonus capacity of 10."""
+        """Reverse debt restores 60 headroom; the bonus cannot exceed it."""
         runner = _runner(actions_per_tick_max=50)
         scenario = _reciprocity_scenario(reciprocity_bonus=1.0)
 
@@ -573,10 +564,7 @@ class TestReciprocityBonus:
         assert len(a_to_b) > 0, "Should have A→B actions"
 
         max_amount = max(Decimal(a.amount) for a in a_to_b)
-        assert max_amount > Decimal("10"), (
-            f"With reciprocity bonus=1.0 and reverse debt, A→B limit should "
-            f"be ~20 (doubled from 10), but max amount is {max_amount}"
-        )
+        assert Decimal("20") < max_amount <= Decimal("60")
 
     def test_reciprocity_no_reverse_debt_no_bonus(self) -> None:
         """Without reverse debt (no B→A entry in snapshot), no bonus is
@@ -609,8 +597,10 @@ class TestReciprocityBonus:
             )
 
     def test_reciprocity_disabled_no_bonus(self) -> None:
-        """With reciprocity_bonus=0, reverse debt is ignored entirely.
-        All A→B amounts must stay within the available capacity of 10."""
+        """050: even with bonus=0, reverse debt adds real repayment capacity.
+
+        The pair bound is 60, not the previous 10 that ignored reverse debt.
+        """
         runner = _runner(actions_per_tick_max=50)
         scenario = _reciprocity_scenario(reciprocity_bonus=0.0)
 
@@ -630,9 +620,11 @@ class TestReciprocityBonus:
             a for a in planned
             if a.sender_pid == "A" and a.receiver_pid == "B"
         ]
+        assert a_to_b
+        assert max(Decimal(a.amount) for a in a_to_b) > Decimal("10")
         for a in a_to_b:
             amt = Decimal(a.amount)
-            assert amt <= Decimal("10"), (
+            assert amt <= Decimal("60"), (
                 f"With bonus=0, A→B amount {amt} should not exceed "
-                f"available capacity 10 (reverse debt ignored)"
+                f"available pair capacity 60 (reverse debt included)"
             )

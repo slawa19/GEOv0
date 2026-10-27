@@ -263,7 +263,11 @@ class TestCapacityAwareAmounts:
     """Tests for capacity-aware amount reduction via debt_snapshot."""
 
     def test_capacity_reduces_amount_with_existing_debt(self) -> None:
-        """With debt_snapshot, amounts ≤ available (limit − used)."""
+        """050: matching reverse debt restores room: 1000 - 800 + 800 = 1000.
+
+        This synthetic snapshot has opposing debts (a live ledger nets them).
+        Before decision 5(b), the planner ignored reverse debt and capped at 200.
+        """
         runner = _runner(actions_per_tick_max=50)
         scenario = _mesh_scenario(limit="1000", num_participants=3)
 
@@ -278,11 +282,13 @@ class TestCapacityAwareAmounts:
         run = _make_run(seed=1, tick_index=100, intensity_percent=100)
         planned = runner._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot)
 
-        # available = 1000 − 800 = 200 on every edge.
+        assert len(planned) == 50
+        assert max(Decimal(a.amount) for a in planned) > Decimal("200")
+        # Sum of limits is 2000 at each endpoint; the pair's 1000 is tighter.
         for a in planned:
             amt = Decimal(a.amount)
-            assert amt <= Decimal("200"), (
-                f"Amount {amt} exceeds available capacity 200 "
+            assert amt <= Decimal("1000"), (
+                f"Amount {amt} exceeds reciprocal pair capacity 1000 "
                 f"(sender={a.sender_pid}, receiver={a.receiver_pid})"
             )
 
@@ -305,7 +311,11 @@ class TestCapacityAwareAmounts:
             assert amt <= Decimal("500"), f"Amount {amt} exceeds static limit 500"
 
     def test_capacity_zero_available_skips_candidate(self) -> None:
-        """used ≥ limit → available ≤ 0 → all candidates skipped → 0 actions."""
+        """050: opposing full debts offset; this is not a zero-capacity snapshot.
+
+        The old aggregate/max bug returned no plans. A genuinely full one-way
+        three-line snapshot is covered in test_p050_planner_policy_and_capacity.
+        """
         runner = _runner(actions_per_tick_max=50)
         scenario = _mesh_scenario(limit="1000", num_participants=3)
 
@@ -319,18 +329,18 @@ class TestCapacityAwareAmounts:
         run = _make_run(seed=1, tick_index=100, intensity_percent=100)
         planned = runner._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot)
 
-        assert len(planned) == 0, (
-            f"Zero available capacity should produce 0 actions, got {len(planned)}"
+        assert len(planned) == 50, (
+            f"Reciprocal debts leave pair capacity 1000, got {len(planned)} actions"
         )
+        assert all(Decimal(a.amount) <= Decimal("1000") for a in planned)
 
     def test_capacity_three_level_reduction(self) -> None:
         """The planner uses min(available_out, available_in, available_direct).
 
-        Scenario with 3 participants (A, B, C) and asymmetric debt
-        so ``available_in`` is the tightest constraint for A→B payments:
+        050: sums of participant limits leave the direct pair tightest:
 
-            available_out(A)       = 1000 − 200 − 200 = 600
-            available_in(B)        = 1000 − 100 − 700 = 200  ← bottleneck
+            available_out(A)       = 2000 − 100 − 200 = 1700
+            available_in(B)        = 2000 − 100 − 700 = 1200
             available_direct(A→B)  = 1000 − 100        = 900
         """
         runner = _runner(actions_per_tick_max=50)
@@ -379,9 +389,9 @@ class TestCapacityAwareAmounts:
         # debt_in_agg(B, UAH) = 100 + 700 = 800
         #
         # For payment A→B:
-        #   available_out  = 1000 − 300 = 700
-        #   available_in   = 1000 − 800 = 200  ← tightest
-        #   available_direct = 1000 − 100 = 900
+        #   available_out  = 2000 − 300 = 1700
+        #   available_in   = 2000 − 800 = 1200
+        #   available_direct = 1000 − 100 = 900  ← tightest
         debt_snapshot: dict[tuple[str, str, str], Decimal] = {
             ("A", "B", "UAH"): Decimal("100"),
             ("A", "C", "UAH"): Decimal("200"),
@@ -395,13 +405,10 @@ class TestCapacityAwareAmounts:
 
         assert len(planned) > 0, "Should produce at least some actions"
 
-        # Check every A→B action is bounded by available_in = 200.
-        for a in planned:
-            if a.sender_pid == "A" and a.receiver_pid == "B":
-                amt = Decimal(a.amount)
-                assert amt <= Decimal("200"), (
-                    f"A→B amount {amt} exceeds available_in bottleneck 200"
-                )
+        a_to_b = [Decimal(a.amount) for a in planned if a.sender_pid == "A" and a.receiver_pid == "B"]
+        assert a_to_b
+        assert max(a_to_b) > Decimal("200")  # No longer suppressed by the old single-line aggregate.
+        assert max(a_to_b) <= Decimal("900")
 
     def test_load_debt_snapshot_maps_pids_correctly(self) -> None:
         """_load_debt_snapshot_by_pid returns PID-keyed dict (not UUID-keyed)."""
