@@ -31,7 +31,7 @@ def _dependencies():
 
     try:
         url = make_url(os.environ.get("DATABASE_URL", ""))
-        valid = url.drivername == "postgresql+asyncpg" and bool(url.database)
+        valid = bool(url.database)
     except Exception:
         valid = False
     if not valid:
@@ -56,6 +56,8 @@ def _dependencies():
             "Set ENV=test explicitly for offline measurement (and remove any conflicting ENVIRONMENT alias)."
         )
     from app.core.payments.capacity import pair_rules, route_breaks_policy
+
+    # Settings owns the supported-driver refusal; do not duplicate its rule here.
     from app.core.simulator.real_payment_planner import RealPaymentPlanner
     from app.core.simulator.scenario_equivalent import effective_equivalent
 

@@ -397,3 +397,53 @@ def test_cli_subprocess_emits_json_with_no_database_connection(tmp_path):
     assert process.returncode == 0, process.stderr
     assert json.loads(process.stdout)["planned_actions"] == 2
     assert "unreachable/plans" in process.stderr
+
+
+def test_cli_wrong_driver_is_refused_by_app_config_before_runtime_state(tmp_path):
+    source = tmp_path / "scenario.json"
+    source.write_text(json.dumps(scenario([])), encoding="utf-8")
+    default_state = ROOT / ".local-run/simulator"
+
+    def state_snapshot():
+        return (
+            [
+                (
+                    str(path.relative_to(default_state)),
+                    path.stat().st_mtime_ns,
+                    path.stat().st_size,
+                )
+                for path in sorted(default_state.rglob("*"))
+            ]
+            if default_state.exists()
+            else None
+        )
+
+    before = state_snapshot()
+    env = dict(os.environ)
+    env["DATABASE_URL"] = "sqlite:///refused-offline-driver.db"
+    task_state = Path(env["SIMULATOR_STATE_DIR"]) / "wrong-driver-refusal"
+    assert not task_state.exists()
+    env["SIMULATOR_STATE_DIR"] = str(task_state)
+    env["ENV"] = env["ENVIRONMENT"] = "test"
+    env["DEBUG"] = "false"
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/measure_scenario_economy.py"),
+            str(source),
+            "--ticks",
+            "1",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert process.returncode == 1
+    assert "app" in process.stderr and "config.py" in process.stderr
+    assert (
+        "DATABASE_URL uses 'sqlite'; the application runs only on PostgreSQL"
+        in process.stderr
+    )
+    assert process.stdout == ""
+    assert not task_state.exists()
+    assert state_snapshot() == before
