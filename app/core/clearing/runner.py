@@ -484,7 +484,7 @@ async def run_clearing_pass(
     state = _PassState(equivalent_code, distributed_exclusive=lease is not None and lease.distributed)
     replans = 0
     # Decision 10: the caller's deadline is checked BETWEEN occurrences - never before the first cycle of the pass.
-    # Checked before the snapshot and the first cycle too, a plan slower than the caller's budget (a tick's 250 ms)
+    # Checked before the snapshot and the first cycle too, a plan slower than the caller's budget (then 250 ms per tick)
     # started nothing, and a graph whose planning always exceeds the budget never cleared (found 2026-09-28 by
     # slice (d); `test_a_budget_spent_by_planning_still_lets_the_first_cycle_run`). The lease is checked always.
     attempted = False

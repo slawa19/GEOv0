@@ -92,6 +92,10 @@ async def _capture(client, auth, run_id, *, ticks):
     run = runtime.get_run(run_id)
     assert run.seed == 42 and runtime._tick_seconds_of(run) == .25
     assert runtime._real_runner._tick._clearing_every_n_ticks == 25, "frozen live cadence differs from runtime"
+    clearing_budget_ms = runtime._real_runner._tick._real_clearing_time_budget_ms
+    clearing_hard_timeout_sec = runtime._real_runner._tick.clearing_hard_timeout_sec()
+    assert clearing_budget_ms == 5000, "approved live clearing budget differs from captured runtime"
+    assert clearing_hard_timeout_sec == 8.0, "approved live hard-timeout cap differs from runtime"
     initial_status = await _get(client, auth, run_id)
     assert initial_status["sim_time_ms"] == 0
     initial_snapshot = await _get(client, auth, run_id, "/graph/snapshot", equivalent="UAH")
@@ -100,6 +104,8 @@ async def _capture(client, auth, run_id, *, ticks):
               "initial_status": initial_status, "start_event_id": cursor, "events": [],
               "completed_ticks": [], "expected_ticks": ticks, "clearing_every": 25,
               "parameters": {"seed": 42, "intensity_percent": run.intensity_percent, "tick_seconds": .25,
+                             "clearing_budget_ms": clearing_budget_ms,
+                             "clearing_hard_timeout_sec": clearing_hard_timeout_sec,
                              "subscriber_queue_capacity": runtime._sse_sub_queue_max}}
     observer_events = []
     observer = await runtime.subscribe(run_id, equivalent="UAH", after_event_id=cursor)

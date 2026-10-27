@@ -98,7 +98,7 @@ def tick_unit_runner(**collaborators: Any):
     the runner at call time and captures the static intervals at construction. The unit tests of the old classes
     built each class with its collaborators as constructor arguments; they now build a `RealTick` over this runner
     and pass the same collaborators as keyword arguments (`_trust_drift_engine=...`, `_artifacts=...`, ...).
-    Defaults: a real lock and logger, clearing on every tick with the default 250 ms budget, metrics and
+    Stand defaults: a real lock and logger, clearing on every tick with a stand-specific 250 ms budget, metrics and
     bottlenecks on every tick, at most 30 `clearing.done` cycle edges, no artifact writes, storage enabled, every
     warning let through.
     """
