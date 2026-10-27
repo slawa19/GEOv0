@@ -420,7 +420,7 @@ def test_cli_wrong_driver_is_refused_by_app_config_before_runtime_state(tmp_path
 
     before = state_snapshot()
     env = dict(os.environ)
-    env["DATABASE_URL"] = "sqlite:///refused-offline-driver.db"
+    env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'refused-offline-driver.db'}"
     task_state = Path(env["SIMULATOR_STATE_DIR"]) / "wrong-driver-refusal"
     assert not task_state.exists()
     env["SIMULATOR_STATE_DIR"] = str(task_state)
@@ -446,4 +446,5 @@ def test_cli_wrong_driver_is_refused_by_app_config_before_runtime_state(tmp_path
     )
     assert process.stdout == ""
     assert not task_state.exists()
+    assert not (tmp_path / "refused-offline-driver.db").exists()
     assert state_snapshot() == before
