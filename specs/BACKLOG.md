@@ -13,6 +13,24 @@
 **История.** Текст снятых пунктов — строк с метками «взято / сделано / закрыто в 028», пунктов с решением реестра 029 и исторических повествований без открытого действия (оценка направления 2026-09-11, история `simulator-super-smoke`, разрывы владения 007/011/012, реестр 029 № 285) — `git show 46d2d934:specs/BACKLOG.md` (состояние, по которому составлен реестр 029) и `git show 9ba0bf7d:specs/BACKLOG.md` (последнее перед чисткой 029). Текст остатков класса 2 до их разнесения 031 — `git show 05d6e812:specs/BACKLOG.md`. Решение и evidence по номеру — в реестре 029.
 
 
+## Итоги закрывающего T5204 программы 052 (2026-10-27)
+
+<a id="052-1"></a>
+
+- **052-1 — значение неположительного HARD (P3, класс 2; F-T5204-1), закрыто пояснением документации. Получатель: docs/simulator.** В `app/core/simulator/tick.py:890` HARD ≤0 теперь означает аварийный порог 0.1 с; ранее снимался потолок с производного `max(2, 4×soft)`, а не отключался весь timeout. Это отличается от нового SOFT ≤0, отключающего дедлайн. Root принял выбранную границу; active runbook теперь явно называет изменение и целочисленный env-ввод (дробные значения — только тестовая подмена). Source-confirmed, отдельный runtime deployment с HARD=0 не запускался; потери денег не заявлены. Новый target или code fix этим пунктом не авторизуется.
+
+<a id="052-2"></a>
+
+- **052-2 — ранние red cohorts и финальный текст тестов (P3, класс 2; F-T5204-2), закрыто точным receipt. Получатель: tests/simulator, orchestration evidence.** `red-confirmed.log`: 11 failed / 1 passed / 1 slow deselected, 12.06 с; позднейший `red-closed.log`: 14 failed / 1 passed / 1 slow deselected, 13.92 с. Это разные ранние редакции нового модуля; финальная содержит 20 non-slow cases +1 slow. Хеши ранних текстов не сохранены; exact-final-text red не проводился и не заявляется. Обе raw-проверки фактически доказывают старую отсечку и patchless commit; дополнительные финальные guards проверены после исправления. Root принял уточнение без повторного red-прогона или source-wave.
+
+<a id="052-3"></a>
+
+- **052-3 — имя independence-теста шире его real-pass части (P3, класс 2; F-T5204-3), принято как bounded test-description debt. Получатель: tests/simulator.** В `tests/integration/test_p052_complete_clearing_pass_postgres.py:174` малый принудительный HARD=0.35 даёт одинаковую границу в старой и новой формулах: эта часть проверяет real cancellation/drainage, независимость доказывают предшествующие asserts 60/0.1 и actual caller. Отдельный canonical slow default case **фактически выполнен локально**: 1 passed, exit 0, 12.22 с, реальные два commit дольше 8 с; утверждение ревью «no gate ever» в этой части неверно. Default CI этот slow case не исполняет. Покрытие не объявлено утраченным; при будущей правке уточнить имя/docstring, без новой волны сейчас.
+
+<a id="052-4"></a>
+
+- **052-4 — stale patchless premises в тестовой прозе (P3, класс 2; F-T5204-4), принято как bounded documentation debt. Получатель: tests/simulator.** `tests/integration/test_p034_s2_clearing_done_amount_is_in_the_equivalents_step_postgres.py:7–10` и `tests/unit/test_tick_clearing_publishes_progress.py:17–18` ещё описывают отмену без patches, хотя 052 восстанавливает их из БД, а patchless остаётся fallback. Precision/assertions сохранены; сбой создания helper отдельно покрывается p034_s2b. Root подтвердил stale wording, но не меняет verification source во время полного gate. Будущее узкое уточнение prose, без source fix или paid review сейчас.
+
 ## Принято закрывающим T5006 программы 050 (2026-10-27)
 
 <a id="050-3"></a>
