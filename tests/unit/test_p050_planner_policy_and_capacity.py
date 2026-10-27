@@ -180,6 +180,39 @@ def test_direct_target_group_neighbor_precedes_ten_deeper_members(branch, used, 
         assert chosen and chosen <= {f"R{i}" for i in range(10)}
 
 
+@pytest.mark.parametrize("precision", [0, 2, 8])
+@pytest.mark.parametrize("used,expected_receiver", [("170", "R"), ("150", "D"), ("200", "R")])
+def test_direct_preference_requires_room_for_sender_minimum(precision, used, expected_receiver):
+    scenario = _scenario([_line("S", "D", limit="200"), _line("S", "M", limit="1000"),
+                          _line("M", "R", limit="200")], groups={"D": "target", "R": "target"},
+                         props={"recipient_group_weights": {"target": 1},
+                                "amount_model": {"UAH": {"min": "50", "max": "100", "p50": "70"}}})
+    planned = _plan(scenario, {("S", "D", "UAH"): Decimal(used)}, precision)
+    assert len(planned) == 20
+    assert {receiver for _, receiver, _ in planned} == {expected_receiver}
+    assert all(Decimal(50) <= Decimal(amount) <= Decimal(100) for _, _, amount in planned)
+    if expected_receiver == "D":
+        assert {Decimal(amount) for _, _, amount in planned} == {Decimal(50)}
+
+
+@pytest.mark.parametrize("precision,used,expected_receiver", [
+    (0, "199.5", "R"), (2, "199.995", "R"), (8, "199.99999999", "D"), (2, "170", "D"),
+])
+@pytest.mark.parametrize("empty_model", [False, True])
+def test_direct_preference_without_model_requires_positive_equivalent_step(precision, used, expected_receiver, empty_model):
+    """Arithmetic controls: sub-step raw debts are not claimed live ledger states."""
+    props = {"recipient_group_weights": {"target": 1}}
+    if empty_model:
+        props["amount_model"] = {"UAH": {}}
+    scenario = _scenario([_line("S", "D", limit="200"), _line("S", "M", limit="1000"),
+                          _line("M", "R", limit="200")], groups={"D": "target", "R": "target"},
+                         props=props)
+    planned = _plan(scenario, {("S", "D", "UAH"): Decimal(used)}, precision)
+    assert len(planned) == 20
+    assert {receiver for _, receiver, _ in planned} == {expected_receiver}
+    assert all(Decimal(amount) > 0 for _, _, amount in planned)
+
+
 def test_missing_profiles_and_settings_keep_direct_plans_and_empty_snapshot_equivalence():
     scenario = _scenario([_line("S", "R")])
     scenario.pop("behaviorProfiles")

@@ -176,28 +176,10 @@ class RealPaymentPlanner:
         precision: int = 2,
     ) -> str | None:
         step = Decimal(1).scaleb(-int(precision))  # 028 `F-028-32`: the equivalent's step, not always cents
-        cap = limit
-        if self._amount_cap_limit is not None:
-            cap = min(cap, self._amount_cap_limit)
-        if cap <= 0:
+        bounds = _amount_bounds(limit, amount_cap_limit=self._amount_cap_limit, amount_model=amount_model)
+        if bounds is None:
             return None
-
-        model_min: Decimal | None = None
-        if isinstance(amount_model, dict) and amount_model:
-            try:
-                m_max = amount_model.get("max")
-                if m_max is not None:
-                    cap = min(cap, Decimal(str(m_max)))
-                m_min = amount_model.get("min")
-                if m_min is not None:
-                    model_min = Decimal(str(m_min))
-            except Exception:
-                model_min = None
-
-        if cap <= 0:
-            return None
-        if model_min is not None and model_min > cap:
-            return None
+        cap, model_min = bounds
 
         if isinstance(amount_model, dict) and amount_model:
             low = model_min if model_min is not None else Decimal("0.10")
@@ -373,20 +355,21 @@ class RealPaymentPlanner:
         if action_rng.random() > accept_prob:
             return None
 
-        receiver_pid = _choose_receiver(
-            ctx, rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props
-        )
-        if receiver_pid is None:
-            return None
-
-        limit = self._capacity_limit(ctx, eq=eq, sender_pid=sender_pid, receiver_pid=receiver_pid)
-
         amount_model = None
         raw_amount_model = sender_props.get("amount_model")
         if isinstance(raw_amount_model, dict):
             maybe = raw_amount_model.get(eq)
             if isinstance(maybe, dict):
                 amount_model = maybe
+
+        receiver_pid = _choose_receiver(
+            ctx, rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props,
+            amount_model=amount_model, amount_cap_limit=self._amount_cap_limit,
+        )
+        if receiver_pid is None:
+            return None
+
+        limit = self._capacity_limit(ctx, eq=eq, sender_pid=sender_pid, receiver_pid=receiver_pid)
 
         amount = self.pick_amount(
             action_rng,
@@ -463,6 +446,35 @@ class RealPaymentPlanner:
 
 
 _ZERO = Decimal("0")
+
+
+def _amount_bounds(
+    limit: Decimal, *, amount_cap_limit: Decimal | None, amount_model: dict[str, Any] | None
+) -> tuple[Decimal, Decimal | None] | None:
+    """Deterministic bounds shared by amount sampling and direct-neighbor eligibility."""
+    cap = limit
+    if amount_cap_limit is not None:
+        cap = min(cap, amount_cap_limit)
+    if cap <= 0:
+        return None
+
+    model_min: Decimal | None = None
+    if isinstance(amount_model, dict) and amount_model:
+        try:
+            m_max = amount_model.get("max")
+            if m_max is not None:
+                cap = min(cap, Decimal(str(m_max)))
+            m_min = amount_model.get("min")
+            if m_min is not None:
+                model_min = Decimal(str(m_min))
+        except Exception:
+            model_min = None
+
+    if cap <= 0:
+        return None
+    if model_min is not None and model_min > cap:
+        return None
+    return cap, model_min
 
 
 def _clamp01(v: Any, default: float) -> float:
@@ -917,6 +929,8 @@ def _choose_receiver(
     eq: str,
     sender: str,
     sender_props: dict[str, Any],
+    amount_model: dict[str, Any] | None = None,
+    amount_cap_limit: Decimal | None = None,
 ) -> str | None:
     participant_group_by_pid = ctx.participant_group_by_pid
     reachable = _reachable_nodes(ctx, eq, sender)
@@ -924,9 +938,16 @@ def _choose_receiver(
         return None
 
     direct = {pid for pid, _ in (ctx.adjacency_by_eq.get(eq) or {}).get(sender, [])}
-    # An exhausted direct member must not beat a deeper group member. Indirect
-    # path capacity remains the router's job; this checks only the direct pair.
-    eligible_direct = {pid for pid in direct if _direct_capacity(ctx, sender, pid, eq) > 0}
+    # A direct member must fit the sender's amount bounds and a positive monetary
+    # step before it beats a deeper group member. Indirect path capacity remains
+    # the router's job; this checks only the direct pair.
+    step = Decimal(1).scaleb(-int((ctx.precision_by_eq or {}).get(eq.strip().upper(), 2)))
+    eligible_direct = set()
+    for pid in direct:
+        bounds = _amount_bounds(_direct_capacity(ctx, sender, pid, eq),
+                                amount_cap_limit=amount_cap_limit, amount_model=amount_model)
+        if bounds is not None and bounds[0].quantize(step, rounding=ROUND_DOWN) > 0:
+            eligible_direct.add(pid)
     reachable = [pid for pid in reachable if pid not in direct or pid in eligible_direct]
     if not reachable:
         return None
