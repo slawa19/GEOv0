@@ -40,14 +40,16 @@ def test_policy_nontransit_creditor_business_and_endpoints():
     assert good.reachable("UAH", "a", "c")
     assert not bad.reachable("UAH", "a", "c")
     assert bad.reachable("UAH", "a", "b")  # endpoint is not an intermediate
-    measured = measure(forbidden, ticks=50, intensity=100)
-    assert measured["planned_static_unreachable"]["numerator"] > 0
-    assert (
-        measure(permitted, ticks=50, intensity=100)["planned_static_unreachable"][
-            "numerator"
-        ]
-        == 0
-    )
+    # 050 decision 5 filters forbidden routes before sampling plans. Keep the
+    # policy counterexample on the independent ordered-pair domain, while a
+    # nonempty sample prevents a planner returning no actions from passing.
+    for raw, expected_coverage in ((forbidden, 2), (permitted, 3)):
+        measured = measure(raw, ticks=50, intensity=100)
+        sampled = measured["planned_static_unreachable"]
+        assert sampled["denominator"] > 0
+        assert sampled["numerator"] == 0
+        coverage = measured["equivalents"]["UAH"]["eligible_ordered_pair_coverage"]
+        assert (coverage["numerator"], coverage["denominator"]) == (expected_coverage, 6)
 
 
 def test_reverse_line_policy_and_alternate_valid_path():
