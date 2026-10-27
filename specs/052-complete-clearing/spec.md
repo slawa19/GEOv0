@@ -1,7 +1,7 @@
 # 052 — Complete automatic clearing passes
 
 - **Date:** 2026-10-27
-- **Status:** AUTHORIZED — design accepted by main on 2026-10-27; implementation follows the committed plan.
+- **Status:** SOURCE ACCEPTED — implementation, affected checks, live and closing source review accepted; delivery and final gates are authoritative in PR #361.
 - **Status authority:** Completion is established by the success criteria and retained evidence below, plus PR delivery; this label does not establish passing gates or delivery.
 - **Owner surface:** `app/config.py`, `app/core/simulator/tick.py`; the named tests and three active simulator documents below. No clearing algorithm, ledger, router, schema, UI implementation or fixture changes.
 - **Origin:** After delivery of 050, the owner explicitly approved: «Для демонстрации полного взаимозачёта ... завершать проход, оставляя более длинный аварийный таймаут — да, сделай». Main owns final decisions, commits, push, PR and merge. Cleanup is a separate root-owned stream and is excluded here.
@@ -71,6 +71,20 @@ A full canonical backend milestone and required CI run only after source freeze;
 
 **Forbidden proof.** No synthetic ledger changes instead of real committed occurrences; no fake patches, mock-only money evidence, timer/status assertions without debt effect, selecting a passing seed, reducing frozen thresholds, omitting bounded-mode controls, or treating cancelled/absent measurements as zero. Do not call `complete` equivalent to all debt zero or treat the historical manual times as a guarantee.
 
+## Delivery and final gate authority
+
+Source `b2a7f061` принят root. Итоговые backend / required-CI jobs, точные финальные SHA и доставка — [PR #361](https://github.com/slawa19/GEOv0/pull/361), durable body которого ведёт главная сессия; merge разрешён только после всех обязательных gates. Эта спека не объявляет незавершённую проверку успешной и не требует ещё одного result-only коммита ради её будущих чисел.
+
+Canonical full backend имеет одного владельца — нижнего оркестратора; slug `p052_backend`, raw/result/точная локальная invocation — `.local-run/test-runs/p052_backend/`. Из integration worktree команда воспроизводится так:
+
+```powershell
+$mainRepo = Split-Path (git rev-parse --path-format=absolute --git-common-dir) -Parent
+$rootPython = Join-Path $mainRepo '.venv\Scripts\python.exe'
+.\scripts\verify_local.ps1 -TaskSlug p052_backend -BackendOnly -Python $rootPython
+```
+
+Process-local `DEBUG=false`; незаданный TEST_DATABASE_URL даёт отдельную задаче PostgreSQL DB на 127.0.0.1. Новый live не нужен: принят `.local-run/test-runs/p052_live/{receipt.md,actual-summary.json,phase-summary.json,canonical.log,result.json}`. Точный selector обеих 100-tick/restart проверок и параметры сохранены в invocation.json; повторять его без новой source-причины запрещено. Источник full/backend и будущего docs-only HEAD должен оставаться product-identical; это проверяет root перед delivery.
+
 ## Tasks
 
 Legend: `[x]` completed with evidence; `[ ]` active; `[!]` waiting for dependency. Entire follow-up is owner-authorized; main accepted this plan before source edits.
@@ -79,10 +93,22 @@ Legend: `[x]` completed with evidence; `[ ]` active; `[!]` waiting for dependenc
 |---|---|---|
 | T5201 | Accept scope/CIO, freeze design and authorization before source edits | [x] Main accepted 2026-10-27 |
 | T5202 | Red reproducer → independent timeout policy → bounded partial-progress publication; cheap canonical checks and internal review | [x] Root accepted frozen implementation and internal SOUND on 2026-10-27 |
-| T5203 | One affected live100/restart milestone, stable full backend and required CI evidence; sync active docs | [ ] Source frozen; affected consumer/smoke checks passed, live/full/CI pending |
-| T5204 | Mandatory frozen external Claude closing, classify findings, delivery receipt | [ ] Frozen source accepted; external review pending |
+| T5203 | One affected live100/restart milestone, stable full backend and required CI evidence; sync active docs | Source/live accepted; final backend, required CI and delivery authority: PR #361 and the named artifact owners below |
+| T5204 | Mandatory frozen external Claude closing, classify findings, delivery receipt | [x] VALID SOUND, class 1 = 0, 12/12 checks; dispositions 052-1–052-4 recorded |
 
 ## Changelog
+
+- **2026-10-27 — live и formal closing приняты, source неизменён.** Frozen `1cf4e135..b2a7f061`: один canonical live selector обеих realistic 100+restart проверок, DEBUG=false / seed42 / intensity15 / pacing0.25 / cadence25 / runtime 0/60: 2 passed, exit 0, 399.43 с (wrapper 403.134717 с), head037. Оба normal 100 дают 300/300 успехов, reject 0, assigned 1; каждый steady share ≥0.04430853798956837468, opening shares village 1.020402 / town 1.130564 ≥0.5. После рестарта оба 75/75, no stalls; edge-debt reductions 37582.73 / 40197.86 >0. Все десять automatic passes complete / remaining_cycles0. С source-default0/60 самое долгое наблюдаемое runner ожидание — village restart 18.640 с; full resume→post-tick interval20.317409 с. Это отдельные стадийные времена на общем хосте с параллельным backend, не SLA и не нулевая сумма всех долгов. Полная таблица окон, ролей, sampled debt/limit и raw references — retained live receipt выше.
+- **2026-10-27 — T5204: VALID SOUND, class 1 = 0.** Claude Code 2.1.311, один normal-p/JSON-schema Opus/high вызов на том же committed range, plan/noEditWrite; actual modelUsage claude-opus-5-5 + auxiliary claude-haiku-5-5, 12/12 уникальных checks, REVIEW-COMPLETE: YES, process 0, clone clean. CLI list-cost 3.8776505 USD, не billing. Root прочитал все четыре P3 класса2: 052-1/052-2 закрыты active-runbook/receipt уточнениями, 052-3/052-4 приняты как bounded debt; production/tests после review не меняются. Ledger хранит время/модель/цену; полный JSON/schema/prompt/validation — `.local-run/codex-review/p052-closing-20261027/`. Дополнительных paid calls и finalizer/clone cleanup не выполнялось.
+
+| Finding | Кто добавил сверх internal SOUND | Проверка / disposition root |
+|---|---|---|
+| F-T5204-1 | Claude, P3/2 | Source-confirmed semantic flip HARD ≤0; runbook теперь явно называет 0.1 s, старый derived limit и int env; BACKLOG 052-1 resolved docs |
+| F-T5204-2 | Claude, P3/2 | Открыты оба raw red cohorts; уточнение ниже, BACKLOG 052-2 resolved records; exact-final red не заявляется |
+| F-T5204-3 | Claude, P3/2 | Pure asserts доказывают independence, real forced-short half — drainage; local canonical >8 s witness выполнен, default CI его не исполняет; BACKLOG 052-3 accepted |
+| F-T5204-4 | Claude, P3/2 | Root подтвердил stale test prose; precision и fallback guards сохранены, BACKLOG 052-4 accepted без mutation verification source во время full gate |
+
+- **2026-10-27 — точность red evidence.** Исторические 11 failed / 1 passed / 1 slow deselected, 12.06 с и позднейшие 14 failed / 1 passed / 1 slow deselected, 13.92 с относятся к разным ранним редакциям модуля: `p052_impl/red-confirmed.log` и `red-closed.log`. Финальная редакция имеет 20 non-slow cases + 1 slow; хеши ранних текстов не сохранены. Exact-final-module red не проводился; не утверждаем его по двум старым логам и не приписываем им новые guards. Оба фактически подтверждают исходную отсечку и patchless confirmed commit; отдельный положительный bounded control оставался действующим. После test-only artifact-sink исправления финальный developer targeted 77 passed, integrated 78 passed (добавлен real SSE smoke), оба exit 0; старый batch 3 failed / 74 passed — реальный missing `None.enqueue_event_artifact` в stand, не product propagation failure. Cleanup-only ms не сохранены: измерены whole-case 0.62 с success (включая 0.5 с forced emergency), 2.17 с hang, 0.14 с repeated cancellation, 0.26 с pending grace; проверен bound < 2.7 с. Это не чистое время одних recovery SQL reads.
 
 - **2026-10-27 — source acceptance before milestones.** Root read the production/test/doc diff and accepted the independent read-only `VERDICT-P052-INTERNAL: SOUND` (class 1 = 0, class 2 = 0), frozen six-file manifest `.local-run/test-runs/p052_review/frozen-manifest.json`. Integrated canonical selectors including real SSE smoke: 78 passed / 1 slow deselected, exit 0, 84.53 s; log `.local-run/test-runs/p052_integrated_target/canonical.log`. Separate real-duration case beyond eight seconds: 1 passed, exit 0, 12.22 s (`p052_impl/slow-final.log`). UI affected consumers: 56 passed across three files; Chromium smoke: 1 passed, both exit 0 (`p052_ui_consumer/result.json`). The earlier scripted-stand failure was missing artifact-sink wiring, fixed in the test without weakening financial assertions. Full backend, live100/restart, external closing and CI are still pending. Default changes do not imply every debt is zero; manual-disconnect and stopped pending-task sibling branches remain unchanged.
 
