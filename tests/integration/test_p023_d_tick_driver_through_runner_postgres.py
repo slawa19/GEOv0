@@ -1,9 +1,9 @@
 """Programme 023, slice (d): the simulator's tick clearing through the common runner, and the cold-spawn acceptance.
 
 The tick adapter is REAL: `RealTick.maybe_run_clearing` (`app/core/simulator/tick.py`, the tick's call, with its
-hard timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
+independent hard timeout `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
 -> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The bounded-pass stands explicitly
-set `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` to 250 ms; a separate case exercises the production default of 5000 ms.
+set `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` to 250 ms and the hard timeout to 2 s; a separate case verifies the disabled default reaches the tick.
 Until 021 stage 4 the adapter
 was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunnerImpl.tick_real_mode_clearing`.
 
@@ -59,6 +59,7 @@ async def factory(committed_database, monkeypatch):
         install_tick_stand(monkeypatch, made)
         # These bounded-pass and cancellation contracts use 250 ms explicitly, before the runner captures it.
         monkeypatch.setattr(settings, "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250)
+        monkeypatch.setattr(settings, "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 2)
         yield made
 
 
@@ -247,8 +248,8 @@ async def test_the_default_budget_reaches_the_tick_and_allows_two_slow_occurrenc
     [done] = stand.done_events()
     assert done["cleared_cycles"] == 2 and Decimal(done["cleared_amount"]) == Decimal("5")
     assert volumes[CODE] == Decimal("5")
-    assert stand.runner._real_clearing_time_budget_ms == stand.runner._tick._real_clearing_time_budget_ms == 5000
-    assert stand.runner._tick.clearing_hard_timeout_sec() == 8.0
+    assert stand.runner._real_clearing_time_budget_ms == stand.runner._tick._real_clearing_time_budget_ms == 0
+    assert stand.runner._tick.clearing_hard_timeout_sec() == 60.0
 
 
 @EXECUTE_DELAYS

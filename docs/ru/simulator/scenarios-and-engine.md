@@ -368,7 +368,7 @@ flowchart TD
 - `SIMULATOR_TICK_MS_BASE` — виртуальная длительность тика.
 - `SIMULATOR_ACTIONS_PER_TICK_MAX` — верхний лимит budget действий.
 - `SIMULATOR_CLEARING_EVERY_N_TICKS` — cadence клиринга в real mode.
-- `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` — мягкий бюджет прохода, по умолчанию 5000 мс; проверяется между выполнениями циклов. `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC` — hard timeout, по умолчанию 8 с. Это может дать заметную паузу; бюджет не является доказанным оптимумом. Источники — [app/config.py](../../../app/config.py) и [clearing/runner.py](../../../app/core/clearing/runner.py).
+- `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` — необязательный мягкий бюджет прохода: по умолчанию `0`, неположительное значение отключает дедлайн. Обычный проход завершается по правилам раннера; положительное число миллисекунд явно включает прежнюю отсечку между циклами. Независимый `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC` по умолчанию равен 60 с; аварийная отмена не зависит от мягкого бюджета. Это порог запроса отмены, а не гарантия точного wall time: уже начатый commit сначала устанавливает свой исход, затем публикуется известный результат. Источники — [app/config.py](../../../app/config.py), [tick.py](../../../app/core/simulator/tick.py) и [clearing/runner.py](../../../app/core/clearing/runner.py).
 - `SIMULATOR_SCENARIO_ALLOWLIST` — фильтр списка сценариев для UI; с 044 `T4405` — и допуск запуска и чтения сценария для не-администратора.
 
 SSE replay buffer:

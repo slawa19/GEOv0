@@ -61,10 +61,10 @@ async def _cancelled_after_one_commit(factory, monkeypatch, *, precision: int,  
     # precision of its own and wrote two digits.
     assert stand.run._real_viz_by_eq.get(CODE) is None
     await stand.tick()
-    # Controls: the second occurrence started and was cut, the first is durable and published once, without patches.
+    # Controls: the second occurrence started and was cut, the first is durable and published once, with recovered DB-backed patches.
     assert len(calls) == 2 and await stand.clearings() == 1, (len(calls), await stand.clearings())
     [done] = stand.done_events()
-    assert done["node_patch"] is None and done["edge_patch"] is None, done
+    assert done["node_patch"] and done["edge_patch"], done
     amount = (before_total - await stand.total()) / 3
     assert amount in amounts, amount
     return done, amount

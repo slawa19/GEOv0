@@ -886,13 +886,8 @@ class RealTick:
     # ── clearing: static cadence, hard timeout, one call to the common runner ─────────────────────────
 
     def clearing_hard_timeout_sec(self) -> float:
-        """The hard timeout of the tick's clearing: `max(2 s, 4 × budget)`, capped by
-        `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC` (default 8), never below 0.1 s."""
-        clearing_hard_timeout_sec = max(2.0, float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0)
-        env_timeout_cap = float(settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC)
-        if env_timeout_cap > 0:
-            clearing_hard_timeout_sec = min(clearing_hard_timeout_sec, env_timeout_cap)
-        return float(max(0.1, float(clearing_hard_timeout_sec)))
+        """Independent emergency limit (default 60 s), with the defensive 0.1 s floor."""
+        return max(0.1, float(settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC))
 
     async def _await_pending_clearing(self, run_id: str, *, run: RunRecord) -> None:
         rr = self._runner
@@ -1205,13 +1200,13 @@ class RealTick:
         * progress - node and edge patches as of the clearing's commit, one `clearing.done`, THEN trust growth on the
           touched edges and its `topology.changed` (039 D-fix, 2026-10-19: the growth event follows the clearing's,
           never precedes it; its own failure only logged); a failure of the pass after progress is raised only then;
-        * cancellation - progress not yet published is published without patches and without growth, and the
-          cancellation propagates (a cancellation that lands in the growth finds `clearing.done` already out);
+        * cancellation - bounded fresh reads publish durable patches and closed lines, without growth; failed,
+          timed-out or cancelled recovery falls back to a patchless summary. Cancellation always propagates;
         * the operator's stop or an integrity hold (`MoneyBoundary.MONEY_STOP_REASONS`) - the equivalent is skipped,
           not a run error; any other failure - a run error (`CLEARING_ERROR`, sanitised), then the next equivalent.
         """
         rr = self._runner
-        budget_ms = max(1, int(self._real_clearing_time_budget_ms))
+        budget_ms = int(self._real_clearing_time_budget_ms)
         emitter = SseEventEmitter(sse=rr._sse, utc_now=rr._utc_now, logger=rr._logger)
         session_local = db_session.AsyncSessionLocal
         with rr._lock:
@@ -1226,6 +1221,21 @@ class RealTick:
             touched_nodes: set[str] = set()
             touched_edges: set[tuple[str, str]] = set()
             done_emitted = False
+            closed: set[tuple[str, str]] = set()
+            closed_published = False
+
+            def _emit_done(node_patch=None, edge_patch=None) -> None:
+                nonlocal done_emitted
+                with rr._lock:
+                    run.last_event_type = "clearing.done"
+                    run.current_phase = None
+                done_emitted = emitter.emit_clearing_done(
+                    run_id=run_id, run=run, equivalent=eq, plan_id=plan_id,
+                    cleared_cycles=cleared_cycles,
+                    cleared_amount=self._cleared_amount_str(precision, cleared_amount),
+                    cycle_edges=self._done_cycle_edges(run, eq, touched_edges) if touched_edges else None,
+                    node_patch=node_patch, edge_patch=edge_patch,
+                ) is not None
 
             def _on_committed(occurrence, eq: str = eq) -> None:
                 nonlocal cleared_cycles, cleared_amount
@@ -1262,7 +1272,7 @@ class RealTick:
                         eq,
                         allowed_participant_pids=run_perimeter_pids(run),
                         on_committed=_on_committed,
-                        deadline=asyncio.get_running_loop().time() + budget_ms / 1000.0,
+                        deadline=asyncio.get_running_loop().time() + budget_ms / 1000.0 if budget_ms > 0 else None,
                     )
                 except clearing_runner.ClearingPassCancelled as cancelled:
                     # A cancellation during planning does NOT stop the planner worker; the result says so
@@ -1316,29 +1326,14 @@ class RealTick:
                 # patch of every edge, already carrying the post-clearing debts, so the UI met `clearing.done` with
                 # nothing left to change and never stated the clearing's "was -> now" after an automatic clearing.
                 async with session_local() as clearing_session:
-                    closed: set[tuple[str, str]] = set()
                     node_patch, edge_patch = await self._clearing_patches(
                         run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles, closed
                     )
-                    with rr._lock:
-                        run.last_event_type = "clearing.done"
-                        run.current_phase = None
-                    emitter.emit_clearing_done(
-                        run_id=run_id,
-                        run=run,
-                        equivalent=eq,
-                        plan_id=plan_id,
-                        cleared_cycles=cleared_cycles,
-                        # `to_money_str` is total and cannot raise: no `str(Decimal)` fallback (`1E-8` on the wire).
-                        cleared_amount=self._cleared_amount_str(precision, cleared_amount) if cleared_amount > 0 else None,
-                        cycle_edges=self._done_cycle_edges(run, eq, touched_edges) if touched_edges else None,
-                        node_patch=node_patch,
-                        edge_patch=edge_patch,
-                    )
-                    done_emitted = True
+                    _emit_done(node_patch, edge_patch)
                     # 026 `T2603.2`: the patches were read after the occurrences committed (`on_committed`).
                     await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
                                                     equivalent=eq, pairs=closed)
+                    closed_published = True
                     rr._logger.info(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
                         str(run.run_id),
@@ -1354,30 +1349,35 @@ class RealTick:
                 if execution_error is not None:
                     raise execution_error
             except asyncio.CancelledError:
-                if cleared_cycles > 0 and not done_emitted:
-                    with rr._lock:
-                        run.last_event_type = "clearing.done"
-                        run.current_phase = None
+                if cleared_cycles > 0:
                     try:
-                        emitter.emit_clearing_done(
-                            run_id=run_id,
-                            run=run,
-                            equivalent=eq,
-                            plan_id=plan_id,
-                            cleared_cycles=cleared_cycles,
-                            cleared_amount=self._cleared_amount_str(precision, cleared_amount),
-                            cycle_edges=self._done_cycle_edges(run, eq, touched_edges),
-                            node_patch=None,
-                            edge_patch=None,
-                        )
-                    except Exception:
+                        # Cleanup only: same task, no new occurrence or growth, and no orphan finalizer.
+                        # Include session exit and the closed-line recheck in this small fixed bound.
+                        async with asyncio.timeout(2.0):
+                            if not done_emitted:
+                                async with session_local() as recovery_session:
+                                    node_patch, edge_patch = await self._clearing_patches(
+                                        run, eq, recovery_session, touched_nodes, touched_edges, cleared_cycles, closed
+                                    )
+                                    if node_patch is None and edge_patch is None:
+                                        rr._logger.warning(
+                                            "simulator.real.clearing_cancel_recovery_failed run_id=%s tick=%s eq=%s "
+                                            "reason=patches_unavailable", str(run.run_id), int(run.tick_index), eq,
+                                        )
+                                    _emit_done(node_patch, edge_patch)
+                            if not closed_published:
+                                # The owner rechecks liveness/epochs and removes only still-held pairs, once.
+                                await publish_closed_trustlines(
+                                    emitter=emitter, lock=rr._lock, run_id=run_id, run=run, equivalent=eq, pairs=closed
+                                )
+                                closed_published = True
+                    except (Exception, asyncio.CancelledError):
                         rr._logger.warning(
-                            "simulator.real.clearing_cancel_partial_emit_failed run_id=%s tick=%s eq=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                            eq,
-                            exc_info=True,
+                            "simulator.real.clearing_cancel_recovery_failed run_id=%s tick=%s eq=%s",
+                            str(run.run_id), int(run.tick_index), eq, exc_info=True,
                         )
+                    if not done_emitted:
+                        _emit_done()
                 raise
             except Exception as exc:
                 refusal_reason = (exc.details or {}).get("reason") if isinstance(exc, ConflictException) else None
@@ -1658,6 +1658,20 @@ class RealTick:
                 if run._real_clearing_task is clearing_task:
                     run._real_clearing_task = None
                 run.current_phase = None
+        except asyncio.CancelledError:
+            # wait_for may itself be cancelled again while draining the child's bounded recovery.
+            # Forward that pulse and await the terminal child; never detach a live clearing task.
+            clearing_task.cancel()
+            try:
+                await clearing_task
+            except (Exception, asyncio.CancelledError):
+                pass
+            finally:
+                with rr._lock:
+                    if run._real_clearing_task is clearing_task:
+                        run._real_clearing_task = None
+                    run.current_phase = None
+            raise
         except Exception:
             if outcomes is not None:
                 for eq in equivalents:

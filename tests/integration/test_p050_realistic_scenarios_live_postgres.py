@@ -135,8 +135,8 @@ async def _capture(client, auth, run_id, *, ticks):
     assert runtime._real_runner._tick._clearing_every_n_ticks == 25, "frozen live cadence differs from runtime"
     clearing_budget_ms = runtime._real_runner._tick._real_clearing_time_budget_ms
     clearing_hard_timeout_sec = runtime._real_runner._tick.clearing_hard_timeout_sec()
-    assert clearing_budget_ms == 5000, "approved live clearing budget differs from captured runtime"
-    assert clearing_hard_timeout_sec == 8.0, "approved live hard-timeout cap differs from runtime"
+    assert clearing_budget_ms == 0, "approved live clearing budget differs from captured runtime"
+    assert clearing_hard_timeout_sec == 60.0, "approved live hard-timeout cap differs from runtime"
     initial_status = await _get(client, auth, run_id)
     assert initial_status["sim_time_ms"] == 0
     initial_snapshot = await _get(client, auth, run_id, "/graph/snapshot", equivalent="UAH")
