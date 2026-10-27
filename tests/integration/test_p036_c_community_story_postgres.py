@@ -29,7 +29,7 @@ WHY THE STORY IS BUILT THE WAY IT IS (and what the test therefore depends on). D
 `docs/ru/simulator/scenarios-and-engine.md`: the background intensity is 0; the PERIODIC clearing (every 25th tick, a
 process setting) is not switched off by a scenario, so no cycle exists on the ticks 25, 50 and 75 - the circle is closed on
 tick 38 and cleared on tick 43; the order inside a tick is by event TYPE (inject, payment, clearing), not by `time`; the
-scripted clearing may end `incomplete` within its 250 ms budget and is then finished by the next tick - the test waits for
+scripted clearing may end `incomplete` within its configured budget and is then finished by the next tick - the test waits for
 `done` and does not depend on how many ticks that took; `inject` needs the process flag, which the tests set (or unset).
 
 NOT SEEN HERE. The Simulator UI (the story is never rendered), the demo snapshots, and a real clock.

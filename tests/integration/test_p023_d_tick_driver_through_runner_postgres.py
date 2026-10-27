@@ -2,8 +2,9 @@
 
 The tick adapter is REAL: `RealTick.maybe_run_clearing` (`app/core/simulator/tick.py`, the tick's call, with its
 hard timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
--> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The budget is the normal one
-(`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`, 250 ms); nothing is raised for the test. Until 021 stage 4 the adapter
+-> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The bounded-pass stands explicitly
+set `SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS` to 250 ms; a separate case exercises the production default of 5000 ms.
+Until 021 stage 4 the adapter
 was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunnerImpl.tick_real_mode_clearing`.
 
 * THROUGH THE RUNNER - the tick's clearing goes through `execute_occurrence` in the run's perimeter; its
@@ -37,6 +38,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
+from app.config import Settings, settings
 from app.core.clearing.service import ClearingService
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner_impl import RealRunnerImpl
@@ -55,6 +57,8 @@ RING4 = ring([f"p023tr{k}" for k in range(4)], ["1"] * 4, [debt_uuid(0x23D3, 20 
 async def factory(committed_database, monkeypatch):
     async with pooled_sessionmaker_over(committed_database.url) as made:
         install_tick_stand(monkeypatch, made)
+        # These bounded-pass and cancellation contracts use 250 ms explicitly, before the runner captures it.
+        monkeypatch.setattr(settings, "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250)
         yield made
 
 
@@ -156,7 +160,7 @@ async def _drain(stand: "_Stand", caplog, *, first_tick: int) -> list[int]:
     The contract (023 decision 10; `app/core/clearing/runner.py`, the deadline is checked before every cycle start
     after the first): a tick with a non-empty plan commits at least one occurrence, and may stop on the tick budget
     after any of them (`budget_exhausted`). The one thing above the budget is the tick's hard timeout
-    (`RealTick._execute_clearing_with_timeout`, 2 s by default): it may cancel a pass before its first commit -
+    (`RealTick._execute_clearing_with_timeout`, 2 s with this stand's 250 ms budget): it may cancel a pass before its first commit -
     observed only under heavy CPU oversubscription. So what a stand may require is progress on every tick that the
     hard timeout did not cut (that tick must have logged `tick_clearing_hard_timeout`) and drainage within a bound -
     not a number of cycles in one tick, which depends on how long a commit takes.
@@ -185,7 +189,7 @@ def _budget_does_not_bind(monkeypatch, stand: "_Stand") -> float:
     """For the stands whose SUBJECT is the hard timeout cutting a held second occurrence: the runner must start that
     occurrence, whatever the first commit costs. The tick budget - the runner's soft deadline, which may end the
     pass after the first occurrence - is widened on this stand's tick only, and the hard timeout is held at its
-    default value (2 s) through its own cap, so the timeout under test is the product's. Nothing in `app/` changes.
+    250 ms stand value (2 s) through its own cap, so the production timeout path is exercised. Nothing in `app/` changes.
     Returns the hard timeout."""
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 2)
@@ -219,6 +223,32 @@ class _DelegatingPool:
 
 
 # ------------------------------------------------------------------------------------------ through the runner
+
+
+@pytest.mark.asyncio
+async def test_the_default_budget_reaches_the_tick_and_allows_two_slow_occurrences(factory, monkeypatch) -> None:
+    # Read the real default without a developer's environment or .env overriding these two settings.
+    for name in ("SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC"):
+        monkeypatch.delenv(name, raising=False)
+    defaults = Settings(_env_file=None)
+    monkeypatch.setattr(settings, "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", defaults.SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS)
+    monkeypatch.setattr(settings, "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", defaults.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC)
+    stand = await _stand(factory, T1 + T2)
+    calls = _spy_execute(monkeypatch, execute_delay=0.3)
+    runner = _runner_module()
+    await asyncio.wrap_future(runner._default_planner_executor().submit(runner.plan_clearing, []))
+
+    volumes = await stand.tick()
+
+    # The explicit 250 ms sibling commits only one of these cycles per pass. The new default reaches the
+    # real occurrence boundary, rather than merely changing a settings field or a helper's return value.
+    assert await stand.clearings() == 2, "the default budget must allow both 300 ms occurrences in one tick"
+    assert await stand.total() == 0 and len(calls) == 2
+    [done] = stand.done_events()
+    assert done["cleared_cycles"] == 2 and Decimal(done["cleared_amount"]) == Decimal("5")
+    assert volumes[CODE] == Decimal("5")
+    assert stand.runner._real_clearing_time_budget_ms == stand.runner._tick._real_clearing_time_budget_ms == 5000
+    assert stand.runner._tick.clearing_hard_timeout_sec() == 8.0
 
 
 @EXECUTE_DELAYS
@@ -358,9 +388,9 @@ async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_st
 @pytest.mark.asyncio
 async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monkeypatch, caplog, execute_delay) -> None:
     stand = await _stand(factory, T1 + T2)
-    # 021 `T2109` fix-delta: the second occurrence must START for the hard timeout to cut it; with the default budget
+    # 021 `T2109` fix-delta: the second occurrence must START for the hard timeout to cut it; with the 250 ms stand budget
     # a slow first commit ended the pass on the budget instead (1 call). The budget does not bind on this stand; the
-    # hard timeout is the product's 2 s.
+    # hard timeout remains 2 s on this stand.
     hard_timeout = _budget_does_not_bind(monkeypatch, stand)
 
     async def before(n: int) -> None:

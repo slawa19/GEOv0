@@ -7,15 +7,16 @@ a fixed plan, its SSE stream and its graph snapshots written as they came.
 
 What it writes into ``--out`` (normally ``simulator-ui/v2/public/simulator-fixtures/v1/UAH/events``):
 
-- ``demo-tx-snapshot.json`` - ``GET /simulator/runs/{id}/graph/snapshot`` after the run is seeded, before any payment;
+- ``demo-tx-snapshot.json`` - ``GET /simulator/runs/{id}/graph/snapshot`` after seeding, before the first PLAN payment;
 - ``demo-tx.json`` - the ``tx.updated`` events of the plan's payments, in stream order;
 - ``demo-clearing-snapshot.json`` - the snapshot after the last payment, before the clearing;
 - ``demo-clearing.json`` - the ``clearing.done`` event(s) of one Interact clearing.
 
 Each playlist starts from ITS OWN snapshot (the workbench plays it on that scene). Nothing recorded is changed: ids,
-``event_id``, ``ts`` and every number are the server's. A recording is reproducible in its numbers (fixed scenario,
-fixed plan, intensity 0, no automatic payments and no automatic clearing during the recording), not in its ids: the
-run id (and so every participant identity ``<run_id>:p<N>``, 044 `T4405`) and the timestamps differ per recording.
+``event_id``, ``ts`` and every number are the server's. The scenario and plan are fixed; intensity 0 and an immediate
+pause prevent subsequent ticks, but do not erase scripted opening payments from a tick already begun. The start
+snapshot is the actual baseline, so numbers can differ between recordings. Run ids (and so every participant identity
+``<run_id>:p<N>``, 044 `T4405`) and timestamps also differ.
 
 Why a new script: ``scripts/diagnose_simulator_sse.py`` reads a run's stream but only counts it, and drives no payment;
 nothing else records the stream with the snapshot it starts from.
@@ -57,35 +58,37 @@ SCENARIO_PATH = _REPO_ROOT / "fixtures" / "simulator" / SCENARIO_ID / "scenario.
 
 #: The payments, by the 1-based ORDINAL of the participant in the scenario (the run identity is ``<run_id>:p<N>``),
 #: with the amount as a decimal string at the equivalent's precision. Built so that the recording shows direct and
-#: 2-4 line routes and leaves debt cycles for the clearing, two of which share a line (1 -> 2):
-#: 2 -> 1, 6 -> 2, 1 -> 6 (lines 1->2, 2->6, 6->1); 2 -> 1, 7 -> 2, 1 -> 7 (lines 1->2, 2->7, 7->1);
-#: 36 -> 3, 11 -> 36, 3 -> 11 (lines 3->36, 36->11, 11->3). A payment X -> Y over one line uses the line Y -> X
-#: (Y is the creditor), so every direct payment below names a line of the scenario (checked before the run starts).
+#: 2-4 line routes and leaves overlapping debt cycles for the clearing. Reauthored for the 050 role graph:
+#: 61 -> 36 first creates repayment capacity 36 -> 61; the next two payments can then travel
+#: 36 -> 61 -> 37 -> 21 and 78 -> 36 -> 61 -> 37 -> 21 (the router still owns route selection).
+#: The direct payments leave cycles 1 -> 11 -> 46 -> 89 -> 1 and 1 -> 11 -> 47 -> 61 -> 1,
+#: sharing debt edge 1 -> 11; the remaining household purchases show two-line routes.
+#: A direct payment X -> Y uses the scenario line Y -> X (Y is the creditor), checked before the run starts.
 PLAN: tuple[tuple[int, int, str], ...] = (
-    (36, 3, "135.00"),
-    (70, 17, "42.70"),
-    (2, 1, "120.00"),
-    (6, 2, "80.00"),
-    (65, 14, "18.40"),
-    (1, 6, "80.00"),
-    (11, 36, "110.00"),
-    (49, 46, "27.30"),
-    (7, 2, "95.00"),
-    (2, 1, "100.00"),
-    (88, 19, "15.60"),
-    (3, 11, "110.00"),
-    (1, 7, "95.00"),
-    (43, 56, "12.90"),
-    (22, 14, "31.20"),
-    (84, 11, "9.75"),
-    (81, 43, "22.00"),
-    (48, 14, "16.80"),
-    (72, 27, "26.40"),
-    (32, 35, "14.10"),
+    (61, 36, "135.00"),
+    (36, 21, "20.00"),
+    (78, 21, "15.00"),
+    (1, 11, "120.00"),
+    (11, 46, "80.00"),
+    (46, 89, "80.00"),
+    (89, 1, "80.00"),
+    (1, 11, "100.00"),
+    (11, 47, "95.00"),
+    (47, 61, "95.00"),
+    (61, 1, "95.00"),
+    (62, 11, "42.70"),
+    (63, 13, "18.40"),
+    (64, 13, "27.30"),
+    (65, 15, "15.60"),
+    (66, 15, "12.90"),
+    (67, 17, "31.20"),
+    (68, 11, "9.75"),
+    (69, 13, "22.00"),
+    (70, 11, "16.80"),
 )
 
 #: Direct payments of the plan (sender, receiver): each needs the scenario line receiver -> sender.
-DIRECT = ((36, 3), (2, 1), (6, 2), (1, 6), (11, 36), (7, 2), (3, 11), (1, 7))
+DIRECT = ((61, 36), (1, 11), (11, 46), (46, 89), (89, 1), (11, 47), (47, 61), (61, 1))
 
 EFFECT_TYPES = ("tx.updated", "clearing.done")
 EVENT_TIMEOUT_SEC = 30.0

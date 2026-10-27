@@ -277,21 +277,7 @@ def test_the_scenario_keeps_no_second_roster(community_id: str, descriptions) ->
     assert described == in_scenario
     assert len(in_scenario) == EXPECTED[community_id]["participants"]
 
-    # The same mapping on both ends of every line: who trusts whom, in which equivalent, up to which limit and
-    # under which policy is the description's, for the equivalents the scenario selects.
-    pid_by_ref = {p["ref"]: in_this_scenario(p["pid"]) for p in doc["participants"]}
-    selected = set(scenario["equivalents"])
-    described_lines = {
-        (pid_by_ref[t["from"]], pid_by_ref[t["to"]], t["equivalent"]): (t["limit"], t["policy"])
-        for t in doc["trustlines"]
-        if t["equivalent"] in selected
-    }
-    scenario_lines = {(t["from"], t["to"], t["equivalent"]): (t["limit"], t["policy"]) for t in scenario["trustlines"]}
-    assert scenario_lines == described_lines
-    assert len(scenario["trustlines"]) == len(scenario_lines) == sum(
-        EXPECTED[community_id]["by_equivalent"][code] for code in selected
-    )
-
+    # 050 derives simulator lines from its economy; the description owns the roster and groups.
     declared_groups = {g["id"]: g["label"] for g in doc["groups"]}
     assert {g["id"]: g["label"] for g in scenario["groups"]} == declared_groups
 

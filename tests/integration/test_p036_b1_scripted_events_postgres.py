@@ -89,7 +89,7 @@ async def _stand(factory, monkeypatch, roles, lines, debts, events, *, clearing_
     run = run_for(list(p.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=clearing_every)
     # A clearing pass is `complete` only when a re-plan on a fresh snapshot is empty, and the pass's budget is checked before
-    # that re-plan: with the default 250 ms a slow machine ends a pass that cleared everything as `budget_exhausted`
+    # that re-plan: with a finite production budget a slow machine can end a fully cleared pass as `budget_exhausted`
     # (the event is then run once more on the next tick, which is the point of the fix-delta, but not what these stands are
     # about). A generous budget keeps them deterministic; the incomplete endings have their own tests.
     runner._tick._real_clearing_time_budget_ms = 20_000

@@ -1,94 +1,74 @@
 # Simulator fixtures
 
-Каноничные `scenario.json` сценарии и JSON Schema для симулятора.
+Каноничные `scenario.json` и [JSON Schema](scenario.schema.json) симулятора.
 
-Документация (RU): [`docs/ru/simulator/scenarios-and-engine.md`](../../docs/ru/simulator/scenarios-and-engine.md)
-Правила realistic-v2 (RU, единая точка истины): [`docs/ru/simulator/realistic-scenarios.md`](../../docs/ru/simulator/realistic-scenarios.md)
-
----
+- [Сценарии и движок (RU)](../../docs/ru/simulator/scenarios-and-engine.md) — запуск и lifecycle.
+- [Правила модели realistic-v2 (RU)](../../docs/ru/simulator/realistic-scenarios.md) — роли, назначения, opening, валидация и измерение.
 
 ## Активные сценарии
 
-| Сценарий | Участников | Описание |
-|----------|-----------|----------|
-| **`greenfield-village-100-realistic-v2`** | 100 | Основной рабочий сценарий. Realistic behaviorProfiles (10 подтипов), seasonal events, settings (warmup, trust_drift, flow). UI default. |
-| **`riverside-town-50-realistic-v2`** | 50 | Компактная альтернатива. Те же фичи, быстрее для тестов и демо. |
-| **`clearing-demo-10`** | 10 | Минимальный сценарий для интерактивной демонстрации клиринга. **Дефолтный датасет Interact Mode.** 4 бизнеса + 6 людей, множество потенциальных циклов. Запускать с `intensity_percent=0`. |
-| **`community-story-10`** | 10 (+1 по `inject`) | Сюжетный сценарий (036): 12 эпизодов с подписями и паузами — прямая покупка, посредник, круг долгов и клиринг, заморозка, отказ без доверия. Не в списке по умолчанию (выбирается `SIMULATOR_SCENARIO_ALLOWLIST=community-story-10`); нужны `SIMULATOR_REAL_ENABLE_INJECT=1`, intensity 0 и чистая база; описание — [`scenarios-and-engine.md` §2.13](../../docs/ru/simulator/scenarios-and-engine.md). |
-| **`minimal`** | 2 | Минимальный валидный сценарий для unit-тестов валидатора/схемы. |
-| **`negative/`** | — | 2 невалидных JSON для тестов валидатора schema. |
+| Сценарий | Участников | Назначение |
+|---|---|---|
+| `greenfield-village-100-realistic-v2` | 100 | Ролевая экономика UAH: назначенные контрагенты, профили «роль × степень», стартовые платежи, stress, warmup и trust drift. |
+| `riverside-town-50-realistic-v2` | 50 | Та же модель на компактном составе сообщества. |
+| `clearing-demo-10` | 10 | Небольшая сеть для демонстрации платежей и клиринга; публичный сценарий посетителя по умолчанию. Владелец подтвердил сохранение clearing-demo-10 2026-10-27; T5007 демонстрирует результат без смены default. |
+| `community-story-10` | 10 (+1 по `inject`) | Сюжетная история с эпизодами и паузами. Вне списка по умолчанию; нужны `SIMULATOR_SCENARIO_ALLOWLIST=community-story-10`, `SIMULATOR_REAL_ENABLE_INJECT=1`, интенсивность 0 и чистое начальное состояние. См. [§2.13 руководства](../../docs/ru/simulator/scenarios-and-engine.md). |
+| `minimal` | 2 | Минимальный валидный вход для проверок схемы и валидатора. |
+| `negative/` | — | Невалидные входы для тестов валидатора. |
+
+Сервер использует Real Mode. Статические снимки для клиентского Sandbox находятся отдельно в `simulator-ui/v2/public/simulator-fixtures/`. Режим `INTERACT` удалён; его прежний автоматический paused run не описывает нынешний запуск.
 
 ## Файловая структура
 
-```
+```text
 fixtures/simulator/
-├── scenario.schema.json                                ← JSON Schema (MVP)
-├── README.md                                           ← этот файл
-├── greenfield-village-100-realistic-v2/scenario.json   ← основной (100)
-├── riverside-town-50-realistic-v2/scenario.json        ← компактный (50)
-├── clearing-demo-10/scenario.json                      ← демо клиринга (10)
-├── community-story-10/scenario.json                    ← сюжетная история (036)
-├── minimal/scenario.json                               ← unit-тесты
-├── negative/                                           ← тесты валидатора
-└── _archive/                                           ← устаревшие сценарии (не загружаются runtime)
+├── scenario.schema.json
+├── README.md
+├── greenfield-village-100-realistic-v2/scenario.json
+├── riverside-town-50-realistic-v2/scenario.json
+├── clearing-demo-10/scenario.json
+├── community-story-10/scenario.json
+├── minimal/scenario.json
+├── negative/
+└── _archive/
 ```
 
-## Типы участников (`participant.type`)
+## Типы участников
 
-В сценариях v0 допустимы два типа:
+Для текущих сценариев используются `person` (человек, домохозяйство) и `business` (организация, магазин, мастерская, кооператив или центральный узел). Тип не заменяет экономическую роль: в realistic-v2 её задаёт `groupId`, а текстовое описание хранится в `metadata.role`.
 
-| Тип | Визуализация | Когда использовать |
-|---|---|---|
-| `person` | Круг (синий) | Физическое лицо, домохозяйство |
-| `business` | Квадрат (зелёный) | Организация, магазин, мастерская, кооператив — и **любой центральный узел-«хаб»** в демо-сценарии |
+У `hub` нет отдельного поведения в v0-симуляторе; семантический хаб в этих наборах обозначается `business`. Разрешение транзита для generated realistic-v2 определяется типом кредитора: `business` допускает посредничество, `person` — нет. Каждое звено ролевого кольца является отдельным прямым платежом, поэтому не требует транзита всем кругом.
 
-> **Важно.** Тип `hub` существует в протокольной спецификации GEO (§8 «Межхабовое взаимодействие»),
-> но в **v0-симуляторе не реализован как отдельный тип**: UI не имеет для него визуального стиля
-> (рендерится как `person`), бэкенд не имеет специальной логики.
-> Во всех сценариях и фикстурах **использовать `"type": "business"`**, даже если узел
-> семантически является хабом.
+## Источник realistic-v2 и регенерация
 
-## Interact Mode — дефолтный датасет
+[generate_simulator_seed_scenarios.py](../../scripts/generate_simulator_seed_scenarios.py) берёт из `seeds/communities/<id>/community.json` **состав, группы, имена, типы, статусы и описательные роли**. Линии community не копируются: общая модель генератора выводит назначения контрагентов, обратные creditor→debtor trustlines, профили и стартовые платежи. `community.json` и `recipe.json` продолжают задавать отдельный административный мир; это принятый долг 050, решение 9 ([подробности](../../docs/ru/simulator/realistic-scenarios.md#1-два-мира-одного-сообщества)).
 
-При запуске Simulator UI в режиме `INTERACT` (реальный бэкенд, кнопка «INTERACT» в шапке)
-автоматически создаётся paused run по сценарию **`clearing-demo-10`**.
+Для просмотра результата вне tracked fixtures, из корня репозитория:
 
-Участники датасета (для справки при разборе проблем):
-
-| id | name | type |
-|---|---|---|
-| `shop` | Магазин | business |
-| `bakery` | Пекарня | business |
-| `farmer` | Фермер | business |
-| `workshop` | Майстерня | business |
-| `alice` | Алиса | person |
-| `bob` | Боб | person |
-| `olena` | Олена | person |
-| `dmytro` | Дмитро | person |
-| `natalya` | Наталя | person |
-| `vasyl` | Василь | person |
-
-Источник: `fixtures/simulator/clearing-demo-10/scenario.json`
-
-## Регенерация
-
-Regenerate realistic-v2 seed scenarios:
-```bash
-python scripts/generate_simulator_seed_scenarios.py
+```powershell
+.\.venv\Scripts\python.exe scripts/generate_simulator_seed_scenarios.py --out-root .local-run/scenario-preview
 ```
 
-События (`events`) realistic-v2 пишет тот же генератор (`_make_seasonal_stress_events`). Прежний патчер
-`scripts/generate_scenario_events.py` удалён 2026-10-16 (041 `T4105`): он перезаписывал `events` таймлайном
-`inject`/`note` с синтетическими PID, которого в текущих фикстурах нет.
+Для согласованной регенерации каноничных двух наборов:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/generate_simulator_seed_scenarios.py
+```
+
+Оба пути выполняют JSON Schema и проверку экономики до публикации каждого файла. Валидация использует настоящую `plan_payments`: seeds 42/1729/20261027, по 2000 тактов при 100 %, максимум 20 действий/такт. Входящие и исходящие суммы сначала складываются по cohort, затем проверяются дисбалансы участников и ролей; параметры и ограничения — [в правилах модели](../../docs/ru/simulator/realistic-scenarios.md#6-генерация-и-проверка-модели). Генератор сам изолирует ENV/state validation subprocess; офлайн-проверка не соединяется с БД.
+
+`events` пишет тот же генератор:
+
+- Opening — обычные `payment` на тактах 1–20, не более пяти за такт, по назначенным прямым парам. Номинальный вклад на пару ограничен половиной исходного лимита. Opening исполняется и при темпе 0; `/restart` повторяет его поверх сохранённых долгов, отказы допустимы.
+- Stress начинается на тактах 120/180/240/300. Он включён в офлайн-характеризацию 2000 тактов, но не в первые 100 тактов номинальной живой приёмки.
+- Trust drift сохраняет рост `0.05`, затухание `0` (решение по измерению 2026-10-27).
+
+Глобальный `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию `None`; положительное значение — opt-in. Для этих наборов cap 500 не требуется. Измерять результаты нужно отдельно по планам и живым денежным событиям: [CLI, replay и границы метрик](../../docs/ru/simulator/realistic-scenarios.md#7-что-измерять).
 
 ## Как загружаются сценарии
 
-- Backend загружает preset сценарии из `fixtures/simulator/*/scenario.json`
-- Загруженные (uploaded) сценарии хранятся в `.local-run/simulator/scenarios/<scenario_id>/scenario.json`
-- Список сценариев в UI может фильтроваться через `SIMULATOR_SCENARIO_ALLOWLIST`
-- Директория `_archive/` **не содержит** валидных scenario.json на верхнем уровне — runtime её игнорирует
-
-## Планы
-
-- Аудит сценариев и план демо клиринга: [`plans/scenario-audit-and-interactive-clearing-demo.md`](../../plans/scenario-audit-and-interactive-clearing-demo.md)
-- Интерактивная демонстрация в Simulator UI: [`plans/interactive-clearing-demo-in-simulator-ui.md`](../../plans/interactive-clearing-demo-in-simulator-ui.md)
+- Backend загружает preset-сценарии из `fixtures/simulator/*/scenario.json`.
+- Uploaded-сценарии хранятся в `.local-run/simulator/scenarios/<scenario_id>/scenario.json` по умолчанию; корень меняется через `SIMULATOR_STATE_DIR`.
+- `SIMULATOR_SCENARIO_ALLOWLIST` фильтрует список и допуск сценариев для не-администратора.
+- Runtime игнорирует `_archive/`: там нет `scenario.json` на уровне загружаемого preset.
+- При создании прогона runtime привязывает идентичности участников к run и сам засевает сценарий. Рецепт Admin UI не является обязательным шагом этого пути; `/restart` сохраняет идентичности и долги.

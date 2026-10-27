@@ -144,7 +144,7 @@ async def _state(db_session, pids) -> dict:
 
 
 async def _start(client, stopped_runs, scenario_id: str) -> str:
-    """A real-mode run at intensity 0: its heartbeat ticks, and no background payment moves anything."""
+    """A real-mode run paused after its first completed opening tick at intensity zero."""
     response = await client.post(
         "/api/v1/simulator/runs",
         headers=_admin(),
@@ -153,6 +153,19 @@ async def _start(client, stopped_runs, scenario_id: str) -> str:
     assert response.status_code == 200, response.text
     run_id = str(response.json()["run_id"])
     stopped_runs.append(run_id)
+    # Tempo zero still executes opening payments. Observe a completed first tick,
+    # then freeze the baseline before a controlled manual mutation.
+    observer = await runtime.subscribe(run_id, equivalent="UAH")
+    try:
+        async with asyncio.timeout(AUTO_RUN_DEADLINE_S):
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") == "run_status" and event.get("state") == "running" and event.get("sim_time_ms", 0) >= 1000:
+                    await runtime.pause(run_id)
+                    break
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+    assert runtime.get_run(run_id).tick_index == 1
     return run_id
 
 
@@ -167,8 +180,10 @@ async def _interact_seeds(client, run_id: str) -> None:
 async def _pay_one_line(client, run_id: str, scenario: dict) -> tuple[str, str]:
     """One manual payment over one declared line between two active participants: the debtor pays the creditor."""
     roster = _declared_roster(scenario)
+    opening_pairs = {frozenset((e["from"], e["to"])) for e in scenario.get("events", []) if e.get("type") == "payment"}
     line = next(
         t for t in scenario["trustlines"] if roster[t["from"]][2] == "active" and roster[t["to"]][2] == "active"
+        and frozenset((t["from"], t["to"])) not in opening_pairs
     )
     debtor, creditor = line["to"], line["from"]  # `from -> to` is creditor -> debtor
     response = await client.post(
@@ -185,15 +200,32 @@ async def _a_scenario_ran_and_left_debt(client, db_session, stopped_runs, scenar
     run_id = await _start(client, stopped_runs, scenario_id)
     scenario = _bound(run_id)
     await _interact_seeds(client, run_id)
+    opening = await _state(db_session, _declared_roster(scenario))
+    assert opening["debts"] == _opening_debts(scenario, 1000)
     debtor, creditor = await _pay_one_line(client, run_id, scenario)
     await runtime.stop(run_id)
 
     left = await _state(db_session, _declared_roster(scenario))
     # Non-vacuous precondition: there IS committed debt and a frozen participant to inherit or to disturb.
-    assert left["debts"] == {(debtor, creditor, "UAH"): Decimal("1.00")}, left["debts"]
+    assert left["debts"] == {**opening["debts"], (debtor, creditor, "UAH"): Decimal("1.00")}, left["debts"]
     assert "suspended" in {status for _n, _t, status in left["roster"].values()}
     assert left["roster"] == _declared_roster(scenario)
     return left
+
+
+def _ordinary_committed(status: dict) -> int:
+    """Opening successes must not satisfy the Auto-Run payment assertion."""
+    scripted = sum(p["kind"] == "payment" and p["status"] == "done" for p in status.get("episode_progress") or [])
+    return status["committed_total"] - scripted
+
+
+def _opening_debts(scenario: dict, sim_time_ms: int) -> dict:
+    debts = {}
+    for event in scenario.get("events", []):
+        if event.get("type") == "payment" and event["time"] <= sim_time_ms:
+            key = (event["from"], event["to"], event["equivalent"])
+            debts[key] = debts.get(key, Decimal(0)) + Decimal(event["amount"])
+    return debts
 
 
 def _assert_is_its_declaration(state: dict, scenario: dict, *, whose: str) -> None:
@@ -212,26 +244,41 @@ async def test_the_second_scenario_runs_on_its_own_participants_and_leaves_the_f
     declared = _bound(run_id)
     await _interact_seeds(client, run_id)
 
-    # Before anything moves in the second run (intensity 0): it is exactly its declaration, and owes nothing.
+    # Its first completed tick creates only its own declared opening debt, even at intensity zero.
     seeded = await _state(db_session, _declared_roster(declared))
     _assert_is_its_declaration(seeded, declared, whose=second)
-    assert seeded["debts"] == {}, f"{second} inherited debts"
+    assert seeded["debts"] == _opening_debts(declared, 1000), f"{second} inherited debts"
 
     # A controlled payment, then Auto-Run: both operate, and both stay inside the second scenario.
     debtor, creditor = await _pay_one_line(client, run_id, declared)
     after_payment = await _state(db_session, _declared_roster(declared))
-    assert after_payment["debts"] == {(debtor, creditor, "UAH"): Decimal("1.00")}
+    assert after_payment["debts"] == {**seeded["debts"], (debtor, creditor, "UAH"): Decimal("1.00")}
 
     run = runtime.get_run(run_id)
     response = await client.post(
         f"/api/v1/simulator/runs/{run_id}/intensity", headers=_admin(), json={"intensity_percent": 100}
     )
     assert response.status_code == 200, response.text
-    deadline = time.monotonic() + AUTO_RUN_DEADLINE_S
-    while run._real_money_committed_payments_total < 1 and run.state == "running" and time.monotonic() < deadline:
-        await asyncio.sleep(0.2)
-    assert run.state == "running", run.last_error
-    assert run._real_money_committed_payments_total >= 1, "Auto-Run committed no payment"
+    baseline = (await client.get(f"/api/v1/simulator/runs/{run_id}", headers=_admin())).json()
+    ordinary_before = _ordinary_committed(baseline)
+    observer = await runtime.subscribe(run_id, equivalent="UAH")
+    try:
+        await runtime.resume(run_id)
+        async with asyncio.timeout(AUTO_RUN_DEADLINE_S):
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") != "run_status" or event.get("state") != "running" or event.get("sim_time_ms", 0) <= baseline["sim_time_ms"]:
+                    continue
+                await runtime.pause(run_id)
+                current = (await client.get(f"/api/v1/simulator/runs/{run_id}", headers=_admin())).json()
+                assert current["sim_time_ms"] == event["sim_time_ms"], "Auto-Run observer overshot completion"
+                if _ordinary_committed(current) > ordinary_before:
+                    break
+                await runtime.resume(run_id)
+        assert run.state == "paused" and run.errors_total == 0, run.last_error
+        assert _ordinary_committed(current) > ordinary_before, "Auto-Run committed no ordinary payment"
+    finally:
+        await runtime.unsubscribe(run_id, observer)
     await runtime.stop(run_id)
 
     operated = await _state(db_session, _declared_roster(declared))
@@ -258,7 +305,7 @@ async def test_a_second_run_of_the_same_scenario_starts_fresh_and_leaves_the_fir
 
     seeded = await _state(db_session, _declared_roster(declared))
     _assert_is_its_declaration(seeded, declared, whose="the second run")
-    assert seeded["debts"] == {}, "the second run inherited debts"
+    assert seeded["debts"] == _opening_debts(declared, 1000), "the second run inherited debts"
     assert set(_declared_roster(declared)).isdisjoint(left["roster"])
     assert await _state(db_session, left["roster"]) == left
 
@@ -294,6 +341,28 @@ async def test_a_database_seeded_before_the_namespaces_does_not_contaminate_eith
         await runtime.stop(run_id)
         seeded = await _state(db_session, _declared_roster(declared))
         _assert_is_its_declaration(seeded, declared, whose=scenario_id)
-        assert seeded["debts"] == {}
+        assert seeded["debts"] == _opening_debts(declared, 1000)
 
     assert await _state(db_session, _declared_roster(legacy)) == old_rows
+
+
+@pytest.mark.asyncio
+async def test_scripted_opening_commits_alone_do_not_prove_auto_run(client, db_session, stopped_runs):
+    run_id = await _start(client, stopped_runs, GREENFIELD)
+    first = (await client.get(f"/api/v1/simulator/runs/{run_id}", headers=_admin())).json()
+    observer = await runtime.subscribe(run_id, equivalent="UAH")
+    try:
+        await runtime.resume(run_id)  # intensity stays ZERO: only the next opening batch can commit.
+        async with asyncio.timeout(AUTO_RUN_DEADLINE_S):
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") == "run_status" and event.get("state") == "running" and event.get("sim_time_ms") == 2000:
+                    await runtime.pause(run_id)
+                    break
+        second = (await client.get(f"/api/v1/simulator/runs/{run_id}", headers=_admin())).json()
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+    assert second["committed_total"] > first["committed_total"], "counterprobe needs real new scripted money"
+    with pytest.raises(AssertionError, match="ordinary payment"):
+        assert _ordinary_committed(second) > _ordinary_committed(first), "no ordinary payment"
+    assert _ordinary_committed(second) == _ordinary_committed(first) == 0

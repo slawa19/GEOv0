@@ -1,17 +1,19 @@
-"""Deterministic, offline planned-flow and static-policy measurements.
+"""Offline planned-flow measurements and replay of recorded real-mode launches.
 
 CLI: explicitly set ENV=test (compatible ENVIRONMENT alias), DEBUG=false, DATABASE_URL to an explicit task PostgreSQL URL and SIMULATOR_STATE_DIR
 under .local-run/test-runs/<task>/ before running. No database connection is made
 by this script; importing the real planner constructs the application's runtime
 and engine. The state override protects the developer runtime from import cleanup.
 JSON goes to stdout (or --output); a concise human table goes to stderr.
+Replay: scenario.json --replay capture.json [--output report.json]; no runtime
+imports or environment overrides are needed for a recorded launch.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import logging
@@ -268,6 +270,7 @@ def measure(
         for pid, p in graph.participants.items()
     }
     counts, amounts = defaultdict(int), defaultdict(lambda: Decimal(0))
+    pair_counts = defaultdict(int)
     inflow, outflow = defaultdict(lambda: Decimal(0)), defaultdict(lambda: Decimal(0))
     total = unreachable = direct = nonactive = 0
     per_eq = defaultdict(lambda: {"planned": 0, "unreachable": 0, "direct": 0})
@@ -279,6 +282,7 @@ def measure(
         ):
             amount = Decimal(raw_amount)
             total += 1
+            pair_counts[eq, sender, receiver] += 1
             failed = not graph.reachable(eq, sender, receiver)
             is_direct = receiver in graph.edges[eq].get(sender, ())
             unreachable += failed
@@ -319,6 +323,11 @@ def measure(
         stats = per_eq[eq]
         result_eq[eq] = {
             "planned_actions": stats["planned"],
+            "planned_pair_counts": [
+                {"sender": sender, "receiver": receiver, "count": count}
+                for (pair_eq, sender, receiver), count in sorted(pair_counts.items())
+                if pair_eq == eq
+            ],
             "planned_static_unreachable": _stat(stats["unreachable"], stats["planned"]),
             "direct_planned_payment_share": _stat(stats["direct"], stats["planned"]),
             "eligible_ordered_pair_coverage": _stat(reachable, len(pairs)),
@@ -440,9 +449,523 @@ def measure(
     }
 
 
+def _live_money(raw):
+    if raw is None or isinstance(raw, (bool, float)):
+        raise ValueError("Missing or inexact money measurement")
+    try:
+        value = Decimal(str(raw))
+    except InvalidOperation as exc:
+        raise ValueError("Invalid decimal money measurement") from exc
+    if not value.is_finite() or value < 0:
+        raise ValueError("Money must be finite and nonnegative")
+    return value
+
+
+def _live_seq(event_id, run_id):
+    prefix = f"evt_{run_id}_"
+    if not isinstance(event_id, str) or not event_id.startswith(prefix):
+        raise ValueError("Event ID belongs to another run")
+    tail = event_id[len(prefix) :]
+    if not tail.isdigit():
+        raise ValueError("Invalid event sequence")
+    return int(tail)
+
+
+def _live_normal(transactions, roles, intended):
+    successful = [p for p in transactions if p["type"] == "tx.updated"]
+    n = len(transactions)
+
+    def role_counts(items, endpoint):
+        return {
+            role: _stat(sum(roles[p[endpoint]] == role for p in items), n)
+            for role in sorted(set(roles.values()))
+        }
+
+    def assigned(items):
+        return sum((p["equivalent"], p["from"], p["to"]) in intended for p in items)
+
+    return {
+        "attempts": n,
+        "successful": len(successful),
+        "failed": n - len(successful),
+        "successful_gross": format(
+            sum((_live_money(p["amount"]) for p in successful), Decimal(0)), "f"
+        ),
+        "rejection": _stat(n - len(successful), n),
+        "assigned": _stat(assigned(successful), n),
+        "role_send": role_counts(successful, "from"),
+        "role_receive": role_counts(successful, "to"),
+        "attempt_assigned": _stat(assigned(transactions), n),
+        "attempt_role_send": role_counts(transactions, "from"),
+        "attempt_role_receive": role_counts(transactions, "to"),
+        "errors": {
+            code: sum(p.get("error", {}).get("code") == code for p in transactions)
+            for code in sorted(
+                {p["error"]["code"] for p in transactions if p["type"] == "tx.failed"}
+            )
+        },
+    }
+
+
+def _measure_live_launch(scenario, launch, roles, intended):
+    run_id, epoch = launch["run_id"], launch["epoch"]
+    expected, cadence = launch["expected_ticks"], launch["clearing_every"]
+    if type(epoch) is not int or epoch < 0 or type(expected) is not int or expected < 1:
+        raise ValueError("Invalid launch epoch or expected tick coverage")
+    if type(cadence) is not int or cadence < 1:
+        raise ValueError("Invalid clearing cadence")
+    snapshot = launch["initial_snapshot"]
+    eq = snapshot["equivalent"]
+    debt, limits = {}, {}
+    for edge in snapshot["links"]:
+        key = edge["source"], edge["target"]
+        if key in debt:
+            raise ValueError("Duplicate snapshot edge")
+        debt[key] = _live_money(edge.get("used"))
+        limits[key] = _live_money(edge.get("trust_limit"))
+    initial = launch["initial_status"]
+    if initial.get("run_id") != run_id or initial.get("sim_time_ms") != 0:
+        raise ValueError("Initial status must describe this launch before tick 1")
+    if initial.get("episode_progress"):
+        raise ValueError("Initial launch progress is not empty")
+    prior_status = initial
+    counters = ("attempts_total", "committed_total", "rejected_total", "errors_total")
+
+    def counter(status, name):
+        value = status.get(name)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"Missing runtime counter {name}")
+        return value
+
+    for name in counters:
+        counter(initial, name)
+
+    seq = _live_seq(launch["start_event_id"], run_id)
+    events, seen = [], {}
+    for envelope in launch["events"]:
+        event_id, kind, payload = envelope["id"], envelope["type"], envelope["payload"]
+        if payload.get("event_id") != event_id or payload.get("type") != kind:
+            raise ValueError("Conflicting SSE envelope")
+        if event_id in seen:
+            if envelope != seen[event_id]:
+                raise ValueError("Conflicting duplicate event ID")
+            continue
+        seen[event_id] = envelope
+        number = _live_seq(event_id, run_id)
+        if number != seq + 1:
+            raise ValueError("SSE event gap or out-of-order sequence")
+        seq = number
+        events.append(envelope)
+    completions = launch["completed_ticks"]
+    if [c["tick"] for c in completions] != list(range(1, expected + 1)):
+        raise ValueError("Missing completed tick coverage")
+    by_id = {e["id"]: i for i, e in enumerate(events)}
+    previous_end, progress = -1, {}
+    normal, scripted = [], []
+    clearings, stalls = [], []
+    max_ratio, max_sample, observed_tick = Decimal(0), None, 0
+
+    def observe():
+        nonlocal max_ratio, max_sample
+        for key, amount in debt.items():
+            limit = limits[key]
+            if limit > 0:
+                ratio = amount / limit
+                if max_sample is None or ratio > max_ratio:
+                    max_ratio = ratio
+                    max_sample = {
+                        "tick": observed_tick,
+                        "source": key[0],
+                        "target": key[1],
+                        "used": format(amount, "f"),
+                        "trust_limit": format(limit, "f"),
+                        "ratio": format(ratio, "f"),
+                    }
+
+    observe()
+
+    def patch(edges, *, required=False):
+        if required and not edges:
+            raise ValueError("Missing required money edge patch")
+        for edge in edges or []:
+            key = edge["source"], edge["target"]
+            if key not in debt:
+                raise ValueError("Money patch for unknown edge")
+            if "used" in edge:
+                debt[key] = _live_money(edge["used"])
+            elif required:
+                raise ValueError("Missing absolute used in money patch")
+            if "trust_limit" in edge:
+                limits[key] = _live_money(edge["trust_limit"])
+        observe()
+
+    payments = {
+        i: e
+        for i, e in enumerate(scenario.get("events", []))
+        if e.get("type") == "payment"
+    }
+    nominal = sum(
+        (
+            _live_money(e["amount"])
+            for e in payments.values()
+            if e.get("equivalent", scenario.get("baseEquivalent")) == eq
+            and type(e.get("time")) is int
+            and e["time"] <= 20000
+        ),
+        Decimal(0),
+    )
+    for completion in completions:
+        tick, event_id, status = (
+            completion["tick"],
+            completion["event_id"],
+            completion["status"],
+        )
+        observed_tick = tick
+        if event_id not in by_id or by_id[event_id] <= previous_end:
+            raise ValueError("Missing or reused post-tick SSE completion")
+        end = by_id[event_id]
+        completed = events[end]
+        payload = completed["payload"]
+        if (
+            completed["type"] != "run_status"
+            or payload.get("sim_time_ms") != tick * 1000
+            or payload.get("run_id") != run_id
+        ):
+            raise ValueError("Completion must link this tick's post-tick run_status")
+        if status.get("run_id") != run_id or status.get("sim_time_ms") != tick * 1000:
+            raise ValueError("GET status does not match completed tick")
+        if any(counter(status, name) != counter(payload, name) for name in counters):
+            raise ValueError("GET/SSE status counters disagree")
+        if (status.get("consec_all_rejected_ticks") or 0) != (
+            payload.get("consec_all_rejected_ticks") or 0
+        ):
+            raise ValueError("GET/SSE stall evidence disagrees")
+        if (status.get("consec_all_rejected_ticks") or 0) >= 3:
+            stalls.append(tick)
+        transactions, cleared, cycle_amount = [], Decimal(0), Decimal(0)
+        for event in events[previous_end + 1 : end + 1]:
+            kind, p = event["type"], event["payload"]
+            if kind == "run_status":
+                continue
+            if p.get("equivalent") != eq:
+                raise ValueError(
+                    "Recording must contain all events of one measured equivalent"
+                )
+            if kind in ("tx.updated", "tx.failed"):
+                if p.get("from") not in roles or p.get("to") not in roles:
+                    raise ValueError("Unknown transaction endpoint")
+                if kind == "tx.updated":
+                    _live_money(p.get("amount"))
+                    patch(p.get("edge_patch"), required=True)
+                elif not p.get("error", {}).get("code"):
+                    raise ValueError("Missing failed payment outcome")
+                transactions.append(p)
+            elif kind == "clearing.done":
+                if tick % cadence:
+                    raise ValueError(
+                        "Unscheduled clearing cannot be attributed to scheduled interval"
+                    )
+                before = sum(debt.values(), Decimal(0))
+                patch(p.get("edge_patch"), required=True)
+                reduction = before - sum(debt.values(), Decimal(0))
+                if reduction < 0:
+                    raise ValueError("Clearing increased edge debt")
+                cleared += reduction
+                if p.get("cleared_amount") is None:
+                    cycle_amount = None
+                elif cycle_amount is not None:
+                    cycle_amount += _live_money(p["cleared_amount"])
+            elif kind == "topology.changed":
+                topology = p.get("payload", {})
+                for edge in topology.get("added_edges", []):
+                    if edge["equivalent_code"] != eq:
+                        raise ValueError("Mixed equivalent topology")
+                    key = edge["from_pid"], edge["to_pid"]
+                    if key in debt:
+                        raise ValueError("Duplicate added edge")
+                    debt[key], limits[key] = Decimal(0), _live_money(edge.get("limit"))
+                patch(topology.get("edge_patch"))
+                for edge in topology.get("removed_edges", []):
+                    key = edge["from_pid"], edge["to_pid"]
+                    if key not in debt or debt[key] != 0:
+                        raise ValueError("Removed edge has unavailable or nonzero debt")
+                    del debt[key], limits[key]
+            else:
+                raise ValueError(f"Unmeasured event type {kind}")
+        success = sum(p["type"] == "tx.updated" for p in transactions)
+        delta = {
+            name: counter(status, name) - counter(prior_status, name)
+            for name in counters
+        }
+        if (
+            delta["attempts_total"] != len(transactions)
+            or delta["committed_total"] != success
+            or delta["rejected_total"] + delta["errors_total"]
+            != len(transactions) - success
+            or any(n < 0 for n in delta.values())
+        ):
+            raise ValueError(
+                "Runtime counters do not reconcile with terminal SSE outcomes"
+            )
+        current = {}
+        for record in status.get("episode_progress") or []:
+            index = record["index"]
+            if record.get("epoch") != epoch or index in current:
+                raise ValueError("Mixed launch epoch or duplicate episode progress")
+            story = scenario.get("events", [])
+            if (
+                type(index) is not int
+                or not 0 <= index < len(story)
+                or story[index].get("type") != record.get("kind")
+            ):
+                raise ValueError(
+                    "Episode progress does not belong to bound scenario event"
+                )
+            current[index] = record
+        matched = set()
+        for index, event in payments.items():
+            due = event.get("time")
+            if type(due) is not int:
+                raise ValueError("Unmeasurable scripted payment time")
+            old, record = progress.get(index), current.get(index)
+            if due > tick * 1000:
+                if record is not None:
+                    raise ValueError("Scripted progress before due tick")
+                continue
+            if record is None:
+                raise ValueError("Missing due scripted episode progress")
+            if old and old["status"] in ("done", "refused"):
+                if old != record:
+                    raise ValueError("Terminal scripted progress changed")
+                continue
+            attempts = record.get("attempts")
+            if (
+                type(attempts) is not int
+                or attempts != (old.get("attempts", 0) if old else 0) + 1
+            ):
+                raise ValueError("Scripted attempt history unavailable")
+            expected_payment = {
+                "from": event["from"],
+                "to": event["to"],
+                "amount": event["amount"],
+                "equivalent": event.get("equivalent", scenario.get("baseEquivalent")),
+            }
+            actual_payment = record.get("payment")
+            if (
+                record.get("kind") != "payment"
+                or actual_payment != expected_payment
+                or record.get("status") not in ("done", "refused", "incomplete")
+            ):
+                raise ValueError("Scripted progress payment/outcome mismatch")
+            kind = "tx.updated" if record["status"] == "done" else "tx.failed"
+            candidates = [
+                i
+                for i, p in enumerate(transactions)
+                if i not in matched
+                and p["type"] == kind
+                and all(
+                    p.get(k) == expected_payment[k]
+                    for k in ("equivalent", "from", "to")
+                )
+                and (
+                    _live_money(p.get("amount")) == _live_money(event["amount"])
+                    if kind == "tx.updated"
+                    else p.get("error", {}).get("code") == record.get("reason")
+                )
+            ]
+            if not candidates:
+                raise ValueError("Scripted outcome multiset does not reconcile")
+            chosen = candidates[
+                -1
+            ]  # normals precede scripts; identical outcomes are metrically interchangeable.
+            matched.add(chosen)
+            scripted.append(
+                {
+                    "type": kind,
+                    "amount": event["amount"],
+                    "tick": tick,
+                    "status": record["status"],
+                    "reason": record.get("reason"),
+                }
+            )
+        if any(index not in current for index in progress):
+            raise ValueError("Episode progress disappeared")
+        normal.extend(
+            {**p, "tick": tick} for i, p in enumerate(transactions) if i not in matched
+        )
+        if tick % cadence == 0:
+            turnover = sum(
+                (
+                    _live_money(p["amount"])
+                    for p in normal
+                    if tick - cadence < p["tick"] <= tick and p["type"] == "tx.updated"
+                ),
+                Decimal(0),
+            )
+            uses_opening = tick == cadence and nominal > 0
+            denominator = nominal if uses_opening else turnover
+            if denominator <= 0:
+                raise ValueError("Missing or zero scheduled clearing denominator")
+            clearings.append(
+                {
+                    "tick": tick,
+                    "cleared_edge_debt": format(cleared, "f"),
+                    "cleared_cycle_amount": (
+                        format(cycle_amount, "f") if cycle_amount is not None else None
+                    ),
+                    "normal_successful_turnover": format(turnover, "f"),
+                    "denominator": format(denominator, "f"),
+                    "denominator_basis": (
+                        "nominal_opening_gross"
+                        if uses_opening
+                        else "normal_successful_turnover"
+                    ),
+                    "share": _ratio(cleared, denominator),
+                }
+            )
+        previous_end, prior_status, progress = end, status, current
+    for event in events[previous_end + 1 :]:
+        payload = event["payload"]
+        if (
+            event["type"] != "run_status"
+            or payload.get("run_id") != run_id
+            or payload.get("sim_time_ms") != expected * 1000
+            or any(
+                counter(payload, name) != counter(prior_status, name)
+                for name in counters
+            )
+        ):
+            raise ValueError("Uncompleted trailing SSE events")
+    if not normal and initial.get("intensity_percent") != 0:
+        raise ValueError("Missing or zero normal attempt denominator")
+    return {
+        "epoch": epoch,
+        "equivalent": eq,
+        "completed_ticks": expected,
+        "normal": _live_normal(normal, roles, intended),
+        "windows": {
+            name: (
+                _live_normal(
+                    [p for p in normal if lo <= p["tick"] <= hi], roles, intended
+                )
+                if expected >= lo
+                else None
+            )
+            for name, lo, hi in (("opening", 1, 20), ("steady", 21, expected))
+        },
+        "scripted": {
+            "successful": sum(p["type"] == "tx.updated" for p in scripted),
+            "failed": sum(p["type"] == "tx.failed" for p in scripted),
+            "refused": sum(p["status"] == "refused" for p in scripted),
+            "incomplete": sum(p["status"] == "incomplete" for p in scripted),
+            "successful_gross": format(
+                sum(
+                    (
+                        _live_money(p["amount"])
+                        for p in scripted
+                        if p["type"] == "tx.updated"
+                    ),
+                    Decimal(0),
+                ),
+                "f",
+            ),
+            "refused_gross": format(
+                sum(
+                    (
+                        _live_money(p["amount"])
+                        for p in scripted
+                        if p["status"] == "refused"
+                    ),
+                    Decimal(0),
+                ),
+                "f",
+            ),
+            "incomplete_gross": format(
+                sum(
+                    (
+                        _live_money(p["amount"])
+                        for p in scripted
+                        if p["status"] == "incomplete"
+                    ),
+                    Decimal(0),
+                ),
+                "f",
+            ),
+            "errors": {
+                reason: sum(p["reason"] == reason for p in scripted)
+                for reason in sorted({p["reason"] for p in scripted if p["reason"]})
+            },
+            "nominal_gross": format(nominal, "f"),
+        },
+        "clearings": clearings,
+        "max_debt_limit": format(max_ratio, "f") if max_sample else None,
+        "max_debt_limit_sample": max_sample,
+        "stall_ticks": stalls,
+        "final_debt_by_edge": [
+            {"source": a, "target": b, "used": format(amount, "f")}
+            for (a, b), amount in sorted(debt.items())
+        ],
+    }
+
+
+def measure_live(bound_scenario, recording):
+    """Measure complete recorded tick prefixes, without planner or runtime imports.
+
+    Each launch supplies epoch/run_id, initial_snapshot and initial_status at
+    sim_time=0, start_event_id cursor, ordered SSE envelopes {id,type,payload},
+    completed_ticks {tick,event_id,status} (post-tick SSE plus matching GET
+    RunStatus), expected_ticks and clearing_every. All SSE IDs must be contiguous;
+    exact replay duplicates are ignored. Restart launches have separate snapshots,
+    progress and epochs. Capture parameters may be retained as extra metadata.
+
+    This parses evidence, not acceptance thresholds. Missing required evidence
+    raises ValueError; future windows are None, observed scheduled empty clearing
+    is zero. Tempo-zero launches expose undefined normal shares as None.
+    The first clearing uses positive nominal opening gross when present;
+    otherwise its denominator is successful normal turnover, as for later windows.
+    Failed SSE has no amount: endpoint/currency/error counts are reconciled;
+    scripted attempted gross comes from progress and normal failed gross is not
+    invented. Identical failed endpoint/outcome records are interchangeable.
+    max_debt_limit_sample is observed on initial snapshot and ordered money/limit
+    patches, not a claim of continuous or unreported database state.
+    """
+    try:
+        roles = {
+            str(p["id"]): str(p.get("groupId") or "(ungrouped)")
+            for p in bound_scenario["participants"]
+        }
+        intended = {
+            (
+                str(line.get("equivalent", bound_scenario.get("baseEquivalent"))),
+                str(line["to"]),
+                str(line["from"]),
+            )
+            for line in bound_scenario["trustlines"]
+            if str(line.get("status", "active")).lower() == "active"
+            and _live_money(line["limit"]) > 0
+        }
+        launches = recording["launches"]
+        if not launches or len({(x["run_id"], x["epoch"]) for x in launches}) != len(
+            launches
+        ):
+            raise ValueError("Missing or duplicate launch epoch")
+        return {
+            "scenario_id": bound_scenario.get("scenario_id"),
+            "launches": [
+                _measure_live_launch(bound_scenario, launch, roles, intended)
+                for launch in launches
+            ],
+        }
+    except (KeyError, TypeError, IndexError, AttributeError) as exc:
+        raise ValueError(f"Missing or malformed live recording: {exc}") from exc
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", type=Path)
+    parser.add_argument(
+        "--replay", type=Path, help="measure a live recording instead of offline plans"
+    )
     parser.add_argument("--ticks", type=int, default=2000)
     parser.add_argument("--intensity", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
@@ -464,16 +987,21 @@ def main(argv=None):
             if not code.strip():
                 raise ValueError("empty equivalent in --eq-precision")
             precision[code.strip().upper()] = int(digits)
-        result = measure(
-            json.loads(args.scenario.read_text(encoding="utf-8")),
-            ticks=args.ticks,
-            intensity=args.intensity,
-            seed=args.seed,
-            actions_per_tick=args.actions_per_tick,
-            amount_cap=args.amount_cap,
-            precision_by_eq=precision,
-            default_precision=args.precision,
-            max_hops=args.max_hops,
+        scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
+        result = (
+            measure_live(scenario, json.loads(args.replay.read_text(encoding="utf-8")))
+            if args.replay
+            else measure(
+                scenario,
+                ticks=args.ticks,
+                intensity=args.intensity,
+                seed=args.seed,
+                actions_per_tick=args.actions_per_tick,
+                amount_cap=args.amount_cap,
+                precision_by_eq=precision,
+                default_precision=args.precision,
+                max_hops=args.max_hops,
+            )
         )
         payload = (
             json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
@@ -483,6 +1011,8 @@ def main(argv=None):
             args.output.write_text(payload, encoding="utf-8")
         else:
             print(payload, end="")
+        if args.replay:
+            return 0
         print(
             "EQ    plans  unreachable/plans  reachable/eligible  direct/plans  cycles3/4  circulation",
             file=sys.stderr,

@@ -49,7 +49,40 @@ def test_policy_nontransit_creditor_business_and_endpoints():
         assert sampled["denominator"] > 0
         assert sampled["numerator"] == 0
         coverage = measured["equivalents"]["UAH"]["eligible_ordered_pair_coverage"]
-        assert (coverage["numerator"], coverage["denominator"]) == (expected_coverage, 6)
+        assert (coverage["numerator"], coverage["denominator"]) == (
+            expected_coverage,
+            6,
+        )
+
+
+def test_pair_counts_cover_actual_plans_including_frozen_and_indirect(monkeypatch):
+    from app.core.simulator.real_payment_planner import RealPaymentPlanner
+
+    raw = scenario([("a", "b"), ("b", "c")])
+    raw["participants"][2]["status"] = "frozen"
+    # A generic measurement must count every returned action, even one outside
+    # the static graph. Otherwise assigned-share denominators silently improve.
+    monkeypatch.setattr(
+        RealPaymentPlanner,
+        "plan_payments",
+        lambda *a, **k: [
+            ("UAH", "a", "b", "1"),
+            ("UAH", "a", "c", "2"),
+            ("UAH", "a", "c", "3"),
+            ("UAH", "b", "a", "4"),
+        ],
+    )
+    report = measure(raw, ticks=2)
+    assert report["equivalents"]["UAH"]["planned_pair_counts"] == [
+        {"sender": "a", "receiver": "b", "count": 2},
+        {"sender": "a", "receiver": "c", "count": 4},
+        {"sender": "b", "receiver": "a", "count": 2},
+    ]
+    assert report["planned_actions"] == 8
+    assert report["planned_nonactive_endpoint_actions"] == 4
+    assert report["direct_planned_payment_share"]["numerator"] == 2
+    monkeypatch.setattr(RealPaymentPlanner, "plan_payments", lambda *a, **k: [])
+    assert measure(raw, ticks=1)["equivalents"]["UAH"]["planned_pair_counts"] == []
 
 
 def test_reverse_line_policy_and_alternate_valid_path():
