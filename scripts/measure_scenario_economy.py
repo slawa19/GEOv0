@@ -268,6 +268,7 @@ def measure(
         for pid, p in graph.participants.items()
     }
     counts, amounts = defaultdict(int), defaultdict(lambda: Decimal(0))
+    pair_counts = defaultdict(int)
     inflow, outflow = defaultdict(lambda: Decimal(0)), defaultdict(lambda: Decimal(0))
     total = unreachable = direct = nonactive = 0
     per_eq = defaultdict(lambda: {"planned": 0, "unreachable": 0, "direct": 0})
@@ -279,6 +280,7 @@ def measure(
         ):
             amount = Decimal(raw_amount)
             total += 1
+            pair_counts[eq, sender, receiver] += 1
             failed = not graph.reachable(eq, sender, receiver)
             is_direct = receiver in graph.edges[eq].get(sender, ())
             unreachable += failed
@@ -319,6 +321,11 @@ def measure(
         stats = per_eq[eq]
         result_eq[eq] = {
             "planned_actions": stats["planned"],
+            "planned_pair_counts": [
+                {"sender": sender, "receiver": receiver, "count": count}
+                for (pair_eq, sender, receiver), count in sorted(pair_counts.items())
+                if pair_eq == eq
+            ],
             "planned_static_unreachable": _stat(stats["unreachable"], stats["planned"]),
             "direct_planned_payment_share": _stat(stats["direct"], stats["planned"]),
             "eligible_ordered_pair_coverage": _stat(reachable, len(pairs)),
