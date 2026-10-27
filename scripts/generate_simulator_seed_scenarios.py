@@ -577,7 +577,7 @@ def _make_settings_realistic_v2() -> dict[str, Any]:
         "trust_drift": {
             "enabled": True,
             "growth_rate": 0.05,
-            "decay_rate": 0.02,
+            "decay_rate": 0,
             "max_growth": 2.0,
             "min_limit_ratio": 0.3,
             "overload_threshold": 0.8,
