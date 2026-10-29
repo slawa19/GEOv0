@@ -46,7 +46,13 @@ async def test_signed_close_manual_clearing_accounts_for_all_150_before_removal(
     run, sse = _run(code, people), RecordingSse()
     monkeypatch.setattr(settings, "SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
-    monkeypatch.setattr(simulator_module.runtime, "_sse", sse)
+    original_dispatch = simulator_module.runtime._sse._dispatch_locked
+
+    def record_dispatch(*, run, payload):
+        sse.broadcast(run.run_id, payload)
+        original_dispatch(run=run, payload=payload)
+
+    monkeypatch.setattr(simulator_module.runtime._sse, "_dispatch_locked", record_dispatch)
     response = await client.post(f"/api/v1/simulator/runs/{run.run_id}/actions/clearing-real",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN}, json={"equivalent": code})
     assert response.status_code == 200, response.text

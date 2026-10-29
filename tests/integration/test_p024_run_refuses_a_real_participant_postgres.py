@@ -21,6 +21,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
@@ -30,9 +31,11 @@ from sqlalchemy import func, or_, select
 
 from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
+from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.equivalent import Equivalent
+from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.simulator_tick_stand import RecordingSse
@@ -131,6 +134,166 @@ def _scenario(eq_code: str, pids: list[str], trustlines: list[tuple[str, str]], 
         "behaviorProfiles": [],
         "events": events or [],
     }
+
+
+async def _cached_seed_world(factory, monkeypatch):
+    """A real old graph and a new scenario whose first tick owes exactly 3.00."""
+    from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+
+    n = _tag()
+    code = f"SC{n}"
+    old = [f"old_a_{n}", f"old_b_{n}"]
+    own = [f"new_a_{n}", f"new_b_{n}"]
+    scenario = _scenario(code, own, [(own[1], own[0])], events=[{
+        "time": 0, "type": "payment", "from": own[0], "to": own[1], "equivalent": code, "amount": "3.00",
+    }])
+    install_tick_stand(monkeypatch, factory)
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
+    async with factory() as session:
+        await RealScenarioSeeder().seed_scenario_into_db(
+            session=session, scenario=_scenario(code, old, [(old[1], old[0])]))
+        await session.commit()
+        await PaymentRouter(session).build_graph(code, refresh=True)
+    run = _fresh_run(f"seed-cache-{n}", f"seed-cache-{n}", scenario)
+    return code, own, scenario, run, _runner(run, scenario)
+
+
+async def _seed_money_state(factory, own, code):
+    async with factory() as session:
+        people = (await session.execute(select(Participant.id).where(Participant.pid.in_(own)))).scalars().all()
+        lines = await session.scalar(select(func.count()).select_from(TrustLine).where(
+            TrustLine.from_participant_id.in_(people), TrustLine.to_participant_id.in_(people)))
+        debts = (await session.execute(select(Debt.amount).where(
+            Debt.debtor_id.in_(people), Debt.creditor_id.in_(people), Debt.amount != 0))).scalars().all()
+        return len(people), lines, list(debts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["refresh", "eviction-control"])
+async def test_seed_refresh_waits_for_the_older_read_before_opening_money(factory, monkeypatch, boundary):
+    """Eviction alone still allows the pre-commit in-flight graph to publish afterward."""
+    import app.core.simulator.tick as tick_module
+
+    code, own, scenario, run, runner = await _cached_seed_world(factory, monkeypatch)
+    PaymentRouter.invalidate_cache(code)
+    read_finished, release_read, refresh_entered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_refresh = tick_module.refresh_seeded_routing_after_commit
+    async with factory() as old_session:
+        original_execute = old_session.execute
+
+        async def hold_participant_result(statement, *args, **kwargs):
+            result = await original_execute(statement, *args, **kwargs)
+            if any(c.get("entity") is Participant for c in getattr(statement, "column_descriptions", [])):
+                read_finished.set()
+                await release_read.wait()
+            return result
+
+        monkeypatch.setattr(old_session, "execute", hold_participant_result)
+        old_router = PaymentRouter(old_session)
+        pending = asyncio.create_task(old_router.build_graph(code, use_shared_cache=True))
+
+        async def after_commit(**kwargs):
+            assert await _seed_money_state(factory, own, code) == (2, 1, [])
+            refresh_entered.set()
+            if boundary == "eviction-control":
+                PaymentRouter.invalidate_cache(code)
+                release_read.set()
+                await pending  # the old read publishes AFTER the eviction
+            else:
+                await original_refresh(**kwargs)
+
+        monkeypatch.setattr(tick_module, "refresh_seeded_routing_after_commit", after_commit)
+        tick = None
+        try:
+            await asyncio.wait_for(read_finished.wait(), 10)
+            tick = asyncio.create_task(_tick(runner, run))
+            await asyncio.wait_for(refresh_entered.wait(), 10)
+            if boundary == "refresh":
+                assert not pending.done()
+            release_read.set()
+            await asyncio.wait_for(asyncio.gather(tick, pending), 30)
+        finally:
+            release_read.set()
+            for task in (tick, pending):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(*(t for t in (tick, pending) if t is not None), return_exceptions=True)
+    assert set(own).isdisjoint(old_router.uuids), "premise: the held read predates the new topology"
+    expected = [] if boundary == "eviction-control" else [Decimal("3.00")]
+    assert await _seed_money_state(factory, own, code) == (2, 1, expected)
+    assert run._real_seeded is True
+    if boundary == "eviction-control":
+        assert run.rejected_total == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["tick", "interact"])
+@pytest.mark.parametrize("fault", ["failure", "cancellation"])
+async def test_postcommit_refresh_retry_preserves_seed_and_executes_opening_once(factory, monkeypatch, owner, fault):
+    import app.api.v1.simulator as simulator_module
+    import app.core.simulator.tick as tick_module
+
+    code, own, scenario, run, runner = await _cached_seed_world(factory, monkeypatch)
+    module = tick_module if owner == "tick" else simulator_module
+    original_refresh = module.refresh_seeded_routing_after_commit
+
+    async def fail_after_commit(**_kwargs):
+        assert await _seed_money_state(factory, own, code) == (2, 1, [])
+        if fault == "cancellation":
+            raise asyncio.CancelledError()
+        raise RuntimeError("forced postcommit routing refresh failure")
+
+    monkeypatch.setattr(module, "refresh_seeded_routing_after_commit", fail_after_commit)
+    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _rid: run)
+
+    async def seed():
+        if owner == "tick":
+            await _tick(runner, run)
+        else:
+            async with factory() as session:
+                response = await simulator_module._ensure_run_seeded(run.run_id, session)
+            assert response is not None and response.status_code == 503
+
+    if fault == "cancellation":
+        with pytest.raises(asyncio.CancelledError):
+            await seed()
+    else:
+        await seed()
+    assert run._real_seeded is False
+    assert await _seed_money_state(factory, own, code) == (2, 1, [])
+    assert set(own).isdisjoint(PaymentRouter._graph_cache[code][5])
+
+    monkeypatch.setattr(module, "refresh_seeded_routing_after_commit", original_refresh)
+    if owner == "interact":
+        async with factory() as session:
+            assert await simulator_module._ensure_run_seeded(run.run_id, session) is None
+    await _tick(runner, run)
+    assert run._real_seeded is True
+    assert await _seed_money_state(factory, own, code) == (2, 1, [Decimal("3.00")])
+    await _tick(runner, run)  # spent scripted money is not executed a second time
+    assert await _seed_money_state(factory, own, code) == (2, 1, [Decimal("3.00")])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["tick", "interact"])
+async def test_refused_seed_rolls_back_without_publishing_its_topology(factory, monkeypatch, owner):
+    import app.api.v1.simulator as simulator_module
+
+    code, own, scenario, run, runner = await _cached_seed_world(factory, monkeypatch)
+    cached = PaymentRouter._graph_cache[code]
+    scenario["trustlines"][0]["policy"] = {"daily_limit": "invalid"}
+    if owner == "tick":
+        await _tick(runner, run)
+        assert run.state == "error" and run.last_error["code"] == "SCENARIO_TRUSTLINE_REFUSED"
+    else:
+        monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _rid: run)
+        async with factory() as session:
+            response = await simulator_module._ensure_run_seeded(run.run_id, session)
+            assert response is not None and response.status_code == 409
+            await session.commit()  # later work cannot commit anything of the rejected seed
+    assert run._real_seeded is False
+    assert await _seed_money_state(factory, own, code) == (0, 0, [])
+    assert PaymentRouter._graph_cache[code] is cached
 
 
 async def _trustlines_touching(factory, pid: str) -> int:
@@ -434,20 +597,9 @@ async def test_interact_seeding_of_a_real_participant_is_409_with_code_pid_and_r
     eq_code = f"P24H{n}"
     newcomer = f"p024_new_{n}"
     scenario = _scenario(eq_code, [real.pid, newcomer], [(real.pid, newcomer)])
-    registered = RunRecord(run_id="p024-http", scenario_id="p024-http", mode="real", state="paused")
-    registered._scenario_raw = scenario
-    monkeypatch.setitem(simulator_module.runtime._runs, "p024-http", registered)
-    run = SimpleNamespace(
-        run_id="p024-http",
-        scenario_id="p024-http",
-        mode="real",
-        state="paused",
-        owner_id="",
-        _scenario_raw=scenario,
-        _real_seeded=False,
-        _real_seeding_lock=None,
-    )
-    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda run_id: run)
+    run = RunRecord(run_id="p024-http", scenario_id="p024-http", mode="real", state="paused")
+    run._scenario_raw = scenario
+    monkeypatch.setitem(simulator_module.runtime._runs, "p024-http", run)
 
     response = await client.post(
         "/api/v1/simulator/runs/p024-http/actions/trustline-create",

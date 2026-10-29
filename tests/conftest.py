@@ -601,29 +601,6 @@ async def _session_for_one_test(*, mode_b: bool):
 
     await _ensure_schema_initialized()
 
-    # Simulator runtime can spawn background tasks (heartbeat / real-mode tick) that keep DB
-    # connections open; stop any run a previous test left behind before this test starts.
-    try:
-        from app.core.simulator.runtime import runtime as simulator_runtime
-
-        # Ensure simulator cleanup uses the same test DB sessionmaker.
-        import app.db.session as app_db_session
-        _orig_async_session_local = app_db_session.AsyncSessionLocal
-        app_db_session.AsyncSessionLocal = TestingSessionLocal
-        try:
-            with simulator_runtime._lock:
-                run_ids = list(simulator_runtime._runs.keys())
-
-            for run_id in run_ids:
-                try:
-                    await simulator_runtime.stop(run_id)
-                except Exception:
-                    pass
-        finally:
-            app_db_session.AsyncSessionLocal = _orig_async_session_local
-    except Exception:
-        pass
-
     if mode_b:
         async with _committed_database_context() as database:
             async with database.sessionmaker() as session:
@@ -650,6 +627,113 @@ async def _session_for_one_test(*, mode_b: bool):
             # class FIXA, 62 tests in 24 files); SQLite never ran this branch.
             yield session
         await transaction.rollback()
+
+
+def _assert_test_simulator_runs_drained(simulator_runtime, runs, tasks) -> None:
+    """Neither an early `stopped` state nor detached task fields proves a completed stop."""
+
+    with simulator_runtime._lock:
+        for run in runs:
+            tasks.update(t for t in (run._heartbeat_task, run._artifact_events_task, run._real_clearing_task) if t is not None)
+            if run.run_id in simulator_runtime._run_lifecycle._cleanup_in_progress:
+                raise RuntimeError(f"simulator test cleanup is still in progress: {run.run_id}")
+    if any(not task.done() for task in tasks):
+        raise RuntimeError("simulator test cleanup left a live heartbeat, artifact writer or clearing task")
+
+
+async def _stop_test_simulator_runs(simulator_runtime, runs, tasks) -> None:
+    """Finish full production stop while the test's factories, clone and loop still exist.
+
+    Shield the cleanup itself: interruption must wait for the drain and remain a teardown failure.
+    On a failed stop, cancel/await the known tasks but keep the records for diagnosis/retry.
+    """
+
+    async def stop_all():
+        failures = []
+        for run in runs:
+            with simulator_runtime._lock:
+                if simulator_runtime._runs.get(run.run_id) is not run:
+                    continue  # a preceding full stop may have pruned this ended record
+            try:
+                await simulator_runtime.stop(run.run_id)
+            except BaseException as exc:
+                failures.append(exc)
+        if not failures:
+            try:
+                _assert_test_simulator_runs_drained(simulator_runtime, runs, tasks)
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            for run in runs:
+                tasks.update(t for t in (run._heartbeat_task, run._artifact_events_task, run._real_clearing_task) if t is not None)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise BaseExceptionGroup("simulator test cleanup failed", failures)
+
+    cleanup = asyncio.create_task(stop_all(), name="simulator-test-cleanup")
+    interrupted = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            interrupted = True
+    cleanup.result()
+    if interrupted:
+        raise asyncio.CancelledError("simulator test cleanup was interrupted")
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """Clean test-owned singleton runs before fixture teardown; retire after finalizers.
+
+    This boundary also covers direct committed_database callers and tests without db_session.
+    client/clone/monkeypatch finalizers have not run yet, and the function's event_loop is alive.
+    Records stay accessible to fixture finalizers that themselves call stop(). No registry or
+    retention policy is changed during a test; successful cleanup retires records, failed cleanup retains them and fails loudly.
+    """
+
+    from app.core.simulator.runtime import runtime as simulator_runtime
+
+    with simulator_runtime._lock:
+        runs = list(simulator_runtime._runs.values())
+        tasks = {t for r in runs for t in (r._heartbeat_task, r._artifact_events_task, r._real_clearing_task) if t is not None}
+    failure = None
+    private_loop = None
+    try:
+        if runs:
+            loops = {t.get_loop() for t in tasks if not t.done()}
+            loop = item.funcargs.get("event_loop")
+            if len(loops) > 1 or (loops and loop is not None and loop not in loops):
+                raise RuntimeError("simulator test tasks belong to a different event loop")
+            if loops:
+                loop = next(iter(loops))
+            if loop is None:
+                # Synchronous tests may register taskless records; never move a live task here.
+                loop = private_loop = asyncio.new_event_loop()
+            loop.run_until_complete(_stop_test_simulator_runs(simulator_runtime, runs, tasks))
+    except BaseException as exc:
+        failure = exc
+    finally:
+        if private_loop is not None:
+            private_loop.close()
+
+    yield  # keep records available to fixture-owned stop/inspection finalizers
+
+    if failure is not None:
+        raise failure
+    _assert_test_simulator_runs_drained(simulator_runtime, runs, tasks)
+    with simulator_runtime._lock:
+        owned = {id(run) for run in runs}
+        if any(id(run) not in owned for run in simulator_runtime._runs.values()):
+            raise RuntimeError("a fixture finalizer created a simulator run after the test cleanup")
+        for run in runs:
+            if simulator_runtime._runs.get(run.run_id) is run:
+                run._subs.clear()
+                del simulator_runtime._runs[run.run_id]
+                if simulator_runtime._active_run_id_by_owner.get(run.owner_id) == run.run_id:
+                    del simulator_runtime._active_run_id_by_owner[run.owner_id]
 
 
 #: MODE B FOR ONE TEST OF THE DEFAULT TIER (017 stage 2b, T1702). Put `@MODE_B` on a test, or

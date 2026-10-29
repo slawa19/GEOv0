@@ -26,7 +26,6 @@ from __future__ import annotations
 import base64
 import uuid
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 from nacl.signing import SigningKey
@@ -377,18 +376,8 @@ def run_owning_the_cycle(monkeypatch):
     import app.api.v1.simulator as simulator_module
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda run_id: SimpleNamespace(
-            run_id=str(run_id),
-            state="running",
-            owner_id="",
-            _real_seeded=True,
-            _real_seeding_lock=None,
-        ),
-    )
     run = RunRecord(run_id="run-t1544", scenario_id="scn-t1544", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {
         "participants": [
             {"id": pid, "name": pid.upper(), "type": "person", "status": "active"}

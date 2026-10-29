@@ -49,6 +49,7 @@ from app.core.simulator.real_scenario_seeder import (
     RealScenarioSeeder,
     ScenarioTrustLineRefused,
     SimulatorPidTakenError,
+    refresh_seeded_routing_after_commit,
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription, bump_topology_epoch
@@ -690,6 +691,9 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 # the request's, and nothing staged here may reach a later commit on it.
                 await session.rollback()
                 raise
+            # The seed is durable. Keep the flag false until refresh succeeds so a
+            # failure/cancellation retries idempotent seeding, without running money.
+            await refresh_seeded_routing_after_commit(session=session, scenario=scenario)
             run._real_seeded = True
             logger.debug(
                 "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",

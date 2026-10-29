@@ -107,13 +107,8 @@ def interact(monkeypatch, db_session):
     n = uuid.uuid4().hex[:6].upper()
     w = SimpleNamespace(run_id=f"p021-i-{n}", a=f"P21I_A_{n}", b=f"P21I_B_{n}", eq=f"P21I{n}")
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda run_id: SimpleNamespace(run_id=str(run_id), state="running", owner_id="", _real_seeded=True,
-                                       _real_seeding_lock=None),
-    )
     run = RunRecord(run_id=w.run_id, scenario_id="p021-interact", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {"participants": [{"id": w.a}, {"id": w.b}], "trustlines": []}
     monkeypatch.setitem(simulator_module.runtime._runs, w.run_id, run)
     return w

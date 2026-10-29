@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -43,18 +42,8 @@ def _register_run(monkeypatch, *, run_id: str, pids: list[str]):
     import app.api.v1.simulator as simulator_module
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda rid: SimpleNamespace(
-            run_id=str(rid),
-            state="running",
-            owner_id="",
-            _real_seeded=True,
-            _real_seeding_lock=None,
-        ),
-    )
     run = RunRecord(run_id=run_id, scenario_id="scn", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {
         "participants": [
             {"id": p, "name": p.upper(), "type": "person", "status": "active"} for p in pids

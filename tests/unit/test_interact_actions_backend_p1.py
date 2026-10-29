@@ -35,27 +35,12 @@ from tests.conftest import MODE_B
 
 @pytest.fixture
 def interact_actions_enabled(monkeypatch):
-    """Enable simulator interact actions and bypass run lifecycle checks."""
+    """Enable simulator interact actions on a registered, already seeded run."""
 
     import app.api.v1.simulator as simulator_module
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    # Avoid depending on in-memory runtime run registry.
-    # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()` (FIX-CR4).
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda run_id: SimpleNamespace(
-            run_id=str(run_id),
-            state="running",
-            owner_id="",
-            # New lazy seeding helper accesses these fields.
-            _real_seeded=True,
-            _real_seeding_lock=None,
-        ),
-    )
-
-    # 2026-08-22 / p009: the stub above is not enough to make the run perimeter real.
+    # 2026-08-22 / p009: a getter stub was not enough to make the run perimeter real.
     # `_run_scoped_pids_or_none` goes through `runtime.build_graph_snapshot`, which reads
     # the REAL run registry (`runtime_impl.py:142-148`), not the stubbed `get_run`.  With
     # no entry there the snapshot raised, the perimeter fell into its `except` branch and
@@ -90,6 +75,7 @@ def _register_run_perimeter(simulator_module, monkeypatch, participants):
         run_id="test-run", scenario_id="test-scenario", mode="real", state="running"
     )
     run._scenario_raw = {"participants": list(participants), "trustlines": []}
+    run._real_seeded = True
     # setitem reverts on teardown, so the global registry is not left dirty.
     monkeypatch.setitem(simulator_module.runtime._runs, "test-run", run)
     return run
@@ -143,21 +129,11 @@ async def test_action_trustline_close_seeds_when_run_paused(client, db_session, 
 
     # The perimeter is fail-closed since 2026-08-22, so the run has to exist in the real
     # registry too -- stubbing `get_run` alone left `SHOP`/`VASYL` outside every perimeter.
-    _register_run_perimeter(simulator_module, monkeypatch, scenario["participants"])
-
-    # Provide a real-mode RunRecord-like object compatible with _get_run_checked + _ensure_run_seeded.
-    run = SimpleNamespace(
-        run_id="test-run",
-        scenario_id="scenario-1",
-        mode="real",
-        state="paused",
-        owner_id="",
-        _scenario_raw=scenario,
-        _real_seeded=False,
-        _real_seeding_lock=None,
-    )
-
-    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda run_id: run)
+    run = _register_run_perimeter(simulator_module, monkeypatch, scenario["participants"])
+    run.scenario_id = "scenario-1"
+    run.state = "paused"
+    run._scenario_raw = scenario
+    run._real_seeded = False
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_scenario",
@@ -729,20 +705,10 @@ async def test_action_payment_real_emits_tx_updated_with_edge_patch(
     )
     await db_session.commit()
 
-    # Fake runtime run record so SSE emission is executed (not swallowed by NotFound).
-    run = SimpleNamespace(
-        run_id="test-run",
-        scenario_id="scenario-1",
-        state="running",
-        owner_id="",
-        tick_index=0,
-        _real_participants=[(alice.id, alice.pid), (bob.id, bob.pid)],
-        _real_viz_by_eq={},
-        # New lazy seeding helper accesses these fields.
-        _real_seeded=True,
-        _real_seeding_lock=None,
-    )
-    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _run_id: run)
+    # Enrich the registered run so SSE emission sees the same record as its perimeter.
+    run = simulator_module.runtime.get_run("test-run")
+    run.scenario_id = "scenario-1"
+    run._real_participants = [(alice.id, alice.pid), (bob.id, bob.pid)]
 
     emitted: dict[str, object] = {}
 
@@ -1498,21 +1464,7 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
     import app.api.v1.simulator as simulator_module
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    # Keep the test focused on the used_now failure path.
-    # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()`.
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda run_id: SimpleNamespace(
-            run_id=str(run_id),
-            scenario_id="scenario-1",
-            state="running",
-            owner_id="",
-            # New lazy seeding helper accesses these fields.
-            _real_seeded=True,
-            _real_seeding_lock=None,
-        ),
-    )
+    # Keep the test focused on the used_now failure path with an already seeded run.
     _register_run_perimeter(
         simulator_module,
         monkeypatch,

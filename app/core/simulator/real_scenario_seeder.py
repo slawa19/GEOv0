@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db.models.equivalent import Equivalent
 from app.core.equivalents import create_equivalent
 from app.core.participants.service import ParticipantService
+from app.core.payments.router import PaymentRouter
 from app.db.models.participant import Participant
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
 from app.core.simulator.run_perimeter import is_run_identity
@@ -129,6 +130,19 @@ def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
 
     if public_key != simulated_public_key(pid):
         raise SimulatorPidTakenError(pid)
+
+
+async def refresh_seeded_routing_after_commit(*, session: Any, scenario: dict[str, Any]) -> None:
+    """Make the committed scenario topology available before its first payment.
+
+    Both seeding owners call this only AFTER their commit, before marking the run seeded.
+    A plain eviction can be overwritten by a graph read already in flight. `refresh`
+    waits for that reader and accepts only a read begun after this request (027 T2704).
+    This is a seeding boundary, not a change to general topology/cache consistency.
+    """
+    equivalents = {effective_equivalent(scenario, line) for line in scenario.get("trustlines") or []}
+    for code in sorted(equivalents - {""}):
+        await PaymentRouter(session).build_graph(code, refresh=True)
 
 
 class RealScenarioSeeder:

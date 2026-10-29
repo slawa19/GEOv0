@@ -41,6 +41,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import aliased
 
 from app.config import settings
+from app.core.payments.router import PaymentRouter
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, scenario_participant_status
 from app.core.simulator.runtime import runtime
 from app.db.models.debt import Debt
@@ -308,6 +309,44 @@ async def test_a_second_run_of_the_same_scenario_starts_fresh_and_leaves_the_fir
     assert seeded["debts"] == _opening_debts(declared, 1000), "the second run inherited debts"
     assert set(_declared_roster(declared)).isdisjoint(left["roster"])
     assert await _state(db_session, left["roster"]) == left
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warm_cache", [False, True], ids=["fresh", "cached-before-seeding"])
+async def test_opening_payments_see_the_new_run_after_an_older_graph_was_cached(
+    client, db_session, stopped_runs, monkeypatch, warm_cache
+) -> None:
+    # Keep the cache alive deterministically; elapsed wall time must not decide whether
+    # a newly seeded run gets its opening money. The graph itself is built from real rows.
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
+    first = await _start(client, stopped_runs, RIVERSIDE)
+    await runtime.stop(first)
+    first_scenario = _bound(first)
+    before = await _state(db_session, _declared_roster(first_scenario))
+    assert before["debts"] == _opening_debts(first_scenario, 1000)
+    async with sessionmaker_of(db_session)() as session:
+        await PaymentRouter(session).build_graph("UAH", refresh=True)
+    if not warm_cache:
+        PaymentRouter.invalidate_cache("UAH")
+
+    observed = []
+    original = PaymentRouter.build_graph
+
+    async def observe(router, code, **kwargs):
+        await original(router, code, **kwargs)
+        observed.append((router.from_cache, set(router.uuids)))
+
+    monkeypatch.setattr(PaymentRouter, "build_graph", observe)
+    second = await _start(client, stopped_runs, RIVERSIDE)
+    scenario = _bound(second)
+    own = set(_declared_roster(scenario))
+    after = await _state(db_session, own)
+    _assert_is_its_declaration(after, scenario, whose="the fresh run")
+    observations = [(cached, len(pids & own)) for cached, pids in observed]
+    assert after["debts"] == _opening_debts(scenario, 1000), observations
+    opening_pids = {pid for debtor, creditor, _eq in _opening_debts(scenario, 1000) for pid in (debtor, creditor)}
+    assert observed and all(opening_pids <= pids for _cached, pids in observed), observations
+    assert await _state(db_session, before["roster"]) == before
 
 
 def _as_before_the_namespaces(scenario: dict) -> dict:

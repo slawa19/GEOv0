@@ -31,7 +31,6 @@ import asyncio
 import uuid
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -70,14 +69,8 @@ def stand(monkeypatch):
     import app.api.v1.simulator as simulator_module
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda rid: SimpleNamespace(
-            run_id=str(rid), state="running", owner_id="", _real_seeded=True, _real_seeding_lock=None
-        ),
-    )
     run = RunRecord(run_id=_RUN, scenario_id="scn", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {
         "participants": [
             {"id": p, "name": p.upper(), "type": "person", "status": "active"} for p in ("a1", "b1", "a2")
@@ -422,6 +415,7 @@ def _register_run(monkeypatch, run_id: str, pids=("a1", "b1", "a2")) -> RunRecor
     import app.api.v1.simulator as simulator_module
 
     run = RunRecord(run_id=run_id, scenario_id="scn", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {
         "participants": [{"id": p, "name": p.upper(), "type": "person", "status": "active"} for p in pids],
         "trustlines": [],
@@ -672,11 +666,7 @@ async def test_a_stopped_run_answers_run_terminal_without_the_pre_read_even_for_
             return await original(self, *a, **kw)
 
         monkeypatch.setattr(PaymentService, "create_payment_internal", counting)
-        monkeypatch.setattr(
-            simulator_module.runtime,
-            "get_run",
-            lambda rid: SimpleNamespace(run_id=str(rid), state="stopped", owner_id="", _real_seeded=True, _real_seeding_lock=None),
-        )
+        simulator_module.runtime.get_run(_RUN).state = "stopped"
         stored = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
         unknown = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=_key()))
     finally:
@@ -700,10 +690,7 @@ async def test_the_key_survives_a_restart_of_the_run_and_a_new_key_pays_again(cl
     import app.api.v1.simulator as simulator_module
 
     await _seed(db_session)
-    the_run = SimpleNamespace(
-        run_id=_RUN, state="running", owner_id="", _real_seeded=True, _real_seeding_lock=None, _launch_epoch=0
-    )
-    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda rid: the_run)
+    the_run = simulator_module.runtime.get_run(_RUN)
     key = _key()
     first = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
     the_run._launch_epoch += 1  # what `restart` does to the run

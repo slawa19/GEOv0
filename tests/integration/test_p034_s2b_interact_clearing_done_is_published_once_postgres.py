@@ -32,14 +32,20 @@ from tests.integration.test_p026_s4_tick_close_publication_postgres import _requ
 from tests.simulator_tick_stand import RecordingSse
 
 
-async def _stand(client, db_session, monkeypatch):
+async def _stand(client, db_session, monkeypatch, *, sse=None):
     code, p, lines, factory = await _requested(client, db_session)
     # A owes C 50 and C owes B 50: with B owing A 50 the cycle clears 50 and completes the close of A -> B.
     assert await _pay(factory, p["A"], p["C"], code, "50") and await _pay(factory, p["C"], p["B"], code, "50")
-    run, sse = _run(code, p), RecordingSse()
+    run, sse = _run(code, p), sse if sse is not None else RecordingSse()
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
-    monkeypatch.setattr(simulator_module.runtime, "_sse", sse)
+    original_dispatch = simulator_module.runtime._sse._dispatch_locked
+
+    def record_dispatch(*, run, payload):
+        sse.broadcast(run.run_id, payload)
+        original_dispatch(run=run, payload=payload)
+
+    monkeypatch.setattr(simulator_module.runtime._sse, "_dispatch_locked", record_dispatch)
     return code, p, lines, run, sse
 
 
@@ -123,9 +129,8 @@ async def test_a_done_that_was_not_published_is_published_by_the_cancellation_en
     """034 S2b fix-delta (review of `ed3271fe`, P3): the flag stands for a PUBLISHED event, not for an attempt. The
     first emit fails inside the emitter (which returns no event id), then the cancellation arrives on the re-read of
     the closed line: the durable progress must still be published - once."""
-    code, p, lines, run, _sse = await _stand(client, db_session, monkeypatch)
     sse = _FailsTheFirstDone()
-    monkeypatch.setattr(simulator_module.runtime, "_sse", sse)
+    code, p, lines, run, _sse = await _stand(client, db_session, monkeypatch, sse=sse)
     inside, release = asyncio.Event(), asyncio.Event()
 
     async def _held(_eq, _pairs):
@@ -138,6 +143,7 @@ async def test_a_done_that_was_not_published_is_published_by_the_cancellation_en
     await asyncio.wait_for(inside.wait(), timeout=30)
     # Controls: the emit was attempted and refused, nothing is published yet, the clearing is committed.
     assert sse.refused == 1 and _done(sse) == [], (sse.refused, _done(sse))
+    assert [entry[3] for entry in run._event_buffer if entry[3].get("type") == "clearing.done"] == []
     assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed"
 
     request.cancel()
@@ -148,3 +154,4 @@ async def test_a_done_that_was_not_published_is_published_by_the_cancellation_en
     assert len(done) == 1 and done[0]["cleared_cycles"] == 1, (
         f"one committed cycle whose first clearing.done was not delivered: {len(done)} published after the "
         f"cancellation, expected 1: {done}")
+    assert [entry[3] for entry in run._event_buffer if entry[3].get("type") == "clearing.done"] == done
