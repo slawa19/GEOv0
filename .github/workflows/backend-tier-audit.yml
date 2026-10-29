@@ -1,0 +1,86 @@
+name: Backend tier duration audit
+
+# Research branch only. This workflow is never merged into the production gates.
+on:
+  push:
+    branches:
+      - audit/backend-tier-duration-20261029
+
+permissions:
+  contents: read
+
+jobs:
+  backend-duration-profile:
+    name: Audit canonical backend tier (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_test_backend_audit_20261029
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_test_backend_audit_20261029"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out the frozen audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install the same backend dependencies as required-backend
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Validate the dedicated audit database and run migration preflight
+        env:
+          ENV: test
+          DEBUG: "false"
+          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_backend_audit_20261029
+          TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_backend_audit_20261029
+          GEO_TEST_ALLOW_DB_RESET: "1"
+        run: |
+          python -c "import os; from pathlib import Path; from scripts.validate_test_database_url import assert_safe_test_database_url; u=assert_safe_test_database_url(os.environ['TEST_DATABASE_URL'], allow_destructive_reset=os.environ['GEO_TEST_ALLOW_DB_RESET'], repo_root=Path.cwd(), required_backend='postgresql'); assert u.database == 'geov0_test_backend_audit_20261029' and u.host == '127.0.0.1'; print('Dedicated CI audit PostgreSQL database validated')"
+          python scripts/check_alembic_heads.py
+          bash docker/docker-entrypoint.sh true
+
+      - name: Profile the unchanged canonical backend tier and Alembic head check
+        shell: bash
+        env:
+          ENV: test
+          DEBUG: "false"
+          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_backend_audit_20261029
+          TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_backend_audit_20261029
+          GEO_TEST_ALLOW_DB_RESET: "1"
+          GEO_TEST_USE_MIGRATED_SCHEMA: "1"
+          PYTHONPATH: ${{ github.workspace }}/.github/audit
+          GEO_BACKEND_PROFILE: ${{ github.workspace }}/.local-run/backend-tier-audit/phase-fixture.ndjson
+          PYTEST_ADDOPTS: >-
+            -p backend_profile --durations=0 --durations-min=0
+            --junitxml=${{ github.workspace }}/.local-run/backend-tier-audit/junit.xml
+        run: |
+          mkdir -p .local-run/backend-tier-audit
+          set -o pipefail
+          pwsh -NoProfile -Command './scripts/verify_local.ps1 -Python ((Get-Command python).Source) -TaskSlug ci-backend-duration-audit -BackendOnly' 2>&1 | tee .local-run/backend-tier-audit/canonical.log
+
+      - name: Preserve the audit profile even after a test failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-tier-duration-profile
+          path: .local-run/backend-tier-audit/
+          if-no-files-found: warn
+          retention-days: 7
