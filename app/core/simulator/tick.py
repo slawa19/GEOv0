@@ -70,6 +70,7 @@ from app.core.simulator.real_scenario_seeder import (
     SIMULATOR_PID_TAKEN,
     ScenarioTrustLineRefused,
     SimulatorPidTakenError,
+    refresh_seeded_routing_after_commit,
 )
 from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.core.simulator.scenario_equivalent import (
@@ -535,6 +536,9 @@ class RealTick:
                             # the failure leaves this block.
                             await setup_session.rollback()
                             raise
+                        # The seed is durable. If refresh fails/cancels, keep the flag false:
+                        # a later attempt re-seeds idempotently before retrying the refresh.
+                        await refresh_seeded_routing_after_commit(session=setup_session, scenario=scenario)
                         run._real_seeded = True
 
             if run._real_participants is None or run._real_equivalents is None:
