@@ -13,6 +13,17 @@
 **История.** Текст снятых пунктов — строк с метками «взято / сделано / закрыто в 028», пунктов с решением реестра 029 и исторических повествований без открытого действия (оценка направления 2026-09-11, история `simulator-super-smoke`, разрывы владения 007/011/012, реестр 029 № 285) — `git show 46d2d934:specs/BACKLOG.md` (состояние, по которому составлен реестр 029) и `git show 9ba0bf7d:specs/BACKLOG.md` (последнее перед чисткой 029). Текст остатков класса 2 до их разнесения 031 — `git show 05d6e812:specs/BACKLOG.md`. Решение и evidence по номеру — в реестре 029.
 
 
+## Расширенное ревью 053 — 2026-10-29
+
+Результаты независимых Astra/Argon и root verification сведены в [053](053-expanded-demo-review/spec.md). Это класс2; завершённые050/052 не переоткрываются, новая реализация не начата.
+
+- **053-1 — P2, неполный результат клиринга при завершении закрытия линии. Получатель: simulator SSE.** EA-1/ARG-1, воспроизведено реальной PostgreSQL/public action и actual UI pipeline: DB150→0, после clearing+removal сохранённая UI-пара150→50 при current total0. Pre-existing. [Узкая спецификация](053-expanded-demo-review/follow-up.md); не вычислять нулевой долг из отсутствующего patch и не ослаблять fail-closed измерителя.
+- **053-2 — P2, старые tick-bound кэши после stopped restart. Получатель: simulator lifecycle.** ARG-2, exact-method debug-only probe: helper refresh91 переживает restart, новых обновлений на1–100 нет; reset-control обновляется на1. No-progress/decay markers — условные дополнительные последствия, не поломка денег или default decay. [Отдельная спецификация](053-expanded-demo-review/restart-follow-up.md); принятая active-restart race049-5 не переоткрывается.
+- **053-3 — P3, согласование рецепта и проверок перед перезаписью плейлистов. Получатель: simulator workbench tooling.** ARG-3, root downgrade из P2: текущие assets исправны в этой части; свежий recipe PG run дал4cycles/11edges/3shared/175.00 против старых exact expectations3/8/1/247.95. Прогноз Argon7/9edges опровергнут. [Условная спецификация](053-expanded-demo-review/recording-follow-up.md); выполнять перед следующей осознанной регенерацией, без ослабления денежных assertions.
+- **053-4 — P3, две устаревшие записи активной справки. Получатель: docs/simulator.** ARG-5: `docs/ru/simulator/scenarios-and-engine.md:633` всё ещё называет5000мс штатным бюджетом, :388 перечисляет неиспользуемый `SIMULATOR_CLEARING_MAX_DEPTH`. Код/правильный раздел справки уже0/60. При следующем изменении убрать нерабочий guardrail и описать incomplete при явном positive soft budget, отдельно аварийную отмену; не обещать безусловное продолжение любого hard-timeout. Не дубликат052-4 про test prose.
+
+ARG-4 как нарушение изоляции/обязательное удаление retained evidence отклонён: UUID-каталоги изолированы, balance JSON намеренно доступны как evidence. Пустая candidate-папка — необязательная гигиена, новая cleanup-волна не создаётся.
+
 ## Итоги закрывающего T5204 программы 052 (2026-10-27)
 
 <a id="052-1"></a>
