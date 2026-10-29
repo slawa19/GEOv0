@@ -31,7 +31,9 @@ async def create_trustline(
 async def get_trustlines(
     direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
     equivalent: Optional[str] = Query(None),
-    status: Optional[Literal['active', 'closed']] = Query(None),
+    status: Optional[Literal['active', 'closed']] = Query(
+        None, description="Filter by status; omitted selects active trustlines."
+    ),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=200),
     current_participant: Participant = Depends(deps.get_current_participant),

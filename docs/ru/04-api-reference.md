@@ -384,7 +384,7 @@ Authorization: Bearer {token}
 **Query параметры:**
 - `direction` — `outgoing` (я даю) | `incoming` (мне дают) | `all`
 - `equivalent` — фильтр по эквиваленту
-- `status` — `active` | `frozen` | `closed`
+- `status` — `active` | `closed`; если параметр пропущен, выбираются только `active`
 - `page`, `per_page`
 
 **Response:**

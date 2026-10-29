@@ -5,7 +5,7 @@ from collections import OrderedDict
 from decimal import Decimal
 from typing import Dict
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -91,13 +91,14 @@ class BalanceService:
         )
         in_tls = (await self.session.execute(in_tl_stmt)).scalars().all()
 
-        # Fetch Debts I owe (Me -> Others)
-        my_debts_stmt = select(Debt).options(joinedload(Debt.equivalent)).where(Debt.debtor_id == participant_id)
-        my_debts = (await self.session.execute(my_debts_stmt)).scalars().all()
-
-        # Fetch Debts others owe Me (Others -> Me)
-        others_debts_stmt = select(Debt).options(joinedload(Debt.equivalent)).where(Debt.creditor_id == participant_id)
-        others_debts = (await self.session.execute(others_debts_stmt)).scalars().all()
+        # Both roles must come from one statement snapshot under READ COMMITTED:
+        # a payment can reverse a pair's debt between two separate SELECTs.
+        debts_stmt = select(Debt).options(joinedload(Debt.equivalent)).where(
+            or_(Debt.debtor_id == participant_id, Debt.creditor_id == participant_id)
+        )
+        debts = (await self.session.execute(debts_stmt)).scalars().all()
+        my_debts = [d for d in debts if d.debtor_id == participant_id]
+        others_debts = [d for d in debts if d.creditor_id == participant_id]
 
         # Group by Equivalent
         equivalents_map: Dict[str, Dict[str, Decimal]] = {}
@@ -159,7 +160,9 @@ class BalanceService:
                 payee_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
                 pair_has_active_line=True,
             )
-            get_eq_entry(code)['spend_capacity'] += capacity
+            # Lowered trust may leave this pair over limit; its shortfall
+            # cannot consume the usable capacity of independent peers.
+            get_eq_entry(code)['spend_capacity'] += max(Decimal('0'), capacity)
 
         # Receive capacity comes from Outgoing TrustLines (Me -> Peer)
         for tl in out_tls:
@@ -173,7 +176,7 @@ class BalanceService:
                 payee_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
                 pair_has_active_line=True,
             )
-            get_eq_entry(code)['receive_capacity'] += capacity
+            get_eq_entry(code)['receive_capacity'] += max(Decimal('0'), capacity)
 
         # A peer whose line to me is not active: the offset counts only if MY line to them is active.
         all_peers_equivalents = set(debts_i_owe.keys()) | set(debts_others_owe.keys())
@@ -252,17 +255,24 @@ class BalanceService:
         outgoing_res = []
         incoming_res = []
         
+        roles = []
         if direction in ['outgoing', 'all']:
-            # Debts I owe (Me is Debtor)
-            stmt = select(Debt).options(joinedload(Debt.creditor)).where(
-                and_(
-                    Debt.debtor_id == participant_id,
-                    Debt.equivalent_id == equivalent.id,
-                    Debt.amount > 0
-                )
+            roles.append(Debt.debtor_id == participant_id)
+        if direction in ['incoming', 'all']:
+            roles.append(Debt.creditor_id == participant_id)
+
+        if roles:
+            # As in summary, materialize both directions in one statement before
+            # partitioning. Load both peers here to avoid later lazy reads.
+            stmt = select(Debt).options(joinedload(Debt.creditor), joinedload(Debt.debtor)).where(
+                or_(*roles), Debt.equivalent_id == equivalent.id, Debt.amount > 0
             )
             debts = (await self.session.execute(stmt)).scalars().all()
-            for d in debts:
+        else:
+            debts = []
+
+        for d in debts:
+            if direction in ['outgoing', 'all'] and d.debtor_id == participant_id:
                 outgoing_res.append(OutgoingDebt(
                     creditor=d.creditor.pid,
                     creditor_name=d.creditor.display_name or "",
@@ -270,17 +280,7 @@ class BalanceService:
                     amount=to_money_str(d.amount, precision)
                 ))
                 
-        if direction in ['incoming', 'all']:
-            # Debts others owe Me (Me is Creditor)
-            stmt = select(Debt).options(joinedload(Debt.debtor)).where(
-                and_(
-                    Debt.creditor_id == participant_id,
-                    Debt.equivalent_id == equivalent.id,
-                    Debt.amount > 0
-                )
-            )
-            debts = (await self.session.execute(stmt)).scalars().all()
-            for d in debts:
+            if direction in ['incoming', 'all'] and d.creditor_id == participant_id:
                 incoming_res.append(IncomingDebt(
                     debtor=d.debtor.pid,
                     debtor_name=d.debtor.display_name or "",
