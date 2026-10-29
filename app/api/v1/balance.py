@@ -7,6 +7,7 @@ from app.api.deps import get_db, get_current_participant
 from app.core.balance.service import BalanceService
 from app.db.models.participant import Participant
 from app.schemas.balance import BalanceSummary, DebtsDetails
+from app.schemas.common import ErrorEnvelope
 
 router = APIRouter()
 
@@ -21,7 +22,11 @@ async def get_balance(
     service = BalanceService(db)
     return await service.get_summary(current_participant.id)
 
-@router.get("/debts", response_model=DebtsDetails)
+@router.get(
+    "/debts",
+    response_model=DebtsDetails,
+    responses={404: {"model": ErrorEnvelope, "description": "Equivalent not found"}},
+)
 async def get_debts(
     equivalent: str = Query(..., description="Equivalent code"),
     direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),

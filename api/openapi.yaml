@@ -2203,6 +2203,7 @@ paths:
             type: string
         - in: query
           name: status
+          description: Filter by status; omitted selects active trustlines.
           schema:
             type: string
             enum: [active, closed]
@@ -2822,6 +2823,8 @@ paths:
                 $ref: '#/components/schemas/DebtsDetails'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
