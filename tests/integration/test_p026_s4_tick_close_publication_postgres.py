@@ -140,7 +140,13 @@ async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once
     run, sse = _run(code, p), RecordingSse()
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
-    monkeypatch.setattr(simulator_module.runtime, "_sse", sse)
+    original_dispatch = simulator_module.runtime._sse._dispatch_locked
+
+    def record_dispatch(*, run, payload):
+        sse.broadcast(run.run_id, payload)
+        original_dispatch(run=run, payload=payload)
+
+    monkeypatch.setattr(simulator_module.runtime._sse, "_dispatch_locked", record_dispatch)
 
     r = await client.post(f"/api/v1/simulator/runs/{run.run_id}/actions/clearing-real",
                           headers={"X-Admin-Token": settings.ADMIN_TOKEN}, json={"equivalent": code})

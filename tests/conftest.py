@@ -691,7 +691,7 @@ def pytest_runtest_teardown(item):
     This boundary also covers direct committed_database callers and tests without db_session.
     client/clone/monkeypatch finalizers have not run yet, and the function's event_loop is alive.
     Records stay accessible to fixture finalizers that themselves call stop(). No registry or
-    retention policy is changed during a test; nothing is carried into the next test.
+    retention policy is changed during a test; successful cleanup retires records, failed cleanup retains them and fails loudly.
     """
 
     from app.core.simulator.runtime import runtime as simulator_runtime
