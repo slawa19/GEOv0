@@ -1,7 +1,7 @@
 # 053 follow-up — Полный результат клиринга при закрытии линии
 
 - **Date:** 2026-10-29
-- **Status:** SPECIFIED — implementation not started or authorized by this review request.
+- **Status:** IMPLEMENTATION AUTHORIZED — 2026-10-29; current owner instruction: «реализуй».
 - **Status authority:** The reproduced discrepancy below establishes the finding; this label does not establish a fix or passing acceptance.
 - **Owner surface:** Proposed narrow changes in `app/core/simulator/edge_patch_builder.py` and its clearing callers, plus the named backend/UI behavioral tests. Exact caller list must be inventoried before implementation. No financial algorithm, schema, migration, generator or default-policy change.
 - **Origin:** Expanded review 053, Astra finding; root PostgreSQL and actual UI-consumer reproductions on `dc7a9054`. P2, AGENTS §19.5 class 2: database debt is correct; published/displayed clearing result is incomplete.
@@ -38,12 +38,14 @@
 
 | ID | Task | Status |
 |---|---|---|
-| F1 | Red regression через реальную БД и настоящий UI consumer; инвентаризация всех clearing callers | [!] implementation not authorized |
-| F2 | Минимальная post-commit публикация закрытых именно этим clearing линий | [!] implementation not authorized |
-| F3 | Targeted tests, независимое review защищённого SSE slice, milestone и доставка | [!] implementation not authorized |
+| F1 | Red regression через реальную БД и настоящий UI consumer; инвентаризация всех clearing callers | [ ] authorized, pending execution |
+| F2 | Минимальная post-commit публикация закрытых именно этим clearing линий | [ ] authorized, pending execution |
+| F3 | Targeted tests, независимое review защищённого SSE slice, milestone и доставка | [ ] authorized, pending execution |
 
-`[x]` completed; `[ ]` in progress; `[!]` not authorized/blocked. Review request authorizes this specification, not a new implementation wave.
+`[x]` completed; `[ ]` in progress; `[!]` not authorized/blocked. The review request authorized the specification; the separate owner instruction «реализуй» on 2026-10-29 authorizes this implementation wave.
 
 ## Changelog
 
 - **2026-10-29:** root reproduced the ordinary signed-close/manual-clearing case on PostgreSQL, then both production UI event handlers. Logs and exact temporary test sources retained under `.local-run/expanded-review-20261029/`; findings consolidation remains in the parent review specification.
+
+- **2026-10-29 — implementation authorization, before code:** owner «реализуй» starts F1–F3 and R1–R3. Root accepted the two existing specifications; independent owner surfaces may execute in parallel. No recorder regeneration, documentation cleanup wave, financial algorithm, schema or default changes. New code must pass meaningful red/green and the stated controls; one integrated milestone and required external Claude review, then PR/CI/merge autonomously.

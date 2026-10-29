@@ -1,10 +1,10 @@
 # 053 follow-up — Сброс привязанных к тактам кэшей при restart
 
 - **Date:** 2026-10-29
-- **Status:** SPECIFIED — implementation not started.
+- **Status:** IMPLEMENTATION AUTHORIZED — 2026-10-29; current owner instruction: «реализуй».
 - **Status authority:** Source-method probe confirms the stale epoch mechanism; it is debug-only, not a live restart acceptance gate.
 - **Owner surface:** `app/core/simulator/run_lifecycle.py`, focused lifecycle/viz behavioral tests. No money algorithm, DB reset, new lifecycle service or changes to the accepted active-restart concurrency boundary.
-- **Origin:** ARG-2, verified after independent review; P2, AGENTS §19.5 class 2. Authorization covers review and this specification, not implementation.
+- **Origin:** ARG-2, verified after independent review; P2, AGENTS §19.5 class 2. Owner authorized implementation on 2026-10-29 after the completed review.
 
 ## Problem
 
@@ -35,12 +35,14 @@ Current: номер такта начинается заново, зависим
 
 | ID | Task | Status |
 |---|---|---|
-| R1 | Owner-selector inventory и meaningful red на stopped restart | [!] implementation not started |
-| R2 | Минимальный сброс названных tick-bound полей, сохранение durable состояния | [!] implementation not started |
-| R3 | Targeted verification, независимое review и соответствующий milestone | [!] implementation not started |
+| R1 | Owner-selector inventory и meaningful red на stopped restart | [ ] authorized, pending execution |
+| R2 | Минимальный сброс названных tick-bound полей, сохранение durable состояния | [ ] authorized, pending execution |
+| R3 | Targeted verification, независимое review и соответствующий milestone | [ ] authorized, pending execution |
 
 `[x]` done; `[ ]` in progress; `[!]` not authorized/blocked.
 
 ## Changelog
 
 - **2026-10-29:** ARG-2 сужен по проверке: stale quantiles — основной подтверждённый эффект, decay/counter — условные последствия; неверный пример default demo отклонён. Проба и ограничения — в консолидации 053.
+
+- **2026-10-29 — implementation authorization, before code:** owner «реализуй» starts F1–F3 and R1–R3. Root accepted the two existing specifications; independent owner surfaces may execute in parallel. No recorder regeneration, documentation cleanup wave, financial algorithm, schema or default changes. New code must pass meaningful red/green and the stated controls; one integrated milestone and required external Claude review, then PR/CI/merge autonomously.
