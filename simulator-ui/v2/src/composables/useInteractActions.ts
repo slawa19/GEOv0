@@ -86,6 +86,11 @@ export function isInteractActionError(e: unknown): e is InteractActionError {
   return typeof v.status === 'number' && typeof v.code === 'string' && typeof v.message === 'string'
 }
 
+/** A nested resource's 404 does not establish that its owning run disappeared. */
+function isMissingRunError(e: unknown): boolean {
+  return isInteractActionError(e) && e.status === 404 && e.code === 'RUN_NOT_FOUND'
+}
+
 function randomIdFallback(): string {
   // Stable-enough for UI correlation (not a security token).
   return `act_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`
@@ -166,7 +171,7 @@ function mapToInteractActionError(e: unknown): InteractActionError {
 export function useInteractActions(opts: {
   httpConfig: Ref<HttpConfig>
   runId: Ref<string>
-  /** Optional hook to clear the active run context if a stale runId is detected (HTTP 404). */
+  /** Optional hook to clear the active run context on HTTP 404 / RUN_NOT_FOUND. */
   onStaleRunId?: () => void
 }): {
   /** True when backend rejects actions due to feature flag (HTTP 403 ACTIONS_DISABLED). */
@@ -239,6 +244,7 @@ export function useInteractActions(opts: {
   }
 
   async function wrap<T>(fn: () => Promise<T>): Promise<T> {
+    const requestRunId = opts.runId.value.trim()
     try {
       // Do NOT clear `actionsDisabled` optimistically before awaiting.
       // If backend keeps rejecting with 403 ACTIONS_DISABLED, the UI should not flicker.
@@ -259,7 +265,7 @@ export function useInteractActions(opts: {
 
       // If the run no longer exists, stop issuing run-scoped calls.
       // This can happen if a previously stored runId becomes stale (backend restart, TTL, cleanup).
-      if (mapped.status === 404) {
+      if (isMissingRunError(mapped) && requestRunId && opts.runId.value.trim() === requestRunId) {
         clearRunIdBestEffort()
       }
 
@@ -343,7 +349,7 @@ export function useInteractActions(opts: {
         const res = await wrap(() => getParticipantsList(opts.httpConfig.value, requireRunId()))
         return res.items
       } catch (e) {
-        if (isInteractActionError(e) && e.status === 404) return []
+        if (isMissingRunError(e)) return []
         throw e
       }
     },
@@ -353,7 +359,7 @@ export function useInteractActions(opts: {
         const res = await wrap(() => getTrustlinesList(opts.httpConfig.value, requireRunId(), eq, pid))
         return res.items
       } catch (e) {
-        if (isInteractActionError(e) && e.status === 404) return []
+        if (isMissingRunError(e)) return []
         throw e
       }
     },
@@ -370,7 +376,7 @@ export function useInteractActions(opts: {
         )
         return res.items
       } catch (e) {
-        if (isInteractActionError(e) && e.status === 404) return []
+        if (isMissingRunError(e)) return []
         throw e
       }
     },

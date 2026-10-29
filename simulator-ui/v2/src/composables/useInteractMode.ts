@@ -9,7 +9,7 @@ import type { UiLocale } from '../i18n/locale'
 import { actionErrorText, clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
-import { useInteractActions } from './useInteractActions'
+import { isInteractActionError, useInteractActions } from './useInteractActions'
 import { useInteractDataCache } from './interact/useInteractDataCache'
 import type { TrustlinesFetchState } from './interact/trustlinesSourceState'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
@@ -918,6 +918,21 @@ export function useInteractMode(opts: {
     })
   }
 
+  function trustlineResourceErrorHandler(eq: string, isCurrent: () => boolean): (error: unknown) => never {
+    const runId = normalizeRunId(opts.runId.value)
+    return (error: unknown): never => {
+      // Another tab can close a line while this editor is open. Refresh the data even on refusal,
+      // preserving the original action error. A cancelled flow or another run/equivalent owns no refresh.
+      if (isCurrent() && runId && normalizeRunId(opts.runId.value) === runId && sameEquivalent(opts.equivalent.value, eq) &&
+        isInteractActionError(error) && error.status === 404 &&
+        ['TRUSTLINE_NOT_FOUND', 'PARTICIPANT_NOT_FOUND', 'EQUIVALENT_NOT_FOUND'].includes(error.code)) {
+        invalidateTrustlinesCache(eq)
+        void refreshTrustlines({ force: true })
+      }
+      throw error
+    }
+  }
+
   async function confirmTrustlineCreate(limit: string): Promise<void> {
     fsm.clearError()
     // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
@@ -927,6 +942,7 @@ export function useInteractMode(opts: {
     await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noSelection'))
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
+        .catch(trustlineResourceErrorHandler(eq, isCurrent))
       if (!isCurrent()) return
 
       // BUG-5: log to history. 044 `T4405`: the participants' names, not their ids (identities of the run).
@@ -946,6 +962,7 @@ export function useInteractMode(opts: {
     await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       await opts.actions.updateTrustline(from, to, newLimit, eq, { signal })
+        .catch(trustlineResourceErrorHandler(eq, isCurrent))
       if (!isCurrent()) return
 
       // BUG-5: log to history
@@ -968,6 +985,7 @@ export function useInteractMode(opts: {
     await runBusy(async ({ isCurrent, resetToIdle, signal, historyContext: began }) => {
       if (!from || !to) throw new ShownFailure(clientShownError('trustline.noTrustlineSelected'))
       const res = await opts.actions.closeTrustline(from, to, eq, { signal })
+        .catch(trustlineResourceErrorHandler(eq, isCurrent))
       if (!isCurrent()) return
 
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
