@@ -1,7 +1,7 @@
 # 053 follow-up — Полный результат клиринга при закрытии линии
 
 - **Date:** 2026-10-29
-- **Status:** LOCAL ACCEPTANCE COMPLETE — 2026-10-29; implementation, targeted/live gates and required external source review passed; PR/required CI/merge delivery pending.
+- **Status:** SOURCE ACCEPTED — 2026-10-29; implementation, targeted/live gates and required external source review passed. Required CI and delivery receipt: [PR #363](https://github.com/slawa19/GEOv0/pull/363).
 - **Status authority:** Fresh red/green observations, exact selectors and review records are in the dated acceptance entries below; this label alone proves neither behavior nor delivery.
 - **Owner surface:** `app/core/simulator/edge_patch_builder.py`, clearing callers in `app/api/v1/simulator.py` and `app/core/simulator/tick.py`, and named backend/UI behavioral tests. All three production builder callers inventoried; payment executor behavior retained. No financial algorithm, schema, migration, generator or default-policy change.
 - **Origin:** Expanded review 053, Astra finding; root PostgreSQL and actual UI-consumer reproductions on `dc7a9054`. P2, AGENTS §19.5 class 2: database debt is correct; published/displayed clearing result is incomplete.
@@ -84,3 +84,5 @@ tests/contract/test_openapi_contract.py
 | Claude P053-CR-1 | P3/class2, unexecuted recreation-during-SELECT display race | Source mechanism checked: stale closed patch can apply by pair key while removal guard preserves recreated line. No DB/money effect or reproduction claimed; dated recipient [BACKLOG053-5](../BACKLOG.md#053-5), no source change/new round under §19.5 |
 
 Required CI and delivery remain owned by the main session; no CI run, PR or merge is claimed in this local acceptance record.
+
+- **2026-10-29 — delivery tracking:** [PR #363](https://github.com/slawa19/GEOv0/pull/363) owns the final commit, required CI job results and merge receipt. Local acceptance above is source acceptance; PR state is authoritative for delivery.
