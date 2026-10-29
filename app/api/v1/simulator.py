@@ -1508,9 +1508,8 @@ async def action_trustline_update(
 
     if (err := _step_error_or_none(new_limit_dec, parties.eq, field="new_limit", raw=req.new_limit)) is not None:
         return err
-    old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
     # 026 `T2602`: no debt floor - a limit below `used` is a trust change, same rule as the public PATCH; the
-    # service takes the row lock (`TrustLineService.execute_update`).
+    # service validates the change (`TrustLineService.execute_update`).
 
     # Programme 021, stage 2: the write goes through the trust-line service's internal path in this handler's
     # transaction; the handler rolls back on any failure before it propagates (spec, "Решения" item 7). See the
@@ -1525,6 +1524,14 @@ async def action_trustline_update(
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
     try:
+        # OMR-5: the response's before-value must come from the row as its lock returns it, not the earlier
+        # live-line lookup. Refresh the same identity after any wait; the service reuses this transaction's lock.
+        locked = await db.execute(select(TrustLine).where(TrustLine.id == tl.id).with_for_update().execution_options(
+            populate_existing=True))
+        tl = locked.scalar_one_or_none()
+        if tl is None:
+            raise NotFoundException("Trustline not found")
+        old_limit_dec = Decimal(str(tl.limit))
         await trust_lines.execute_update(
             batch,
             tl.id,
