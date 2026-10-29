@@ -845,14 +845,8 @@ async def test_step5c_clearing_real_reports_the_hold_as_its_declared_409(client,
     from app.core.simulator.models import RunRecord
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda run_id: SimpleNamespace(
-            run_id=str(run_id), state="running", owner_id="", _real_seeded=True, _real_seeding_lock=None
-        ),
-    )
     run = RunRecord(run_id="run-s5c", scenario_id="scn-s5c", mode="real", state="running")
+    run._real_seeded = True
     run._scenario_raw = {
         "participants": [
             {"id": pid, "name": pid.upper(), "type": "person", "status": "active"} for pid in ("s1", "s2", "s3")

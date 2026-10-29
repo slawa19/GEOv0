@@ -16,7 +16,6 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 
@@ -112,12 +111,8 @@ async def test_trustlines_list_does_not_read_an_orphan_edge(client, db_session, 
     run_id = f"p024-orphan-{uuid.uuid4().hex[:6]}"
     registered = RunRecord(run_id=run_id, scenario_id=run_id, mode="real", state="paused", owner_id=owner_id)
     registered._scenario_raw = scenario
+    registered._real_seeded = True
     monkeypatch.setitem(simulator_module.runtime._runs, run_id, registered)
-    stub = SimpleNamespace(
-        run_id=run_id, scenario_id=run_id, mode="real", state="paused", owner_id=owner_id,
-        _scenario_raw=scenario, _real_seeded=True, _real_seeding_lock=None,
-    )
-    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _rid: stub)
 
     listed = await client.get(
         f"/api/v1/simulator/runs/{run_id}/actions/trustlines-list", params={"equivalent": eq.code}
