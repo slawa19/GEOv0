@@ -580,6 +580,11 @@ class RunLifecycle:
 
             run.sim_time_ms = 0
             run.tick_index = 0
+            # 053: cached quantiles and same-tick clearing exemptions belong to
+            # the old tick sequence. Preserve the substantive clearing history.
+            run._real_viz_by_eq.clear()
+            for history in run._edge_clearing_history.values():
+                history.last_clearing_tick = -1
             # 034 `F-034-1`: the tick numbers start again under the same `run_id`, so the launch is what tells this
             # tick's payments from the stored payments of the same tick number before the restart.
             run._launch_epoch += 1
@@ -599,10 +604,11 @@ class RunLifecycle:
             run.queue_depth = 0
             run.ops_sec = 0.0
             # 049 S2a: an empty share no longer clears the stall run nor the run of tick failures (`is_empty_share`),
-            # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch starts both
+            # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch starts
             # from zero here, like `errors_total` above - the old launch's counts must not greet the new one.
             run._real_consec_all_rejected_ticks = 0
             run._real_consec_tick_failures = 0
+            run._real_consec_money_no_progress_ticks = 0
             run.stopped_at = None
             run.state = "running"
             run.started_at = self._utc_now()
