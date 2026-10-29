@@ -255,6 +255,7 @@ async def _emit_interact_clearing_done_best_effort(
             equivalent_code=equivalent_code,
             edges_pairs=edges_pairs,
             closed=closed,
+            include_closed_zero_debt=True,
         )
 
         event_id = emitter.emit_clearing_done(
@@ -334,6 +335,7 @@ async def _compute_viz_patches_best_effort(
     equivalent_code: str,
     edges_pairs: list[tuple[str, str]],
     closed: set[tuple[str, str]] | None = None,
+    include_closed_zero_debt: bool = False,
 ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
     """Compute (edge_patch, node_patch) for a set of touched edges.
 
@@ -414,6 +416,7 @@ async def _compute_viz_patches_best_effort(
             edges_pairs=edges_pairs,
             pid_to_participant=pid_to_participant,
             closed=closed,
+            include_closed_zero_debt=include_closed_zero_debt,
         )
         if edge_patch == []:
             edge_patch = None

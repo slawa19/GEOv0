@@ -203,14 +203,18 @@ class EdgePatchBuilder:
         edges_pairs: list[tuple[str, str]],
         pid_to_participant: dict[str, Participant],
         closed: set[tuple[str, str]] | None = None,
+        include_closed_zero_debt: bool = False,
     ) -> list[dict[str, Any]]:
         """Compute a minimal edge_patch for specific edges using VizPatchHelper.
 
         This is used by per-tx and clearing.done patch codepaths and intentionally
         mirrors the existing RealRunner inline logic (used/available + viz_* keys).
 
-        026 `T2603.2`: a pair whose rows are all `closed` gets no patch and is added to `closed` - the caller
+        026 `T2603.2`: a pair whose rows are all `closed` is added to `closed` - the caller
         removes it from the run once the transaction that closed it has committed (same SELECT, no extra query).
+        Only post-commit clearing callers opt into a final patch for such a pair, and only when its DB debt is
+        zero (053 F). This accounts for the clearing before topology removal, without inventing absent lines or
+        zeroing debt that remains. Payment callers retain their existing closed-line behavior.
         """
 
         if not edges_pairs:
@@ -294,7 +298,8 @@ class EdgePatchBuilder:
             if tl_status == "closed":
                 if closed is not None:
                     closed.add((src_pid, dst_pid))
-                continue
+                if not include_closed_zero_debt or used_amt != 0:
+                    continue
             available_amt = limit_amt - used_amt  # 026 `T2602`: signed, never clamped
 
             edge_viz = helper.edge_viz(status=tl_status, used=used_amt, limit=limit_amt)

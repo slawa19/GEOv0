@@ -1525,6 +1525,7 @@ class RealTick:
                     edges_pairs=sorted(touched_edges),
                     pid_to_participant=pid_to_participant,
                     closed=closed,
+                    include_closed_zero_debt=True,
                 ) or None
         except Exception:
             if self._should_warn(run, f"clearing_done_patch_failed:{eq}"):

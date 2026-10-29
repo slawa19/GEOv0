@@ -1,6 +1,6 @@
 # BACKLOG — находки без программы
 
-**Обновлено:** 2026-10-29 — по поручению владельца зарегистрированы подтверждённые находки ревью балансов `OMR-1`–`OMR-3` и управления линиями доверия `OMR-4`–`OMR-6`; реализация исправлений не начата. История — `git log -p -- specs/BACKLOG.md`.
+**Обновлено:** 2026-10-29 — по поручению владельца зарегистрированы подтверждённые находки ревью балансов `OMR-1`–`OMR-3` и управления линиями доверия `OMR-4`–`OMR-6`; их исправления не начаты. Сохранены записи о локальной приёмке053-1/053-2 и невоспроизведённом P3/class2 кандидате053-5; ранее 2026-10-27 — ограниченный долг050-1. История — `git log -p -- specs/BACKLOG.md`.
 
 Здесь живут находки, которые не тянут на отдельную программу, но и не должны потеряться.
 Правило AGENTS.md §2 прямое: узкая очевидная правка не требует церемонии; новый контракт или
@@ -41,9 +41,11 @@
 
 **Доказательства второго среза, 2026-10-29:** тот же frozen source `7c9831da174749a7945870da78b4c2b7505c3d2c`; независимый reference-агент нашёл OMR-4, DeepSeek Pro и Kimi K3 — OMR-5, Qwen 27B — OMR-6; root проверил source и повторил runtime witnesses. Detached worktree `.local-run/worktrees/open-model-critical-verify-20261029/`: локальные `tests/integration/test_critical_review_non_run_404_witness.py`, `tests/integration/test_critical_review_old_limit_witness.py`, `simulator-ui/v2/src/composables/useSimulatorApp.critical404.witness.test.ts`, **не часть tracked test tier**. Из этого worktree canonical `scripts/verify_local.ps1 -TaskSlug critical_review_rootcheck_20261029 -BackendOnly -BackendSelector @('tests/integration/test_critical_review_non_run_404_witness.py','tests/integration/test_critical_review_old_limit_witness.py')` с Python основной `.venv`, process-local `DEBUG=false`: exit 0, **2 passed**, Alembic head passed; `npm --prefix simulator-ui/v2 run test:unit -- src/composables/useSimulatorApp.critical404.witness.test.ts`: exit 0, **4 passed**. Green здесь означает воспроизведение дефекта, не исправление. JSON actual и логи: `.local-run/open-model-review/20261029-critical/verification-root/` (ignored). Существующие направленные baseline selectors прошли, но не исключили этих дефектов; full tier, CI и browser E2E не заявляются. Перед исправлением повторить на актуальном owner code.
 
+**Повторная проверка после параллельной доставки053:** 2026-10-29 на `825b02f6` (merge PR #363) root повторил те же два backend witness и четыре frontend cases: exit 0, **2 passed / 4 passed**, Alembic head passed; фактические JSON снова показывают сброс существующего run и `old_limit=100` вместо150. Артефакты — `.local-run/open-model-review/20261029-critical/verification-current-main/`. Изменения053 в `simulator.py` относятся к closed-zero clearing patches и не исправляют OMR-4/5; owner code OMR-1–3/6 не изменён. Исходные модельные испытания остаются привязанными к frozen source выше.
+
 ## Расширенное ревью 053 — 2026-10-29
 
-Результаты независимых Astra/Argon и root verification сведены в [053](053-expanded-demo-review/spec.md). Это класс2; завершённые050/052 не переоткрываются, новая реализация не начата.
+Результаты независимых Astra/Argon и root verification сведены в [053](053-expanded-demo-review/spec.md). Это класс2; завершённые050/052 не переоткрываются. Последующая авторизованная реализация053-1/053-2 прошла локальные targeted/live gates и internal/Claude source review; delivery CI/PR/merge остаётся главной сессии. Исторические репродукции ниже не выдаются за текущее поведение.
 
 - **053-1 — P2, неполный результат клиринга при завершении закрытия линии. Получатель: simulator SSE.** EA-1/ARG-1, воспроизведено реальной PostgreSQL/public action и actual UI pipeline: DB150→0, после clearing+removal сохранённая UI-пара150→50 при current total0. Pre-existing. [Узкая спецификация](053-expanded-demo-review/follow-up.md); не вычислять нулевой долг из отсутствующего patch и не ослаблять fail-closed измерителя.
 - **053-2 — P2, старые tick-bound кэши после stopped restart. Получатель: simulator lifecycle.** ARG-2, exact-method debug-only probe: helper refresh91 переживает restart, новых обновлений на1–100 нет; reset-control обновляется на1. No-progress/decay markers — условные дополнительные последствия, не поломка денег или default decay. [Отдельная спецификация](053-expanded-demo-review/restart-follow-up.md); принятая active-restart race049-5 не переоткрывается.
@@ -51,6 +53,10 @@
 - **053-4 — P3, две устаревшие записи активной справки. Получатель: docs/simulator.** ARG-5: `docs/ru/simulator/scenarios-and-engine.md:633` всё ещё называет5000мс штатным бюджетом, :388 перечисляет неиспользуемый `SIMULATOR_CLEARING_MAX_DEPTH`. Код/правильный раздел справки уже0/60. При следующем изменении убрать нерабочий guardrail и описать incomplete при явном positive soft budget, отдельно аварийную отмену; не обещать безусловное продолжение любого hard-timeout. Не дубликат052-4 про test prose.
 
 ARG-4 как нарушение изоляции/обязательное удаление retained evidence отклонён: UUID-каталоги изолированы, balance JSON намеренно доступны как evidence. Пустая candidate-папка — необязательная гигиена, новая cleanup-волна не создаётся.
+
+<a id="053-5"></a>
+
+- **053-5 — P3/class2, невоспроизведённая гонка отображения при пересоздании линии. Получатель: simulator closed-line publication/UI.** Claude P053-CR-1 на `5b5aa6a7`, 2026-10-29: если recreate той же пары закоммитился во время await SELECT закрытой инкарнации (`edge_patch_builder.py:265–278`) и его SSE уже пришёл, последующий final closed-zero patch (`:301`) может кратко вернуть старую available/приглушённый стиль по тому же edge key (`simulator-ui/v2/src/demo/patches.ts:101–116`). `publish_closed_trustlines` сохраняет live/epoch guard (`sse_broadcast.py:726–794`), поэтому новую линию не удаляет; DB/долг не затрагиваются. Механизм сверен по source; runtime race/reproducer не выполнялся и наличие живого дефекта не утверждается. Следующее наблюдение — реальное пересоздание, попавшее в SELECT window; выполнять отдельную диагностику только при сигнале/при изменении этого owner. По §19.5 этот display-кандидат не расширяет053, новый epoch/concurrency механизм и code fix не авторизованы.
 
 ## Итоги закрывающего T5204 программы 052 (2026-10-27)
 
