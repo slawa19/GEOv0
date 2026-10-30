@@ -126,8 +126,11 @@ def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             raise BadRequestException(f"Config key not mutable: {key}")
 
         field = Settings.model_fields[key]
+        # 054-D-7: the field's constraints (`ge=1` and the like) live in `field.metadata`, not in the annotation;
+        # validating by the bare annotation dropped them, so 0 was accepted where the start-up check refuses it.
+        annotation = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
         try:
-            validated[key] = TypeAdapter(field.annotation).validate_python(
+            validated[key] = TypeAdapter(annotation).validate_python(
                 value,
                 strict=True,
             )
