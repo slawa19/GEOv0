@@ -7,7 +7,10 @@ import yaml
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_ruff_blocks_ci_while_black_remains_diagnostic() -> None:
+def test_ruff_and_black_block_ci() -> None:
+    """Both pinned formatters gate the job (Black since 2026-10-30, 054 T5411: one mechanical reformat of
+    app/, ratchet closed at zero). Black's area is app/ only: applied migrations are read-only by AGENTS.md §3
+    and excluded in pyproject. This guard checks the workflow's shape, not that the tree is clean - the job does."""
     workflow = yaml.safe_load(
         (_ROOT / ".github" / "workflows" / "quality.yml").read_text(
             encoding="utf-8"
@@ -24,8 +27,8 @@ def test_ruff_blocks_ci_while_black_remains_diagnostic() -> None:
 
     assert ruff.get("continue-on-error") is not True
     assert ruff["run"] == "python -m ruff check app migrations --no-cache"
-    assert black.get("continue-on-error") is True
-    assert black["run"] == "python -m black --check app migrations"
+    assert black.get("continue-on-error") is not True
+    assert black["run"] == "python -m black --check app"
 
 
 # THE TOOLING TIER'S CI BINDING (025 T2502.2, 2026-10-03). The portable partition runs as a step of

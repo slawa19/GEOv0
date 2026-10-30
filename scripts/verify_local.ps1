@@ -283,13 +283,13 @@ try {
         }
 
         if ($StaticDiagnostics) {
-            Write-Host "`nLocal diagnostics do not gate this command; CI separately requires pinned Ruff while Black remains non-blocking." -ForegroundColor Yellow
+            Write-Host "`nLocal diagnostics do not gate this command; CI separately requires pinned Ruff and Black (app/ is Black-clean since 2026-10-30)." -ForegroundColor Yellow
             Write-Host 'Mypy is not configured in this repository and is not run.' -ForegroundColor Yellow
             Invoke-DiagnosticStep -Name 'Ruff' -Command {
                 & $pythonExe -m ruff check app migrations --no-cache
             }
             Invoke-DiagnosticStep -Name 'Black' -Command {
-                & $pythonExe -m black --check app migrations
+                & $pythonExe -m black --check app
             }
         }
     }

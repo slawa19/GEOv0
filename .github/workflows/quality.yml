@@ -191,9 +191,10 @@ jobs:
           -ToolingOnly
           -ToolingPartition portable
 
+      # BLOCKING since 2026-10-30 (054 T5411): app/ is Black-clean after one mechanical commit, the ratchet
+      # is closed at zero. Applied migrations are outside Black's area (pyproject extend-exclude).
       - name: Black diagnostics
-        continue-on-error: true
-        run: python -m black --check app migrations
+        run: python -m black --check app
 
   dev-image-content:
     name: Development image content policy
