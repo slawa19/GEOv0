@@ -143,14 +143,24 @@ async def _load_run_window(db: Any, run_id: str) -> RunWindow | None:
     )
 
 
-async def _collect_payment_amounts(db: Any, window: RunWindow, equivalent: str) -> list[float]:
+async def _collect_payment_amounts(
+    db: Any, window: RunWindow, equivalent: str, *, run_id: str
+) -> list[float]:
     # Narrowed in SQL rather than in Python: on PostgreSQL the whole PAYMENT history of a seeded
     # community would otherwise cross the wire to be discarded here.
+    #
+    # 054-G-8: only the COMMITTED payments OF THIS RUN. A refused payment is an ABORTED row of the
+    # same type, and the window alone also took every other run's payments made meanwhile. The run
+    # is bound by its participants: since 044 every participant of a run has an identity of that run,
+    # `<run_id>:p<ordinal>` (`app/core/simulator/run_perimeter.py`), and a payment row's payload names
+    # its sender by that pid. `starts_with`, not LIKE: a run id carries `_`, a LIKE wildcard.
     rows = await db.fetch(
         "SELECT payload, created_at FROM transactions "
-        "WHERE type = 'PAYMENT' AND created_at BETWEEN $1 AND $2",
+        "WHERE type = 'PAYMENT' AND state = 'COMMITTED' AND created_at BETWEEN $1 AND $2 "
+        "AND starts_with(payload->>'from', $3)",
         window.started_at,
         window.stopped_at,
+        f"{run_id}:p",
         timeout=_DB_STATEMENT_TIMEOUT_SECONDS,
     )
 
@@ -241,6 +251,15 @@ def main() -> int:
     )
     ap.add_argument("--timeout-sec", type=int, default=30, help="HTTP client timeout (seconds)")
     args = ap.parse_args()
+
+    # 054-G-8: the database URL is checked BEFORE the run, not after it - a missing or non-PostgreSQL
+    # URL used to surface only once the whole run had been driven and its artefacts downloaded.
+    if not str(args.database_url).strip():
+        raise SystemExit(
+            "No database URL for the post-run analysis: pass --database-url or set DATABASE_URL "
+            "(the launcher exports it)."
+        )
+    _database_dsn(args.database_url)
 
     headers = {
         "X-Admin-Token": args.admin_token,
@@ -405,12 +424,6 @@ def main() -> int:
         except Exception:
             print("run.counters=unavailable (failed to parse summary.json)")
 
-    if not str(args.database_url).strip():
-        raise SystemExit(
-            "No database URL for the post-run analysis: pass --database-url or set DATABASE_URL "
-            "(the launcher exports it)."
-        )
-
     async def _read() -> tuple[RunWindow | None, list[float]]:
         db = await _connect(args.database_url)
         try:
@@ -418,7 +431,7 @@ def main() -> int:
             if not window:
                 return None, []
             return window, await _collect_payment_amounts(
-                db, window, equivalent=args.equivalent
+                db, window, equivalent=args.equivalent, run_id=run_id
             )
         finally:
             await db.close()
