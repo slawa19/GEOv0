@@ -2290,6 +2290,7 @@ async def action_participants_list(
     "/runs/{run_id}/actions/trustlines-list",
     response_model=SimulatorActionTrustlinesListResponse,
     responses={
+        400: {"model": SimulatorActionError, "description": "Invalid request: `equivalent` is missing (flat envelope, 054-E-12)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
@@ -2300,7 +2301,9 @@ async def action_participants_list(
 )
 async def action_trustlines_list(
     run_id: str,
-    equivalent: Optional[str] = Query(None),
+    # 054-E-12: required, as `api/openapi.yaml` states; its absence is the validation 400 INVALID_REQUEST of every
+    # action route (`request_validation_exception_handler`), no longer a 404 EQUIVALENT_NOT_FOUND for "".
+    equivalent: str = Query(...),
     participant_pid: Optional[str] = Query(None),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),

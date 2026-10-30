@@ -3492,7 +3492,8 @@ paths:
         - $ref: '#/components/parameters/RunIdPath'
         - in: query
           name: equivalent
-          required: false
+          # 054-E-12: required; without it the action answers 400 INVALID_REQUEST.
+          required: true
           schema:
             type: string
         - in: query
@@ -3507,6 +3508,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionTrustlinesListResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
