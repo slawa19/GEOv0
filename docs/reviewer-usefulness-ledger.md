@@ -75,3 +75,43 @@ Claude добавил один P3/class2 невоспроизведённый di
 Время wrapper UTC10:36:23.296–10:40:49.644,266.35с. `modelUsage.claude-opus-5-5.costUSD` и `total_cost_usd` = **2.4171946 USD**, costBasis=list, не подтверждённое списание. Usage: input46, cache-read input3061353, cache-creation input177880, output19085, thinking10028; webSearchRequests0. Полные result/validation/modelUsage, immutable prompt/schema hashes и invocation metadata — `.local-run/codex-review/p053-closing-20261029/`. Внешний reviewer не запускал тестов/PG/UI/CI и не читал вне клона red-артефакты; точные184targeted, actualPG-wire UI и2live100+restart принадлежат локальным gates. При freeze live ещё шёл; успешный итог записан отдельно, prompt не менялся. Argon не повторялся: отдельный двухмодельный review053 уже завершён; существенного неразрешённого P1/P2 разногласия не осталось.
 
 Уборка standalone clone: отдельный preflight прошёл, recovery bundle сохранён/проверен. Затем точный `Remove-Item -LiteralPath <review-root>/clone -Recurse -Force` был отклонён exec policy до запуска PowerShell (`blocked by policy`, active approval_policy=never), не Auto-review и не NTFS. Клон остался целым/чистым на точном sourceSHA; обходов/изменений атрибутов не делали. Датированные `cleanup-preflight.json` и `cleanup-receipt.json` со статусом `BLOCKED_REQUIRES_APPROVAL` сохранены рядом; это отдельный остаток локальной уборки, не отсутствие review.
+
+## Пилот открытых моделей как дополнительных ревьюеров — 2026-10-29 (закрыт 2026-10-30, каталоги удалены)
+
+Источник: три локальных отчёта пилота (срезы balance, critical, payments) и их `root-adjudication.md`; каталоги `.local-run/open-model-review/*` удалены 2026-10-30 по слову владельца, выводы сохранены здесь. Цифры — из отчётов; чего там нет, помечено «в отчёте не указано».
+
+### Постановка
+
+- **Модели** (requested ID, через OpenCode 1.19.0 / OpenRouter, `run --pure --agent plan --format json`, prompt через stdin): `openrouter/deepseek/deepseek-v4.1-flash`, `openrouter/deepseek/deepseek-v4-pro`, `openrouter/qwen/qwen3.8-27b`, `openrouter/qwen/qwen3-coder-next`, `openrouter/moonshotai/kimi-k2.6`, `openrouter/moonshotai/kimi-k3`, `openrouter/poolside/laguna-s-2.1`. Resolved weights ID OpenCode не возвращает — «не подтверждён» во всех испытаниях. Laguna — через локальный override каталога (`OPENCODE_MODELS_PATH`), провайдер и ID не подменялись.
+- **Три frozen среза:** balance и critical на `7c9831da174749a7945870da78b4c2b7505c3d2c` (`app/core/balance/service.py`, `/balance`, `/balance/debts`; 25 файлов trustlines create/update/close в Simulator UI v2 и API, Admin freeze/unfreeze), payments на `825b02f64a76613fa0494f2d39d9f8e0fa508b29` (27 файлов: Admin stop/reactivate эквивалента, backend admission/replay, Simulator intent).
+- На срез один byte-identical prompt для всех внешних моделей и один свежий reference `gpt-6.1-sol/high` (Codex), один trial на модель; reference-находки и ответы друг друга моделям не передавались.
+- **Независимый witness.** Приёмка root по исполнению, не по голосам: witness-тесты в writable verification worktree (real ASGI/PostgreSQL через canonical `verify_local.ps1 -BackendOnly` и Vitest); baseline существующих тестов 63 / 281 / 316 (не full tier, не CI); P1/P2 — только после воспроизведения достижимого эффекта.
+- **Timeout/incomplete:** таймаут сессии 1200 с (balance) и 1500 с (critical, payments); нет финальных маркеров, `length` или timeout — `UNVERIFIED`, не «находок нет»; бюджет вывода на шаг 16384 (balance, primary critical) и 32768 (payments, supplemental critical). Setup failures учтены отдельно от способности ревью.
+
+### Результаты по моделям
+
+Время в секундах, стоимость — сумма `step_finish.cost`, не счёт OpenRouter. OMR-1/2/3 = B1/B2/B3 отчёта balance.
+
+| Модель | Принято | Отклонено / не воспроизведено | Время / стоимость (B; C; P) | Статус |
+|---|---|---|---|---|
+| DeepSeek V4.1 Flash | B: OMR-1, OMR-3, частичный сигнал по torn-read (OMR-2 точно не найден). C: 0, пропустил OMR-4/5. P: 0 | B: TTL, schema, order, pagination; неактивные участники/held. P: неточность про discard/verdict | 687.3 / $0.108; 607.8 / $0.176; 260.9 / $0.103 | complete ×3 |
+| DeepSeek V4 Pro | B: OMR-1, OMR-3. C: OMR-5 (вместе с Kimi K3). P: 0 | B: TTL, OMR-2 не найден. C: create-race repro с неверным направлением долга (защищает live uniqueness guard) | 798.9 / $0.239; 492.0 / $0.346; 340.2 / $0.329 | complete ×3; в P прочитал 18 из 27 файлов |
+| Kimi K3 | B: OMR-1, OMR-3. C: OMR-5. P: 0 | B: отверг OMR-2 как «accepted design»; неверное утверждение о совпадении inline-полей. P: смешал внутренний unknown-COMMIT и явный HTTP retry | 302.1 / $1.167; 514.9 / $4.080; 572.8 / $3.761 | complete ×3 |
+| Qwen3.8-27B | B: не оценено. C: OMR-6 (docs, P3). P: 0 | P: вывод «safe/stricter DB» верен только для deactivation | 1201.5 / subtotal $0.082; 1097.5 / $0.144; 1466.1 / $0.212 | B: timeout, UNVERIFIED; C, P: complete |
+| Qwen3-Coder-Next | 0 ×3 | B: 8 claims, 0 принято. C: 0 из 5 (`CLASS-1-COUNT: 3` без денежной потери; busy-защита опровергнута). P: не принято | 93.5 / $0.072; 124.1 / $0.231; 42.8 / $0.034 | B: complete (формат нарушен); C: без `REVIEW-COMPLETE`, UNVERIFIED; P: complete, 10 из 27 файлов |
+| Kimi K2.6 | 0 ×3 | B: 8 claims, 0 принято. C: 4 отклонены. P: не учтено сохранение earlier unknown в `markRefused` | 305.4 / $0.223; 542.5 / $0.284 (primary), 930.2 / $0.522 (32k); 403.2 / $0.854 | B: complete; C primary: `length`, UNVERIFIED; C 32k, P: complete |
+| Laguna S 2.1 | C: OMR-5 только в supplemental 32k. Иначе 0 | B: 0 из 8. C 32k: policy-merge опровергнут `protocol:376`. P: ошибочный вывод об общем snapshot при READ COMMITTED | 412.9 / $0.047; 453.2 / $0.132 (primary), 525.3 / $0.071 (32k); 738.4 / $0.097 | B: complete (формат нарушен); C primary: `length`, UNVERIFIED; C 32k, P: complete |
+| Reference `gpt-6.1-sol/high` | B: OMR-1, OMR-2, OMR-3. C: OMR-4 (P2). P: 0 (`SOUND` как ограниченная статика) | C: не выделил OMR-5/6 | 318.8 с; 278 с; 344 с; стоимость в отчёте не указана | complete |
+
+Суммы наблюдаемых step events: balance $2.3756796361 (основные 7 trials $1.9374459487), critical $5.9850791805, payments $5.3900132721. Полный счёт OpenRouter в отчётах не указан.
+
+### Выводы отчётов
+
+- DeepSeek Pro — лучший кандидат в выборочный дополнительный ревьюер (три primary-прогона завершились; неполное чтение в payments). DeepSeek Flash — кандидат на дешёвый первый проход с проверкой. Kimi K3 дал те же OMR-1/3/5 при цене в 3–12 раз выше. Qwen27B — OMR-6 (docs); локальный inference не испытан. Laguna — резерв/эксперимент. Qwen Coder и Kimi K2.6 — принятых находок нет.
+- **Нашёл только reference:** OMR-2 (два SELECT направлений долга при READ COMMITTED) и OMR-4 (любой HTTP 404 сбрасывает живой run и SSE) — все внешние модели пропустили OMR-4. **Сверх reference:** OMR-5 (Pro, Kimi K3, Laguna) и OMR-6 (Qwen27B). Все принятые находки — класс 2; денежных потерь не установлено. Срез payments не дал actionable ни у кого.
+- **Чего пилот не доказывает:** преимущества над OpenAI+Anthropic+Gemini (тройку на тех же снимках не гоняли); независимости весов Flash/Pro (direct API alias `deepseek-v4-pro` маршрутизируется в V4.1-Flash); общего рейтинга (три среза, один trial); влияния бюджета (16k → 32k менялся); отсутствия дефектов по негативным отчётам (неодинаковые подмножества файлов).
+- **Ограничения harness:** read-deny не ограничивает grep/glob (Flash сделал `grep` по собственному `.git`); допуски инструментов — tool permissions, не OS sandbox; standalone clones credential-free, без origin; reference шёл в другом harness (Codex). Доставка находок — `specs/BACKLOG.md` (PR #364, merge `6cee8d8a`).
+
+### Решение
+
+Регулярные платные вызовы открытых моделей не включены; обязательная матрица Codex ↔ Claude Code и три триггера Argon не изменены. Слово владельца 2026-10-30: пилот закрыт, артефакты удалены, выводы сохранены в этом разделе. Для 054 ревьюеры — Opus и Codex `gpt-6-astra`.
