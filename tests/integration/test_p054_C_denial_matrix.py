@@ -11,9 +11,9 @@ What it sees: the status (and, for the admin refusals, the refusal's own message
 with a wrong admin token, and - on `/simulator/admin/*` - with a valid anonymous visitor cookie. What it does not
 see: refusals that need a real participant (another participant's resource, an inactive account), the CSRF origin
 check, and anything a route does after authentication. The class comes from the guard the route has, so the
-matrix proves that each route's guard refuses, not that each route has the right guard: a route whose guard is
-downgraded (e.g. `require_admin` -> `get_current_participant`) is reclassified and stays green unless it is named
-in `MUST_CONTAIN`; an admin check in a handler body outside `/simulator/admin/*` (e.g. scenario upload, covered by
+matrix proves that each route's guard refuses, not that each route has the right guard: outside the
+`/api/v1/admin` prefix (which `_classify` pins to admin by path) a route whose guard is downgraded (e.g. integrity
+`require_admin` -> `get_current_participant`) is reclassified and stays green unless it is named in `MUST_CONTAIN`; an admin check in a handler body outside `/simulator/admin/*` (e.g. scenario upload, covered by
 `tests/integration/test_p044_t4405_run_isolation.py`) is tested only as a simulator route; and only `APIRoute`s
 are enumerated - a future mount, `add_route` or websocket route escapes `test_every_route_is_classified`.
 """
