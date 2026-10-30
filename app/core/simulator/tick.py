@@ -1531,13 +1531,18 @@ class RealTick:
                     closed=closed,
                     include_closed_zero_debt=True,
                 ) or None
-        except Exception:
+        except Exception as exc:
+            # 054-A-8: `clearing.done` still goes out, without patches - the clearing is committed - but the loss of
+            # its patches is a warning, not a debug line nobody sees (AGENTS.md §9/§12).
             if self._should_warn(run, f"clearing_done_patch_failed:{eq}"):
-                rr._logger.debug(
-                    "simulator.real.clearing_done_patch_failed run_id=%s tick=%s eq=%s",
+                rr._logger.warning(
+                    "simulator.real.clearing_done_patch_failed run_id=%s tick=%s eq=%s cleared_cycles=%s "
+                    "error_type=%s",
                     str(run.run_id),
                     int(run.tick_index),
                     eq,
+                    int(cleared_cycles),
+                    type(exc).__name__,
                     exc_info=True,
                 )
             node_patch = None
