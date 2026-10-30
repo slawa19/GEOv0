@@ -803,6 +803,42 @@ async def publish_closed_trustlines(
 
 _PENDING_PUBLICATIONS: set[asyncio.Task] = set()
 
+#: 054-A review FD4: how long `stop()` waits for a run's scheduled closed-line publications before its terminal
+#: `run_status(stopped)`. Each is one SELECT and one event; one still running past the bound is named in a warning
+#: and left to finish - waited for, never cancelled.
+CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC = 5.0
+
+
+def _publication_task_name(run_id: Any) -> str:
+    return f"simulator-closed-trustlines:{run_id}"
+
+
+def pending_closed_trustlines_publications(run_id: str) -> list[asyncio.Task]:
+    """The run's closed-line publications scheduled and not yet done (054-A review FD4)."""
+
+    name = _publication_task_name(run_id)
+    return [task for task in list(_PENDING_PUBLICATIONS) if not task.done() and task.get_name() == name]
+
+
+async def drain_closed_trustlines_publications(run_id: str) -> None:
+    """Wait, at most `CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC`, for the run's pending closed-line publications.
+
+    054-A review FD4: a committed tick payment that completes a requested close schedules its publication from the
+    synchronous post-commit callback, and nothing awaits it - so the heartbeat drain of a `stop()` does not cover it,
+    and `topology.changed` could follow `stopped`, which ends the live stream. `stop()` calls this after the drain."""
+
+    pending = pending_closed_trustlines_publications(run_id)
+    if not pending:
+        return
+    _done, still = await asyncio.wait(pending, timeout=CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC)
+    if still:
+        logging.getLogger(__name__).warning(
+            "simulator.sse.trustline_closed_publication_drain_timeout run_id=%s pending=%d timeout_sec=%s",
+            run_id,
+            len(still),
+            CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC,
+        )
+
 
 def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None:
     """`publish_closed_trustlines` from a synchronous post-commit callback: a task on the running loop.
@@ -814,7 +850,9 @@ def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None
     if not kwargs.get("pairs"):
         return None
     try:
-        task = asyncio.get_running_loop().create_task(publish_closed_trustlines(**kwargs))
+        task = asyncio.get_running_loop().create_task(
+            publish_closed_trustlines(**kwargs), name=_publication_task_name(kwargs.get("run_id"))
+        )
     except RuntimeError:
         logging.getLogger(__name__).warning("simulator.sse.trustline_closed_no_loop run_id=%s", kwargs.get("run_id"))
         return None

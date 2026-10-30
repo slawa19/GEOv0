@@ -12,7 +12,11 @@ from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import PAUSE_REASON_SCENARIO_EXHAUSTED, RunRecord, note_subscribers_locked
 from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.sse_broadcast import (
+    SseBroadcast,
+    drain_closed_trustlines_publications,
+    pending_closed_trustlines_publications,
+)
 from app.schemas.simulator import RunMode, RunStatus
 from app.utils.exceptions import ConflictException
 from app.utils.exceptions import NotFoundException
@@ -516,7 +520,7 @@ class RunLifecycle:
             # Cancelling the task again is a repeated cancellation: `commit_resolution._drain_task` then cancels the
             # in-flight COMMIT it shields, and the tick ends with its committed money unknown and unpublished.
             joins_drain = run._stop_draining and heartbeat_task is not None
-            if heartbeat_task is not None:
+            if heartbeat_task is not None or pending_closed_trustlines_publications(run_id):
                 # From here until the drain below is over, every `run_status` says `stopping` - also the one a second
                 # stop (retry, stop-all, shutdown), a new subscription, a pause or an intensity change publishes.
                 run._stop_draining = True
@@ -577,9 +581,13 @@ class RunLifecycle:
         # way out; published before the drain, `stopped` got an older event id than those events, the live SSE stream
         # (which returns on `stopped`) never delivered them and `stopped` carried the counters of before the commit.
         # The state and the owner slot above are still released early - only the publication waits.
-        with self._lock:
-            run._stop_draining = False  # 054-A review FD2: the drain is over; `stopped` may be said
-        self._publish_run_status(run_id)
+        try:
+            # 054-A review FD4: the drained tick's closed-line publications are tasks of their own; bounded wait.
+            await drain_closed_trustlines_publications(run_id)
+        finally:
+            with self._lock:
+                run._stop_draining = False  # 054-A review FD2: the drain is over; `stopped` may be said
+            self._publish_run_status(run_id)
 
         # Always attempt to stop artifacts writer (idempotent).
         try:
