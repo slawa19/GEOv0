@@ -199,19 +199,70 @@ def is_json_media_type(value: str | None) -> bool:
     return media == "application/json" or media.endswith("+json")
 
 
+# 054-E-H2: how many response-level `$ref` hops are followed before the chain is called a loop.
+_MAX_RESPONSE_REF_HOPS = 8
+
+
+def resolve_declared_response(
+    document: dict[str, Any], method: str, path: str, status: int
+) -> tuple[str, dict[str, Any], str] | None:
+    """`(key, response object, JSON pointer of that object)` the canon declares, or `None`.
+
+    `key` is `str(status)` when the canon names the status and `"default"` when only a `default`
+    entry covers it - the caller is told which, because a `default` match is allowed but marked
+    (054-E-H1 (e)). The response object has every **response-level** `$ref`
+    (`{"$ref": "#/components/responses/NotFound"}`) followed, and the pointer names the object that
+    was finally read, so a schema pointer built from it resolves against the whole document.
+
+    054-E-H2: before this function the readers took the `$ref` dict itself for the response, found
+    no `content` in it and answered `declared-without-a-body` - measured on the full tier, 457 of 558
+    non-2xx responses are declared this way, so a non-2xx rule without it would have reported a
+    false "the canon says there is no body" on almost every error. A reference this function cannot
+    follow (not local, missing target, a loop) RAISES rather than answering: falling back to the
+    unresolved dict is exactly the false `declared-without-a-body` again, and a raise inside
+    `Harness.record` lands in `recorder_errors`, which the aggregate fails on.
+    """
+
+    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
+    if not isinstance(operation, dict):
+        return None
+    responses = operation.get("responses") or {}
+    key = next((k for k in (str(status), "default") if k in responses), None)
+    if key is None:
+        return None
+    response = responses[key]
+    pointer = f"/paths/{_escape(path)}/{method.lower()}/responses/{_escape(key)}"
+    for _ in range(_MAX_RESPONSE_REF_HOPS):
+        if not (isinstance(response, dict) and "$ref" in response):
+            break
+        ref = response["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            raise ValueError(f"{method} {path} {key}: cannot follow response $ref {ref!r}")
+        pointer = ref[1:]
+        target: Any = document
+        for token in pointer[1:].split("/"):
+            token = token.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or token not in target:
+                raise ValueError(f"{method} {path} {key}: response $ref {ref!r} resolves to nothing")
+            target = target[token]
+        response = target
+    else:
+        raise ValueError(f"{method} {path} {key}: response $ref chain longer than "
+                         f"{_MAX_RESPONSE_REF_HOPS} hops")
+    if not isinstance(response, dict):
+        return None
+    return key, response, pointer
+
+
 def declared_media_types(
     document: dict[str, Any], method: str, path: str, status: int
 ) -> list[str]:
     """Every media type the canon declares for this operation and status, normalized."""
 
-    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
-    if not isinstance(operation, dict):
+    declared = resolve_declared_response(document, method, path, status)
+    if declared is None:
         return []
-    responses = operation.get("responses") or {}
-    key = next((k for k in (str(status), "default") if k in responses), None)
-    if key is None or not isinstance(responses[key], dict):
-        return []
-    return sorted(normalize_media_type(m) for m in (responses[key].get("content") or {}))
+    return sorted(normalize_media_type(m) for m in (declared[1].get("content") or {}))
 
 
 def classify_response_declaration(
@@ -253,16 +304,10 @@ def classify_response_declaration(
     the JSON schema for this operation", asked of the document alone.
     """
 
-    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
-    if not isinstance(operation, dict):
+    declared = resolve_declared_response(document, method, path, status)
+    if declared is None:
         return DECL_UNDECLARED, None
-    responses = operation.get("responses") or {}
-    key = next((k for k in (str(status), "default") if k in responses), None)
-    if key is None:
-        return DECL_UNDECLARED, None
-    response = responses[key]
-    if not isinstance(response, dict):
-        return DECL_UNDECLARED, None
+    _key, response, response_pointer = declared
     content = response.get("content") or {}
     if not content:
         return DECL_NO_CONTENT, None
@@ -281,10 +326,7 @@ def classify_response_declaration(
 
     if "schema" not in content[media]:
         return DECL_NO_SCHEMA, None
-    return DECL_SCHEMA, (
-        f"/paths/{_escape(path)}/{method.lower()}/responses/{_escape(key)}"
-        f"/content/{_escape(media)}/schema"
-    )
+    return DECL_SCHEMA, f"{response_pointer}/content/{_escape(media)}/schema"
 
 
 def response_schema_pointer(
