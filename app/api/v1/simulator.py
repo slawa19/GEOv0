@@ -1194,8 +1194,9 @@ async def _publish_trustline_change_best_effort(
     """After a committed trust-line action: the run's in-memory topology, the router cache, `topology.changed`.
 
     All of it is best effort and never raises: the mutation is durable already, and nothing here may report it
-    as failed. `op` is `create` (the added edge with its limit and an edge patch), `update` (published only when
-    an edge patch could be built) or `close` (the removed edge, no patch - the UI needs the explicit removal).
+    as failed. `op` is `create` (the added edge with its limit and an edge patch), `update` (published with its edge
+    patch; when the patch could not be BUILT, without one - a patch-less event asks the UI to refresh its snapshot,
+    054-A-18) or `close` (the removed edge, no patch - the UI needs the explicit removal).
     """
 
     eq_code, from_pid, to_pid = parties.eq.code, parties.from_p.pid, parties.to_p.pid
@@ -1206,12 +1207,16 @@ async def _publish_trustline_change_best_effort(
     try:
         PaymentRouter.invalidate_cache(eq_code)
     except Exception:
-        pass
+        logger.warning(
+            "Router cache invalidation failed: interact.trustline_%s run_id=%s equivalent=%s",
+            op, run_id, eq_code, exc_info=True,
+        )
 
     try:
         run = runtime.get_run(run_id)
         emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
         edge_patch: list[dict[str, Any]] | None = None
+        patch_failed = False
         if op in ("create", "update"):
             try:
                 edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
@@ -1222,7 +1227,13 @@ async def _publish_trustline_change_best_effort(
                     include_width_keys=True,
                 )
             except Exception:
+                # 054-A-18: the change is committed; the event still goes out (below), only without the patch.
+                patch_failed = True
                 edge_patch = None
+                logger.warning(
+                    "Edge patch build failed: interact.trustline_%s run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+                    op, run_id, eq_code, from_pid, to_pid, exc_info=True,
+                )
 
         if op == "create":
             assert limit_dec is not None
@@ -1239,9 +1250,10 @@ async def _publish_trustline_change_best_effort(
                 edge_patch=(edge_patch or None),
             )
         elif op == "update":
-            if not edge_patch:
+            if not edge_patch and not patch_failed:
                 return
-            payload = TopologyChangedPayload(node_patch=None, edge_patch=edge_patch)
+            # A failed build publishes the change without a patch: the UI answers it with a snapshot refresh.
+            payload = TopologyChangedPayload(node_patch=None, edge_patch=(edge_patch or None))
         else:
             payload = TopologyChangedPayload(
                 removed_edges=[TopologyChangedEdgeRef(from_pid=from_pid, to_pid=to_pid, equivalent_code=eq_code)],
