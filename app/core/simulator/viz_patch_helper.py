@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -242,28 +242,31 @@ class VizPatchHelper:
         if not pid_list:
             return []
 
-        # Compute net balances for these participants in 2 grouped queries.
         part_ids = [pid_to_participant[pid].id for pid in pid_list if pid in pid_to_participant]
         if not part_ids:
             return []
 
-        credit_rows = (
+        # 054-A-3: both roles come from ONE statement, so from one snapshot under READ COMMITTED (as the balance
+        # summary, `BalanceService`). Two SELECTs - credit, then debit - let a payment commit between them, and the
+        # node patch published a net the database never held.
+        wanted = set(part_ids)
+        debt_rows = (
             await session.execute(
-                select(Debt.creditor_id, func.coalesce(func.sum(Debt.amount), 0).label("amount"))
-                .where(Debt.equivalent_id == self.equivalent_id, Debt.creditor_id.in_(part_ids))
-                .group_by(Debt.creditor_id)
-            )
-        ).all()
-        debit_rows = (
-            await session.execute(
-                select(Debt.debtor_id, func.coalesce(func.sum(Debt.amount), 0).label("amount"))
-                .where(Debt.equivalent_id == self.equivalent_id, Debt.debtor_id.in_(part_ids))
-                .group_by(Debt.debtor_id)
+                select(Debt.creditor_id, Debt.debtor_id, Debt.amount).where(
+                    Debt.equivalent_id == self.equivalent_id,
+                    or_(Debt.creditor_id.in_(part_ids), Debt.debtor_id.in_(part_ids)),
+                )
             )
         ).all()
 
-        credit_sum = {r.creditor_id: (r.amount or Decimal("0")) for r in credit_rows}
-        debit_sum = {r.debtor_id: (r.amount or Decimal("0")) for r in debit_rows}
+        credit_sum: dict[Any, Decimal] = {}
+        debit_sum: dict[Any, Decimal] = {}
+        for r in debt_rows:
+            amount = r.amount or Decimal("0")
+            if r.creditor_id in wanted:
+                credit_sum[r.creditor_id] = credit_sum.get(r.creditor_id, Decimal("0")) + amount
+            if r.debtor_id in wanted:
+                debit_sum[r.debtor_id] = debit_sum.get(r.debtor_id, Decimal("0")) + amount
 
         precision = int(self.precision)
 
