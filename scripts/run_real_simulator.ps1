@@ -5,16 +5,13 @@
 .DESCRIPTION
   Brings up everything needed to test the real simulator via simulator-ui/v2:
   - Postgres + Redis + API (Docker Compose)
-  - Optional DB seeding (a community's recipe run through the domain services; off by default)
+  - No DB seeding: the Compose database `geov0` is not a disposable seed target (see -Community)
   - Simulator UI v2 in Real Mode (Vite dev server with /api/v1 proxy)
 
   Designed for Windows PowerShell 5.1+ / PowerShell 7+.
 
 .EXAMPLE
   ./scripts/run_real_simulator.ps1
-
-.EXAMPLE
-  ./scripts/run_real_simulator.ps1 -Community riverside-town-50
 
 .EXAMPLE
   ./scripts/run_real_simulator.ps1 -Action doctor
@@ -31,10 +28,11 @@ param(
   [int]$ApiPort = 8000,
   [int]$SimulatorUiPort = 5176,
 
-  # Community whose recipe seeds the DB (scripts/seed_db.py --source recipe). 'none' (the default) disables
-  # seeding: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3) deleted the
-  # direct import of fixture packs; the recipe seeds only an EMPTY, disposable database by name
-  # (geov0_dev_<slug> / geov0_test_<slug> on a loopback host) and refuses the Compose database `geov0`.
+  # Only 'none' is accepted: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3)
+  # deleted the direct import of fixture packs; the recipe (scripts/seed_db.py --source recipe) seeds only an
+  # EMPTY, disposable database by name (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database
+  # `geov0` (docker-compose.yml DATABASE_URL), so a community here and -Action seed are refused below, before
+  # any Docker or lifecycle mutation (054-G-9: they used to fail only after `docker compose up -d --build`).
   [ValidateSet('greenfield-village-100', 'riverside-town-50', 'none')]
   [string]$Community = 'none',
 
@@ -52,6 +50,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Action -eq 'seed' -or $Community -ne 'none') {
+  throw ("Seeding is not available here: scripts/seed_db.py --source recipe seeds only an empty disposable " +
+    "database (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database 'geov0'. Seed a launcher " +
+    "database instead: ./scripts/run_local.ps1 reset-db -SeedCommunity <community>, or scripts/seed_db.py " +
+    "--source recipe --community <community> with DATABASE_URL on a geov0_dev_<slug> database. " +
+    "The real simulator seeds its own scenario at run start; run this script without -Community / -Action seed.")
+}
 
 $script:UserSpecifiedApiPort = $PSBoundParameters.ContainsKey('ApiPort')
 $script:UserSpecifiedRedisPort = $PSBoundParameters.ContainsKey('RedisPort')
@@ -847,14 +853,6 @@ if ($Action -eq 'stop') {
   Write-Host 'Stopping all simulator services...'
   Stop-RunRealServices
   Write-Host 'All simulator services stopped.' -ForegroundColor Green
-  exit 0
-}
-
-if ($Action -eq 'seed') {
-  Ensure-ComposeCore
-  Seed-DbIfRequested
-  Write-Host 'OK: seed completed.'
-  Write-UsefulLinks
   exit 0
 }
 
