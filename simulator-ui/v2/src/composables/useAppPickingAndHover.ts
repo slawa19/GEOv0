@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 
+import type { GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 
 import { clamp } from '../utils/math'
@@ -33,6 +34,8 @@ export function useAppPickingAndHover(opts: {
   getSelectedNodeId: () => string | null
   hasSelectedIncidentEdges: () => boolean
   getLinkByKey: (key: string) => LayoutLink | undefined
+  /** 054-B-7: the shown snapshot - the hovered line's figures are read again on a patch or a replacement (`useEdgeHover`). */
+  getSnapshot: () => GraphSnapshot | null | undefined
 
   // tooltip unit
   getUnit: () => string
@@ -66,6 +69,7 @@ export function useAppPickingAndHover(opts: {
     formatEdgeAmountText: edgeTooltip.formatEdgeAmountText,
     // 043 S1: the same unit the amount text is written in, captured with the figures.
     getEquivalent: () => opts.getUnit() || null,
+    getSnapshot: opts.getSnapshot,
     clientToScreen: opts.clientToScreen,
     screenToWorld: opts.screenToWorld,
     worldToScreen: opts.worldToScreen,

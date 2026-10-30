@@ -388,18 +388,18 @@ describe('F-034-D2, review C2 -> 048 S3: a scene error is not copied to the run 
     await app.admin.attachRun('R')
     await settle()
     // 046 wave 1, full (2026-10-19): the line of a run ended by an error is the interface's sentence with the code.
-    expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
+    expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-11T00:00:00Z' }, 'en'))
 
     vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
     await app.realActions.refreshSnapshot()
     await settle()
     expect(runErrorLineLog(app.state.errorLine), 'the scene error is shown - in its own place').toContain('HTTP 503')
-    expect(app.real.lastError, 'not copied to the run line').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
+    expect(app.real.lastError, 'not copied to the run line').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-11T00:00:00Z' }, 'en'))
 
     await app.realActions.refreshSnapshot()
     await settle()
 
-    expect(app.real.lastError, 'the error of the run was lost with the scene error').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
+    expect(app.real.lastError, 'the error of the run was lost with the scene error').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-11T00:00:00Z' }, 'en'))
   })
 })
 

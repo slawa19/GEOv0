@@ -202,7 +202,7 @@ for (const theme of THEMES) {
     }
   })
 
-  test(`P046W1F (4) [${theme}] a visitor whose run was stopped (stop-all, an API stop without a reason) or ended with an error reads "reload the page"`, async ({ page }) => {
+  test(`P046W1F (4) [${theme}] a visitor whose run was stopped (stop-all, an API stop without a reason) reads "reload the page", or ended with an error reads its code and message (054-B-7b)`, async ({ page }) => {
     for (const lang of LANGS) {
       for (const [ending, extra, key] of [
         ['operator', { state: 'stopped', stop_source: 'admin', stop_reason: 'admin_stop_all' }, 'runLine.stopped'],
@@ -217,9 +217,11 @@ for (const theme of THEMES) {
         await expect(page.getByTestId('network-state')).toHaveAttribute('data-run-state', ending === 'error' ? 'error' : 'stopped')
         // On the first view ("Подробнее" closed): the line says what to do.
         await expect(page.locator(DETAILS)).toHaveAttribute('aria-expanded', 'false')
-        await expect(page.getByTestId('top-error'), `${lang} ${ending}`).toContainText(t(key, { code: 'REAL_MODE_TICK_FAILED' }, lang))
-        // 049 S2 (decision 7): the code is not drawn in brackets - it is the title (and the console).
-        await expect(page.getByTestId('top-error'), `${lang} ${ending}`).not.toContainText('REAL_MODE_TICK_FAILED')
+        // 054-B-7b (the owner's decision of 2026-10-30): a run ended by an error names its code, the server's message and
+        // its time in the text (049 S2 decision 7 kept the code in the title only); a stop names no code.
+        await expect(page.getByTestId('top-error'), `${lang} ${ending}`).toContainText(t(key, { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-19T00:00:00Z' }, lang))
+        if (ending === 'error') await expect(page.getByTestId('top-error'), `${lang} ${ending}`).toContainText('REAL_MODE_TICK_FAILED — tick failed')
+        else await expect(page.getByTestId('top-error'), `${lang} ${ending}`).not.toContainText('REAL_MODE_TICK_FAILED')
         for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) {
           await expect(page.getByTestId(id)).toBeDisabled()
           await expect(page.getByTestId(id), 'the reason names the reload').toHaveAttribute('title', t('actions.noRun', undefined, lang))

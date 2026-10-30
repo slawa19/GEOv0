@@ -194,7 +194,9 @@ describe('048 S3: the run error line - one sentence, no «Error» before it, the
 
     // 049 S2 (decision 7, reproducer (е)): a code of the run is no longer printed in brackets - it is the title and the
     // console line. Red before: «The run stopped with an error (REAL_MODE_TICK_FAILED). …».
-    it(`a run's code is not drawn in brackets, it is the title [${locale}]`, async () => {
+    // 054-B-7b (the owner's decision of 2026-10-30) turns half of it over: the code and the server's message ARE drawn
+    // (not in brackets - «CODE — message»), and the title still carries them.
+    it(`a run's code and message are drawn, not in brackets; the title keeps them [${locale}]`, async () => {
       setUiLocale(locale)
       for (const line of [
         runEndedByErrorLine({ code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-20T00:00:00Z' }),
@@ -210,7 +212,8 @@ describe('048 S3: the run error line - one sentence, no «Error» before it, the
         const sentence = el.querySelector('[data-testid="error-text"]')!
         const code = line.kind === 'code' ? line.code : ''
         expect(code, 'anti-vacuum: the line carries a code').not.toBe('')
-        expect(el.textContent, `${code} is not drawn`).not.toContain(code)
+        const message = line.kind === 'code' ? line.message ?? '' : ''
+        expect(sentence.textContent, `${code} is drawn`).toContain(`${code} — ${message}`)
         expect(el.textContent).not.toMatch(/\(\s*[A-Z_]{3,}\s*\)/)
         expect(sentence.getAttribute('title'), 'the code is the title').toContain(code)
         host.remove()

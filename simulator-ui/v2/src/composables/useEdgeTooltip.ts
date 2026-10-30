@@ -43,33 +43,40 @@ export function useEdgeTooltip(deps: UseEdgeTooltipDeps): UseEdgeTooltipReturn {
     return t('edgeTooltip.amounts', { from: fromTxt, to: toTxt, unit })
   }
 
-  // §7.1 — Cached overlay size to avoid layout thrash on every pointermove.
-  // DOM measurement (querySelector + getBoundingClientRect) is performed only
-  // once per "show" event — when hoveredEdge.key transitions from null to a
-  // non-null value — and the result is cached for subsequent pointermove calls.
+  // §7.1 — Cached overlay size to avoid layout thrash on every pointermove: the tooltip is measured once per show and the
+  // result is reused by the following pointermoves.
+  //
+  // 054-B-9: the measurement waits for the tooltip to EXIST. The call that sets a new key comes before it is rendered
+  // (`EdgeTooltip.vue` is under `v-if="edge.key"`, its `:style` is this function), so measuring only on the null->key call
+  // never found it and the clamp always used the fallback. Now the first call of a show on which the element is there
+  // measures it; on a call that changed the key the element still holds the previous line, so it is not measured then.
+  // The fallback is used only until the first measurement; afterwards the last measured size stands in until the next.
   const FALLBACK_W = 260
   const FALLBACK_H = 120
   const cachedOverlaySize = { w: FALLBACK_W, h: FALLBACK_H }
   let prevKey: string | null = null
+  let measuredKey: string | null = null
 
   function edgeTooltipStyle() {
     const host = deps.hostEl.value
     if (!host || !deps.hoveredEdge.key) {
       prevKey = null
+      measuredKey = null
       return { display: 'none' }
     }
 
-    // Measure overlay size once on show (null→key transition), not on every pointermove.
-    if (prevKey === null) {
+    const key = deps.hoveredEdge.key
+    if (measuredKey !== key && (prevKey === null || prevKey === key)) {
       // 046 wave 1: found by its test id, not by its accessible name (which is in the language of the interface).
       const tooltipEl = host.querySelector('[data-testid="edge-tooltip"]') as HTMLElement | null
       const tooltipRect = tooltipEl?.getBoundingClientRect()
       if (tooltipRect && tooltipRect.width > 0) {
         cachedOverlaySize.w = tooltipRect.width
         cachedOverlaySize.h = tooltipRect.height
+        measuredKey = key
       }
     }
-    prevKey = deps.hoveredEdge.key
+    prevKey = key
 
     const rect = host.getBoundingClientRect()
 

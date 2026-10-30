@@ -122,14 +122,20 @@ const effectiveUsed = computed(() => effectiveData.value.used)
 const effectiveLimit = computed(() => effectiveData.value.limit)
 const effectiveAvailable = computed(() => effectiveData.value.available)
 
+// 054-B-13: what the pre-fill last wrote into «New limit». While the field still holds it (the user has not typed), a limit
+// that becomes known later - the source answers after the edit began - is written there too; a typed value is never replaced.
+let prefilledLimit: string | null = null
+function prefillNewLimit() {
+  const cur = effectiveLimit.value
+  newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
+  prefilledLimit = newLimit.value
+}
+
 watch(
   () => props.phase,
   (p) => {
     // Pre-fill edit field when entering edit phase.
-    if (p === 'editing-trustline') {
-      const cur = effectiveLimit.value
-      newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
-    }
+    if (p === 'editing-trustline') prefillNewLimit()
     // Reset create field when entering create phase.
     if (p === 'confirm-trustline-create') {
       limit.value = ''
@@ -145,10 +151,15 @@ watch(
   () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}`,
   () => {
     if (props.phase !== 'editing-trustline') return
-    const cur = effectiveLimit.value
-    newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
+    prefillNewLimit()
   },
 )
+
+watch(effectiveLimit, () => {
+  if (props.phase !== 'editing-trustline') return
+  if (newLimit.value !== prefilledLimit) return
+  prefillNewLimit()
+})
 
 const createLimitNormalized = computed(() => parseTypedAmount(limit.value))
 const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.value))

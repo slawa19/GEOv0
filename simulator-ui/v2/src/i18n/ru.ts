@@ -276,11 +276,12 @@ export const ru = {
     trustlineUpdated: 'Новый лимит линии: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
     closeRequested: 'Линия закроется после погашения: {from} → {to}',
+    // 054-B-6: no amount - the answer's `total_cleared_amount` is not the drop of the total debt the bar and the feed state (039 P-5).
     clearing: plural({
-      one: 'Клиринг: {count} круг, −{amount} {unit}',
-      few: 'Клиринг: {count} круга, −{amount} {unit}',
-      many: 'Клиринг: {count} кругов, −{amount} {unit}',
-      other: 'Клиринг: {count} круга, −{amount} {unit}',
+      one: 'Клиринг: {count} круг',
+      few: 'Клиринг: {count} круга',
+      many: 'Клиринг: {count} кругов',
+      other: 'Клиринг: {count} круга',
     }),
     clearingNothing: 'Клиринг: ничего не погашено',
   },
@@ -423,6 +424,8 @@ export const ru = {
     flow: 'Поток',
     flowPause: 'Поставить автоматические платежи на паузу',
     flowResume: 'Возобновить автоматические платежи',
+    restart: 'Перезапустить',
+    restartTitle: 'Новый прогон этого сценария',
     details: 'Подробнее',
     network: 'Сеть',
     detailsRowAria: 'Верхняя панель',
@@ -453,8 +456,6 @@ export const ru = {
     paymentsAria: 'Платежи',
     payments: 'Платежи: {ok} из {total} прошли',
     paymentsNone: 'Платежей ещё не было',
-    stallAria: 'Платежи стоят',
-    stall: 'Последние платежи не проходят. Попробуйте клиринг или увеличьте лимит нужной линии.',
   },
 
   actions: {
@@ -641,8 +642,9 @@ export const ru = {
     idleStopped: 'Прогон остановлен сервером: его долго никто не смотрел. Чтобы запустить снова, перезагрузите страницу.',
     zeroIntensity: 'Темп 0 — прогон без платежей: укажите темп от 1 до 100. Остановить платежи — пауза.',
     stopped: 'Прогон остановлен. Чтобы запустить снова, перезагрузите страницу.',
-    errorStopped: 'Демо остановилось из-за сбоя. Перезагрузите страницу, чтобы начать новый прогон.',
-    runningError: 'Во время прогона произошёл сбой; прогон продолжается.',
+    errorStopped: 'Прогон остановлен: {code} — {message} ({at}). Перезапустите прогон.',
+    runningError: 'Во время прогона произошёл сбой: {code} — {message} ({at}); прогон продолжается.',
+    scenarioExhausted: 'Автоматические платежи сценария исчерпаны; платите вручную или перезапустите.',
   },
 
   windowShell: {

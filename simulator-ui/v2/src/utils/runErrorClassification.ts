@@ -7,15 +7,29 @@ import type { UiLocale } from '../i18n/locale'
 import { t, tn, type MessageKey, type PluralKey } from '../i18n/t'
 import { uiLocale } from './paymentRefusalText'
 
+/**
+ * 054-B-7b (the owner's decision of 2026-10-30: «на этапе разработки пользователь и есть администратор; все РЕАЛЬНЫЕ ошибки
+ * показывать»): the codes of a REAL failure - infrastructure, integrity, a defect of the program - as opposed to a refusal
+ * of a payment (`ROUTING_*`, `CONFLICT`, `INVALID_INPUT`, `PAYMENT_REJECTED`, `TRUSTLINE_*`, ...: an outcome, shown in the
+ * history only). A run that goes on shows such a `last_error` on its line, its code and message in the text; a `tx.failed`
+ * with such a code is counted as an error, not a rejection. Until 054 only `PAYMENT_TIMEOUT`, `INTERNAL_ERROR` and
+ * `CLEARING_REFUSED` were (031 item 17). A code in none of the classes stays unshown on a running run (a run in `error`
+ * shows whatever code stopped it).
+ */
+const REAL_RUN_ERROR_CODES = new Set([
+  'PAYMENT_TIMEOUT',
+  'INTERNAL_ERROR',
+  'CLEARING_ERROR',
+  'CLEARING_REFUSED',
+  'INTEGRITY_VIOLATION',
+  'HEARTBEAT_FAILED',
+  'SENDER_NOT_FOUND',
+])
+
 export function isUserFacingRunErrorCode(code: string): boolean {
   const c = code.toUpperCase()
   if (!c) return false
-  if (c === 'PAYMENT_TIMEOUT') return true
-  if (c === 'INTERNAL_ERROR') return true
-  // 031 item 17: the tick's clearing step refusal is named by the server (030 S2); every other clearing failure
-  // stays the sanitised CLEARING_ERROR and is not shown.
-  if (c === 'CLEARING_REFUSED') return true
-  return false
+  return REAL_RUN_ERROR_CODES.has(c) || c.startsWith('REAL_MODE_')
 }
 
 /**
@@ -26,8 +40,10 @@ export function isUserFacingRunErrorCode(code: string): boolean {
  *   - `raw`   - a text kept as it came (the server's own `CODE: message`, a transport error, a scene-load error);
  *   - `code`  - a dictionary key whose text names a server code (`{code}`): the sentence is in the interface language,
  *               the code stays as it came, for correlation (046 wave 1, full: the line of a run ended by an error);
- *               `detail` is the server's own `CODE: message` - not drawn, but the line's `title` and one console line
- *               (048 decision 3, AGENTS.md section 12: the full text stays reachable for correlation).
+ *               `detail` is the server's own `CODE: message` - the line's `title` and one console line (048 decision 3,
+ *               AGENTS.md section 12). 054-B-7b (the owner's decision of 2026-10-30, replaces 048 S3's «the technical text
+ *               is the title only» for the run's own failure): `message` and `at` of `last_error` are DRAWN too
+ *               (`{message}`, `{at}`), as the server gave them.
  * `renderRunErrorLine` gives the text in a language. The holder (`useSimulatorRealMode.ts`) keeps the VALUE in
  * `lastErrorLine` and the text of the current language in `lastError` (for every reader that wants a string: the top
  * bar, its title, tests), and renders again on a switch. A line put aside and brought back (a scene-load error over it)
@@ -45,7 +61,18 @@ export type RunErrorLine =
   | { readonly kind: 'dict'; readonly key: MessageKey; readonly ref?: string | null; readonly detail?: string; readonly log?: string }
   | { readonly kind: 'count'; readonly key: PluralKey; readonly count: number; readonly ref?: string | null; readonly log?: string }
   | { readonly kind: 'raw'; readonly text: string }
-  | { readonly kind: 'code'; readonly key: MessageKey; readonly code: string; readonly detail?: string; readonly ref?: string | null }
+  | {
+      readonly kind: 'code'
+      readonly key: MessageKey
+      readonly code: string
+      readonly message?: string
+      readonly at?: string
+      readonly detail?: string
+      readonly ref?: string | null
+    }
+
+/** The top bar shows at most this many characters of the run's error line (`TopBar.vue`, the error line's text). */
+export const RUN_ERROR_LINE_MAX_CHARS = 160
 
 export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLocale()): string {
   switch (line.kind) {
@@ -56,15 +83,31 @@ export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLoca
     case 'raw':
       return line.text
     case 'code':
-      return t(line.key, { code: line.code }, locale)
+      return renderCodeLine(line, locale)
   }
+}
+
+/**
+ * 054-B-7b fix-delta (§15 Codex R3): the code and the time are drawn whole; only the server's message is shortened so the
+ * sentence fits the top bar (`RUN_ERROR_LINE_MAX_CHARS`). Before, the bar cut the whole sentence at its end, and a
+ * regular message (`REAL_MODE_MONEY_CONFLICT_UNRESOLVED`, about 100 characters) lost the time. The full text is the title.
+ */
+function renderCodeLine(line: Extract<RunErrorLine, { kind: 'code' }>, locale: UiLocale): string {
+  const render = (message: string) => t(line.key, { code: line.code, message, at: line.at ?? '' }, locale)
+  const message = line.message ?? ''
+  const full = render(message)
+  if (full.length <= RUN_ERROR_LINE_MAX_CHARS) return full
+  const budget = RUN_ERROR_LINE_MAX_CHARS - render('').length
+  return render(budget > 1 ? `${message.slice(0, budget - 1)}…` : '…')
 }
 
 export const rawRunErrorLine = (text: string): RunErrorLine => ({ kind: 'raw', text })
 
 /** The server's full text behind a line (the `title` of the error line), when the line keeps one; else null. */
 export function runErrorLineTitle(line: RunErrorLine | null | undefined): string | null {
-  return (line?.kind === 'code' || line?.kind === 'dict') && line.detail ? line.detail : null
+  // 054-B-7b fix-delta (§15 Codex R3): the time of a run's own failure is in its title too.
+  if (line?.kind === 'code' && line.detail) return line.at ? `${line.detail} (${line.at})` : line.detail
+  return line?.kind === 'dict' && line.detail ? line.detail : null
 }
 
 /** 048 S3: the full technical text behind a line, for the console (a failed request's `log`, else its title), else null. */
@@ -135,8 +178,9 @@ export function writeRunErrorLine(
 
 /**
  * The error line of a run status (BACKLOG 037-5 (a)). A run in `error` was stopped by `last_error`: it is shown whatever
- * its code, because it is the only answer to "why did the run stop". For a run that goes on, the list of user-facing
- * codes decides as before - since 048 S3 its line is a sentence with the code (`runErrorLine`). Null: no line.
+ * its code, because it is the only answer to "why did the run stop". For a run that goes on, the codes of a real failure
+ * decide (`isUserFacingRunErrorCode`, 054-B-7b) - its line is a sentence with the code and the message (`runErrorLine`).
+ * Null: no line.
  *
  * 046 wave 1, full (048 S2 hand-over P2-2): a visitor has no Start since 048 S2, so a run that ENDED says what to do -
  * reload the page (the opening then starts a new run, `useInteractAutoBootstrapRun.ts`): the idle stop (044), any other
@@ -146,10 +190,13 @@ export function writeRunErrorLine(
  * (its code, not the server's English prose: 046 decision 3). Who stopped it is the stop reason behind "Details".
  */
 export function runStatusErrorLine(
-  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
+  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null; pause_reason?: string | null },
   isUserFacing: (code: string) => boolean,
 ): RunErrorLine | null {
   const state = String(status.state ?? '').trim().toLowerCase()
+  // 054-B-7a (the owner's decision of 2026-10-30): a run the server paused because the scenario's automatic payments are
+  // used up says so - the person pays by hand, resumes or restarts. Only this value: an unknown reason has no text.
+  if (state === 'paused' && status.pause_reason === SCENARIO_EXHAUSTED_PAUSE_REASON) return SCENARIO_EXHAUSTED_LINE
   // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
   if (state === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return IDLE_STOP_LINE
   if (state === 'stopped' && status.stop_reason !== OWN_STOP_REASON) return STOPPED_LINE
@@ -159,37 +206,36 @@ export function runStatusErrorLine(
   return isUserFacing(error.code) ? runErrorLine(error) : null
 }
 
+/** 054-B-7a: `pause_reason` of a run whose scenario's automatic payments are used up (stream A, 2026-10-30). */
+export const SCENARIO_EXHAUSTED_PAUSE_REASON = 'scenario_exhausted'
+
+const SCENARIO_EXHAUSTED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.scenarioExhausted' })
+
 /** The reason Stop of this screen's run row sends (`useSimulatorRealMode.ts` `stop`) - the one stop that writes no line. */
 export const OWN_STOP_REASON = 'user_stop'
 
 const STOPPED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.stopped' })
 
 /**
- * The line of a run the server ended with an error: the clearing step refusal keeps its own human text (it names the
- * cause and the operator's action); any other code is told in the interface language with the code itself.
+ * The line of a run the server ended with an error. 054-B-7b (the owner's decision of 2026-10-30): its code, message and
+ * time are in the text, whatever the code (until 054 a general sentence, and the clearing step refusal its own human text,
+ * `refusal.clearingStepNoEq`); the way back is a restart of the run.
  */
 export function runEndedByErrorLine(error: RunError): RunErrorLine {
-  if (error.code.toUpperCase() === 'CLEARING_REFUSED') return runErrorLine(error)
-  return { kind: 'code', key: 'runLine.errorStopped', code: error.code, detail: `${error.code}: ${error.message}` }
+  return codeLine('runLine.errorStopped', error)
 }
 
-export function runStatusErrorText(
-  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
-  isUserFacing: (code: string) => boolean,
-  locale: UiLocale = uiLocale(),
-): string {
-  const line = runStatusErrorLine(status, isUserFacing)
-  return line ? renderRunErrorLine(line, locale) : ''
+function codeLine(key: MessageKey, error: RunError): RunErrorLine {
+  return { kind: 'code', key, code: error.code, message: error.message, at: error.at, detail: `${error.code}: ${error.message}` }
 }
 
 /**
- * The run-level error line: the step refusal is a human text in the interface language. 048 S3 (decision 3): any other
- * code of a run that goes on is a sentence of the interface with the code for correlation - the server's `CODE: message`
- * is the line's detail (`title`, console), no longer drawn (it was, until S3: English prose on a Russian screen).
+ * The run-level error line of a run that goes on. 054-B-7b (the owner's decision of 2026-10-30): the code, the server's
+ * message and its time are in the text, the clearing step refusal too (until 054 a human text of its own, and since
+ * 048 S3 the message was the title only); the server's `CODE: message` stays the line's detail (`title`, console).
  */
 export function runErrorLine(error: RunError): RunErrorLine {
-  if (error.code.toUpperCase() === 'CLEARING_REFUSED') return { kind: 'dict', key: 'refusal.clearingStepNoEq' }
-  return { kind: 'code', key: 'runLine.runningError', code: error.code, detail: `${error.code}: ${error.message}` }
+  return codeLine('runLine.runningError', error)
 }
 
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
@@ -205,10 +251,6 @@ export const IDLE_STOP_REASON = 'idle_no_subscribers'
  * Russian word in the English text and an English one in the Russian (the service row is not translated yet).
  */
 const IDLE_STOP_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.idleStopped' })
-
-export function idleStopText(locale: UiLocale = uiLocale()): string {
-  return renderRunErrorLine(IDLE_STOP_LINE, locale)
-}
 
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
 export const GLOBAL_ACTIVE_LIMIT_CONFLICT = 'global_active_limit'
@@ -285,7 +327,3 @@ export function noScenarioText(locale: UiLocale = uiLocale()): string {
  * value is not replaced by another one behind the person's back. Stopping the payments is the pause.
  */
 export const ZERO_INTENSITY_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.zeroIntensity' })
-
-export function zeroIntensityText(locale: UiLocale = uiLocale()): string {
-  return renderRunErrorLine(ZERO_INTENSITY_LINE, locale)
-}

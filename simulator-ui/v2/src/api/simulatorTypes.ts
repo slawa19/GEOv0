@@ -18,9 +18,7 @@ export type ScenarioSummary = {
   description?: LocalizedText | null
   /** UI-only compatibility field; REST decoder accepts only canonical backend fields. */
   label?: string
-  mode?: string
   created_at?: string | null
-  updated_at?: string
   participants_count?: number
   trustlines_count?: number
   equivalents?: string[]
@@ -307,6 +305,9 @@ export type RunStatus = {
   stop_source?: string | null
   stop_reason?: string | null
   stop_client?: string | null
+  // 054-B-7a (stream A contract, 2026-10-30): why a `paused` run was paused by the server - `scenario_exhausted` (its
+  // automatic payments are used up). Absent from an older backend; any other value has no line of its own.
+  pause_reason?: string | null
   sim_time_ms?: number | null
   intensity_percent?: number | null
   ops_sec?: number | null

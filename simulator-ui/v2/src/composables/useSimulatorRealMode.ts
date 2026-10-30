@@ -308,6 +308,8 @@ export function useSimulatorRealMode(opts: {
   
   // Block watchers from calling refreshSnapshot during startRun to prevent double load.
   let startRunInProgress = false
+  // 054-B-2: the attach by id owns its change of run (snapshot, then stream) like a start does.
+  let attachRunInProgress = false
 
   // Block the scenario-change watcher from calling refreshSnapshot during the initial
   // boot sequence (immediate watcher). refreshScenarios() may update selectedScenarioId,
@@ -440,6 +442,39 @@ export function useSimulatorRealMode(opts: {
 
     // Keep selection usable after restart (do not auto-start).
     ensureScenarioSelectionValid()
+  }
+
+  /**
+   * 054-B-4: the run's control commands (pause, resume, tempo, stop, the start's own pause) are answered in the order
+   * they were asked. An answer to a command older than the latest one - or to a command for another run - is not
+   * applied, neither its status nor its failure: a late Resume answer would otherwise turn a pause confirmed since
+   * then back into `running`, and the server publishes no status of a paused run that would correct it. The latest
+   * command is set when a command is SENT, so a later command that fails does not let an older answer through.
+   * `sameRun`: the run the command was sent for is still the current one - the condition of a reset on its 404 (a gone
+   * run is gone whatever was asked after it; another run's 404 says nothing of the current one).
+   */
+  let runControlSeq = 0
+  function issueRunControl(): { latest: () => boolean; sameRun: () => boolean } {
+    const seq = ++runControlSeq
+    const runId = real.runId
+    const sameRun = () => real.runId === runId
+    return { latest: () => runControlSeq === seq && sameRun(), sameRun }
+  }
+
+  /**
+   * 054-B-4 fix-delta (§15 Codex R2): the answer of the latest command is applied - but it never turns a run whose ENDED
+   * status (`error`, `stopped`) is already known back into a living one. A Resume answered `running` after the stream
+   * and the status read said `error` would bring back "Поток" and hide "Перезапустить" over a run the server ended (and
+   * whose stream is closed). An ended status comes from the stream, the status read, or the answer of a stop.
+   */
+  function applyRunControlAnswer(control: { latest: () => boolean }, st: RunStatus): void {
+    if (!control.latest()) return
+    const ended = (state: unknown) => {
+      const s = toLower(state)
+      return s === 'error' || s === 'stopped'
+    }
+    if (ended(real.runStatus?.state) && !ended(st?.state)) return
+    real.runStatus = st
   }
 
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
@@ -586,6 +621,20 @@ export function useSimulatorRealMode(opts: {
       refreshSnapshotPending = true
       return
     }
+    await startSnapshotRefresh()
+  }
+
+  /**
+   * 054-B-2 fix-delta (§15 Codex R1): the owner of a change of run - a start (with its attach on 409), the attach by id,
+   * the opening's run - waits for a snapshot OF THE CURRENT CONTEXT before it opens the stream. `refreshSnapshot`
+   * coalesces: it joins a load in flight for the previous context (the scenario preview) and returns after it, or returns
+   * at once inside the debounce window; the new run's load then came later, awaited by nobody, and the stream opened
+   * before it. A load started here supersedes the one in flight (`refreshSnapshotSeq`; the scene applies its latest).
+   */
+  async function refreshSnapshotOfCurrentContext(): Promise<void> {
+    if (!isRealMode.value) return
+    if (!real.runId && !real.selectedScenarioId) return
+    cancelPendingRefreshSnapshotDebounce()
     await startSnapshotRefresh()
   }
 
@@ -1082,7 +1131,7 @@ export function useSimulatorRealMode(opts: {
 
   watch(
     () => [real.runId, real.accessToken, effectiveEq.value, real.apiBase] as const,
-    () => {
+    ([runId], previous) => {
       if (sceneContextRefresh) {
         if (!isSceneContextCurrent(sceneContextRefresh)) void replaceSceneSnapshotBeforeSse()
         return
@@ -1095,6 +1144,12 @@ export function useSimulatorRealMode(opts: {
         stopSse()
         return
       }
+      // 054-B-2 (§8, ws-protocol §2.1): a NEW run gets its snapshot before its stream. Opening the stream here, the
+      // moment the id changed, applied its events to the old scene and moved the cursor past them before the snapshot
+      // replaced that scene - the reconnect did not replay them. The owners of a change of run - a start (incl. its
+      // attach on 409), the attach by id, the opening's discovery - read the status and the snapshot and open the
+      // stream themselves, after the snapshot; they are the only code that sets a run id (a reset sets none).
+      if (runId && runId !== previous?.[0] && (startRunInProgress || attachRunInProgress || initialBootInProgress)) return
       runSseLoop()
     },
     { flush: 'post' },
@@ -1252,7 +1307,9 @@ export function useSimulatorRealMode(opts: {
         let paused = false
         for (let i = 0; i < delaysMs.length + 1; i++) {
           try {
-            real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+            const control = issueRunControl()
+            const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+            applyRunControlAnswer(control, st)
             paused = true
             break
           } catch (e: unknown) {
@@ -1270,7 +1327,7 @@ export function useSimulatorRealMode(opts: {
       }
 
       await refreshRunStatus()
-      await refreshSnapshot()
+      await refreshSnapshotOfCurrentContext()
       // SSE loop is long-lived; do not await it. `lastError` was reset at the top of this start.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
@@ -1291,10 +1348,12 @@ export function useSimulatorRealMode(opts: {
   async function pause() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const control = issueRunControl()
     try {
-      real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1343,37 +1402,42 @@ export function useSimulatorRealMode(opts: {
     manualPausePending = false
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const control = issueRunControl()
     try {
-      real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
   async function stop() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const control = issueRunControl()
     try {
       teardownRefreshSnapshot()
       stopSse()
       cleanupRealRunFxAndTimers()
-      real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
+      const st = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
         source: 'ui',
         reason: 'user_stop',
       })
+      applyRunControlAnswer(control, st)
       await refreshRunStatus()
     } catch (e: unknown) {
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
       // treat stop as idempotent and reset local state instead of surfacing a hard error.
+      // 054-B-4: only for the run this stop was sent for - a late 404 of another run does not reset the current one.
       if (httpStatusOf(e) === 404) {
-        resetStaleRun({ clearError: true })
+        if (control.sameRun()) resetStaleRun({ clearError: true })
         return
       }
 
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
       // The stop request was not confirmed. The backend run may still be live,
       // so restore observation instead of leaving the UI permanently detached.
-      if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
+      if (isRealMode.value && real.runId && control.sameRun()) void runSseLoop({ preserveLastError: true })
     }
   }
 
@@ -1382,6 +1446,7 @@ export function useSimulatorRealMode(opts: {
     const rid = runId.trim()
     if (!rid) return
 
+    attachRunInProgress = true
     try {
       teardownRefreshSnapshot()
       stopSse()
@@ -1395,11 +1460,13 @@ export function useSimulatorRealMode(opts: {
       resetArtifactIndex()
 
       await refreshRunStatus()
-      await refreshSnapshot()
+      await refreshSnapshotOfCurrentContext()
       // `lastError` was reset at the top of this attach, so what it holds now came from the reads above.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       writeRunErrorLine(real, failureRunErrorLine(e))
+    } finally {
+      attachRunInProgress = false
     }
   }
 
@@ -1421,18 +1488,21 @@ export function useSimulatorRealMode(opts: {
       writeRunErrorLine(real, ZERO_INTENSITY_LINE)
       return
     }
+    const control = issueRunControl()
     try {
-      real.runStatus = await setIntensity(
+      const st = await setIntensity(
         { apiBase: real.apiBase, accessToken: real.accessToken },
         real.runId,
         real.intensityPercent,
       )
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
+      // 054-B-4: only for the run this tempo was sent for - a late 404 of another run does not reset the current one.
       if (e instanceof ApiError && e.status === 404) {
-        resetStaleRun({ clearError: true })
+        if (control.sameRun()) resetStaleRun({ clearError: true })
         return
       }
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1527,7 +1597,7 @@ export function useSimulatorRealMode(opts: {
             // 048 S3: the opening's read of the restored run - the one read where a 403 clears the saved id.
             await refreshRunStatus({ opening: true })
             if (real.runId) {
-              await refreshSnapshot()
+              await refreshSnapshotOfCurrentContext()
               // 043 S2 (review C6): an ENDED run (`stopped`, `error`) gets no event stream - there is nothing live to
               // follow, and on the one screen the opening replaces it (`useInteractAutoBootstrapRun.ts`). A live run, and
               // a run whose status could not be read (the stream is how it shows up again), still get it.

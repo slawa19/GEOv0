@@ -1,8 +1,8 @@
 /**
  * 048 S1 (decisions 2, 4 and 5) - the top bar for its addressees, mounted and used as a person uses it.
  *
- *  - the visitor: the capacity-stall alert is on the first view, only while payments stall; a lost stream is said in
- *    the state of the network;
+ *  - the visitor: a lost stream is said in the state of the network; 054-B-7a (the owner's decision of 2026-10-30): the
+ *    capacity-stall alert of 048 S1 decision 2 is gone - the system tries the clearing itself;
  *  - the developer (`debug`): the SSE badge.
  *
  * 048 S2 (amendments 8-12): "Admin ▾" is gone, and with it the tests of this file that used it - the administrator's
@@ -46,24 +46,19 @@ function mountTopBar(ctx: TopBarContext, props: Record<string, unknown> = {}) {
   return { host, onToggleAnalytics, done: () => { app.unmount(); host.remove() } }
 }
 
-describe('048 S1 - the capacity stall is on the first view (decision 2)', () => {
+describe('054-B-7a - no capacity-stall alert (decision of the owner of 2026-10-30, replaces 048 S1 decision 2)', () => {
   const stalled = (ticks: number) => ref({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running', consec_all_rejected_ticks: ticks } as RunStatus)
 
-  it('reproducer (г), unit half: shown with "Подробнее" OFF once the run has stalled for the threshold; absent before', async () => {
-    // Anti-vacuum first: without a stall (and below the threshold) there is no alert, with Details off and on.
-    for (const ticks of [0, 2]) {
+  it('reproducer (г) turned over: no alert at any count of all-rejected ticks, with "Подробнее" off and on', async () => {
+    for (const ticks of [0, 2, 3, 50]) {
       for (const detailsOpen of [false, true]) {
         const { host, done } = mountTopBar(context({ runStatus: stalled(ticks) }), { detailsOpen })
         await nextTick()
+        // Counter-check: the bar is mounted (its first row is there), so the absence is not of an empty host.
+        expect(host.querySelector('[data-testid="network-state"]'), 'stand: the bar is mounted').not.toBeNull()
         expect(host.querySelector('[data-testid="capacity-stall"]'), `${ticks} ticks, details ${detailsOpen}: no alert`).toBeNull()
         done()
       }
-    }
-    for (const detailsOpen of [false, true]) {
-      const { host, done } = mountTopBar(context({ runStatus: stalled(3) }), { detailsOpen })
-      await nextTick()
-      expect(host.querySelector('[data-testid="capacity-stall"]'), `3 ticks, details ${detailsOpen}: the alert`).not.toBeNull()
-      done()
     }
   })
 })

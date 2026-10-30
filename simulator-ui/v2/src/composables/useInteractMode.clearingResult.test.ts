@@ -111,8 +111,9 @@ describe('the clearing result stays until it is closed', () => {
     const im = mk(vi.fn(async () => twoCycles))
     im.startClearingFlow()
     await runAndWait(im)
-    expect(im.history.map((e) => historyEntryText(e, 'ru'))).toEqual(['Клиринг: 2 круга, −14.00 UAH'])
-    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual(['Clearing: 2 cycles, −14.00 UAH'])
+    // 054-B-6: without an amount (`total_cleared_amount` is not the drop of the total debt; `useInteractMode.p054b.clearingHistory`).
+    expect(im.history.map((e) => historyEntryText(e, 'ru'))).toEqual(['Клиринг: 2 круга'])
+    expect(im.history.map((e) => historyEntryText(e, 'en'))).toEqual(['Clearing: 2 cycles'])
   })
 
   it('a refusal keeps the panel open with the error (no result, no stuck "preview"), and is not a success', async () => {

@@ -318,7 +318,8 @@ export const en = {
     trustlineUpdated: 'New line limit: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Trustline closed: {from} → {to}',
     closeRequested: 'Closes once the debt is repaid: {from} → {to}',
-    clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
+    // 054-B-6: no amount - the answer's `total_cleared_amount` is not the drop of the total debt the bar and the feed state (039 P-5).
+    clearing: plural({ one: 'Clearing: {count} cycle', other: 'Clearing: {count} cycles' }),
     clearingNothing: 'Clearing: nothing cleared',
   },
 
@@ -492,6 +493,9 @@ export const en = {
     flow: 'Flow',
     flowPause: 'Pause automatic payments',
     flowResume: 'Resume automatic payments',
+    /** 054-B-7c: a run ended by an error is restarted (a new run of the scenario), not resumed. */
+    restart: 'Restart',
+    restartTitle: 'A new run of this scenario',
     details: 'Details',
     /** §G "Network <name>": the label of the full name behind "Details". */
     network: 'Network',
@@ -525,9 +529,6 @@ export const en = {
     paymentsAria: 'Payments',
     payments: 'Payments: {ok} of {total} went through',
     paymentsNone: 'No payments yet',
-    stallAria: 'Payments stalled',
-    /** 048 decision 2: the one diagnosis a visitor gets; it claims no more than the mechanism (`consec_all_rejected_ticks`). */
-    stall: "Recent payments are not going through. Try clearing or increase the relevant trustline's limit.",
   },
 
   /**
@@ -754,9 +755,12 @@ export const en = {
      * not shown; the code correlates).
      */
     stopped: 'The run was stopped. To start again, reload the page.',
-    errorStopped: 'The demo stopped because of an error. Reload the page to start a new run.',
-    /** 048 S3: a user-facing code of a run that goes on - the code correlates; the server's `CODE: message` is the title. */
-    runningError: 'Something failed during the run; the run goes on.',
+    /** 054-B-7b (the owner's decision of 2026-10-30): the code, the server's message and its time are in the text. */
+    errorStopped: 'The run stopped: {code} — {message} ({at}). Restart the run.',
+    /** 054-B-7b: a real failure of a run that goes on - its code, message and time; the `CODE: message` is the title too. */
+    runningError: 'Something failed during the run: {code} — {message} ({at}); the run goes on.',
+    /** 054-B-7a: a run the server paused because its scenario's automatic payments are used up (`pause_reason`). */
+    scenarioExhausted: "The scenario's automatic payments are used up; pay by hand or restart.",
   },
 
   /**

@@ -43,7 +43,6 @@ import { useLayoutIndex } from './useLayoutIndex'
 import { syncLayoutFromSnapshot as syncLayoutFromSnapshotImpl } from './syncLayoutFromSnapshot'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
 import { useMetricsPolling } from './useMetricsPolling'
-import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
 import { useAppFxOverlays } from './useAppFxOverlays'
@@ -62,7 +61,6 @@ import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 
 import { useQualityAutoguards } from './useQualityAutoguards'
-import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { defaultIntensityPercentFor, pickDefaultScenarioId, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
@@ -155,7 +153,6 @@ export async function loadActiveRunSnapshot(input: {
 }
 
 type RealModeApi = ReturnType<typeof useSimulatorRealMode>
-type CookieSessionApi = ReturnType<typeof useCookieSessionBootstrap>
 type InteractActionsApi = ReturnType<typeof useInteractActions>
 type InteractModeApi = ReturnType<typeof useInteractMode>
 type UiDerivedApi = ReturnType<typeof useAppUiDerivedState>
@@ -203,8 +200,6 @@ export type SimulatorAppApi = {
     | 'applyIntensity'
     | 'refreshSnapshot'
   >
-
-  session: Pick<CookieSessionApi, 'actorKind' | 'ownerId' | 'bootstrapping' | 'tryEnsure'>
 
   /**
    * 048 S2 (amendment 9): "Admin ▾" is gone from the UI - the run list, Stop and Stop all are the API's
@@ -287,7 +282,6 @@ export type SimulatorAppApi = {
   selectedNode: ViewWiringApi['selectedNode']
   selectedNodeScreenCenter: ViewWiringApi['selectedNodeScreenCenter']
   getNodeScreenCenter: (nodeId: string) => Point | null
-  selectedNodeEdgeStats: ReturnType<typeof useSelectedNodeEdgeStats>['selectedNodeEdgeStats']
 
   dragToPin: DragToPinApi['dragToPin']
   isSelectedPinned: PhysicsAndPinningApi['isSelectedPinned']
@@ -675,15 +669,11 @@ export function useSimulatorApp(opts?: {
 
   const inc = incCounter
 
-  // ============================
-  // §10: Cookie session state (anonymous visitors)
-  // ============================
-
-  const session = useCookieSessionBootstrap({
-    isRealMode,
-    apiBase: computed(() => real.apiBase),
-    accessToken: computed(() => real.accessToken),
-  })
+  // §10: the cookie session of an anonymous visitor has ONE bootstrap - `ensureAnonSessionOnce` of
+  // `useSimulatorRealMode.ts`, awaited by the boot before its first call. 054 B-1: a second, independent `onMounted`
+  // ensure was removed - the server makes a new session for every request without a cookie, so a late second answer
+  // moved the cookie away from the owner of the run the boot had already created
+  // (`useSimulatorApp.p054b.doubleEnsure.test.ts`).
 
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
@@ -804,13 +794,6 @@ export function useSimulatorApp(opts?: {
     quality,
     isTestMode,
     isWebDriver,
-  })
-
-  // §10: Cookie bootstrap — ensure session for anonymous visitors at startup.
-  // Only runs in real mode, and only if no explicit accessToken is configured.
-  onMounted(() => {
-    if (!isRealMode.value) return
-    void session.tryEnsure()
   })
 
   // uiDerived reads camera.zoom (for overlay label scale). Keep this wiring robust
@@ -1061,11 +1044,6 @@ export function useSimulatorApp(opts?: {
     if (!node) return null
     return worldToScreen(node.__x, node.__y)
   }
-
-  const selectedNodeEdgeStats = useSelectedNodeEdgeStats({
-    getSnapshot: () => state.snapshot,
-    getSelectedNodeId: () => state.selectedNodeId,
-  }).selectedNodeEdgeStats
 
   const fxOverlays = useAppFxOverlays({
     getLayoutNodeById: (id) => getLayoutNodeByIdLive(id) ?? undefined,
@@ -1433,6 +1411,8 @@ export function useSimulatorApp(opts?: {
     getSelectedNodeId: () => state.selectedNodeId,
     hasSelectedIncidentEdges: () => selectedIncidentEdgeKeys.value.size > 0,
     getLinkByKey: (k) => layoutLinkMap.value.get(k),
+    // 054-B-7: a patch (its revision) or a replacement (the object) - the hovered line's figures are read again under a still pointer.
+    getSnapshot: () => state.snapshot,
     getUnit: () => state.snapshot?.equivalent ?? effectiveEq.value,
   })
 
@@ -1916,14 +1896,6 @@ export function useSimulatorApp(opts?: {
       // 048 S2 (amendment 9): no run files in the UI - the index and the downloads are the API's (`real-mode-runbook.md`).
     },
 
-    // §10: Cookie session state (anonymous visitors)
-    session: {
-      actorKind: session.actorKind,
-      ownerId: session.ownerId,
-      bootstrapping: session.bootstrapping,
-      tryEnsure: session.tryEnsure,
-    },
-
     // 048 S2 (amendment 9): no admin menu; the attach by id is kept for its tests (see `SimulatorAppApi.admin`).
     admin: {
       attachRun: async (runId: string) => {
@@ -1990,7 +1962,6 @@ export function useSimulatorApp(opts?: {
     selectedNode: viewWiring.selectedNode,
     selectedNodeScreenCenter,
     getNodeScreenCenter,
-    selectedNodeEdgeStats,
 
     // pinning
     dragToPin,

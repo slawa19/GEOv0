@@ -112,10 +112,14 @@ describe('046 wave 1 (§15 Codex) - every line of the run error line is a value 
     expect(renderRunErrorLine(startRunErrorLine(limit({ max_active_runs: 4 }))!, 'ru')).toBe('Сейчас заняты все 4 места: демо смотрят 4 человека. Попробуйте через минуту.')
     // 048 S3 (decision 3), rewritten: the code of a run that goes on is no longer a raw `CODE: message` line (English prose
     // on a Russian screen) - a sentence of the language with the code; the server's text is the detail (title, console).
+    // 054-B-7b (the owner's decision of 2026-10-30): the message and its time are drawn too (as the server gave them).
     const running = runErrorLine({ code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z' })
-    expect(running).toEqual({ kind: 'code', key: 'runLine.runningError', code: 'PAYMENT_TIMEOUT', detail: 'PAYMENT_TIMEOUT: timed out' })
+    expect(running).toEqual({
+      kind: 'code', key: 'runLine.runningError', code: 'PAYMENT_TIMEOUT', message: 'timed out', at: '2026-10-18T00:00:00Z',
+      detail: 'PAYMENT_TIMEOUT: timed out',
+    })
     expect(renderRunErrorLine(running, 'ru')).toMatch(/[Ѐ-ӿ]/)
-    expect(renderRunErrorLine(running, 'en')).not.toContain('timed out')
+    expect(renderRunErrorLine(running, 'en')).toContain('timed out')
   })
 
   it('writeRunErrorLine writes the text of the language, then the value', () => {
@@ -151,15 +155,20 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
   })
 
   // 049 S2 (decisions 7, 8): the sentence of decision 8, the code not in brackets - it is the title (red before: the code drawn).
-  it('a run ended by an error: the reload, not the server\'s English prose nor the code; the step refusal keeps its text', () => {
+  // 054-B-7b (the owner's decision of 2026-10-30) turns it over: the code, the server's message and its time are in the
+  // text, the way back is a restart; the step refusal is told the same way (its own human text is gone).
+  it('a run ended by an error: its code, message and time in the text, a restart; the step refusal the same', () => {
     const line = runStatusErrorLine(status('error', null, { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }), always)
-    expect(line).toEqual({ kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED', detail: 'REAL_MODE_TICK_FAILED: tick failed' })
-    expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed')
-    expect(renderRunErrorLine(line!, 'en')).toBe('The demo stopped because of an error. Reload the page to start a new run.')
-    expect(renderRunErrorLine(line!, 'ru')).toBe('Демо остановилось из-за сбоя. Перезагрузите страницу, чтобы начать новый прогон.')
-    expect(renderRunErrorLine(line!, 'ru')).not.toContain('tick failed')
+    expect(line).toEqual({
+      kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't',
+      detail: 'REAL_MODE_TICK_FAILED: tick failed',
+    })
+    // 054-B-7b fix-delta (§15 Codex R3): with the time of the failure.
+    expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed (t)')
+    expect(renderRunErrorLine(line!, 'en')).toBe('The run stopped: REAL_MODE_TICK_FAILED — tick failed (t). Restart the run.')
+    expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановлен: REAL_MODE_TICK_FAILED — tick failed (t). Перезапустите прогон.')
     const step = runStatusErrorLine(status('error', null, { code: 'CLEARING_REFUSED', message: 'x', at: 't' }), always)
-    expect(step).toEqual({ kind: 'dict', key: 'refusal.clearingStepNoEq' })
+    expect(step).toMatchObject({ kind: 'code', key: 'runLine.errorStopped', code: 'CLEARING_REFUSED', message: 'x' })
   })
 
   // 048 S3: "a live run keeps CODE: message" became "a live run's code is a sentence with the code" (decision 3).
@@ -168,7 +177,7 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
     expect(runStatusErrorLine(status('stopped', 'user_stop'), always), 'Stop of this screen: Start is beside it').toBeNull()
     expect(runStatusErrorLine(status('running', 'admin_stop'), always), 'the reason of a run that is not stopped says nothing').toBeNull()
     expect(runStatusErrorLine(status('running', null, { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }), always))
-      .toEqual({ kind: 'code', key: 'runLine.runningError', code: 'INTERNAL_ERROR', detail: 'INTERNAL_ERROR: boom' })
+      .toEqual({ kind: 'code', key: 'runLine.runningError', code: 'INTERNAL_ERROR', message: 'boom', at: 't', detail: 'INTERNAL_ERROR: boom' })
   })
 })
 
@@ -186,7 +195,8 @@ describe('046 wave 1 - the server text of an ended run: one console line', () =>
       writeRunErrorLine(holder, ended('tick failed'), 'en')
       writeRunErrorLine(holder, ended('tick failed'), 'en') // the REST refresh repeats the status
       writeRunErrorLine(holder, holder.lastErrorLine, 'ru') // a switch of the language re-renders the same value
-      expect(warn.mock.calls).toEqual([['[run] stopped with an error:', 'REAL_MODE_TICK_FAILED: tick failed']])
+      // 054-B-7b fix-delta (§15 Codex R3): the console line carries the time of the failure too.
+      expect(warn.mock.calls).toEqual([['[run] stopped with an error:', 'REAL_MODE_TICK_FAILED: tick failed (t)']])
       writeRunErrorLine(holder, ended('another'), 'en')
       expect(warn).toHaveBeenCalledTimes(2)
       // Counter-check: a line without a server text logs nothing.

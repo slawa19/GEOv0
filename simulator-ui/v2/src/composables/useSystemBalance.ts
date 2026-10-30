@@ -23,10 +23,15 @@ export type SystemBalance = {
   // "Общий долг 0.00"); a clean or frozen debt is read from `totalUsed`.
 }
 
-// TD-3: debounce interval for balance recomputation.
-// With >1000 edges and high SSE-patch frequency, the O(N) summation would run
-// on every snapshot update. The debounced shallowRef ensures recomputation
-// happens at most once per ~100 ms even under intensive server-side ticking.
+// TD-3: debounce interval for a REPLACED snapshot (a scene load, a refresh, a switch of equivalent or run) - and only
+// for it. 054 B-12: it does not bound the recomputation under SSE patches. The patches mutate the shown snapshot in place
+// (`demo/patches.ts` applyEdgePatches, the topology filter/push of `realEventPipeline.ts`); the watch below is not deep,
+// so it does not fire on them, and the object `debouncedSnap` holds is the snapshot's reactive proxy, so `balance` reads
+// the links through it and is invalidated by each patch at once. What bounds it is that a computed is lazy: N patches
+// before one read cost one O(N links) sum, and its readers are the renders of `SystemBalanceBar`
+// (`SimulatorAppRoot.vue`), once per flush. The totals following a patch at once is relied on (`debtChange.p039d.test.ts`,
+// "a topology patch that moves a debt does not replace it either": a `toRaw` copy here turns it red); bounding the
+// patches too would make a total lag ~100 ms behind its patch.
 const BALANCE_DEBOUNCE_MS = 100
 
 export function useSystemBalance(
@@ -36,9 +41,8 @@ export function useSystemBalance(
 ): {
   balance: ComputedRef<SystemBalance>
 } {
-  // Debounced copy of snapshot. Vue tracks only the shallowRef itself, not the
-  // deep structure of GraphSnapshot, so computed(balance) re-runs only when this
-  // ref is actually replaced — after the debounce timer fires.
+  // Debounced copy of the snapshot REFERENCE: a replacement reaches the totals after the timer fires. The value is the
+  // reactive proxy of the shown snapshot, so an in-place patch reaches them at once (see TD-3 above).
   const debouncedSnap = shallowRef<GraphSnapshot | null>(snapshot.value)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
 

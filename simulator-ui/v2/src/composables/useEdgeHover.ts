@@ -1,4 +1,6 @@
-import type { GraphLink } from '../types'
+import { watch } from 'vue'
+
+import type { GraphLink, GraphSnapshot } from '../types'
 import type { Point } from '../types/layout'
 import type { HoveredEdgeState } from './useOverlayState'
 import { closestPointOnSegment, type EdgeSeg } from './usePicking'
@@ -18,6 +20,14 @@ type UseEdgeHoverDeps = {
   formatEdgeAmountText: (link: GraphLink | null | undefined) => string
   /** 043 S1: the equivalent of the scene the link's figures belong to - captured with them (review finding 1). */
   getEquivalent?: () => string | null
+  /**
+   * 054-B-7: the shown snapshot. Its figures change under a still pointer two ways, and the hovered line is read again by its
+   * key on both: a patch mutates the line in place and raises `data_revision` (`demo/patches.ts`); a reload replaces the
+   * object (`useSceneState.ts`, e.g. the refresh after a `topology.changed` without patches) with the revision back at 0.
+   * The object itself is watched, not `generated_at`: a server timestamp is not guaranteed to differ between two answers,
+   * a new object is.
+   */
+  getSnapshot?: () => GraphSnapshot | null | undefined
 
   clientToScreen: (clientX: number, clientY: number) => Point
   screenToWorld: (screenX: number, screenY: number) => Point
@@ -25,6 +35,33 @@ type UseEdgeHoverDeps = {
 }
 
 export function useEdgeHover(deps: UseEdgeHoverDeps) {
+  /** The figures of `link` and their equivalent, written together (043 S1: figures and unit cannot come apart). */
+  function writeFigures(link: GraphLink | null | undefined) {
+    deps.hoveredEdge.amountText = deps.formatEdgeAmountText(link)
+    // BUG-2: populate trustline metadata for Interact Mode EdgeTooltip
+    deps.hoveredEdge.trustLimit = link?.trust_limit ?? null
+    deps.hoveredEdge.used = link?.used ?? null
+    deps.hoveredEdge.available = link?.available ?? null
+    deps.hoveredEdge.edgeStatus = link?.status ?? null
+    deps.hoveredEdge.equivalent = deps.getEquivalent?.() ?? null
+  }
+
+  // 054-B-7: the figures were a copy taken on pointermove - a payment under a still pointer left the old ones on screen.
+  const getSnapshot = deps.getSnapshot
+  if (getSnapshot) {
+    watch([() => getSnapshot(), () => getSnapshot()?.data_revision], () => {
+      const key = deps.hoveredEdge.key
+      if (!key) return
+      const link = deps.getLinkByKey(key)
+      // The line is gone: its old figures are not shown.
+      if (!link) {
+        deps.clearHoveredEdge()
+        return
+      }
+      writeFigures(link)
+    })
+  }
+
   function onPointerMove(ev: PointerEvent, opts: { panActive: boolean }) {
     // Hover only when a node is selected, so it's obvious which edges are relevant.
     // Also keep WebDriver runs stable (no transient tooltip).
@@ -51,15 +88,9 @@ export function useEdgeHover(deps: UseEdgeHoverDeps) {
         deps.hoveredEdge.key = seg.key
         deps.hoveredEdge.fromId = seg.fromId
         deps.hoveredEdge.toId = seg.toId
-        deps.hoveredEdge.amountText = deps.formatEdgeAmountText(link)
         deps.hoveredEdge.screenX = sp.x
         deps.hoveredEdge.screenY = sp.y
-        // BUG-2: populate trustline metadata for Interact Mode EdgeTooltip
-        deps.hoveredEdge.trustLimit = link?.trust_limit ?? null
-        deps.hoveredEdge.used = link?.used ?? null
-        deps.hoveredEdge.available = link?.available ?? null
-        deps.hoveredEdge.edgeStatus = link?.status ?? null
-        deps.hoveredEdge.equivalent = deps.getEquivalent?.() ?? null
+        writeFigures(link)
       } else {
         deps.clearHoveredEdge()
       }
