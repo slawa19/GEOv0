@@ -59,10 +59,17 @@ function Test-TcpOpen([string]$h, [int]$p, [int]$timeoutMs = 250) {
   }
 }
 
-function Test-HttpOk([string]$url) {
+function Test-SimulatorUiServing([string]$url) {
+  # "Already running" only for OUR page: any other HTTP server on the port must not be mistaken
+  # for the Simulator UI (054-G-2: `python -m http.server` was reported as "already running").
+  # The marker is the <title> of simulator-ui/v2/index.html, matched by its ASCII parts: Windows
+  # PowerShell 5.1 reads the em dash between them as its three UTF-8 bytes in Latin-1.
   try {
     $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $url -ErrorAction Stop
-    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
+    if ($r.StatusCode -lt 200 -or $r.StatusCode -ge 300) {
+      return $false
+    }
+    return ([string]$r.Content -match '<title>GEO[^<]*mutual credit network demo</title>')
   } catch {
     return $false
   }
@@ -202,7 +209,7 @@ if (Test-PortExcluded $selectedPort) {
 
 if (Test-TcpOpen $HostName $selectedPort) {
   $url = "http://${HostName}:$selectedPort/"
-  if (Test-HttpOk $url) {
+  if (Test-SimulatorUiServing $url) {
     if (-not $RestartIfRunning) {
       if ($Mode -eq 'fixtures') {
         Write-Host ''
@@ -265,6 +272,7 @@ if (Test-TcpOpen $HostName $selectedPort) {
   if (-not $alt) {
     throw "Port $selectedPort is in use and no usable port found in range [$selectedPort..$($selectedPort + $MaxPortTries)]."
   }
+  Write-Host "Port $selectedPort is in use by something that is not the GEO Simulator UI; using $alt instead." -ForegroundColor Yellow
   $selectedPort = $alt
 }
 
