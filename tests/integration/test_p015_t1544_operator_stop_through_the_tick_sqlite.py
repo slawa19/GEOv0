@@ -167,8 +167,12 @@ async def _ticks(runner: RealRunnerImpl, run: RunRecord, count: int) -> None:
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=60)
 
 
-def _assert_the_run_was_not_charged(run: RunRecord) -> None:
-    assert run.state == "running", (run.state, run.last_error)
+def _assert_the_run_was_not_charged(run: RunRecord, *, paused_as_exhausted: bool = False) -> None:
+    """Refusals cost the run nothing: no error, no failure count, no `last_error`. `paused_as_exhausted` - the stand ran
+    more than `STALL_CLEARING_AFTER_TICKS` attempted ticks in which every payment was refused, so since 054-A-7a the run
+    has paused itself (`pause_reason = scenario_exhausted`) - a pause, not a charge."""
+    expected = ("paused", "scenario_exhausted") if paused_as_exhausted else ("running", None)
+    assert (run.state, run.pause_reason) == expected, (run.state, run.pause_reason, run.last_error)
     assert run.errors_total == 0, run.last_error
     assert run._real_consec_tick_failures == 0
     assert run.last_error is None, run.last_error
@@ -365,7 +369,7 @@ async def test_a_refused_staged_payment_is_rejected_and_the_tick_continues(
     assert refused == outcomes, outcomes
     assert run.rejected_total == len(refused), (run.rejected_total, outcomes)
     assert run.committed_total == 0
-    _assert_the_run_was_not_charged(run)
+    _assert_the_run_was_not_charged(run, paused_as_exhausted=True)  # 4 all-refused ticks
     assert await _debts(factory, eq) == []
     async with factory() as s:
         assert await s.scalar(select(func.count(Transaction.id))) == 0

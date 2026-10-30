@@ -194,7 +194,7 @@ async def test_step5c_a_held_staged_payment_is_rejected_and_the_tick_continues(
     assert refused == outcomes, outcomes
     assert run.rejected_total == len(refused), (run.rejected_total, outcomes)
     assert run.committed_total == 0
-    _assert_the_run_was_not_charged(run)
+    _assert_the_run_was_not_charged(run, paused_as_exhausted=True)  # 4 all-refused ticks
     assert await _debts(factory, eq) == []
     async with factory() as s:
         assert await s.scalar(select(func.count(Transaction.id))) == 0

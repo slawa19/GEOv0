@@ -29,7 +29,8 @@ A REFUSED PAYMENT IS AN OUTCOME, NOT AN ERROR (054-A-7a, owner's decision 2026-1
 tick runs the clearing pass at once, out of the cadence (`maybe_run_clearing`, `CLEARING_ENABLED` respected). If the next
 attempted tick is refused whole again, the scenario has nothing left to do on its own: the run pauses itself with
 `pause_reason = "scenario_exhausted"` (`_stall_step`, `_pause_scenario_exhausted`). Manual Interact actions still work on
-the paused run; `resume` clears the counter and the reason. A scripted event's own refusal is not counted (it never was).
+the paused run; `resume` clears the counter and the reason. The counter is the executor's and is not changed by 054-A-7a:
+a scripted `payment` event due on the tick is planned with the automatic payments, so its refusal counts like theirs.
 
 THE RUNNER. `RealTick` is the tick of `RealRunnerImpl` and reads the runner's collaborators and limits at CALL
 time, as the orchestrator did, so a test or an operator that rebinds one on the runner is seen by the next tick.
