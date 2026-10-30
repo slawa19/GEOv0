@@ -6982,7 +6982,12 @@ components:
               to:
                 type: string
               style:
-                $ref: '#/components/schemas/SimulatorEventEdgeStyle'
+                # 054-E-14 (2026-10-30): no writer sets a style, so every edge goes out
+                # with `style: null`; the null branch says so (a `$ref` sibling would be ignored).
+                oneOf:
+                  - $ref: '#/components/schemas/SimulatorEventEdgeStyle'
+                  - nullable: true
+                    enum: [null]
             additionalProperties: true
         node_badges:
           type: array
