@@ -662,8 +662,15 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # `POST /simulator/runs/{run_id}/actions/tx-once` and `/clearing-once`, removed by the owner's decision of 2026-10-16 (spec 042).
 # Measured with a per-entry dump of every ledger on `1beb8670` and on this tree (`.local-run/p042-s1/dump_ledgers.py`,
 # not committed): the base ledger minus the two keys equals the new one entry by entry.
+# 2026-10-30 / programme 054 `054-E-10` (variant A, decision of the main session): count HOLDS at 44, digest moves; none
+# enters or leaves. Every operation declares `500` on BOTH halves - the canon through `components/responses/InternalError`,
+# the generated schema through `declare_internal_error_status` (`app/openapi_postprocess.py`), the same `ErrorEnvelope`
+# after normalisation; `payment-real` and `clearing-real` declare the same `oneOf[SimulatorActionError, ErrorEnvelope]`
+# on both halves (`SimulatorActionInternalError` / `_ACTION_INTERNAL_ERROR_RESPONSE`). 43 entries gain an EQUAL 500
+# pair; `POST /payments` had a canon-only 500 and now has its generated twin. Measured with a per-entry dump on
+# `721d96b1` and on this tree (a scratch script, not committed): both ledgers with every `500` key removed are equal.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "c933ffdfc609354d5876c3b4361a3c6872a1199f62c8853311dc4720b3801806"
+    "a4e5dd58c58f56823aab141d70714a151a81ba471077a1da96b9bc07aa00731a"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 44
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

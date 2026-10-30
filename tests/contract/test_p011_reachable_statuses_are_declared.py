@@ -80,13 +80,26 @@ by counter-checks in this file.
   Already closed on both sides - zero entries in either list - and the bite-check deletes a `429`
   to prove the wiring still carries rather than merely being imported.
 
+* **S7 - the catch-all exception handler implies `500`** (054-E-10, variant A, 2026-10-30). While
+  `app.exception_handlers` holds a handler for `Exception` (`unhandled_exception_handler`,
+  `app/main.py`), an exception no other handler answers is a `500` with `ErrorEnvelope` (E010) on
+  *every* route. Derived from the handler table, not listed, and applied to every operation like
+  S5: `declare_internal_error_status` declares it in the generated schema,
+  `components/responses/InternalError` in the canon. This is the one `500` the rule can derive;
+  a `500` raised as a `GeoException` deep in `app/core/**` is still the underivable class below,
+  and it is covered only because S7 already demands the status everywhere.
+  `test_s7_the_guard_bites_when_a_500_is_deleted` deletes it from both documents;
+  `tests/integration/test_p054_E_statuses.py` executes the claim.
+
 **What is NOT derived, and why the lists are a lower bound.** A `GeoException` raised in a
 handler, or three call frames down in `app/core/**`, is real - `404` for a missing run, `409`,
 `400` for a bad equivalent - and is not derivable without a call graph over dynamic Python. An
-over-eager version of that rule would demand `404`/`409`/`500` across most of the surface, and
+over-eager version of that rule would demand `404`/`409` across most of the surface, and
 the "fix" would be to write statuses into authority number one that the service never returns.
-The two lists are therefore complete for five mechanically derivable signals and for nothing
-else; a `404`/`409` census needs per-route reasoning and is a separate task.
+(`500` is the exception since 054-E-10: it IS reachable everywhere, through the catch-all handler,
+and S7 derives it from that handler.) The two lists are therefore complete for six mechanically
+derivable signals and for nothing else; a `404`/`409` census needs per-route reasoning and is a
+separate task.
 
 **Two lists, not one.** The canon and the generated schema fail for different reasons: `422` is a
 canon-only debt (FastAPI adds `422` itself and `_custom_openapi` (`app/openapi_postprocess.py`) re-skins it), while `401`/`403`
@@ -270,6 +283,9 @@ def _reachable_by_operation() -> dict[_Operation, dict[str, str]]:
     """The whole rule, applied to the whole route table."""
 
     rate_limited = rate_limited_operations()
+    # S7: the handler table itself, read here rather than taken from `declare_internal_error_status`, so the
+    # guard and the schema derive the set independently and can disagree.
+    catch_all = Exception in app.exception_handlers
     measured: dict[_Operation, dict[str, str]] = {}
 
     for route in app.routes:
@@ -288,6 +304,8 @@ def _reachable_by_operation() -> dict[_Operation, dict[str, str]]:
             operation_statuses = dict(statuses)
             if (method, schema_path) in rate_limited:
                 operation_statuses["429"] = "S5"
+            if catch_all:
+                operation_statuses["500"] = "S7"
             measured[
                 _Operation(
                     key=f"{method} {canon_path if canon_path is not None else schema_path}",
@@ -648,6 +666,37 @@ def test_the_guard_bites_when_a_declaration_is_deleted() -> None:
     # And the ratchet built on it fails, with the pair named in the message.
     appeared = sorted(after_canon - UNDECLARED_REACHABLE_CANON)
     assert appeared == [(key, "403"), (key, "429")], appeared
+
+
+def test_s7_the_guard_bites_when_a_500_is_deleted() -> None:
+    """Delete the `500` from one operation in each document and require it back on that side only.
+
+    `GET /equivalents` declares the shared envelope on both sides and nothing else of S7's kind, so what is reported
+    after the mutation came from the mutation. Both documents are deep copies; nothing is written.
+    """
+
+    key = "GET /equivalents"
+    assert Exception in app.exception_handlers, "the catch-all handler is gone; S7 derives nothing (vacuous)"
+    canonical = copy.deepcopy(_load_openapi_yaml())
+    generated = copy.deepcopy(_load_fastapi_openapi())
+    before_canon, before_generated = undeclared_reachable(canonical, generated)
+    assert not [pair for pair in before_canon | before_generated if pair[0] == key], (before_canon, before_generated)
+
+    del canonical["paths"]["/equivalents"]["get"]["responses"]["500"]
+    after_canon, after_generated = undeclared_reachable(canonical, generated)
+    assert after_canon - before_canon == {(key, "500")}, sorted(after_canon - before_canon)
+    assert after_generated == before_generated
+
+    del generated["paths"]["/api/v1/equivalents"]["get"]["responses"]["500"]
+    _canon, after_generated = undeclared_reachable(canonical, generated)
+    assert after_generated - before_generated == {(key, "500")}, sorted(after_generated - before_generated)
+
+    # And the operations S7 covers are every operation, not some: a vacuous S7 would leave this set empty.
+    reachable = _reachable_by_operation()
+    uncovered = sorted(
+        f"{op.method} {op.schema_path}" for op, statuses in reachable.items() if statuses.get("500") != "S7"
+    )
+    assert reachable and not uncovered, uncovered
 
 
 async def test_require_admin_really_answers_403_and_never_401(client) -> None:

@@ -71,6 +71,8 @@ paths:
                     type: string
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /healthz:
     get:
@@ -91,6 +93,8 @@ paths:
                     enum: [ok]
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /health/db:
     get:
@@ -122,6 +126,8 @@ paths:
                     enum: [error]
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/health/db:
     get:
@@ -161,6 +167,8 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/config:
     get:
@@ -184,6 +192,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
     patch:
       tags: [Admin]
       summary: Patch runtime config subset (admin)
@@ -215,6 +225,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants:
     get:
@@ -266,6 +278,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/stats:
     get:
@@ -289,6 +303,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/freeze:
     post:
@@ -328,6 +344,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/unfreeze:
     post:
@@ -367,6 +385,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/audit-log:
     get:
@@ -421,6 +441,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents:
     get:
@@ -452,6 +474,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [Admin]
       summary: Create equivalent (admin)
@@ -484,6 +508,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}:
     patch:
@@ -528,6 +554,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     delete:
       tags: [Admin]
@@ -580,6 +608,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}/usage:
     get:
@@ -614,6 +644,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}/integrity-hold/clear:
     post:
@@ -671,6 +703,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/migrations:
     get:
@@ -694,6 +728,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/trustlines:
     get:
@@ -756,6 +792,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/liquidity/summary:
     get:
@@ -794,6 +832,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/graph/snapshot:
     get:
@@ -833,6 +873,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/graph/ego:
     get:
@@ -898,6 +940,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/graph/snapshot:
     get:
@@ -924,6 +968,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/graph/ego:
     get:
@@ -962,6 +1008,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/events:
     get:
@@ -1011,6 +1059,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/events/poll:
     get:
@@ -1065,6 +1115,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios:
     get:
@@ -1085,6 +1137,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [Simulator]
       summary: Upload a simulator scenario (Real Mode control plane)
@@ -1114,6 +1168,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios/{scenario_id}:
     get:
@@ -1149,6 +1205,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios/{scenario_id}/graph/preview:
     get:
@@ -1192,6 +1250,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/session/ensure:
     post:
@@ -1217,6 +1277,8 @@ paths:
                     enum: [anon]
                   owner_id:
                     type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/admin/runs:
     get:
@@ -1340,6 +1402,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/admin/runs/stop-all:
     post:
@@ -1390,6 +1454,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs:
     post:
@@ -1427,6 +1493,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/active:
     get:
@@ -1447,6 +1515,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}:
     get:
@@ -1471,6 +1541,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/pause:
     post:
@@ -1495,6 +1567,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/resume:
     post:
@@ -1532,6 +1606,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/stop:
     post:
@@ -1566,6 +1642,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/restart:
     post:
@@ -1599,6 +1677,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/intensity:
     post:
@@ -1631,6 +1711,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/events:
     get:
@@ -1675,6 +1757,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/graph/snapshot:
     get:
@@ -1700,6 +1784,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/metrics:
     get:
@@ -1747,6 +1833,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1789,6 +1877,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -1813,6 +1903,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/artifacts/{name}:
     get:
@@ -1879,6 +1971,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/metrics:
     get:
@@ -1921,6 +2015,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /equivalents:
     get:
@@ -1939,6 +2035,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/challenge:
     post:
@@ -1964,6 +2062,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/login:
     post:
@@ -1991,6 +2091,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/refresh:
     post:
@@ -2018,6 +2120,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants:
     get:
@@ -2071,6 +2175,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     post:
       tags: [Participants]
@@ -2095,6 +2201,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/search:
     get:
@@ -2148,6 +2256,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/me:
     get:
@@ -2166,6 +2276,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     patch:
       tags: [Participants]
@@ -2193,6 +2305,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/{pid}:
     get:
@@ -2215,6 +2329,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /trustlines:
     get:
@@ -2265,6 +2381,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     post:
       tags: [TrustLines]
@@ -2306,6 +2424,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /trustlines/{id}:
     get:
@@ -2330,6 +2450,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     patch:
       tags: [TrustLines]
@@ -2390,6 +2512,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     delete:
       tags: [TrustLines]
@@ -2453,6 +2577,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /clearing/cycles:
     get:
@@ -2574,6 +2700,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/capacity:
     get:
@@ -2615,6 +2743,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/max-flow:
     get:
@@ -2649,6 +2779,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments:
     post:
@@ -2782,6 +2914,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/{tx_id}:
     get:
@@ -2809,6 +2943,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /balance:
     get:
@@ -2827,6 +2963,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /balance/debts:
     get:
@@ -2861,6 +2999,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/summary:
     get:
@@ -2890,6 +3030,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/status:
     get:
@@ -2916,6 +3058,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/checksum/{equivalent}:
     get:
@@ -2946,6 +3090,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/verify:
     post:
@@ -2979,6 +3125,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/audit-log:
     get:
@@ -3024,6 +3172,8 @@ paths:
   # guard returns 403 ACTIONS_DISABLED independently of it. Errors here use the flat
   # SimulatorActionError envelope, not ErrorEnvelope: they are assembled by _action_error,
   # which returns a raw JSONResponse, so response_model of the route does not apply.
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-create:
     post:
@@ -3064,6 +3214,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-update:
     post:
@@ -3111,6 +3263,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-close:
     post:
@@ -3156,6 +3310,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/payment-real:
     post:
@@ -3196,6 +3352,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/SimulatorActionInternalError'
 
   /simulator/runs/{run_id}/actions/clearing-real:
     post:
@@ -3239,11 +3397,7 @@ paths:
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '500':
-          description: Clearing execution failed (CLEARING_FAILED)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SimulatorActionError'
+          $ref: '#/components/responses/SimulatorActionInternalError'
         '503':
           description: Action unavailable - RUN_PERIMETER_UNAVAILABLE or SEEDING_FAILED (flat envelope)
           content:
@@ -3276,6 +3430,8 @@ paths:
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustlines-list:
     get:
@@ -3322,6 +3478,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/payment-targets:
     get:
@@ -3390,6 +3548,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
 components:
   securitySchemes:
@@ -3539,6 +3699,19 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+    # 054-E-10 (decision of the main session 2026-10-30, variant A): every operation can answer 500. An exception no
+    # handler answers reaches `unhandled_exception_handler` (app/main.py), and a GeoException with the internal code
+    # reaches `geo_exception_handler`; both answer this envelope with E010, the code's meaning as the message and the
+    # request id. Declared on every operation, here and in the generated schema (`declare_internal_error_status`,
+    # app/openapi_postprocess.py), so a client has a branch for it; an operation whose 500 body is wider says so.
+    InternalError:
+      description: >-
+        Internal error (E010): the message is the code's meaning only, the cause is in the server log under
+        `error.request_id`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
 
     SimulatorActionBadRequest:
       description: Invalid request payload for the action (flat envelope)
@@ -3552,6 +3725,21 @@ components:
         rejected before the handler ran (ErrorEnvelope). Both shapes are reachable: the guard
         inside the handler answers flat, while require_simulator_actor raises before it and the
         global handler wraps the result.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/SimulatorActionError'
+              - $ref: '#/components/schemas/ErrorEnvelope'
+    # 054-E-9/E-10: the two money actions answer 500 from their own handler in the flat envelope (`payment-real`
+    # maps a service GeoException by its status, so a service E010 is a flat 500 PAYMENT_REJECTED; `clearing-real`
+    # answers a failed pass with a flat 500 CLEARING_FAILED), and an error outside the handler's own `try` - before it,
+    # in a dependency - reaches the global handler, which answers the ErrorEnvelope with E010.
+    SimulatorActionInternalError:
+      description: >-
+        The action failed (flat SimulatorActionError: PAYMENT_REJECTED carrying a service internal error, or
+        CLEARING_FAILED), or an error outside the action's own handling reached the global handler (ErrorEnvelope,
+        E010).
       content:
         application/json:
           schema:

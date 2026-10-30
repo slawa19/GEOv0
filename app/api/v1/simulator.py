@@ -436,6 +436,28 @@ async def _compute_viz_patches_best_effort(
         return None, None
 
 
+#: 054-E-9/E-10: the 500 of the two money actions has both shapes too. `payment-real` maps a service `GeoException`
+#: by its own status (a service E010 is a flat 500 `PAYMENT_REJECTED`), `clearing-real` answers a failed pass with a
+#: flat 500 `CLEARING_FAILED`; an error outside the handler's own `try` reaches `unhandled_exception_handler`, which
+#: answers `ErrorEnvelope` (E010). `api/openapi.yaml`: `components/responses/SimulatorActionInternalError`.
+_ACTION_INTERNAL_ERROR_RESPONSE: dict[str, Any] = {
+    "description": (
+        "The action failed (flat SimulatorActionError: PAYMENT_REJECTED carrying a service internal error, or "
+        "CLEARING_FAILED), or an error outside the action's own handling reached the global handler (ErrorEnvelope, "
+        "E010)"
+    ),
+    "content": {
+        "application/json": {
+            "schema": {
+                "oneOf": [
+                    {"$ref": "#/components/schemas/SimulatorActionError"},
+                    {"$ref": "#/components/schemas/ErrorEnvelope"},
+                ]
+            }
+        }
+    },
+}
+
 # 011/T1109: 403 really has two shapes on the Interact Mode routes, and declaring one of them
 # would be the same defect this program catalogues. `_require_actions_enabled_or_error` and the
 # access checks answer with the flat `SimulatorActionError` (ACTIONS_DISABLED, ACCESS_DENIED),
@@ -1769,6 +1791,7 @@ def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
+        500: _ACTION_INTERNAL_ERROR_RESPONSE,
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
 )
@@ -1973,7 +1996,7 @@ async def action_payment_real(
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        500: {"model": SimulatorActionError, "description": "Clearing execution failed (flat envelope)"},
+        500: _ACTION_INTERNAL_ERROR_RESPONSE,
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
 )
