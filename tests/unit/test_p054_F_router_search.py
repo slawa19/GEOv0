@@ -1,12 +1,17 @@
-"""054-F-1: `PaymentRouter.find_flow_routes` on a hand-built capacity graph (no database).
+"""054-F: `PaymentRouter` searches on hand-built capacity graphs (no database).
 
-Protocol §6.3.2/§6.3.4: the first path is the one of the largest capacity, the split goes by capacity. Shortest paths
-of any capacity first spent `max_paths` on thin hops and refused a payment two wide paths carry.
+F-1 (protocol §6.3.2: the first path is the one of the largest capacity): a payment one path carries whole goes on it;
+otherwise the split before 054 runs unchanged - so no payment routed before is refused now. F-3: max-flow's 0 after a
+policy refusal is checked by one search over every simple path. H-2: `payment_targets` in one linear search.
 """
+
+import random
 
 from decimal import Decimal
 
+from app.core.payments.capacity import route_breaks_policy
 from app.core.payments.router import PaymentRouter
+from app.utils.exceptions import TimeoutException
 
 
 def _router(edges) -> PaymentRouter:
@@ -36,17 +41,31 @@ def _check_within_capacity(router: PaymentRouter, routes) -> None:
         assert total <= router.graph[u][v], (u, v, total)
 
 
-def test_no_single_path_carries_it_widest_paths_are_taken_before_thin_short_ones():
-    router = _router(THIN_AND_WIDE)
-    routes = router.find_flow_routes("P", "Q", Decimal("10"), max_hops=6, max_paths=3, timeout_ms=5_000)
-    assert routes == [(["P", "C", "D", "Q"], Decimal("6")), (["P", "E", "F", "Q"], Decimal("4"))]
+def _assert_a_valid_split(router: PaymentRouter, routes, amount: Decimal, *, payee: str) -> None:
+    """§8: the paths sum to the amount, no hop carries more than its capacity, every path respects the policy."""
+
+    assert routes and sum(a for _, a in routes) == amount, routes
     _check_within_capacity(router, routes)
+    for path, _ in routes:
+        assert route_breaks_policy(path, router._hop_rules, payee=payee) is None, path
 
 
-def test_one_path_carries_it_the_shortest_such_path_is_taken_whole():
+def _the_split_before_054(router: PaymentRouter, monkeypatch, *args, **kwargs):
+    """`find_flow_routes` with step 1 finding nothing: what remains is the algorithm before 054, unchanged."""
+
+    with monkeypatch.context() as m:
+        m.setattr(router, "_bfs_carrying", lambda *a, **k: None)
+        return router.find_flow_routes(*args, **kwargs)
+
+
+def test_f1_one_path_carries_it_the_payment_goes_on_it_whole():
     router = _router(THIN_AND_WIDE)
     assert router.find_flow_routes("P", "Q", Decimal("5"), max_hops=6, max_paths=3, timeout_ms=5_000) == [
         (["P", "C", "D", "Q"], Decimal("5"))
+    ]
+    # The split before 054 spent the three paths on the thin hops and refused the same payment.
+    assert router.find_flow_routes("P", "Q", Decimal("1"), max_hops=6, max_paths=3, timeout_ms=5_000) == [
+        (["P", "Q"], Decimal("1"))
     ]
     # Single-path mode (`max_paths=1`, multipath off): the one path must carry all of it.
     assert router.find_flow_routes("P", "Q", Decimal("6"), max_hops=6, max_paths=1, timeout_ms=5_000) == [
@@ -55,66 +74,17 @@ def test_one_path_carries_it_the_shortest_such_path_is_taken_whole():
     assert router.find_flow_routes("P", "Q", Decimal("7"), max_hops=6, max_paths=1, timeout_ms=5_000) == []
 
 
-def test_the_shortest_path_is_kept_when_it_carries_the_payment():
+def test_f1_no_path_carries_it_the_split_before_054_answers(monkeypatch):
     router = _router(THIN_AND_WIDE)
-    assert router.find_flow_routes("P", "Q", Decimal("1"), max_hops=6, max_paths=3, timeout_ms=5_000) == [
-        (["P", "Q"], Decimal("1"))
-    ]
+    for amount, hops in ((Decimal("3"), 2), (Decimal("4"), 2), (Decimal("7"), 6), (Decimal("13.01"), 6)):
+        args = ("P", "Q", amount)
+        kwargs = dict(max_hops=hops, max_paths=3, timeout_ms=5_000)
+        assert router.find_flow_routes(*args, **kwargs) == _the_split_before_054(router, monkeypatch, *args, **kwargs)
+    routes = router.find_flow_routes("P", "Q", Decimal("3"), max_hops=2, max_paths=3, timeout_ms=5_000)
+    assert routes == [(["P", "Q"], Decimal("1")), (["P", "A", "Q"], Decimal("1")), (["P", "B", "Q"], Decimal("1"))]
 
 
-def test_more_than_the_paths_carry_is_refused_and_max_hops_still_binds():
-    router = _router(THIN_AND_WIDE)
-    # 6 + 6 + 1 = 13 is the most three paths carry.
-    routes = router.find_flow_routes("P", "Q", Decimal("13"), max_hops=6, max_paths=3, timeout_ms=5_000)
-    assert sorted(a for _, a in routes) == [Decimal("1"), Decimal("6"), Decimal("6")]
-    _check_within_capacity(router, routes)
-    assert router.find_flow_routes("P", "Q", Decimal("13.01"), max_hops=6, max_paths=3, timeout_ms=5_000) == []
-    # Within two hops only the thin paths exist: 3 at most.
-    assert router.find_flow_routes("P", "Q", Decimal("4"), max_hops=2, max_paths=3, timeout_ms=5_000) == []
-    assert len(router.find_flow_routes("P", "Q", Decimal("3"), max_hops=2, max_paths=3, timeout_ms=5_000)) == 3
-
-
-def test_the_linear_search_answers_exactly_as_the_exhaustive_one():
-    """`_find_path` (054-F) against `_bfs_single_path` on seeded random graphs with both policy rules: the same path
-    or the same None every time; so is the exact fallback `_exact_path`, and its filter - the local rules alone - finds
-    nothing only where nothing exists. Counter-check: both the linear answer and the fallback (a route-dependent
-    `blocked_participants` refusal) occur, and the filter both answers and lets the search through, so no branch
-    passes vacuously."""
-
-    import random
-
-    rng = random.Random(54)
-    exact_answers = fallbacks = filtered = 0
-    for _ in range(1500):
-        nodes = [f"N{i}" for i in range(rng.randint(3, 9))]
-        router = PaymentRouter(None)
-        router.graph = {x: {} for x in nodes}
-        for u in nodes:
-            for v in nodes:
-                if u != v and rng.random() < 0.4:
-                    router.graph[u][v] = Decimal(rng.choice([1, 2, 3, 5, 8]))
-                    if rng.random() < 0.2:
-                        router.edge_no_transit.setdefault(u, {})[v] = frozenset(rng.sample([u, v], 1))
-                    if rng.random() < 0.4:
-                        router.edge_blocked_participants.setdefault(u, {})[v] = set(rng.sample(nodes, 1))
-        s, t = rng.sample(nodes, 2)
-        amount, hops = Decimal(rng.choice([0, 1, 2, 3, 5])), rng.randint(1, 6)
-        expected = router._bfs_single_path(s, t, amount, max_hops=hops, graph_override=router.graph)
-        assert router._find_path(s, t, amount, max_hops=hops, graph=router.graph) == expected
-        assert router._exact_path(s, t, amount, max_hops=hops, graph=router.graph) == expected
-        relaxed, _ = router._bfs_by_node(s, t, amount, max_hops=hops, graph=router.graph, local_only=True)
-        assert relaxed is not None or expected is None
-        filtered += relaxed is None
-        linear, exact = router._bfs_by_node(s, t, amount, max_hops=hops, graph=router.graph)
-        if exact:
-            assert linear == expected
-            exact_answers += 1
-        else:
-            fallbacks += 1
-    assert exact_answers > 1000 and fallbacks > 30 and 30 < filtered < 1470, (exact_answers, fallbacks, filtered)
-
-
-def _random_policy_graph(rng, *, blocked: bool) -> PaymentRouter:
+def _random_policy_graph(rng, *, blocked: float) -> PaymentRouter:
     nodes = [f"N{i}" for i in range(rng.randint(3, 8))]
     router = PaymentRouter(None)
     router.graph = {x: {} for x in nodes}
@@ -124,69 +94,147 @@ def _random_policy_graph(rng, *, blocked: bool) -> PaymentRouter:
                 router.graph[u][v] = Decimal(rng.choice([1, 2, 3, 5, 8]))
                 if rng.random() < 0.2:
                     router.edge_no_transit.setdefault(u, {})[v] = frozenset(rng.sample([u, v], 1))
-                if blocked and rng.random() < 0.15:
+                if rng.random() < 0.1:
+                    router.edge_can_be_intermediate.setdefault(u, {})[v] = False
+                if rng.random() < blocked:
                     router.edge_blocked_participants.setdefault(u, {})[v] = set(rng.sample(nodes, 1))
     return router
 
 
-def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
-    """W2 on the graph alone: P->X->M is first to M and refused at M->Q (Q's line blocks X); P->Y->Z->M->Q carries
-    10."""
+def test_f1_every_payment_the_split_before_054_routed_is_routed(monkeypatch):
+    """Seeded random graphs with every policy rule: whenever the algorithm before 054 routes a payment, so does
+    `find_flow_routes`, with a valid split. Counter-checks: step 1 routes some payment the old split refused, and on
+    some graph step 1 misses a path (a route-dependent policy) and the old split routes it - both branches occur."""
 
-    router = _router([("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"), ("Z", "M", "10"),
-                      ("M", "Q", "10")])
+    rng = random.Random(5410)
+    gained = step2 = 0
+    for _ in range(1500):
+        router = _random_policy_graph(rng, blocked=0.3)
+        s, t = rng.sample(sorted(router.graph), 2)
+        args = (s, t, Decimal(rng.choice([1, 2, 3, 5, 8, 10, 13])))
+        kwargs = dict(max_hops=rng.randint(1, 6), max_paths=rng.randint(1, 3), timeout_ms=60_000)
+        old = _the_split_before_054(router, monkeypatch, *args, **kwargs)
+        new = router.find_flow_routes(*args, **kwargs)
+        if old:
+            _assert_a_valid_split(router, new, args[2], payee=t)
+        if new:
+            _assert_a_valid_split(router, new, args[2], payee=t)
+            gained += not old
+        whole = router._bfs_carrying(s, t, args[2], max_hops=kwargs["max_hops"], forbidden_nodes=set(),
+                                     deadline=float("inf"))
+        step2 += whole is None and bool(old)
+    assert gained > 5 and step2 > 10, (gained, step2)
+
+
+def _mesh_router() -> PaymentRouter:
+    """Review F-a: s->t 5 and s->a->t 5 carry 10; a 14-clique M1..M14 of capacity 100 reaches t, but every Mj->t
+    (j >= 2) blocks every other M - a route-dependent rule; a search over every simple path for a path carrying 10
+    spends the whole deadline in the clique."""
+
+    ms = [f"M{i}" for i in range(1, 15)]
+    edges = [("s", "t", "5"), ("s", "a", "5"), ("a", "t", "5"), ("s", "M1", "100")]
+    edges += [(x, y, "100") for x in ms for y in ms if x != y] + [(x, "t", "100") for x in ms[1:]]
+    router = _router(edges)
+    router.edge_blocked_participants = {x: {"t": {m for m in ms if m != x}} for x in ms[1:]}
+    return router
+
+
+def _codex_router() -> PaymentRouter:
+    """Codex P2 #1: P->T 5 and P->B->T 5 carry 10; P->X 10 into a 30-clique A1..A30 of 10, each Ai->T 10, and every
+    pair Ai-T blocks X."""
+
+    a = [f"A{i}" for i in range(1, 31)]
+    edges = [("P", "T", "5"), ("P", "B", "5"), ("B", "T", "5"), ("P", "X", "10")]
+    edges += [(x, y, "10") for x in a for y in a if x != y] + [("X", x, "10") for x in a] + [(x, "T", "10") for x in a]
+    router = _router(edges)
+    router.edge_blocked_participants = {x: {"T": {"X"}} for x in a}
+    return router
+
+
+def test_f1_review_inputs_a_split_the_old_strategy_found_at_once_is_found_in_the_deadline():
+    for router, payer, payee in ((_mesh_router(), "s", "t"), (_codex_router(), "P", "T")):
+        routes = router.find_flow_routes(payer, payee, Decimal("10"), max_hops=6, max_paths=3, timeout_ms=500)
+        _assert_a_valid_split(router, routes, Decimal("10"), payee=payee)
+
+
+def test_f1_review_seed_291_the_split_before_054_is_kept():
+    """Review F-c, fuzz seed 291 (no blocked lists): no one path carries 9; the split before 054 is 3 + 3 + 3."""
+
+    edges = [("P0", "P3", "7"), ("P0", "P7", "3"), ("P1", "P2", "7"), ("P1", "P3", "7"), ("P1", "P6", "7"),
+             ("P1", "P7", "3"), ("P2", "P1", "3"), ("P2", "P4", "7"), ("P2", "P6", "7"), ("P3", "P6", "3"),
+             ("P4", "P1", "7"), ("P4", "P3", "3"), ("P4", "P6", "3"), ("P4", "P7", "3"), ("P5", "P1", "3"),
+             ("P5", "P3", "3"), ("P5", "P7", "3"), ("P6", "P0", "3"), ("P6", "P1", "3"), ("P6", "P3", "3"),
+             ("P7", "P1", "3"), ("P7", "P2", "3"), ("P7", "P4", "7"), ("P7", "P5", "3")]
+    router = _router(edges)
+    router.edge_can_be_intermediate = {"P1": {"P2": False}, "P4": {"P3": False, "P6": False, "P7": False},
+                                       "P6": {"P1": False, "P3": False}}
+    router.edge_no_transit = {"P1": {"P6": frozenset({"P6", "P1"})}, "P5": {"P1": frozenset({"P5", "P1"}),
+                              "P3": frozenset({"P3", "P5"})}, "P6": {"P1": frozenset({"P1"})},
+                              "P7": {"P2": frozenset({"P2"})}}
+    routes = router.find_flow_routes("P7", "P3", Decimal("9"), max_hops=8, max_paths=3, timeout_ms=60_000)
+    _assert_a_valid_split(router, routes, Decimal("9"), payee="P3")
+
+
+# --- 054-F-3 -------------------------------------------------------------------------------------------------------
+
+W2_EDGES = [("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"), ("Z", "M", "10"), ("M", "Q", "10")]
+
+
+def _w2_router() -> PaymentRouter:
+    """P->X->M is first to M and refused at M->Q (Q's line blocks X); P->Y->Z->M->Q carries 10."""
+
+    router = _router(W2_EDGES)
     router.edge_blocked_participants = {"M": {"Q": {"X"}}}
-    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("10")
+    return router
 
 
-def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_same_without_route_rules(monkeypatch):
-    """The two invariants of 054-F-3 on seeded random graphs. With only local rules (no `blocked_participants`) the
-    exact search (`_exact_path`) is never called - the work is the one before 054. With them, the answer is >= the
-    one of the node-visited search alone (the algorithm before 054: the exact search answering None), and above it on
-    some graphs (counter-check: the fallback is not vacuous)."""
+def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
+    assert Decimal(_w2_router().calculate_max_flow("P", "Q").max_amount) >= Decimal("10")
 
-    import random
+
+def test_f3_max_flow_never_falls_below_the_one_before_and_searches_only_after_a_policy_refusal(monkeypatch):
+    """On seeded random graphs: without a policy refusal the search over every simple path never runs (the work is
+    the one before 054); with them the answer is >= the one before (that search answering None), and above it on some
+    graphs (counter-check)."""
 
     rng = random.Random(543)
     for _ in range(400):
-        router = _random_policy_graph(rng, blocked=False)
+        router = _random_policy_graph(rng, blocked=0)
+        router.edge_no_transit, router.edge_can_be_intermediate = {}, {}
         s, t = rng.sample(sorted(router.graph), 2)
 
         def _never(*a, **k):
-            raise AssertionError("the exact search ran without a route-dependent refusal")
+            raise AssertionError("the search over every simple path ran without a policy refusal")
 
-        monkeypatch.setattr(router, "_exact_path", _never)
+        monkeypatch.setattr(router, "_bfs_single_path", _never)
         router.calculate_max_flow(s, t)
 
     higher = 0
-    for _ in range(600):
-        router = _random_policy_graph(rng, blocked=True)
+    for _ in range(800):
+        router = _random_policy_graph(rng, blocked=0.15)
         s, t = rng.sample(sorted(router.graph), 2)
         new = Decimal(router.calculate_max_flow(s, t).max_amount)
-        monkeypatch.setattr(router, "_exact_path", lambda *a, **k: None)
+        monkeypatch.setattr(router, "_bfs_single_path", lambda *a, **k: None)
         old = Decimal(router.calculate_max_flow(s, t).max_amount)
         assert new >= old, (new, old)
         higher += new > old
     assert higher > 0
 
 
-def test_f3_max_flow_out_of_time_returns_the_flow_found_so_far(monkeypatch):
-    """The exact search (`_exact_path`) under its deadline: max-flow stops adding and returns what it has - no
-    error, since a payment's refusal reads this value for its text (`service.py`, `max_available`)."""
+def test_f3_max_flow_out_of_time_answers_as_before(monkeypatch):
+    """The search under its deadline: 0, the answer before 054 - no error, since a payment's refusal reads this value
+    for its text (`service.py`, `max_available`)."""
 
-    from app.utils.exceptions import TimeoutException
-
-    # P->Q carries 3 directly; to M the first path is via X, refused at M->Q, so the path via Y needs the fallback.
-    router = _router([("P", "Q", "3"), ("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"),
-                      ("Z", "M", "10"), ("M", "Q", "10")])
-    router.edge_blocked_participants = {"M": {"Q": {"X"}}}
-    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("13")
+    router = _w2_router()
 
     def _out_of_time(*a, **k):
         raise TimeoutException("Routing timed out")
 
-    monkeypatch.setattr(router, "_exact_path", _out_of_time)
-    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("3")
+    monkeypatch.setattr(router, "_bfs_single_path", _out_of_time)
+    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == 0
+
+
+# --- 054-F-H2 ------------------------------------------------------------------------------------------------------
 
 
 def test_h2_payment_targets_answers_as_the_per_target_search():

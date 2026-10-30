@@ -389,135 +389,42 @@ class PaymentRouter:
         forbid, blocked = self._hop_rules(u, v)
         return bool((forbid | blocked) & {n for n in (u, v) if n != payer and n != payee})
 
-    def _bfs_by_node(
+    def _bfs_carrying(
         self,
         from_pid: str,
         to_pid: str,
         amount: Decimal,
         *,
         max_hops: int,
-        graph: Dict[str, Dict[str, Decimal]],
-        forbidden_nodes: Set[str] | None = None,
-        deadline: float | None = None,
-        local_only: bool = False,
-    ) -> Tuple[Optional[List[str]], bool]:
-        """`_bfs_single_path` with a node-level `visited`: linear in the graph, not in its simple paths. Returns
-        `(path, exact)`. `local_only`: the local rules alone (`_hop_refuses`) - a relaxation, exact for itself: its
-        None proves there is no path, its path may break a route-dependent rule.
+        forbidden_nodes: Set[str],
+        deadline: float,
+    ) -> Optional[List[str]]:
+        """054-F-1: a shortest path whose every hop carries `amount`, by a BFS with a node-level `visited` - linear in
+        the graph. The policy (`route_breaks_policy`) is checked on every prefix, as max-flow's BFS checks it, so a
+        path it returns respects it; but the policy depends on the route and `visited` keeps one prefix per node, so
+        it may miss a path that exists. A heuristic, not a proof: None says only "not found here"."""
 
-        054-F: `exact` is True when no candidate hop was refused by a rule that depends on the rest of the route
-        (a `blocked_participants` naming a node elsewhere on it; the other rules are local, `_hop_refuses`). Then a
-        node's first BFS prefix is as good as any other for every continuation, and the answer - path or None - is the
-        one `_bfs_single_path` gives, the same path included (same FIFO order). Otherwise it is only a candidate and the
-        caller searches exactly (`_exact_path`).
-        """
-
-        if from_pid not in graph or to_pid not in graph:
-            return None, True
-        static_forbidden_nodes = forbidden_nodes or set()
-        if from_pid in static_forbidden_nodes or to_pid in static_forbidden_nodes:
-            return None, True
-
-        exact = True
+        if from_pid not in self.graph or to_pid not in self.graph or {from_pid, to_pid} & forbidden_nodes:
+            return None
         seen = {from_pid}
         queue = deque([(from_pid, [from_pid])])
         while queue:
-            if deadline is not None and time.perf_counter() >= deadline:
+            if time.perf_counter() >= deadline:
                 raise TimeoutException("Routing timed out")
             current, path = queue.popleft()
             if current == to_pid:
-                return path, exact
+                return path
             if (len(path) - 1) >= max_hops:
                 continue
-            for neighbor, capacity in graph.get(current, {}).items():
-                if neighbor in seen or neighbor in static_forbidden_nodes or capacity <= 0 or capacity < amount:
+            for neighbor, capacity in self.graph.get(current, {}).items():
+                if neighbor in seen or neighbor in forbidden_nodes or capacity <= 0 or capacity < amount:
                     continue
                 candidate = path + [neighbor]
-                if local_only:
-                    if self._hop_refuses(current, neighbor, payer=from_pid, payee=to_pid):
-                        continue
-                elif route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
-                    if not self._hop_refuses(current, neighbor, payer=from_pid, payee=to_pid):
-                        exact = False
+                if route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
                     continue
                 seen.add(neighbor)
                 queue.append((neighbor, candidate))
-        return None, exact
-
-    def _exact_path(
-        self,
-        from_pid: str,
-        to_pid: str,
-        amount: Decimal,
-        *,
-        max_hops: int,
-        graph: Dict[str, Dict[str, Decimal]],
-        forbidden_nodes: Set[str] | None = None,
-        deadline: float | None = None,
-    ) -> Optional[List[str]]:
-        """`_bfs_single_path`'s answer, the same path included, without its search over every simple path where the
-        local rules alone already leave none (`_bfs_by_node(local_only=True)`, linear) - the search's costly case is
-        the one that finds nothing. Otherwise `_bfs_single_path` itself, under `deadline`: a route that must avoid
-        pairs (a hop, a participant its line blocks) is a hard problem, and no exact search is linear there."""
-
-        relaxed, _ = self._bfs_by_node(from_pid, to_pid, amount, max_hops=max_hops, graph=graph,
-                                       forbidden_nodes=forbidden_nodes, deadline=deadline, local_only=True)
-        if relaxed is None:
-            return None
-        return self._bfs_single_path(from_pid, to_pid, amount, max_hops=max_hops, graph_override=graph,
-                                     forbidden_nodes=forbidden_nodes, deadline=deadline)
-
-    def _find_path(
-        self,
-        from_pid: str,
-        to_pid: str,
-        amount: Decimal,
-        *,
-        max_hops: int,
-        graph: Dict[str, Dict[str, Decimal]],
-        forbidden_nodes: Set[str] | None = None,
-        deadline: float | None = None,
-    ) -> Optional[List[str]]:
-        """The shortest policy-respecting path whose every hop carries `amount` - `_bfs_single_path`'s answer, found
-        by the linear search when that one is exact (054-F, `_bfs_by_node`)."""
-
-        path, exact = self._bfs_by_node(from_pid, to_pid, amount, max_hops=max_hops, graph=graph,
-                                        forbidden_nodes=forbidden_nodes, deadline=deadline)
-        if exact:
-            return path
-        return self._exact_path(from_pid, to_pid, amount, max_hops=max_hops, graph=graph,
-                                forbidden_nodes=forbidden_nodes, deadline=deadline)
-
-    def _widest_path(
-        self,
-        from_pid: str,
-        to_pid: str,
-        *,
-        below: Decimal,
-        max_hops: int,
-        graph: Dict[str, Dict[str, Decimal]],
-        forbidden_nodes: Set[str] | None = None,
-        deadline: float | None = None,
-    ) -> Optional[List[str]]:
-        """054-F-1: a path of the largest bottleneck under `below` (the shortest of them), or None.
-
-        "Some path has every hop >= t" only gets harder as t grows (a path that passes t passes every lower t), and
-        the bottleneck of any path is one of the graph's capacities, so a binary search over the distinct capacities
-        finds the largest feasible t; the path found for it has bottleneck exactly t.
-        """
-
-        thresholds = sorted({cap for adj in graph.values() for cap in adj.values() if 0 < cap < below})
-        best: Optional[List[str]] = None
-        lo, hi = 0, len(thresholds) - 1
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            path = self._find_path(from_pid, to_pid, thresholds[mid], max_hops=max_hops, graph=graph,
-                                   forbidden_nodes=forbidden_nodes, deadline=deadline)
-            if path:
-                best, lo = path, mid + 1
-            else:
-                hi = mid - 1
-        return best
+        return None
 
     def _path_bottleneck(self, path: List[str], *, graph: Dict[str, Dict[str, Decimal]]) -> Decimal:
         b = Decimal('Infinity')
@@ -582,7 +489,7 @@ class PaymentRouter:
         deadline = time.perf_counter() + effective_timeout_ms / 1000.0
         found, exact = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline)
         if not exact:
-            # Who is reachable under the local rules alone (a superset, `_exact_path`); only they are searched.
+            # Who is reachable under the local rules alone - a superset; only they are searched.
             relaxed, _ = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline, local_only=True)
             found = {}
             for to_pid in self.graph:
@@ -602,8 +509,13 @@ class PaymentRouter:
     ) -> Tuple[Dict[str, List[str]], bool]:
         """Every participant `from_pid` can pay within `max_hops` hops of positive capacity, with its first shortest
         path: `({to_pid: path}, exact)`. A hop ends a route (its head is the payee) or continues one (its head is an
-        intermediary); the policy (`route_breaks_policy`) is checked for each role separately. `exact` as in
-        `_bfs_by_node`: no route-dependent rule refused a candidate; `local_only` as there."""
+        intermediary); the policy (`route_breaks_policy`) is checked for each role separately.
+
+        `exact`: no candidate hop was refused by a rule that depends on the rest of the route (a `blocked_participants`
+        naming a node elsewhere on it; the other rules are local, `_hop_refuses`). Then a node's first BFS prefix is as
+        good as any other for every continuation, and the answer is the per-target `_bfs_single_path`'s, paths
+        included (same FIFO order). `local_only`: the local rules alone - a relaxation, exact for itself: a
+        participant it does not reach is reachable by no route."""
 
         intermediary = object()  # a payee no route contains: every node of a prefix is an intermediary
         exact = True
@@ -651,11 +563,13 @@ class PaymentRouter:
         - Respects edge can_be_intermediate constraints.
         - Enforces max_hops.
 
-        054-F-1 (protocol §6.3.2, §6.3.4): each step takes the shortest path that carries ALL of the rest; only when
-        none does, the widest path (`_widest_path`), whose whole bottleneck it uses. The last allowed path must carry
-        the rest, so without one the search stops there. Until 054 the step took the shortest path of ANY capacity,
-        and thin short paths used up `max_paths` while one wide path carried the payment. A greedy split, not an
-        optimal one: an amount some `max_paths` paths could carry may still be refused.
+        054-F-1 (protocol §6.3.2: the first path is the one of the largest capacity). Step 1: one linear BFS for a path
+        that carries ALL of `amount` (`_bfs_carrying`); found - the payment goes on it whole, one route. Step 2, only
+        when step 1 found none: the algorithm before 054, unchanged - the shortest path of any capacity,
+        `min(rest, bottleneck)` on it, up to `max_paths` - on the rest of the same deadline. Until 054 there was only
+        step 2, and thin short paths used up `max_paths` while one wide path carried the payment. So the payments
+        routed are a superset of those before, at the cost of one linear BFS; step 1 is a heuristic (it may miss a
+        path a route-dependent policy hides), and step 2 then answers as before.
         """
         if amount <= 0 or max_paths <= 0:
             return []
@@ -676,6 +590,14 @@ class PaymentRouter:
                 if isinstance(x, str) and x.strip()
             }
 
+        try:
+            whole = self._bfs_carrying(from_pid, to_pid, amount, max_hops=max_hops, forbidden_nodes=forbidden_nodes,
+                                       deadline=deadline)
+        except TimeoutException:
+            self._routing_timed_out(from_pid, to_pid, effective_timeout_ms)
+        if whole:
+            return [(whole, amount)]
+
         # Working copy; subtract allocations to avoid over-committing shared edges.
         residual: Dict[str, Dict[str, Decimal]] = {u: d.copy() for u, d in self.graph.items()}
 
@@ -684,24 +606,17 @@ class PaymentRouter:
 
         while remaining > 0 and len(routes) < max_paths:
             if time.perf_counter() >= deadline:
-                try:
-                    ROUTING_FAILURES_TOTAL.labels(reason="timeout").inc()
-                except Exception:
-                    pass
-                logger.info(
-                    "event=routing.timeout from_pid=%s to_pid=%s timeout_ms=%s",
-                    from_pid,
-                    to_pid,
-                    effective_timeout_ms,
-                )
-                raise TimeoutException("Routing timed out")
+                self._routing_timed_out(from_pid, to_pid, effective_timeout_ms)
 
-            search = dict(max_hops=max_hops, graph=residual, forbidden_nodes=forbidden_nodes, deadline=deadline)
-            path = self._find_path(from_pid, to_pid, remaining, **search)
-            if not path:
-                if len(routes) + 1 >= max_paths:
-                    break  # the last allowed path must carry the rest, and none does
-                path = self._widest_path(from_pid, to_pid, below=remaining, **search)
+            path = self._bfs_single_path(
+                from_pid,
+                to_pid,
+                Decimal('0'),
+                max_hops=max_hops,
+                graph_override=residual,
+                forbidden_nodes=forbidden_nodes,
+                deadline=deadline,
+            )
             if not path:
                 break
 
@@ -728,6 +643,20 @@ class PaymentRouter:
             return []
         return routes
 
+    @staticmethod
+    def _routing_timed_out(from_pid: str, to_pid: str, timeout_ms: int) -> None:
+        try:
+            ROUTING_FAILURES_TOTAL.labels(reason="timeout").inc()
+        except Exception:
+            pass
+        logger.info(
+            "event=routing.timeout from_pid=%s to_pid=%s timeout_ms=%s",
+            from_pid,
+            to_pid,
+            timeout_ms,
+        )
+        raise TimeoutException("Routing timed out")
+
     def check_capacity(self, from_pid: str, to_pid: str, amount: Decimal) -> CapacityResponse:
         routes = self.find_flow_routes(
             from_pid,
@@ -751,19 +680,17 @@ class PaymentRouter:
 
         return to_money_str(value, self.precision or 0)
 
-    def calculate_max_flow(self, from_pid: str, to_pid: str, *, timeout_ms: int | None = None) -> MaxFlowResponse:
+    def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:
         """
         Edmonds-Karp or similar to find max flow - an ESTIMATE, not a proof: the policy is checked per augmenting
         path, and an augmenting path over a residual reverse hop may still overstate (BACKLOG).
 
-        054-F-3: each augmenting path is first searched with a node-level `visited` (`_bfs_by_node`), as before. When
-        that finds none but a route-dependent rule (a `blocked_participants` naming a node elsewhere on the route,
-        `_hop_refuses`) refused a candidate on the way, the node `visited` may have hidden a path, and the exact
-        `_exact_path` searches again, bounded by `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`) for the
-        whole call. When that bound runs out the
-        flow found so far is returned - a LOWER bound, logged (`event=routing.max_flow_truncated`), never an error:
-        a payment's refusal reads this value for its text. So the answer is never below the one before 054, and
-        without such a refusal the work is exactly the one before.
+        054-F-3: the BFS keeps one prefix per node (`visited`) while the policy depends on the route, so it may miss
+        every path and answer 0 although a payment commits. Only then, and only when it refused a candidate by the
+        policy at least once (without a refusal it is exact and 0 is right), one `_bfs_single_path` - every simple
+        path, under `ROUTING_PATH_FINDING_TIMEOUT_MS` - looks for a path; its bottleneck is returned as a LOWER bound.
+        Out of time: 0, as before, logged (`event=routing.max_flow_truncated`) - never an exception, since a payment's
+        refusal reads this value for its text.
         """
         # T1545, 2026-09-13: with from == to the BFS finds a zero-length path at once, the residual
         # update does nothing, and `while True` finds it again forever - synchronously, inside an
@@ -774,46 +701,69 @@ class PaymentRouter:
 
         # Create a working copy of the graph since we modify residuals
         residual_graph = {u: d.copy() for u, d in self.graph.items()}
-        residual_graph.setdefault(to_pid, {})  # the searches answer only for a payee that is a key of the graph
 
         max_flow = Decimal('0')
         paths = []
-        effective_timeout_ms = max(1, int(
-            timeout_ms if timeout_ms is not None else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)))
-        deadline = time.perf_counter() + effective_timeout_ms / 1000.0
-        # The hop limit is the one before 054: a path of at most MAX_FLOW_MAX_HOPS hops (for performance).
-        search = dict(max_hops=int(settings.MAX_FLOW_MAX_HOPS), graph=residual_graph)
+        refused_by_policy = False
 
         while True:
-            # BFS for augmenting path. Policy per augmenting path only: residual re-routing may still overstate.
-            path, exact = self._bfs_by_node(from_pid, to_pid, Decimal('0'), **search)
-            if path is None and not exact:
-                try:
-                    path = self._exact_path(from_pid, to_pid, Decimal('0'), deadline=deadline, **search)
-                except TimeoutException:
-                    logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s max_amount=%s",
-                                from_pid, to_pid, effective_timeout_ms, max_flow)
+            # BFS for augmenting path
+            queue = [(from_pid, [from_pid], Decimal('Infinity'))]
+            visited = {from_pid}
+            path_found = None
+
+            while queue:
+                u, path, flow = queue.pop(0)
+                if u == to_pid:
+                    path_found = (path, flow)
                     break
-            if not path:
+
+                if len(path) > settings.MAX_FLOW_MAX_HOPS: # Limit hops for performance
+                    continue
+
+                for v, cap in residual_graph.get(u, {}).items():
+                    # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
+                    if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
+                        refused_by_policy = refused_by_policy or cap > 0
+                        continue
+                    if v not in visited and cap > 0:
+                        visited.add(v)
+                        new_flow = min(flow, cap)
+                        queue.append((v, path + [v], new_flow))
+
+            if not path_found:
                 break
 
-            flow = self._path_bottleneck(path, graph=residual_graph)
+            path, flow = path_found
             max_flow += flow
             paths.append(MaxFlowPath(path=path, capacity=self._money(flow)))
-            
+
             # Update residuals
             for i in range(len(path) - 1):
                 u, v = path[i], path[i+1]
                 residual_graph[u][v] -= flow
                 if residual_graph[u][v] == 0:
                     del residual_graph[u][v]
-                
+
                 # Add reverse flow
                 if u not in residual_graph.get(v, {}):
                     if v not in residual_graph:
                         residual_graph[v] = {}
                     residual_graph[v][u] = 0
                 residual_graph[v][u] += flow
+
+        if max_flow == 0 and refused_by_policy:
+            timeout_ms = max(1, int(settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500))
+            try:
+                path = self._bfs_single_path(from_pid, to_pid, Decimal('0'), max_hops=int(settings.MAX_FLOW_MAX_HOPS),
+                                             deadline=time.perf_counter() + timeout_ms / 1000.0)
+            except TimeoutException:
+                path = None
+                logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s",
+                            from_pid, to_pid, timeout_ms)
+            if path:
+                max_flow = self._path_bottleneck(path, graph=self.graph)
+                paths = [MaxFlowPath(path=path, capacity=self._money(max_flow))]
 
         # Identify bottlenecks (min-cut edges roughly, or just full edges on the paths)
         # For MVP, just listing edges on paths that have 0 remaining capacity in original direction?
