@@ -603,6 +603,10 @@ watch(
     // Unknown: do NOT reset.
     if (targets === undefined) return
 
+    // 054-B-3: the receipt of a made payment is not a choice to correct. The payment's own patch refreshes the targets, and a
+    // payment that used the whole capacity drops its recipient; resetting To then erased the result, which only the user dismisses.
+    if (success.value) return
+
     if (!targets.has(to)) {
       props.setToPid?.(null)
       toSelectionInvalidKey.value = 'payment.recipientGone'
