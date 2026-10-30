@@ -71,6 +71,8 @@ paths:
                     type: string
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /healthz:
     get:
@@ -91,6 +93,8 @@ paths:
                     enum: [ok]
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /health/db:
     get:
@@ -122,6 +126,8 @@ paths:
                     enum: [error]
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/health/db:
     get:
@@ -161,6 +167,8 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/config:
     get:
@@ -181,9 +189,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminConfigResponse'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
     patch:
       tags: [Admin]
       summary: Patch runtime config subset (admin)
@@ -215,6 +225,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants:
     get:
@@ -266,6 +278,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/stats:
     get:
@@ -289,6 +303,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/freeze:
     post:
@@ -328,6 +344,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/unfreeze:
     post:
@@ -367,6 +385,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/audit-log:
     get:
@@ -421,6 +441,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents:
     get:
@@ -452,6 +474,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [Admin]
       summary: Create equivalent (admin)
@@ -484,6 +508,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}:
     patch:
@@ -528,6 +554,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     delete:
       tags: [Admin]
@@ -580,6 +608,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}/usage:
     get:
@@ -614,6 +644,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/equivalents/{code}/integrity-hold/clear:
     post:
@@ -671,6 +703,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/migrations:
     get:
@@ -694,6 +728,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/trustlines:
     get:
@@ -751,11 +787,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminTrustLinesListResponse'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/liquidity/summary:
     get:
@@ -794,6 +832,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/graph/snapshot:
     get:
@@ -833,6 +873,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/graph/ego:
     get:
@@ -898,6 +940,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/graph/snapshot:
     get:
@@ -924,6 +968,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/graph/ego:
     get:
@@ -962,6 +1008,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/events:
     get:
@@ -971,6 +1019,17 @@ paths:
         Server-Sent Events stream. Each message contains one JSON event.
 
         This endpoint is modeled as `text/event-stream` in OpenAPI.
+
+        Framing (054-E-18): every event is one SSE record `id: <event_id>`,
+        `event: simulator.event`, `data: <one SimulatorEvent as compact JSON on one line>`,
+        then a blank line; `id` equals the payload's `event_id`. A comment record
+        `: keep-alive` follows 15 s without an event. A run's stream ends after a
+        `run_status` whose `state` is `stopped` or `error`, and when the subscriber's
+        queue overflows (reconnect with `Last-Event-ID`; nothing is dropped silently).
+
+        Without an active run of the caller (and without `Last-Event-ID`) the stream is
+        finite: one record (a comment line and a `retry: 15000` field), then the response ends, and
+        `EventSource` reconnects after that delay.
       parameters:
         - in: query
           name: equivalent
@@ -1011,6 +1070,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/events/poll:
     get:
@@ -1065,6 +1126,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios:
     get:
@@ -1085,6 +1148,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [Simulator]
       summary: Upload a simulator scenario (Real Mode control plane)
@@ -1114,6 +1179,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios/{scenario_id}:
     get:
@@ -1149,6 +1216,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/scenarios/{scenario_id}/graph/preview:
     get:
@@ -1192,6 +1261,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/session/ensure:
     post:
@@ -1217,6 +1288,8 @@ paths:
                     enum: [anon]
                   owner_id:
                     type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/admin/runs:
     get:
@@ -1333,13 +1406,15 @@ paths:
                   offset:
                     type: integer
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/admin/runs/stop-all:
     post:
@@ -1383,13 +1458,15 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs:
     post:
@@ -1417,6 +1494,9 @@ paths:
                 $ref: '#/components/schemas/RunCreateResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-8: no scenario has this id, or a non-administrator may not start it (E009).
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '401':
@@ -1427,6 +1507,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/active:
     get:
@@ -1447,6 +1529,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}:
     get:
@@ -1471,6 +1555,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/pause:
     post:
@@ -1495,6 +1581,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/resume:
     post:
@@ -1532,6 +1620,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/stop:
     post:
@@ -1566,6 +1656,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/restart:
     post:
@@ -1599,6 +1691,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/intensity:
     post:
@@ -1631,6 +1725,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/events:
     get:
@@ -1640,6 +1736,13 @@ paths:
         Server-Sent Events stream. Each message contains one JSON event.
 
         This endpoint is modeled as `text/event-stream` in OpenAPI.
+
+        Framing (054-E-18): every event is one SSE record `id: <event_id>`,
+        `event: simulator.event`, `data: <one SimulatorEvent as compact JSON on one line>`,
+        then a blank line; `id` equals the payload's `event_id`. A comment record
+        `: keep-alive` follows 15 s without an event. A run's stream ends after a
+        `run_status` whose `state` is `stopped` or `error`, and when the subscriber's
+        queue overflows (reconnect with `Last-Event-ID`; nothing is dropped silently).
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
         - $ref: '#/components/parameters/EquivalentQuery'
@@ -1675,6 +1778,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/graph/snapshot:
     get:
@@ -1700,6 +1805,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/metrics:
     get:
@@ -1747,6 +1854,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1789,6 +1898,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -1813,6 +1924,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/artifacts/{name}:
     get:
@@ -1879,6 +1992,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /admin/participants/{pid}/metrics:
     get:
@@ -1921,6 +2036,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /equivalents:
     get:
@@ -1939,6 +2056,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/challenge:
     post:
@@ -1960,10 +2079,15 @@ paths:
                 $ref: '#/components/schemas/ChallengeResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-1: no participant has this pid (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/login:
     post:
@@ -1991,6 +2115,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /auth/refresh:
     post:
@@ -2018,6 +2144,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants:
     get:
@@ -2071,6 +2199,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     post:
       tags: [Participants]
@@ -2091,10 +2221,15 @@ paths:
                 $ref: '#/components/schemas/Participant'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          # 054-E-2: a participant with this pid or public key already exists (E008).
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/search:
     get:
@@ -2148,6 +2283,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/me:
     get:
@@ -2166,6 +2303,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     patch:
       tags: [Participants]
@@ -2193,6 +2332,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /participants/{pid}:
     get:
@@ -2215,6 +2356,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /trustlines:
     get:
@@ -2259,12 +2402,20 @@ paths:
                 $ref: '#/components/schemas/TrustLinesList'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-3: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-3: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     post:
       tags: [TrustLines]
@@ -2284,6 +2435,9 @@ paths:
                 $ref: '#/components/schemas/TrustLine'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-4: the recipient `to` or the equivalent does not exist (E009).
+          $ref: '#/components/responses/NotFound'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
         '409':
@@ -2306,6 +2460,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /trustlines/{id}:
     get:
@@ -2330,6 +2486,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     patch:
       tags: [TrustLines]
@@ -2390,6 +2548,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     delete:
       tags: [TrustLines]
@@ -2453,6 +2613,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /clearing/cycles:
     get:
@@ -2488,6 +2650,12 @@ paths:
                 $ref: '#/components/schemas/ClearingCyclesResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-5: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-5: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2554,6 +2722,20 @@ paths:
                 $ref: '#/components/schemas/ClearingAutoResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-5: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-5: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
+        '504':
+          description: >-
+            054-E-5: before any occurrence committed, a clearing lock wait ran past its budget (E007). Met after
+            progress, the same timeout answers 200 `interrupted` with `reason: error` instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2574,6 +2756,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/capacity:
     get:
@@ -2609,12 +2793,21 @@ paths:
           $ref: '#/components/responses/UnauthorizedBearer'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '504':
+          description: >-
+            054-E-6: routing ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007); no partial answer is given.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/max-flow:
     get:
@@ -2649,6 +2842,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments:
     post:
@@ -2782,6 +2977,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /payments/{tx_id}:
     get:
@@ -2809,6 +3006,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /balance:
     get:
@@ -2827,6 +3026,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /balance/debts:
     get:
@@ -2861,6 +3062,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/summary:
     get:
@@ -2890,6 +3093,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/status:
     get:
@@ -2916,6 +3121,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/checksum/{equivalent}:
     get:
@@ -2940,12 +3147,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityChecksumResponse'
+        '400':
+          # 054-E-7: the path code is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/verify:
     post:
@@ -2971,6 +3183,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityVerifyResponse'
+        '400':
+          # 054-E-7: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -2979,6 +3194,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /integrity/audit-log:
     get:
@@ -3024,6 +3241,8 @@ paths:
   # guard returns 403 ACTIONS_DISABLED independently of it. Errors here use the flat
   # SimulatorActionError envelope, not ErrorEnvelope: they are assembled by _action_error,
   # which returns a raw JSONResponse, so response_model of the route does not apply.
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-create:
     post:
@@ -3064,6 +3283,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-update:
     post:
@@ -3111,6 +3332,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustline-close:
     post:
@@ -3156,6 +3379,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/payment-real:
     post:
@@ -3196,6 +3421,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/SimulatorActionInternalError'
 
   /simulator/runs/{run_id}/actions/clearing-real:
     post:
@@ -3239,11 +3466,7 @@ paths:
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '500':
-          description: Clearing execution failed (CLEARING_FAILED)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SimulatorActionError'
+          $ref: '#/components/responses/SimulatorActionInternalError'
         '503':
           description: Action unavailable - RUN_PERIMETER_UNAVAILABLE or SEEDING_FAILED (flat envelope)
           content:
@@ -3276,6 +3499,8 @@ paths:
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/actions/trustlines-list:
     get:
@@ -3285,7 +3510,8 @@ paths:
         - $ref: '#/components/parameters/RunIdPath'
         - in: query
           name: equivalent
-          required: false
+          # 054-E-12: required; without it the action answers 400 INVALID_REQUEST.
+          required: true
           schema:
             type: string
         - in: query
@@ -3300,6 +3526,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionTrustlinesListResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3322,6 +3550,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorActionError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /simulator/runs/{run_id}/payment-targets:
     get:
@@ -3388,8 +3618,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '504':
+          description: >-
+            054-E (review R-E-4): the reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007); no
+            partial answer is given.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
 components:
   securitySchemes:
@@ -3534,7 +3774,25 @@ components:
     ServiceUnavailable:
       description: >-
         Measured data is unavailable and the endpoint refuses to substitute
-        synthetic data (real-mode simulator analytics).
+        synthetic data (real-mode simulator analytics). The envelope carries code
+        `E010`, so its `message` is the generic internal-error text like every `E010`
+        (the specific text is logged under `request_id`, 028 `F-028-42`); the cause is
+        `details.reason` - `db_read_failed` or `storage_disabled` - beside
+        `details.run_id` and `details.equivalent` (054-E-18).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    # 054-E-10 (decision of the main session 2026-10-30, variant A): every operation can answer 500. An exception no
+    # handler answers reaches `unhandled_exception_handler` (app/main.py), and a GeoException with the internal code
+    # reaches `geo_exception_handler`; both answer this envelope with E010, the code's meaning as the message and the
+    # request id. Declared on every operation, here and in the generated schema (`declare_internal_error_status`,
+    # app/openapi_postprocess.py), so a client has a branch for it; an operation whose 500 body is wider says so.
+    InternalError:
+      description: >-
+        Internal error (E010): the message is the code's meaning only, the cause is in the server log under
+        `error.request_id`. Not with `DEBUG=true` (allowed only in dev/test): starlette then answers an
+        unhandled exception with a plain-text traceback instead of this envelope.
       content:
         application/json:
           schema:
@@ -3552,6 +3810,21 @@ components:
         rejected before the handler ran (ErrorEnvelope). Both shapes are reachable: the guard
         inside the handler answers flat, while require_simulator_actor raises before it and the
         global handler wraps the result.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/SimulatorActionError'
+              - $ref: '#/components/schemas/ErrorEnvelope'
+    # 054-E-9/E-10: the two money actions answer 500 from their own handler in the flat envelope (`payment-real`
+    # maps a service GeoException by its status, so a service E010 is a flat 500 PAYMENT_REJECTED; `clearing-real`
+    # answers a failed pass with a flat 500 CLEARING_FAILED), and an error outside the handler's own `try` - before it,
+    # in a dependency - reaches the global handler, which answers the ErrorEnvelope with E010.
+    SimulatorActionInternalError:
+      description: >-
+        The action failed (flat SimulatorActionError: PAYMENT_REJECTED carrying a service internal error, or
+        CLEARING_FAILED), or an error outside the action's own handling reached the global handler (ErrorEnvelope,
+        E010).
       content:
         application/json:
           schema:
@@ -4098,6 +4371,7 @@ components:
       properties:
         updates:
           type: object
+          minProperties: 1
           additionalProperties: true
         reason:
           type: string
@@ -6485,19 +6759,19 @@ components:
         # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
         # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
         # Absent, or a value - never null.
+        #
+        # 054-E-15 (2026-10-30): money is a decimal string and nothing else (AGENTS.md §8). The
+        # `oneOf [string, number]` admitted a JSON number; since 054-A-15 the snapshot/preview
+        # link is built from money strings before the database is read
+        # (app/core/simulator/snapshot_builder.py) and `SimulatorGraphLink` refuses a number, and
+        # both patch builders emit `to_money_str` (edge_patch_builder.py).
         trust_limit:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         used:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         available:
           description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         status:
           type: string
           nullable: true
@@ -6508,7 +6782,10 @@ components:
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
             patch always carries it, null when no close is requested (a re-created line clears an earlier
-            request). A closed line is not patched: it is removed (`removed_edges`).
+            request). A closed line leaves the graph through `topology.changed.removed_edges`. The one
+            patch it still gets is the final one of a committed clearing that brought its supported debt
+            to 0 (053-1): `used` 0 in `clearing.done.edge_patch`, sent before the removal. A payment
+            never patches a closed line.
         viz_color_key:
           type: string
           nullable: true
@@ -6640,19 +6917,19 @@ components:
         # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
         # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
         # Absent, or a value - never null.
+        #
+        # 054-E-15 (2026-10-30): money is a decimal string and nothing else (AGENTS.md §8). The
+        # `oneOf [string, number]` admitted a JSON number; since 054-A-15 the snapshot/preview
+        # link is built from money strings before the database is read
+        # (app/core/simulator/snapshot_builder.py) and `SimulatorGraphLink` refuses a number, and
+        # both patch builders emit `to_money_str` (edge_patch_builder.py).
         trust_limit:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         used:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         available:
           description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         status:
           type: string
           nullable: true
@@ -6663,7 +6940,10 @@ components:
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
             patch always carries it, null when no close is requested (a re-created line clears an earlier
-            request). A closed line is not patched: it is removed (`removed_edges`).
+            request). A closed line leaves the graph through `topology.changed.removed_edges`. The one
+            patch it still gets is the final one of a committed clearing that brought its supported debt
+            to 0 (053-1): `used` 0 in `clearing.done.edge_patch`, sent before the removal. A payment
+            never patches a closed line.
         viz_color_key:
           type: string
           nullable: true
@@ -6740,7 +7020,12 @@ components:
               to:
                 type: string
               style:
-                $ref: '#/components/schemas/SimulatorEventEdgeStyle'
+                # 054-E-14 (2026-10-30): no writer sets a style, so every edge goes out
+                # with `style: null`; the null branch says so (a `$ref` sibling would be ignored).
+                oneOf:
+                  - $ref: '#/components/schemas/SimulatorEventEdgeStyle'
+                  - nullable: true
+                    enum: [null]
             additionalProperties: true
         node_badges:
           type: array

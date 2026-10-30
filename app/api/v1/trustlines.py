@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.schemas.common import ErrorEnvelope
 from app.core.trustlines.service import TrustLineService
 from app.schemas.trustline import (
     TrustLine,
@@ -18,7 +19,13 @@ from app.utils.exceptions import NotFoundException
 
 router = APIRouter()
 
-@router.post("", response_model=TrustLine, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TrustLine,
+    status_code=status.HTTP_201_CREATED,
+    # 054-E-4: declared here as in api/openapi.yaml.
+    responses={404: {"model": ErrorEnvelope, "description": "The recipient `to` or the equivalent does not exist (E009)"}},
+)
 async def create_trustline(
     data: TrustLineCreateRequest,
     current_participant: Participant = Depends(deps.get_current_participant),
@@ -27,7 +34,15 @@ async def create_trustline(
     service = TrustLineService(db)
     return await service.create(current_participant.id, data)
 
-@router.get("", response_model=TrustLinesList)
+@router.get(
+    "",
+    response_model=TrustLinesList,
+    # 054-E-3: declared here as in api/openapi.yaml.
+    responses={
+        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
+        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009)"},
+    },
+)
 async def get_trustlines(
     direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
     equivalent: Optional[str] = Query(None),

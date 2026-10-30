@@ -44,6 +44,8 @@ _EXECUTION_DEPTH_REMOVED = (
     response_model=ClearingCyclesResponse,
     responses={
         # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
+        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
+        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009, 054-E-5)"},
         409: {
             "model": ErrorEnvelope,
             "description": "Simulator use is detected on this server (044 T4406, the periodic pass's rule of 023 "
@@ -163,12 +165,18 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
         # T1544 / 023 R3: the operator stop (or an integrity hold) met BEFORE the first commit is 409/E008. Met after
         # progress, the pass answers 200 `interrupted` with `error.code = "E008"` instead (the progress is durable).
         # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
+        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
+        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009, 054-E-5)"},
         409: {
             "model": ErrorEnvelope,
             "description": "Equivalent is not active (operator stop or integrity hold) before any occurrence "
             "committed, the equivalent's clearing lease is held by another pass, clearing is switched off "
             "(`details.reason = clearing_disabled`), or simulator use is detected on this server (044 T4406: "
             "`details.reason = simulator_real_runs_in_database | simulator_persistence_disabled`)",
+        },
+        504: {
+            "model": ErrorEnvelope,
+            "description": "Before any occurrence committed, a clearing lock wait ran past its budget (E007, 054-E-5)",
         },
     },
 )

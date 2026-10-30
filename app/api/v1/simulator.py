@@ -436,6 +436,28 @@ async def _compute_viz_patches_best_effort(
         return None, None
 
 
+#: 054-E-9/E-10: the 500 of the two money actions has both shapes too. `payment-real` maps a service `GeoException`
+#: by its own status (a service E010 is a flat 500 `PAYMENT_REJECTED`), `clearing-real` answers a failed pass with a
+#: flat 500 `CLEARING_FAILED`; an error outside the handler's own `try` reaches `unhandled_exception_handler`, which
+#: answers `ErrorEnvelope` (E010). `api/openapi.yaml`: `components/responses/SimulatorActionInternalError`.
+_ACTION_INTERNAL_ERROR_RESPONSE: dict[str, Any] = {
+    "description": (
+        "The action failed (flat SimulatorActionError: PAYMENT_REJECTED carrying a service internal error, or "
+        "CLEARING_FAILED), or an error outside the action's own handling reached the global handler (ErrorEnvelope, "
+        "E010)"
+    ),
+    "content": {
+        "application/json": {
+            "schema": {
+                "oneOf": [
+                    {"$ref": "#/components/schemas/SimulatorActionError"},
+                    {"$ref": "#/components/schemas/ErrorEnvelope"},
+                ]
+            }
+        }
+    },
+}
+
 # 011/T1109: 403 really has two shapes on the Interact Mode routes, and declaring one of them
 # would be the same defect this program catalogues. `_require_actions_enabled_or_error` and the
 # access checks answer with the flat `SimulatorActionError` (ACTIONS_DISABLED, ACCESS_DENIED),
@@ -1769,6 +1791,7 @@ def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
+        500: _ACTION_INTERNAL_ERROR_RESPONSE,
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
 )
@@ -1973,7 +1996,7 @@ async def action_payment_real(
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        500: {"model": SimulatorActionError, "description": "Clearing execution failed (flat envelope)"},
+        500: _ACTION_INTERNAL_ERROR_RESPONSE,
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
 )
@@ -2267,6 +2290,7 @@ async def action_participants_list(
     "/runs/{run_id}/actions/trustlines-list",
     response_model=SimulatorActionTrustlinesListResponse,
     responses={
+        400: {"model": SimulatorActionError, "description": "Invalid request: `equivalent` is missing (flat envelope, 054-E-12)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
@@ -2277,7 +2301,9 @@ async def action_participants_list(
 )
 async def action_trustlines_list(
     run_id: str,
-    equivalent: Optional[str] = Query(None),
+    # 054-E-12: required, as `api/openapi.yaml` states; its absence is the validation 400 INVALID_REQUEST of every
+    # action route (`request_validation_exception_handler`), no longer a 404 EQUIVALENT_NOT_FOUND for "".
+    equivalent: str = Query(...),
     participant_pid: Optional[str] = Query(None),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
@@ -2453,6 +2479,7 @@ async def action_trustlines_list(
         409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        504: {"model": ErrorEnvelope, "description": "The reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)"},
     },
 )
 async def payment_targets(
@@ -2934,7 +2961,17 @@ async def scenario_graph_preview(
         scenario_id=scenario_id, equivalent=_norm_equivalent(equivalent), mode=mode, session=db)
 
 
-@router.post("/runs", response_model=RunCreateResponse)
+@router.post(
+    "/runs",
+    response_model=RunCreateResponse,
+    # 054-E-8: declared here as in api/openapi.yaml.
+    responses={
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No scenario has this id, or a non-administrator may not start it (E009)",
+        }
+    },
+)
 async def start_run(
     body: RunCreateRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),

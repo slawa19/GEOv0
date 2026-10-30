@@ -25,14 +25,65 @@ The static guard in `test_p011_nullable_needs_a_sibling_type.py` is the compleme
 reads nodes no test ever reaches, and cannot tell whether null actually occurs there.
 
 It also says nothing about traffic that does not go through `httpx.AsyncClient.request`.
-`AsyncClient.stream()` calls `send()` directly, so the eight SSE / NDJSON tests under
-`tests/integration/` are invisible here: those operations appear in `unobserved_operations`
-and NOT in any `unvalidated` category. Measured, not assumed. `/simulator/events` and
-`/simulator/runs/{run_id}/events` are `text/event-stream` and would validate nothing if the
-hook moved to `send()`; the artifact download is no longer in that sentence, because since
-T1110 it serves three declared JSON documents and a streamed download of one of them WOULD be
-worth validating. It is written down because "the gate cannot see this traffic" should not
-have to be rediscovered.
+`AsyncClient.stream()` calls `send()` directly, so the SSE tests under `tests/integration/` are
+invisible here: those operations appear in `unobserved_operations` and NOT in any `unvalidated`
+category. Measured, not assumed. **Six, not eight** (corrected 2026-10-30, 054-E-H3): counted as
+`git grep -n -F ".stream(" -- tests` minus this file - six call sites, one per module
+(`test_simulator_artifacts_events_ndjson`, `test_simulator_sse_real_smoke`,
+`test_simulator_sse_replay_410`, `test_simulator_sse_trust_drift_decay_topology_patch`,
+`test_simulator_sse_tx_failed_timeout`, and `_read_sse_events` in `test_simulator_super_smoke`,
+reached only from the `slow` part 3), and every one opens an SSE endpoint
+(`/simulator/runs/{run_id}/events` or `/simulator/events`); none streams the NDJSON download,
+which `test_simulator_artifacts_events_ndjson` fetches with an ordinary `get` that IS seen. The
+two SSE operations are `text/event-stream` and would validate nothing if the hook moved to
+`send()`. It is written down because "the gate cannot see this traffic" should not have to be
+rediscovered.
+
+**054-E-H1: every status, not only 2xx (2026-10-30).** Until this change `Harness.record` returned
+on the first line for any non-2xx, so the full tier's 558 error responses were counted in
+`responses_seen` and compared to nothing. The rule now, measured by a prototype over the full tier
+before it was committed (558 non-2xx; 536 valid, 10 undeclared, 12 unrouted, 0 body mismatches):
+
+* a non-2xx on a canonical operation must have its status declared there - an undeclared one is a
+  FINDING (`non_conforming`, node `$`), and the only excuse is a row in `KNOWN_NONCONFORMING`;
+* the body is validated by the same `validate_body` against the schema of the media type that
+  arrived, exactly as a 2xx is, so a body that does not match is a finding too;
+* a response-level `$ref` (`#/components/responses/NotFound`) is followed - see
+  `resolve_declared_response`; without it 457 of the 558 read as `declared-without-a-body`;
+* a non-2xx whose request resolves to no canonical path (starlette's 404/405 on an unknown route)
+  is counted in `unrouted` and is not a finding; a path the canon spells never lands there, including a
+  405 for a METHOD the canon does not declare on it, which is an undeclared-status finding. "Canonical"
+  is decided by `match_path` on the canon's TEMPLATES, segment by segment, not by the app's route table:
+  a route with a `{x:path}` converter (`GET /participants/{pid:path}`) answers `/participants/a/b`,
+  and that response is filed as `unrouted` and unchecked although the app routed it to a canonical
+  operation (054-E review R-E-1; no tier traffic has that shape today);
+* a status matched only by a `default` entry is allowed and listed in `matched_by_default`;
+* non-2xx responses are counted in `non_2xx_seen` / `non_2xx_checked` and never in `observed`,
+  `bodies_checked` or `two_xx_seen`, so coverage, the vacuity skip and the ledger quorum keep
+  their 2xx meaning. A non-2xx that cannot be validated (not JSON, empty, unparseable) lands in
+  the same named categories as a 2xx and fails the aggregate the same way.
+
+**What this harness does not see, by construction - its silence there is not evidence:**
+
+* `AsyncClient.stream()` / `AsyncClient.send()` - both bypass `request`; that includes the 410s
+  `test_simulator_sse_replay_410` provokes on both SSE endpoints;
+* starlette's synchronous `TestClient` (an `httpx.Client`, not an `AsyncClient`):
+  `git grep -ln TestClient -- tests` names the modules that use it;
+* a request made with `raise_app_exceptions=True` - the default of the suite's `client` fixture
+  (`AsyncClient(app=app)` in `tests/conftest.py`) - whose handler raises an exception that only
+  `unhandled_exception_handler` (`app/main.py`, `@app.exception_handler(Exception)`) answers:
+  starlette's `ServerErrorMiddleware` sends the 500 envelope and then re-raises, the transport
+  re-raises into the test, and no response object exists to record. A `GeoException` - E010
+  included - is answered by its own handler without a re-raise and IS seen. Only clients built
+  with `ASGITransport(raise_app_exceptions=False)` let an unhandled-exception 500 reach this check;
+* the REQUEST side: which inputs are accepted or refused (054-E-16) is not a property of a
+  response body;
+* the ORDER of list items (054-E-17): the schema says nothing about it;
+* the choice of error code: `ErrorEnvelope.error.code` is a free string in the canon (054-E-H4), so
+  `E009` where `E008` was meant validates;
+* the frames inside an SSE stream: the canon declares `text/event-stream` and the hook sees no
+  body for it at all;
+* any operation, status or input shape no test exercises.
 
 **T1109 rewrote the bookkeeping, and that is the important part of this file now.** External
 review found the gate failing open in several independent ways. Four of them shared one cause:
@@ -199,19 +250,70 @@ def is_json_media_type(value: str | None) -> bool:
     return media == "application/json" or media.endswith("+json")
 
 
+# 054-E-H2: how many response-level `$ref` hops are followed before the chain is called a loop.
+_MAX_RESPONSE_REF_HOPS = 8
+
+
+def resolve_declared_response(
+    document: dict[str, Any], method: str, path: str, status: int
+) -> tuple[str, dict[str, Any], str] | None:
+    """`(key, response object, JSON pointer of that object)` the canon declares, or `None`.
+
+    `key` is `str(status)` when the canon names the status and `"default"` when only a `default`
+    entry covers it - the caller is told which, because a `default` match is allowed but marked
+    (054-E-H1 (e)). The response object has every **response-level** `$ref`
+    (`{"$ref": "#/components/responses/NotFound"}`) followed, and the pointer names the object that
+    was finally read, so a schema pointer built from it resolves against the whole document.
+
+    054-E-H2: before this function the readers took the `$ref` dict itself for the response, found
+    no `content` in it and answered `declared-without-a-body` - measured on the full tier, 457 of 558
+    non-2xx responses are declared this way, so a non-2xx rule without it would have reported a
+    false "the canon says there is no body" on almost every error. A reference this function cannot
+    follow (not local, missing target, a loop) RAISES rather than answering: falling back to the
+    unresolved dict is exactly the false `declared-without-a-body` again, and a raise inside
+    `Harness.record` lands in `recorder_errors`, which the aggregate fails on.
+    """
+
+    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
+    if not isinstance(operation, dict):
+        return None
+    responses = operation.get("responses") or {}
+    key = next((k for k in (str(status), "default") if k in responses), None)
+    if key is None:
+        return None
+    response = responses[key]
+    pointer = f"/paths/{_escape(path)}/{method.lower()}/responses/{_escape(key)}"
+    for _ in range(_MAX_RESPONSE_REF_HOPS):
+        if not (isinstance(response, dict) and "$ref" in response):
+            break
+        ref = response["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            raise ValueError(f"{method} {path} {key}: cannot follow response $ref {ref!r}")
+        pointer = ref[1:]
+        target: Any = document
+        for token in pointer[1:].split("/"):
+            token = token.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or token not in target:
+                raise ValueError(f"{method} {path} {key}: response $ref {ref!r} resolves to nothing")
+            target = target[token]
+        response = target
+    else:
+        raise ValueError(f"{method} {path} {key}: response $ref chain longer than "
+                         f"{_MAX_RESPONSE_REF_HOPS} hops")
+    if not isinstance(response, dict):
+        return None
+    return key, response, pointer
+
+
 def declared_media_types(
     document: dict[str, Any], method: str, path: str, status: int
 ) -> list[str]:
     """Every media type the canon declares for this operation and status, normalized."""
 
-    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
-    if not isinstance(operation, dict):
+    declared = resolve_declared_response(document, method, path, status)
+    if declared is None:
         return []
-    responses = operation.get("responses") or {}
-    key = next((k for k in (str(status), "default") if k in responses), None)
-    if key is None or not isinstance(responses[key], dict):
-        return []
-    return sorted(normalize_media_type(m) for m in (responses[key].get("content") or {}))
+    return sorted(normalize_media_type(m) for m in (declared[1].get("content") or {}))
 
 
 def classify_response_declaration(
@@ -253,16 +355,10 @@ def classify_response_declaration(
     the JSON schema for this operation", asked of the document alone.
     """
 
-    operation = ((document.get("paths") or {}).get(path) or {}).get(method.lower())
-    if not isinstance(operation, dict):
+    declared = resolve_declared_response(document, method, path, status)
+    if declared is None:
         return DECL_UNDECLARED, None
-    responses = operation.get("responses") or {}
-    key = next((k for k in (str(status), "default") if k in responses), None)
-    if key is None:
-        return DECL_UNDECLARED, None
-    response = responses[key]
-    if not isinstance(response, dict):
-        return DECL_UNDECLARED, None
+    _key, response, response_pointer = declared
     content = response.get("content") or {}
     if not content:
         return DECL_NO_CONTENT, None
@@ -281,10 +377,7 @@ def classify_response_declaration(
 
     if "schema" not in content[media]:
         return DECL_NO_SCHEMA, None
-    return DECL_SCHEMA, (
-        f"/paths/{_escape(path)}/{method.lower()}/responses/{_escape(key)}"
-        f"/content/{_escape(media)}/schema"
-    )
+    return DECL_SCHEMA, f"{response_pointer}/content/{_escape(media)}/schema"
 
 
 def response_schema_pointer(
@@ -392,7 +485,8 @@ UNVALIDATED_CATEGORIES = (
 
 
 class Harness:
-    """Accumulates every 2xx body the suite produces, and what the canon says of it.
+    """Accumulates every response the suite produces (2xx and, since 054-E-H1, non-2xx), and what
+    the canon says of it.
 
     **Coverage means validation.** An operation enters `observed` only when a response of its was
     actually compared to the canon - either a JSON body validated against a declared schema, or a
@@ -419,6 +513,23 @@ class Harness:
         # clean". Both used to look like the same green.
         self.responses_seen = 0
         self.two_xx_seen = 0
+        # 054-E-H1: every non-2xx is now checked too, and counted apart, so that the 2xx counters
+        # and `observed` keep meaning what the vacuity skip and the ledger quorum read them as.
+        self.non_2xx_seen = 0
+        # Non-2xx responses really compared to the canon (a body validated, or a declared-bodyless
+        # status confirmed empty). Never added to `observed` or `bodies_checked`.
+        self.non_2xx_checked = 0
+        # Non-2xx responses whose status the canon does not declare for a canonical operation.
+        # Each is ALSO a finding; the count is here so the report can be compared with the
+        # prototype's measurement without re-deriving it from the finding list.
+        self.non_2xx_undeclared = 0
+        # Non-2xx responses to a request that resolved to NO canonical path - starlette's 404/405
+        # on an unknown route. Counted, never a finding: there is no operation whose declaration
+        # they could contradict. A non-2xx on a path the canon's templates match never lands here
+        # (a multi-segment value for a `{x:path}` converter does - see the module docstring).
+        self.unrouted: list[str] = []
+        # `METHOD /path STATUS` matched only by a `default` entry of the canon. Allowed, marked.
+        self.matched_by_default: set[str] = set()
 
         # Coverage. Only operations a response of which was really checked.
         self.observed: set[tuple[str, str]] = set()
@@ -510,15 +621,22 @@ class Harness:
         assert self._document is not None
         self.responses_seen += 1
         status = response.status_code
-        if not (200 <= status < 300):
-            return
-        self.two_xx_seen += 1
+        # 054-E-H1: there used to be `if not 2xx: return` here, so 558 non-2xx responses of the
+        # full tier were counted in `responses_seen` and compared to nothing.
+        success = 200 <= status < 300
+        if success:
+            self.two_xx_seen += 1
+        else:
+            self.non_2xx_seen += 1
         method = response.request.method.upper()
         raw_path = response.request.url.path
 
         content_type = response.headers.get("content-type", "")
 
         path = match_path(raw_path, self._paths)
+        if path is None and not success:
+            self.unrouted.append(f"{method} {raw_path} {status}")
+            return
         if path is None:
             self._skip(
                 UNVALIDATED_NO_CANONICAL_PATH,
@@ -537,6 +655,30 @@ class Harness:
         verdict, pointer = classify_response_declaration(
             self._document, method, path, status, content_type
         )
+        declared = resolve_declared_response(self._document, method, path, status)
+        if declared is not None and declared[0] == "default":
+            self.matched_by_default.add(f"{method} {path} {status}")
+
+        if verdict == DECL_UNDECLARED and not success:
+            # 054-E-H1 (c): a FINDING, not a category. A category can be written into the
+            # allowance; an error status the canon does not declare is the document describing a
+            # different service, and the only excuse is a dated KNOWN_NONCONFORMING row.
+            self.non_2xx_undeclared += 1
+            operation_declared = isinstance(
+                ((self._document.get("paths") or {}).get(path) or {}).get(method.lower()), dict
+            )
+            self._finding(
+                f"{method} {path} {status}",
+                "$",
+                f"the service answered {status} and the canon does not declare that status for "
+                "this operation"
+                + ("" if operation_declared else " (the canon does not declare this METHOD on "
+                   "this path at all)")
+                + ". Declare it in api/openapi.yaml (with the schema of the body that really "
+                "arrives) or stop the handler from producing it",
+                status,
+            )
+            return
 
         if verdict == DECL_UNDECLARED:
             self._skip(
@@ -618,8 +760,11 @@ class Harness:
                     summarize(content[:200].decode("utf-8", "replace")),
                 )
                 return
-            self.observed.add((method, path))
-            self.empty_bodies_confirmed += 1
+            if success:
+                self.observed.add((method, path))
+                self.empty_bodies_confirmed += 1
+            else:
+                self.non_2xx_checked += 1
             return
 
         assert pointer is not None
@@ -656,8 +801,11 @@ class Harness:
             )
             return
 
-        self.observed.add((method, path))
-        self.bodies_checked += 1
+        if success:
+            self.observed.add((method, path))
+            self.bodies_checked += 1
+        else:
+            self.non_2xx_checked += 1
         for node, message, value in validate_body(
             self._document, pointer, body, registry=self._registry
         ):
@@ -680,7 +828,10 @@ class Harness:
         )
 
     def unvalidated_keys(self) -> list[str]:
-        """`"<category> METHOD /path STATUS"` for every 2xx whose body was not validated.
+        """`"<category> METHOD /path STATUS"` for every response whose body was not validated.
+
+        Since 054-E-H1 that includes non-2xx responses on a canonical operation; the report key is
+        still `unvalidated_2xx`, kept so existing readers of the JSON report do not break.
 
         This is the shape the allowance in `test_p011_responses_conform_to_the_canon.py` is keyed
         by: one line per (category, operation, status), stable across runs, and readable enough
@@ -724,6 +875,12 @@ class Harness:
             "canon_operations": len(declared),
             "responses_seen": self.responses_seen,
             "two_xx_seen": self.two_xx_seen,
+            "non_2xx_seen": self.non_2xx_seen,
+            "non_2xx_checked": self.non_2xx_checked,
+            "non_2xx_undeclared": self.non_2xx_undeclared,
+            "unrouted": len(self.unrouted),
+            "unrouted_detail": sorted(self.unrouted),
+            "matched_by_default": sorted(self.matched_by_default),
             "observed_operations": sorted(f"{m} {p}" for m, p in self.observed),
             "unobserved_operations": sorted(
                 f"{m} {p}" for m, p in declared if (m, p) not in self.observed

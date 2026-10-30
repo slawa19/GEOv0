@@ -3,7 +3,8 @@
 `get_openapi` learns a response only from `responses=` on a route decorator. Three things the
 application answers are not there, so they are added here to the generated document, each derived
 from the route table rather than listed: the GEO error envelope for validation failures, `429`
-where the rate limiter can answer, `401`/`403` where an auth dependency can.
+where the rate limiter can answer, `401`/`403` where an auth dependency can, and `500` everywhere the
+catch-all exception handler answers (054-E-10).
 
 `install_openapi(app)` is the one entry point; `declare_rate_limit_status` and
 `declare_auth_statuses` are public because `tests/contract/test_p011_reachable_statuses_are_declared.py`
@@ -97,6 +98,7 @@ def _custom_openapi(app: FastAPI) -> dict:
 
     declare_rate_limit_status(app, document)
     declare_auth_statuses(app, document)
+    declare_internal_error_status(app, document)
 
     app.openapi_schema = document
     return document
@@ -361,6 +363,52 @@ def declare_auth_statuses(app: FastAPI, document: dict) -> None:
                     ),
                 )
 
+
+_HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace"})
+
+
+def declare_internal_error_status(app: FastAPI, document: dict) -> None:
+    """Declare 500 on every operation, because every operation can answer it (054-E-10, variant A, 2026-10-30).
+
+    The sibling of `declare_rate_limit_status` and `declare_auth_statuses`. The 500 is the catch-all
+    `unhandled_exception_handler` (`app/main.py`): an exception no other handler answers, on any route, is answered
+    with `ErrorEnvelope` and E010 (and a `GeoException` with the internal code is answered the same way by
+    `geo_exception_handler`). `get_openapi` cannot know about a handler, so the status was declared on 3 operations
+    of 85 while every one of them could return it.
+
+    Derived, not listed: the declaration is made only while the application really installs a handler for
+    `Exception` - without one, Starlette's `ServerErrorMiddleware` answers a plain-text body and this envelope would
+    be a false statement. Not covered: with `DEBUG=true` (dev/test only, 054-C-8) `ServerErrorMiddleware` answers a
+    plain-text traceback even though the handler is installed (054-E review R-E-2); the canon's `InternalError` says
+    so rather than this derivation reading `app.debug`. `setdefault` on the status, as with 429/401/403: a route that declares its own 500 keeps
+    it, and that is observable - `clearing-real` and `payment-real` declare the union of their own flat
+    `SimulatorActionError` and this envelope. `api/openapi.yaml` states the same body at
+    `components/responses/InternalError`, so the two documents converge.
+    `tests/contract/test_p011_reachable_statuses_are_declared.py` derives the same set from the same handler table.
+    """
+
+    if Exception not in app.exception_handlers:
+        return
+    for path_item in (document.get("paths") or {}).values():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in _HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            operation.setdefault("responses", {}).setdefault(
+                "500",
+                {
+                    "description": (
+                        "Internal error (E010): the message is the code's meaning only, the cause is in the "
+                        "server log under `error.request_id`."
+                    ),
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
+                        }
+                    },
+                },
+            )
 
 
 def install_openapi(app: FastAPI) -> None:
