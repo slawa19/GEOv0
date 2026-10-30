@@ -20,8 +20,8 @@ from app.utils.exceptions import NotFoundException
 #: 054-A-7c (owner, 2026-10-30): the `last_error.code` of a run in `error` that `resume` refuses - "no second chance".
 #: The run was stopped by its own error budget, by a run of failing ticks, by money that could not progress, or by a
 #: violated integrity invariant; resuming it would run the same thing again. `restart` (and `stop`) stay as they are. Any
-#: other code of `error` (`HEARTBEAT_FAILED`, `SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`, a stored run's
-#: `server_restart`, ...) is still resumed. The codes are spelled where they are raised: `tick.py`,
+#: other code of `error` (`HEARTBEAT_FAILED`, `SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`, ...) is still
+#: resumed. The codes are spelled where they are raised: `tick.py`,
 #: `real_payments_executor.py` (`REAL_MODE_TOO_MANY_TIMEOUTS`, `INTEGRITY_VIOLATION`).
 RESUME_REFUSED_ERROR_CODES = frozenset(
     {

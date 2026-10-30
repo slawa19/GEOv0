@@ -539,11 +539,15 @@ class RealTick:
                 # before or inside the money phase counts: the tick may have attempted payments.
                 if not (money is not None and money.phase is not None and is_empty_share(run, len(money.phase.planned))):
                     run._real_consec_tick_failures += 1
-                run.last_error = {
-                    "code": "REAL_MODE_TICK_FAILED",
-                    "message": tick_failure_message(e, error_id=error_id),
-                    "at": rr._utc_now().isoformat(),
-                }
+                # 054-A-7c: a run this tick has already stopped (`fail_run` inside the money phase - an integrity
+                # violation, the timeouts of a tick - and then a failure on the way out) keeps the stop's code: it is
+                # what `resume` refuses by (`RESUME_REFUSED_ERROR_CODES`).
+                if run.state != "error":
+                    run.last_error = {
+                        "code": "REAL_MODE_TICK_FAILED",
+                        "message": tick_failure_message(e, error_id=error_id),
+                        "at": rr._utc_now().isoformat(),
+                    }
 
             max_consec = int(rr._real_max_consec_tick_failures_limit)
             if max_consec > 0 and run._real_consec_tick_failures >= max_consec:
@@ -899,14 +903,15 @@ class RealTick:
         with rr._lock:
             run._real_consec_money_no_progress_ticks += 1
             no_progress = int(run._real_consec_money_no_progress_ticks)
-            run.last_error = {
-                "code": "REAL_MODE_MONEY_CONFLICT_UNRESOLVED",
-                "message": (
-                    f"The tick's money phase did not commit: {conflict} ({type(error).__name__}). "
-                    f"Consecutive ticks without money progress: {no_progress}."
-                ),
-                "at": rr._utc_now().isoformat(),
-            }
+            if run.state != "error":  # 054-A-7c: a run stopped during the phase keeps the stop's code
+                run.last_error = {
+                    "code": "REAL_MODE_MONEY_CONFLICT_UNRESOLVED",
+                    "message": (
+                        f"The tick's money phase did not commit: {conflict} ({type(error).__name__}). "
+                        f"Consecutive ticks without money progress: {no_progress}."
+                    ),
+                    "at": rr._utc_now().isoformat(),
+                }
 
         rr._logger.warning(
             "simulator.real.money_phase_no_progress run_id=%s tick=%s conflict=%s consec=%s",
