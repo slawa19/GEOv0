@@ -9,7 +9,7 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
-import { pauseRun, resumeRun, getRun, setIntensity } from '../api/simulatorApi'
+import { pauseRun, resumeRun, getRun, setIntensity, stopRun } from '../api/simulatorApi'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 
 const statusOf = (state: string) => ({
@@ -172,5 +172,76 @@ describe('054-B-4: a late answer of an older control command is not applied', ()
     await h.resume()
     expect(real.runStatus?.state, 'the one command asked is applied').toBe('running')
     expect(real.runStatus?.sim_time_ms).toBe(999_999)
+  })
+
+  // Fix-delta of the §15 review: the run half of the guard, the stop guard, and a late 404 of an older run.
+  it('an answer of a command for run r1 is not applied once the screen is on run r2', async () => {
+    const { h, real } = await bootPaused()
+    let releaseResume!: () => void
+    vi.mocked(resumeRun).mockImplementation(() => new Promise((res) => { releaseResume = () => res(lateAnswer('running') as never) }))
+
+    const resumeP = h.resume() // for r1, answer held
+    await h.attachToRun('r2') // the screen moves to r2; no control command is sent for it
+    expect(real.runId, 'stand: attached to r2').toBe('r2')
+    releaseResume(); await resumeP
+    expect(real.runStatus?.sim_time_ms, 'the r1 answer is not applied to r2').not.toBe(999_999)
+  })
+
+  it('a failure of a command for run r1 is not shown once the screen is on run r2', async () => {
+    const { h, real } = await bootPaused()
+    let failPause!: () => void
+    vi.mocked(pauseRun).mockImplementation(() => new Promise((_res, rej) => {
+      failPause = () => rej(new ApiError('HTTP 503 Service Unavailable for /simulator/runs/r1/pause', { status: 503 }))
+    }))
+
+    const pauseP = h.pause() // for r1, the latest command
+    await h.attachToRun('r2')
+    expect(real.runId, 'stand: attached to r2').toBe('r2')
+    real.lastError = ''
+    failPause(); await pauseP
+    expect(real.lastError, 'the failure of a command for r1 is not shown on r2').toBe('')
+  })
+
+  it('a late answer of a superseded stop is not applied', async () => {
+    const { h, real } = await bootPaused()
+    let releaseStop!: () => void
+    vi.mocked(stopRun).mockImplementation((() => new Promise((res) => { releaseStop = () => res(lateAnswer('stopped') as never) })) as never)
+    vi.mocked(resumeRun).mockResolvedValue(statusOf('running') as never)
+
+    const stopP = h.stop() // answer held
+    await h.resume() // the latest command
+    expect(real.runStatus?.state, 'stand: resume applied').toBe('running')
+    // The read of the status after the stop is held: only the stop answer itself can change the state now.
+    vi.mocked(getRun).mockImplementation(() => new Promise(() => undefined))
+    releaseStop()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(real.runStatus?.sim_time_ms, 'the superseded stop answer is not applied').not.toBe(999_999)
+    expect(real.runStatus?.state).toBe('running')
+    void stopP
+  })
+
+  for (const command of ['tempo', 'stop'] as const) {
+    it(`F1: a late 404 of the ${command} sent for r1 does not reset r2`, async () => {
+      const { h, real } = await bootPaused()
+      let fail!: () => void
+      const held = () => new Promise((_res, rej) => {
+        fail = () => rej(new ApiError(`HTTP 404 Not Found for /simulator/runs/r1/${command}`, { status: 404 }))
+      })
+      if (command === 'tempo') vi.mocked(setIntensity).mockImplementation(held as never)
+      else vi.mocked(stopRun).mockImplementation(held as never)
+
+      const p = command === 'tempo' ? h.applyIntensity() : h.stop()
+      await h.attachToRun('r2')
+      expect(real.runId, 'stand: attached to r2').toBe('r2')
+      fail(); await p
+      expect(real.runId, 'the current run r2 is kept').toBe('r2')
+    })
+  }
+
+  it('counter-check: a 404 of the tempo for the CURRENT run still resets it', async () => {
+    const { h, real } = await bootPaused()
+    vi.mocked(setIntensity).mockRejectedValue(new ApiError('HTTP 404 Not Found for /simulator/runs/r1/intensity', { status: 404 }))
+    await h.applyIntensity()
+    expect(real.runId, 'the run the server does not know is reset').toBeNull()
   })
 })

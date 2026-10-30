@@ -450,12 +450,15 @@ export function useSimulatorRealMode(opts: {
    * applied, neither its status nor its failure: a late Resume answer would otherwise turn a pause confirmed since
    * then back into `running`, and the server publishes no status of a paused run that would correct it. The latest
    * command is set when a command is SENT, so a later command that fails does not let an older answer through.
+   * `sameRun`: the run the command was sent for is still the current one - the condition of a reset on its 404 (a gone
+   * run is gone whatever was asked after it; another run's 404 says nothing of the current one).
    */
   let runControlSeq = 0
-  function issueRunControl(): () => boolean {
+  function issueRunControl(): { latest: () => boolean; sameRun: () => boolean } {
     const seq = ++runControlSeq
     const runId = real.runId
-    return () => runControlSeq === seq && real.runId === runId
+    const sameRun = () => real.runId === runId
+    return { latest: () => runControlSeq === seq && sameRun(), sameRun }
   }
 
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
@@ -1274,9 +1277,9 @@ export function useSimulatorRealMode(opts: {
         let paused = false
         for (let i = 0; i < delaysMs.length + 1; i++) {
           try {
-            const isLatestControl = issueRunControl()
+            const control = issueRunControl()
             const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-            if (isLatestControl()) real.runStatus = st
+            if (control.latest()) real.runStatus = st
             paused = true
             break
           } catch (e: unknown) {
@@ -1315,12 +1318,12 @@ export function useSimulatorRealMode(opts: {
   async function pause() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
-    const isLatestControl = issueRunControl()
+    const control = issueRunControl()
     try {
       const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      if (isLatestControl()) real.runStatus = st
+      if (control.latest()) real.runStatus = st
     } catch (e: unknown) {
-      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1369,41 +1372,42 @@ export function useSimulatorRealMode(opts: {
     manualPausePending = false
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
-    const isLatestControl = issueRunControl()
+    const control = issueRunControl()
     try {
       const st = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      if (isLatestControl()) real.runStatus = st
+      if (control.latest()) real.runStatus = st
     } catch (e: unknown) {
-      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
   async function stop() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const control = issueRunControl()
     try {
       teardownRefreshSnapshot()
       stopSse()
       cleanupRealRunFxAndTimers()
-      const isLatestControl = issueRunControl()
       const st = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
         source: 'ui',
         reason: 'user_stop',
       })
-      if (isLatestControl()) real.runStatus = st
+      if (control.latest()) real.runStatus = st
       await refreshRunStatus()
     } catch (e: unknown) {
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
       // treat stop as idempotent and reset local state instead of surfacing a hard error.
+      // 054-B-4: only for the run this stop was sent for - a late 404 of another run does not reset the current one.
       if (httpStatusOf(e) === 404) {
-        resetStaleRun({ clearError: true })
+        if (control.sameRun()) resetStaleRun({ clearError: true })
         return
       }
 
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
       // The stop request was not confirmed. The backend run may still be live,
       // so restore observation instead of leaving the UI permanently detached.
-      if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
+      if (isRealMode.value && real.runId && control.sameRun()) void runSseLoop({ preserveLastError: true })
     }
   }
 
@@ -1454,20 +1458,21 @@ export function useSimulatorRealMode(opts: {
       writeRunErrorLine(real, ZERO_INTENSITY_LINE)
       return
     }
-    const isLatestControl = issueRunControl()
+    const control = issueRunControl()
     try {
       const st = await setIntensity(
         { apiBase: real.apiBase, accessToken: real.accessToken },
         real.runId,
         real.intensityPercent,
       )
-      if (isLatestControl()) real.runStatus = st
+      if (control.latest()) real.runStatus = st
     } catch (e: unknown) {
+      // 054-B-4: only for the run this tempo was sent for - a late 404 of another run does not reset the current one.
       if (e instanceof ApiError && e.status === 404) {
-        resetStaleRun({ clearError: true })
+        if (control.sameRun()) resetStaleRun({ clearError: true })
         return
       }
-      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
+      if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
