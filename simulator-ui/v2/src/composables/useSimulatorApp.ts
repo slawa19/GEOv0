@@ -1418,6 +1418,8 @@ export function useSimulatorApp(opts?: {
     getSelectedNodeId: () => state.selectedNodeId,
     hasSelectedIncidentEdges: () => selectedIncidentEdgeKeys.value.size > 0,
     getLinkByKey: (k) => layoutLinkMap.value.get(k),
+    // 054-B-7: a patch raises the revision; the hovered line's figures are read again under a still pointer.
+    getDataRevision: () => state.snapshot?.data_revision,
     getUnit: () => state.snapshot?.equivalent ?? effectiveEq.value,
   })
 

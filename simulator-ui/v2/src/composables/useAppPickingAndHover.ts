@@ -34,7 +34,7 @@ export function useAppPickingAndHover(opts: {
   hasSelectedIncidentEdges: () => boolean
   getLinkByKey: (key: string) => LayoutLink | undefined
   /** 054-B-7: the shown snapshot's `data_revision` - the hovered line's figures are read again on a patch (`useEdgeHover`). */
-  getDataRevision?: () => unknown
+  getDataRevision: () => unknown
 
   // tooltip unit
   getUnit: () => string
@@ -68,7 +68,7 @@ export function useAppPickingAndHover(opts: {
     formatEdgeAmountText: edgeTooltip.formatEdgeAmountText,
     // 043 S1: the same unit the amount text is written in, captured with the figures.
     getEquivalent: () => opts.getUnit() || null,
-    ...(opts.getDataRevision ? { getDataRevision: opts.getDataRevision } : {}),
+    getDataRevision: opts.getDataRevision,
     clientToScreen: opts.clientToScreen,
     screenToWorld: opts.screenToWorld,
     worldToScreen: opts.worldToScreen,
