@@ -2742,7 +2742,7 @@ async def events_stream_active_run(
 ):
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
 
-    # If there is no actual run (or mapping is stale), serve a stream with keep-alives only.
+    # If there is no actual run (or mapping is stale), answer a FINITE stream: when to reconnect, then the end.
     if run_id is not None:
         try:
             run = runtime.get_run(run_id)
@@ -2757,9 +2757,10 @@ async def events_stream_active_run(
             )
 
         async def idle_stream() -> AsyncIterator[str]:
-            while True:
-                yield ": keep-alive\n\n"
-                await asyncio.sleep(15)
+            # 054-C-3: this answer registers no subscription, so `SIMULATOR_SSE_MAX_CONNECTIONS` cannot count it; an
+            # endless keep-alive here let any number of streams be held open past the limit. One record, then EOF:
+            # an EventSource reconnects after `retry` and finds the run once there is one.
+            yield ": no active run\nretry: 15000\n\n"
 
         return StreamingResponse(
             idle_stream(),
