@@ -89,6 +89,20 @@ if TYPE_CHECKING:
     from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
+def tick_failure_message(error: BaseException, *, error_id: str) -> str:
+    """The `last_error.message` of a failed tick (054-C-5): what may leave the process, and the id to find the rest.
+
+    `last_error` is published in `run_status`, served by the API and stored in `simulator_runs`. The text of an
+    arbitrary exception - a database error, an `OSError` - carries SQL, parameters and local paths, so only the
+    application's own refusals (`GeoException`, whose message is the one the API answers with) keep their message.
+    The exception's text and class are in the `simulator.real.tick_failed` log line that carries the same id.
+    """
+
+    if isinstance(error, GeoException):
+        return f"{error.message} (error id {error_id})"
+    return f"The real-mode tick failed (error id {error_id})"
+
+
 @dataclass(frozen=True)
 class TickPaymentsPhase:
     """What one attempt of the money phase produced (was `RealTickPaymentsPhaseResult`)."""
@@ -462,11 +476,16 @@ class RealTick:
                 return
 
             conflict = money_conflict_name(e)
+            # 054-C-5: the id that correlates the run's `last_error` with this log line (AGENTS.md §12). The tick
+            # runs outside any request, so a request id would be the one of the request that started the run.
+            error_id = uuid.uuid4().hex
             rr._logger.warning(
-                "simulator.real.tick_failed run_id=%s tick=%s money_conflict=%s",
+                "simulator.real.tick_failed run_id=%s tick=%s money_conflict=%s error_id=%s error_type=%s",
                 str(run.run_id),
                 int(run.tick_index or 0),
                 conflict or "none",
+                error_id,
+                type(e).__name__,
                 exc_info=True,
             )
 
@@ -491,7 +510,7 @@ class RealTick:
                     run._real_consec_tick_failures += 1
                 run.last_error = {
                     "code": "REAL_MODE_TICK_FAILED",
-                    "message": str(e),
+                    "message": tick_failure_message(e, error_id=error_id),
                     "at": rr._utc_now().isoformat(),
                 }
 

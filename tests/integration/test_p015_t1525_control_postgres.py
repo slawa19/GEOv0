@@ -503,7 +503,10 @@ def _assert_rolled_back_tick_left_no_payment(outcome: _TickOutcome, *, via_tick:
     if via_tick:
         assert outcome.last_error is not None
         assert outcome.last_error.get("code") == "REAL_MODE_TICK_FAILED", outcome.last_error
-        assert _INJECTED_TICK_FAILURE in str(outcome.last_error.get("message")), outcome.last_error
+        # 054-C-5: the raw text of the failure stays in the log; the run carries the id that finds it there
+        # (that it was this failure is proven by `failed_commits == [1]` in the stand).
+        message = str(outcome.last_error.get("message"))
+        assert _INJECTED_TICK_FAILURE not in message and "error id " in message, outcome.last_error
     assert outcome.rollback_resolution == "rollback", outcome.rollback_resolution
     assert "tx.updated" not in outcome.published_types, outcome.published_types
     # Verdict: what the tick reported as rolled back must not be in the database.
