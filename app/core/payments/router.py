@@ -380,12 +380,14 @@ class PaymentRouter:
 
         return None
 
-    def _hop_forbids(self, u: str, v: str, *, payer: str, payee: str) -> bool:
-        """The hop u -> v alone breaks the policy: an owner who forbids mediation over the pair is an intermediary
-        of it (`route_breaks_policy`, first rule). Local - it reads only the hop and who pays and is paid."""
+    def _hop_refuses(self, u: str, v: str, *, payer: str, payee: str) -> bool:
+        """The hop u -> v alone breaks the policy, whatever the rest of the route: an intermediary of the hop is an
+        owner who forbids mediation over the pair, or is blocked by a line of the pair itself (`route_breaks_policy`).
+        Local - it reads only the hop and who pays and is paid. A line's `blocked_participants` naming a node ELSEWHERE
+        on the route is the one rule that is not."""
 
-        forbid, _ = self._hop_rules(u, v)
-        return bool(forbid & {n for n in (u, v) if n != payer and n != payee})
+        forbid, blocked = self._hop_rules(u, v)
+        return bool((forbid | blocked) & {n for n in (u, v) if n != payer and n != payee})
 
     def _bfs_by_node(
         self,
@@ -402,9 +404,9 @@ class PaymentRouter:
         `(path, exact)`.
 
         054-F: `exact` is True when no candidate hop was refused by a rule that depends on the rest of the route
-        (`blocked_participants`; the forbid-mediation rule of a hop is local, `_hop_forbids`). Then a node's first
-        BFS prefix is as good as any other for every continuation, and the answer - path or None - is the one
-        `_bfs_single_path` gives, the same path included (same FIFO order). Otherwise it is only a candidate and the
+        (a `blocked_participants` naming a node elsewhere on it; the other rules are local, `_hop_refuses`). Then a
+        node's first BFS prefix is as good as any other for every continuation, and the answer - path or None - is the
+        one `_bfs_single_path` gives, the same path included (same FIFO order). Otherwise it is only a candidate and the
         caller runs `_bfs_single_path`.
         """
 
@@ -430,7 +432,7 @@ class PaymentRouter:
                     continue
                 candidate = path + [neighbor]
                 if route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
-                    if not self._hop_forbids(current, neighbor, payer=from_pid, payee=to_pid):
+                    if not self._hop_refuses(current, neighbor, payer=from_pid, payee=to_pid):
                         exact = False
                     continue
                 seen.add(neighbor)
@@ -522,7 +524,9 @@ class PaymentRouter:
             if u in allowed
         }
 
-    def payment_targets(self, from_pid: str, *, max_hops: int, limit: Optional[int] = None) -> List[PaymentTarget]:
+    def payment_targets(
+        self, from_pid: str, *, max_hops: int, limit: Optional[int] = None, timeout_ms: int | None = None
+    ) -> List[PaymentTarget]:
         """Whom `from_pid` can pay on the graph of this instance: every other participant a route of at most
         `max_hops` hops reaches, each edge with capacity above zero and the hop policy respected - the same search
         a payment's routing runs (`_bfs_single_path`, amount zero), so the answer cannot disagree with routing.
@@ -533,20 +537,70 @@ class PaymentRouter:
 
         035 A6 (`T3511`): the public form of the loop the simulator's `payment-targets` route ran over the private
         search (034 `F-034-11`).
+
+        054-F-H2: one breadth-first search from `from_pid` with a node-level `visited` answers for every target at
+        once - linear, not one search per target over every simple path (that held the simulator's event loop for
+        seconds). It is the answer of the per-target search, paths included, unless a route-dependent rule (a
+        `blocked_participants` naming a node elsewhere on the route) refused a candidate; then the per-target search
+        runs as before. Both are bounded by
+        `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`): out of time, `TimeoutException` (HTTP 504, E007) -
+        never a partial list, which would drop reachable targets silently.
         """
 
         if from_pid not in self.graph:
             return []
-        targets: List[PaymentTarget] = []
-        for to_pid in self.graph:
-            if not to_pid or to_pid == from_pid:
-                continue
-            path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops))
-            if not path or len(path) < 2:
-                continue
-            targets.append(PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path)))
+        effective_timeout_ms = max(1, int(
+            timeout_ms if timeout_ms is not None else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)))
+        deadline = time.perf_counter() + effective_timeout_ms / 1000.0
+        found, exact = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline)
+        if not exact:
+            found = {}
+            for to_pid in self.graph:
+                if not to_pid or to_pid == from_pid:
+                    continue
+                path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops), deadline=deadline)
+                if path and len(path) >= 2:
+                    found[to_pid] = path
+        targets = [PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path))
+                   for to_pid, path in found.items() if to_pid and to_pid != from_pid and to_pid in self.graph]
         targets.sort(key=lambda target: (target.hops, target.to_pid))
         return targets if limit is None else targets[: int(limit)]
+
+    def _reach_by_node(
+        self, from_pid: str, *, max_hops: int, deadline: float
+    ) -> Tuple[Dict[str, List[str]], bool]:
+        """Every participant `from_pid` can pay within `max_hops` hops of positive capacity, with its first shortest
+        path: `({to_pid: path}, exact)`. A hop ends a route (its head is the payee) or continues one (its head is an
+        intermediary); the policy (`route_breaks_policy`) is checked for each role separately. `exact` as in
+        `_bfs_by_node`: no route-dependent rule refused a candidate."""
+
+        intermediary = object()  # a payee no route contains: every node of a prefix is an intermediary
+        exact = True
+        found: Dict[str, List[str]] = {}
+        seen = {from_pid}
+        queue = deque([(from_pid, [from_pid])])
+        while queue:
+            if time.perf_counter() >= deadline:
+                raise TimeoutException("Routing timed out")
+            current, path = queue.popleft()
+            if (len(path) - 1) >= max_hops:
+                continue
+            for neighbor, capacity in self.graph.get(current, {}).items():
+                if capacity <= 0 or neighbor in path:
+                    continue
+                candidate = path + [neighbor]
+                for payee, done in ((neighbor, neighbor in found), (intermediary, neighbor in seen)):
+                    if done:
+                        continue
+                    if route_breaks_policy(candidate, self._hop_rules, payee=payee):  # type: ignore[arg-type]
+                        local = self._hop_refuses(current, neighbor, payer=from_pid, payee=payee)  # type: ignore
+                        exact = exact and local
+                    elif payee is intermediary:
+                        seen.add(neighbor)
+                        queue.append((neighbor, candidate))
+                    else:
+                        found[neighbor] = candidate
+        return found, exact
 
     def find_flow_routes(
         self,
@@ -671,8 +725,9 @@ class PaymentRouter:
         path, and an augmenting path over a residual reverse hop may still overstate (BACKLOG).
 
         054-F-3: each augmenting path is first searched with a node-level `visited` (`_bfs_by_node`), as before. When
-        that finds none but a route-dependent rule (`blocked_participants`) refused a candidate on the way, the node
-        `visited` may have hidden a path, and the exhaustive `_bfs_single_path` searches again, bounded by
+        that finds none but a route-dependent rule (a `blocked_participants` naming a node elsewhere on the route,
+        `_hop_refuses`) refused a candidate on the way, the node `visited` may have hidden a path, and the exhaustive
+        `_bfs_single_path` searches again, bounded by
         `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`) for the whole call. When that bound runs out the
         flow found so far is returned - a LOWER bound, logged (`event=routing.max_flow_truncated`), never an error:
         a payment's refusal reads this value for its text. So the answer is never below the one before 054, and

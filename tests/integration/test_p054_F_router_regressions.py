@@ -90,7 +90,8 @@ def _routes(body) -> list:
 @MODE_B
 @pytest.mark.asyncio
 async def test_f1_a_payment_one_wide_path_carries_is_not_split_over_thin_short_paths(client, db_session):
-    assert settings.ROUTING_MAX_PATHS == 3 and settings.ROUTING_MAX_HOPS == 6 and settings.FEATURE_FLAGS_MULTIPATH_ENABLED
+    assert settings.ROUTING_MAX_PATHS == 3 and settings.ROUTING_MAX_HOPS == 6
+    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED
     code, p, factory = await _world(client, db_session, "PQABCD", "F1")
     # creditor -> debtor (a payment debtor -> creditor uses the line creditor -> debtor)
     for cred, debt, lim in (("Q", "P", "1"), ("A", "P", "1"), ("Q", "A", "1"), ("B", "P", "1"), ("Q", "B", "1"),

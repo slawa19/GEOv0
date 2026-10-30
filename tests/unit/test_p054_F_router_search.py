@@ -93,7 +93,7 @@ def test_the_linear_search_answers_exactly_as_the_exhaustive_one():
                     router.graph[u][v] = Decimal(rng.choice([1, 2, 3, 5, 8]))
                     if rng.random() < 0.2:
                         router.edge_no_transit.setdefault(u, {})[v] = frozenset(rng.sample([u, v], 1))
-                    if rng.random() < 0.08:
+                    if rng.random() < 0.4:
                         router.edge_blocked_participants.setdefault(u, {})[v] = set(rng.sample(nodes, 1))
         s, t = rng.sample(nodes, 2)
         amount, hops = Decimal(rng.choice([0, 1, 2, 3, 5])), rng.randint(1, 6)
@@ -124,7 +124,8 @@ def _random_policy_graph(rng, *, blocked: bool) -> PaymentRouter:
 
 
 def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
-    """W2 on the graph alone: P->X->M is first to M and refused at M->Q (Q's line blocks X); P->Y->Z->M->Q carries 10."""
+    """W2 on the graph alone: P->X->M is first to M and refused at M->Q (Q's line blocks X); P->Y->Z->M->Q carries
+    10."""
 
     router = _router([("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"), ("Z", "M", "10"),
                       ("M", "Q", "10")])
@@ -180,3 +181,76 @@ def test_f3_max_flow_out_of_time_returns_the_flow_found_so_far(monkeypatch):
 
     monkeypatch.setattr(router, "_bfs_single_path", _out_of_time)
     assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("3")
+
+
+def test_h2_payment_targets_answers_as_the_per_target_search():
+    """054-F-H2: the one linear search of `payment_targets` against the per-target `_bfs_single_path` it replaced, on
+    seeded random graphs with every policy rule, a zero-capacity hop and a neighbour that is not a graph key: the same
+    targets, hops and paths. Counter-check: both the linear answer and the per-target fallback occur."""
+
+    import random
+
+    from app.core.payments.router import PaymentTarget
+
+    rng = random.Random(5402)
+    exact_answers = fallbacks = 0
+    for _ in range(1500):
+        nodes = [f"N{i}" for i in range(rng.randint(2, 9))]
+        router = PaymentRouter(None)
+        router.graph = {x: {} for x in nodes}
+        for u in nodes:
+            for v in nodes + ["OUT"]:
+                if u != v and rng.random() < 0.35:
+                    router.graph[u][v] = Decimal(rng.choice([0, 1, 2]))
+                    if rng.random() < 0.25:
+                        router.edge_no_transit.setdefault(u, {})[v] = frozenset(rng.sample([u, v], 1))
+                    if rng.random() < 0.05:
+                        router.edge_can_be_intermediate.setdefault(u, {})[v] = False
+                    if rng.random() < 0.2:
+                        router.edge_blocked_participants.setdefault(u, {})[v] = set(rng.sample(nodes, 1))
+        s, hops = rng.choice(nodes), rng.randint(1, 6)
+        expected = []
+        for t in router.graph:
+            path = None if t == s else router._bfs_single_path(s, t, Decimal("0"), max_hops=hops)
+            if path:
+                expected.append(PaymentTarget(t, len(path) - 1, tuple(path)))
+        expected.sort(key=lambda target: (target.hops, target.to_pid))
+        assert router.payment_targets(s, max_hops=hops, timeout_ms=60_000) == expected
+        _, exact = router._reach_by_node(s, max_hops=hops, deadline=float("inf"))
+        exact_answers += exact
+        fallbacks += not exact
+    assert exact_answers > 1000 and fallbacks > 30, (exact_answers, fallbacks)
+
+
+def test_h2_payment_targets_out_of_time_raises_and_the_fallback_has_the_deadline(monkeypatch):
+    """Out of time is `TimeoutException` (HTTP 504 E007), never a shorter list; the per-target fallback runs under the
+    same deadline."""
+
+    import pytest
+
+    from app.utils.exceptions import TimeoutException
+
+    router = _router([("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"), ("Z", "M", "10"),
+                      ("M", "Q", "10")])
+    router.edge_blocked_participants = {"M": {"Q": {"X"}}}  # route-dependent: the fallback runs
+    deadlines = []
+    exhaustive = router._bfs_single_path
+
+    def _recording(*a, **k):
+        deadlines.append(k.get("deadline"))
+        return exhaustive(*a, **k)
+
+    monkeypatch.setattr(router, "_bfs_single_path", _recording)
+    assert {t.to_pid: t.hops for t in router.payment_targets("P", max_hops=6)} == {
+        "X": 1, "Y": 1, "M": 2, "Z": 2, "Q": 4}
+    assert deadlines and all(d is not None for d in deadlines)
+
+    calls = {"n": 0}
+
+    def _clock() -> float:
+        calls["n"] += 1
+        return 0.0 if calls["n"] == 1 else 999.0  # the first call sets the deadline, every later one is past it
+
+    monkeypatch.setattr("app.core.payments.router.time.perf_counter", _clock)
+    with pytest.raises(TimeoutException):
+        router.payment_targets("P", max_hops=6)
