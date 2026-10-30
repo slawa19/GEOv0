@@ -608,6 +608,20 @@ export function useSimulatorRealMode(opts: {
     await startSnapshotRefresh()
   }
 
+  /**
+   * 054-B-2 fix-delta (§15 Codex R1): the owner of a change of run - a start (with its attach on 409), the attach by id,
+   * the opening's run - waits for a snapshot OF THE CURRENT CONTEXT before it opens the stream. `refreshSnapshot`
+   * coalesces: it joins a load in flight for the previous context (the scenario preview) and returns after it, or returns
+   * at once inside the debounce window; the new run's load then came later, awaited by nobody, and the stream opened
+   * before it. A load started here supersedes the one in flight (`refreshSnapshotSeq`; the scene applies its latest).
+   */
+  async function refreshSnapshotOfCurrentContext(): Promise<void> {
+    if (!isRealMode.value) return
+    if (!real.runId && !real.selectedScenarioId) return
+    cancelPendingRefreshSnapshotDebounce()
+    await startSnapshotRefresh()
+  }
+
   async function refreshSnapshotForReplayRecovery(input: {
     runId: string
     equivalent: string
@@ -1297,7 +1311,7 @@ export function useSimulatorRealMode(opts: {
       }
 
       await refreshRunStatus()
-      await refreshSnapshot()
+      await refreshSnapshotOfCurrentContext()
       // SSE loop is long-lived; do not await it. `lastError` was reset at the top of this start.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
@@ -1430,7 +1444,7 @@ export function useSimulatorRealMode(opts: {
       resetArtifactIndex()
 
       await refreshRunStatus()
-      await refreshSnapshot()
+      await refreshSnapshotOfCurrentContext()
       // `lastError` was reset at the top of this attach, so what it holds now came from the reads above.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
@@ -1567,7 +1581,7 @@ export function useSimulatorRealMode(opts: {
             // 048 S3: the opening's read of the restored run - the one read where a 403 clears the saved id.
             await refreshRunStatus({ opening: true })
             if (real.runId) {
-              await refreshSnapshot()
+              await refreshSnapshotOfCurrentContext()
               // 043 S2 (review C6): an ENDED run (`stopped`, `error`) gets no event stream - there is nothing live to
               // follow, and on the one screen the opening replaces it (`useInteractAutoBootstrapRun.ts`). A live run, and
               // a run whose status could not be read (the stream is how it shows up again), still get it.
