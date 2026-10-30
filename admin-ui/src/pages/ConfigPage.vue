@@ -247,6 +247,7 @@ applyRoute()
                   >{{ t('common.false') }}</span>
                   <el-switch
                     v-model="scope.row.value"
+                    :disabled="saving"
                   />
                   <span
                     class="cfgBoolLabel"
@@ -257,6 +258,7 @@ applyRoute()
                 <el-input-number
                   v-else-if="scope.row.kind === 'number'"
                   v-model="scope.row.value"
+                  :disabled="saving"
                   controls-position="right"
                   class="cfgNumber"
                   style="width: 160px"
@@ -265,6 +267,7 @@ applyRoute()
                 <template v-else-if="scope.row.kind === 'string'">
                   <el-input
                     v-model="scope.row.value"
+                    :disabled="saving"
                     size="small"
                     :placeholder="t('common.valuePlaceholder')"
                     class="cfgText"
@@ -274,6 +277,7 @@ applyRoute()
                 <el-input
                   v-else
                   v-model="scope.row.value"
+                  :disabled="saving"
                   size="small"
                   type="textarea"
                   :rows="2"
