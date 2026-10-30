@@ -9,6 +9,7 @@ import { markRaw, nextTick, reactive } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import { createPatchApplier } from '../demo/patches'
+import { syncLayoutFromSnapshot } from './syncLayoutFromSnapshot'
 import type { GraphSnapshot } from '../types'
 import type { LayoutLink } from '../types/layout'
 import { keyEdge } from '../utils/edgeKey'
@@ -24,7 +25,7 @@ function stand() {
       links: [{ source: 'A', target: 'B', trust_limit: '100.00', used: '10.00', available: '90.00', status: 'active' }],
     } as GraphSnapshot,
   })
-  const layout = { links: markRaw([{ ...state.snapshot.links[0]!, __key: keyEdge('A', 'B') } as unknown as LayoutLink]) }
+  const layout = { nodes: [] as never[], links: markRaw([{ ...state.snapshot.links[0]!, __key: keyEdge('A', 'B') } as unknown as LayoutLink]) }
   const applier = createPatchApplier({ getSnapshot: () => state.snapshot, getLayoutNodes: () => [], getLayoutLinks: () => layout.links, keyEdge })
   const overlays = useOverlayState({ getLayoutNodeById: () => undefined, sizeForNode: () => ({ w: 0, h: 0 }), getCameraZoom: () => 1, resetFxState: () => {} })
   const seg: EdgeSeg = { key: keyEdge('A', 'B'), fromId: 'A', toId: 'B', ax: 0, ay: 0, bx: 10, by: 0 }
@@ -40,13 +41,23 @@ function stand() {
     getLinkByKey: (k) => layout.links.find((l) => l.__key === k),
     formatEdgeAmountText: (l) => `used ${String(l?.used ?? '—')}`,
     getEquivalent: () => state.snapshot.equivalent,
-    getDataRevision: () => state.snapshot.data_revision,
+    // As `useSimulatorApp.ts` passes it (through `useAppPickingAndHover`).
+    getSnapshot: () => state.snapshot,
     clientToScreen: (x, y) => ({ x, y }),
     screenToWorld: (x, y) => ({ x, y }),
     worldToScreen: (x, y) => ({ x, y }),
   })
   const point = () => hover.onPointerMove({ clientX: 5, clientY: 0 } as PointerEvent, { panActive: false })
-  return { applier, overlays, point, layout, leave: () => { pointerOn = null } }
+  /** An incremental reload of the run's snapshot (`useSceneState.ts`): a new object, revision 0, no patch; the layout synced. */
+  const replaceSnapshot = (used: string, available: string) => {
+    const next = {
+      ...state.snapshot, data_revision: 0,
+      links: [{ source: 'A', target: 'B', trust_limit: '100.00', used, available, status: 'active' }],
+    } as GraphSnapshot
+    state.snapshot = next
+    syncLayoutFromSnapshot(layout as unknown as Parameters<typeof syncLayoutFromSnapshot>[0], next)
+  }
+  return { applier, overlays, point, layout, replaceSnapshot, leave: () => { pointerOn = null } }
 }
 
 describe('054-B-7: the edge tooltip under a still pointer', () => {
@@ -83,5 +94,17 @@ describe('054-B-7: the edge tooltip under a still pointer', () => {
     applier.applyEdgePatches([{ source: 'C', target: 'D', used: '1.00' }])   // another line's patch bumps the revision
     await nextTick()
     expect(overlays.hoveredEdge.key).toBeNull()
+  })
+
+  it('shows the figures of a replaced snapshot (refresh without a patch: the revision stays 0)', async () => {
+    const { overlays, point, replaceSnapshot } = stand()
+    point()
+    expect(overlays.hoveredEdge.used, 'stand: the figures are taken on hover').toBe('10.00')
+
+    replaceSnapshot('40.00', '60.00')
+    await nextTick()
+    expect(overlays.hoveredEdge.key, 'the tooltip stays').toBe(keyEdge('A', 'B'))
+    expect(overlays.hoveredEdge.used).toBe('40.00')
+    expect(overlays.hoveredEdge.available).toBe('60.00')
   })
 })

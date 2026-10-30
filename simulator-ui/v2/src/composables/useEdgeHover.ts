@@ -1,6 +1,6 @@
 import { watch } from 'vue'
 
-import type { GraphLink } from '../types'
+import type { GraphLink, GraphSnapshot } from '../types'
 import type { Point } from '../types/layout'
 import type { HoveredEdgeState } from './useOverlayState'
 import { closestPointOnSegment, type EdgeSeg } from './usePicking'
@@ -21,10 +21,13 @@ type UseEdgeHoverDeps = {
   /** 043 S1: the equivalent of the scene the link's figures belong to - captured with them (review finding 1). */
   getEquivalent?: () => string | null
   /**
-   * 054-B-7: the data revision of the shown snapshot (`data_revision`, bumped by every patch, `demo/patches.ts`). A patch
-   * mutates the line in place under a still pointer; on a new revision the hovered line's figures are read again by its key.
+   * 054-B-7: the shown snapshot. Its figures change under a still pointer two ways, and the hovered line is read again by its
+   * key on both: a patch mutates the line in place and raises `data_revision` (`demo/patches.ts`); a reload replaces the
+   * object (`useSceneState.ts`, e.g. the refresh after a `topology.changed` without patches) with the revision back at 0.
+   * The object itself is watched, not `generated_at`: a server timestamp is not guaranteed to differ between two answers,
+   * a new object is.
    */
-  getDataRevision?: () => unknown
+  getSnapshot?: () => GraphSnapshot | null | undefined
 
   clientToScreen: (clientX: number, clientY: number) => Point
   screenToWorld: (screenX: number, screenY: number) => Point
@@ -44,8 +47,9 @@ export function useEdgeHover(deps: UseEdgeHoverDeps) {
   }
 
   // 054-B-7: the figures were a copy taken on pointermove - a payment under a still pointer left the old ones on screen.
-  if (deps.getDataRevision) {
-    watch(deps.getDataRevision, () => {
+  const getSnapshot = deps.getSnapshot
+  if (getSnapshot) {
+    watch([() => getSnapshot(), () => getSnapshot()?.data_revision], () => {
       const key = deps.hoveredEdge.key
       if (!key) return
       const link = deps.getLinkByKey(key)
