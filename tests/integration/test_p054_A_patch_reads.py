@@ -141,3 +141,62 @@ async def test_node_patch_is_a_state_the_database_held(client, db_session, monke
     observed = [(Decimal(a), Decimal(b)) for _, a, b in seen]
     assert all(state in db_states for state in observed), f"a node patch the database never held: {observed}"
 
+
+@pytest.mark.asyncio
+async def test_edge_patch_width_does_not_depend_on_another_runs_lines(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
+    # Visitor run B raises its own lines (a real Interact action), then stops; its lines stay in the database.
+    run_b = await _start_paused(client)
+    lines_b = runtime.get_run(run_b)._scenario_raw["trustlines"]
+    for t in lines_b[:160]:
+        r = await client.post(
+            f"/api/v1/simulator/runs/{run_b}/actions/trustline-update",
+            headers=_admin(),
+            json={"from_pid": t["from"], "to_pid": t["to"], "equivalent": "UAH", "new_limit": "50000"},
+        )
+        assert r.status_code == 200, r.text
+    await runtime.stop(run_b)
+    # Run A is untouched by B; update its largest line to the value it already has.
+    run_a = await _start_paused(client)
+    lines_a = runtime.get_run(run_a)._scenario_raw["trustlines"]
+    top = max(lines_a, key=lambda t: Decimal(str(t["limit"])))
+    observer = await runtime.subscribe(run_a, equivalent="UAH")
+    events: list[dict] = []
+
+    def _hit():
+        for e in events:
+            body = e.get("payload") or {}
+            for p in (body.get("edge_patch") or []) if e.get("type") == "topology.changed" else []:
+                if p.get("source") == top["from"] and p.get("target") == top["to"]:
+                    return p
+        return None
+
+    try:
+        r = await client.post(
+            f"/api/v1/simulator/runs/{run_a}/actions/trustline-update",
+            headers=_admin(),
+            json={"from_pid": top["from"], "to_pid": top["to"], "equivalent": "UAH", "new_limit": str(top["limit"])},
+        )
+        assert r.status_code == 200, r.text
+        try:
+            async with asyncio.timeout(15):
+                while _hit() is None:
+                    events.append(await observer.queue.get())
+        except TimeoutError:
+            pass
+    finally:
+        await runtime.unsubscribe(run_a, observer)
+    hit = _hit()
+    assert hit is not None, "no edge_patch for the updated line"
+    p_key = hit["viz_width_key"]
+    snap = await client.get(
+        f"/api/v1/simulator/runs/{run_a}/graph/snapshot", headers=_admin(), params={"equivalent": "UAH"}
+    )
+    assert snap.status_code == 200, snap.text
+    s_key = next(
+        link["viz_width_key"]
+        for link in snap.json()["links"]
+        if link["source"] == top["from"] and link["target"] == top["to"]
+    )
+    print("054-A-5 line", top["from"], "->", top["to"], "limit", top["limit"], "patch:", p_key, "snapshot:", s_key)
+    assert p_key == s_key
