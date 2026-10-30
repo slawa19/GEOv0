@@ -25,14 +25,19 @@ The static guard in `test_p011_nullable_needs_a_sibling_type.py` is the compleme
 reads nodes no test ever reaches, and cannot tell whether null actually occurs there.
 
 It also says nothing about traffic that does not go through `httpx.AsyncClient.request`.
-`AsyncClient.stream()` calls `send()` directly, so the eight SSE / NDJSON tests under
-`tests/integration/` are invisible here: those operations appear in `unobserved_operations`
-and NOT in any `unvalidated` category. Measured, not assumed. `/simulator/events` and
-`/simulator/runs/{run_id}/events` are `text/event-stream` and would validate nothing if the
-hook moved to `send()`; the artifact download is no longer in that sentence, because since
-T1110 it serves three declared JSON documents and a streamed download of one of them WOULD be
-worth validating. It is written down because "the gate cannot see this traffic" should not
-have to be rediscovered.
+`AsyncClient.stream()` calls `send()` directly, so the SSE tests under `tests/integration/` are
+invisible here: those operations appear in `unobserved_operations` and NOT in any `unvalidated`
+category. Measured, not assumed. **Six, not eight** (corrected 2026-10-30, 054-E-H3): counted as
+`git grep -n -F ".stream(" -- tests` minus this file - six call sites, one per module
+(`test_simulator_artifacts_events_ndjson`, `test_simulator_sse_real_smoke`,
+`test_simulator_sse_replay_410`, `test_simulator_sse_trust_drift_decay_topology_patch`,
+`test_simulator_sse_tx_failed_timeout`, and `_read_sse_events` in `test_simulator_super_smoke`,
+reached only from the `slow` part 3), and every one opens an SSE endpoint
+(`/simulator/runs/{run_id}/events` or `/simulator/events`); none streams the NDJSON download,
+which `test_simulator_artifacts_events_ndjson` fetches with an ordinary `get` that IS seen. The
+two SSE operations are `text/event-stream` and would validate nothing if the hook moved to
+`send()`. It is written down because "the gate cannot see this traffic" should not have to be
+rediscovered.
 
 **054-E-H1: every status, not only 2xx (2026-10-30).** Until this change `Harness.record` returned
 on the first line for any non-2xx, so the full tier's 558 error responses were counted in
@@ -53,6 +58,28 @@ before it was committed (558 non-2xx; 536 valid, 10 undeclared, 12 unrouted, 0 b
   `bodies_checked` or `two_xx_seen`, so coverage, the vacuity skip and the ledger quorum keep
   their 2xx meaning. A non-2xx that cannot be validated (not JSON, empty, unparseable) lands in
   the same named categories as a 2xx and fails the aggregate the same way.
+
+**What this harness does not see, by construction - its silence there is not evidence:**
+
+* `AsyncClient.stream()` / `AsyncClient.send()` - both bypass `request`; that includes the 410s
+  `test_simulator_sse_replay_410` provokes on both SSE endpoints;
+* starlette's synchronous `TestClient` (an `httpx.Client`, not an `AsyncClient`):
+  `git grep -ln TestClient -- tests` names the modules that use it;
+* a request made with `raise_app_exceptions=True` - the default of the suite's `client` fixture
+  (`AsyncClient(app=app)` in `tests/conftest.py`) - whose handler raises an exception that only
+  `unhandled_exception_handler` (`app/main.py`, `@app.exception_handler(Exception)`) answers:
+  starlette's `ServerErrorMiddleware` sends the 500 envelope and then re-raises, the transport
+  re-raises into the test, and no response object exists to record. A `GeoException` - E010
+  included - is answered by its own handler without a re-raise and IS seen. Only clients built
+  with `ASGITransport(raise_app_exceptions=False)` let an unhandled-exception 500 reach this check;
+* the REQUEST side: which inputs are accepted or refused (054-E-16) is not a property of a
+  response body;
+* the ORDER of list items (054-E-17): the schema says nothing about it;
+* the choice of error code: `ErrorEnvelope.error.code` is a free string in the canon (054-E-H4), so
+  `E009` where `E008` was meant validates;
+* the frames inside an SSE stream: the canon declares `text/event-stream` and the hook sees no
+  body for it at all;
+* any operation, status or input shape no test exercises.
 
 **T1109 rewrote the bookkeeping, and that is the important part of this file now.** External
 review found the gate failing open in several independent ways. Four of them shared one cause:
