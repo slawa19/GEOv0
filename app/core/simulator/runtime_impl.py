@@ -18,7 +18,12 @@ from app.schemas.simulator import (
 )
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
-from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription, note_subscribers_locked
+from app.core.simulator.models import (
+    RunRecord,
+    ScenarioRecord,
+    _Subscription,
+    note_subscribers_locked,
+)
 from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.run_lifecycle import IDLE_STOP_REASON, RunLifecycle
 from app.config import settings
@@ -167,8 +172,12 @@ class _SimulatorRuntimeBase:
         self._run_lifecycle = RunLifecycle(
             lock=self._lock,
             runs=self._runs,
-            set_active_run_id=lambda run_id, owner_id="": self.set_active_run_id(run_id, owner_id=owner_id),
-            clear_active_run_id=lambda owner_id="", run_id="": self.clear_active_run_id(owner_id=owner_id, run_id=run_id),
+            set_active_run_id=lambda run_id, owner_id="": self.set_active_run_id(
+                run_id, owner_id=owner_id
+            ),
+            clear_active_run_id=lambda owner_id="", run_id="": self.clear_active_run_id(
+                owner_id=owner_id, run_id=run_id
+            ),
             utc_now=_utc_now,
             new_run_id=_new_run_id,
             get_scenario_raw=lambda scenario_id: self.get_scenario(scenario_id).raw,
@@ -339,12 +348,15 @@ class _SimulatorRuntimeBase:
             raise NotFoundException(f"Scenario {scenario_id} not found")
         return rec
 
-    def get_admitted_scenario(self, scenario_id: str, *, is_admin: bool) -> ScenarioRecord:
+    def get_admitted_scenario(
+        self, scenario_id: str, *, is_admin: bool
+    ) -> ScenarioRecord:
         """The scenario, if this actor may read or start it (044 `T4405`, admission (v)).
 
         A non-administrator reaches only the scenarios the list shows them (`SIMULATOR_SCENARIO_ALLOWLIST`, the same
         rule as `list_scenarios`); any other id answers exactly as an unknown one (404), so the refusal discloses
-        nothing. The administrator reaches every registered scenario (it uploads them). Checked before any effect."""
+        nothing. The administrator reaches every registered scenario (it uploads them). Checked before any effect.
+        """
 
         allow = _scenario_allowlist()
         if not is_admin and allow is not None and scenario_id not in allow:
@@ -527,7 +539,9 @@ class _SimulatorRuntimeBase:
         try:
             await self._run_lifecycle.prune_ended_runs()
         except Exception:
-            logger.exception("simulator.runtime.prune_ended_runs_failed run_id=%s", run_id)
+            logger.exception(
+                "simulator.runtime.prune_ended_runs_failed run_id=%s", run_id
+            )
 
         return status
 
@@ -665,12 +679,18 @@ class _SimulatorRuntimeBase:
         # (AGENTS.md §12). The full text is in the log line above, found by the run id.
         message = f"The heartbeat failed: {type(error).__name__}"
         try:
-            await self._real_runner.fail_run(run_id, code="HEARTBEAT_FAILED", message=message)
+            await self._real_runner.fail_run(
+                run_id, code="HEARTBEAT_FAILED", message=message
+            )
             return
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.error("simulator.heartbeat.fail_run_failed run_id=%s", str(run_id), exc_info=True)
+            logger.error(
+                "simulator.heartbeat.fail_run_failed run_id=%s",
+                str(run_id),
+                exc_info=True,
+            )
         # `fail_run` raised. It moves the state first and then publishes and stores; when it is the publication
         # that failed (the usual way to get here: it is what failed the heartbeat too), the run is `error` in
         # memory and NOTHING of that was stored - the `simulator_runs` row would keep saying `running`. So the
@@ -684,12 +704,18 @@ class _SimulatorRuntimeBase:
                 run.stopped_at = _utc_now()
                 run.current_phase = None
                 run.errors_total += 1
-                run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+                run.last_error = {
+                    "code": "HEARTBEAT_FAILED",
+                    "message": message,
+                    "at": _utc_now().isoformat(),
+                }
                 failed_here = True
         if failed_here:
             # 054-A-7d: the same line `fail_run` writes - this branch stops the run without it.
             logger.error(
-                "simulator.run.failed run_id=%s code=%s errors_total=%d", str(run_id), "HEARTBEAT_FAILED",
+                "simulator.run.failed run_id=%s code=%s errors_total=%d",
+                str(run_id),
+                "HEARTBEAT_FAILED",
                 int(run.errors_total),
             )
         if run is None:
@@ -699,7 +725,11 @@ class _SimulatorRuntimeBase:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.error("simulator.heartbeat.fail_run_upsert_failed run_id=%s", str(run_id), exc_info=True)
+            logger.error(
+                "simulator.heartbeat.fail_run_upsert_failed run_id=%s",
+                str(run_id),
+                exc_info=True,
+            )
 
     @staticmethod
     def _tick_seconds_of(run: RunRecord) -> float:
@@ -709,9 +739,15 @@ class _SimulatorRuntimeBase:
         here either and falls back to the default."""
 
         settings_block = (getattr(run, "_scenario_raw", None) or {}).get("settings")
-        playback = settings_block.get("playback") if isinstance(settings_block, dict) else None
+        playback = (
+            settings_block.get("playback") if isinstance(settings_block, dict) else None
+        )
         value = playback.get("tick_seconds") if isinstance(playback, dict) else None
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not (0.25 <= float(value) <= 5.0):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not (0.25 <= float(value) <= 5.0)
+        ):
             return 1.0
         return float(value)
 

@@ -3,16 +3,29 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, Uuid, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    timestamp: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='SET NULL'), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    timestamp: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("participants.id", ondelete="SET NULL"),
+        index=True,
+    )
     actor_role: Mapped[str | None] = mapped_column(String(50))
     action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    object_type: Mapped[str | None] = mapped_column(String(50)) # Index handled via composite
-    object_id: Mapped[str | None] = mapped_column(String(64)) # Index handled via composite
+    object_type: Mapped[str | None] = mapped_column(
+        String(50)
+    )  # Index handled via composite
+    object_id: Mapped[str | None] = mapped_column(
+        String(64)
+    )  # Index handled via composite
     reason: Mapped[str | None] = mapped_column(Text)
     before_state: Mapped[dict | None] = mapped_column(JSON)
     after_state: Mapped[dict | None] = mapped_column(JSON)
@@ -32,10 +45,17 @@ TRUST_LINE_CLOSE_REQUEST = "TRUST_LINE_CLOSE_REQUEST"
 TRUST_LINE_CLOSE = "TRUST_LINE_CLOSE"
 
 
-def trust_line_close_completed(from_pid: str, to_pid: str, trustline_id: str, completed_by: str) -> dict:
+def trust_line_close_completed(
+    from_pid: str, to_pid: str, trustline_id: str, completed_by: str
+) -> dict:
     """The `affected_participants` of a close completion: one shape for both completing writers."""
 
-    return {"from": from_pid, "to": to_pid, "trustline_id": trustline_id, "completed_by": completed_by}
+    return {
+        "from": from_pid,
+        "to": to_pid,
+        "trustline_id": trustline_id,
+        "completed_by": completed_by,
+    }
 
 
 class IntegrityAuditLog(Base):
@@ -43,8 +63,12 @@ class IntegrityAuditLog(Base):
 
     __tablename__ = "integrity_audit_log"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    timestamp: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    timestamp: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     operation_type: Mapped[str] = mapped_column(String(50), nullable=False)
     tx_id: Mapped[str | None] = mapped_column(String(64), index=True)
     equivalent_code: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -54,6 +78,10 @@ class IntegrityAuditLog(Base):
     invariants_checked: Mapped[dict] = mapped_column(JSON, nullable=False)
     # true: the checks ran and passed; false: a check found a violation (or post-tick drift); null: no check
     # ran for this row - a money operation's record since 024 `T2413.2` (migration 032).
-    verification_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    verification_passed: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, index=True
+    )
     error_details: Mapped[dict | None] = mapped_column(JSON)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

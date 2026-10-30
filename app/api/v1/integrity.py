@@ -11,7 +11,11 @@ from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
 from app.core.ledger import reconciliation as _reconciliation
-from app.core.ledger.reconciliation import FAILED, UNVERIFIABLE, result_freshness_threshold
+from app.core.ledger.reconciliation import (
+    FAILED,
+    UNVERIFIABLE,
+    result_freshness_threshold,
+)
 from app.core.maintenance_jobs import debt_reconciliation_run_problem
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
@@ -51,7 +55,10 @@ async def _trust_limits(checker: InvariantChecker, equivalent_id) -> TrustLimits
         violations = (exc.details or {}).get("violations") or []
         allowed = getattr(exc, "over_limit_allowed", [])
         return TrustLimitsResult(
-            passed=False, violations=len(violations), details=exc.details, over_limit_allowed=allowed
+            passed=False,
+            violations=len(violations),
+            details=exc.details,
+            over_limit_allowed=allowed,
         )
     return TrustLimitsResult(passed=True, violations=0, over_limit_allowed=allowed)
 
@@ -61,7 +68,8 @@ async def _evaluate_invariants(
 ) -> tuple[str, dict[str, InvariantOutcome], list[str]]:
     """The invariant checks of one equivalent, as `status` and `verify` both report them (035 A5, `F-035-4`: the two
     routes carried a copy each): its status by these checks alone, the outcome per invariant, and the alerts in the
-    order the checks run. A trust-limit violation is `critical`, a debt-symmetry violation `warning`."""
+    order the checks run. A trust-limit violation is `critical`, a debt-symmetry violation `warning`.
+    """
 
     status = "healthy"
     alerts: list[str] = []
@@ -108,7 +116,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _latest_checkpoint(db: AsyncSession, *, equivalent_id) -> IntegrityCheckpoint | None:
+async def _latest_checkpoint(
+    db: AsyncSession, *, equivalent_id
+) -> IntegrityCheckpoint | None:
     return (
         await db.execute(
             select(IntegrityCheckpoint)
@@ -129,7 +139,8 @@ def _worse(a: str, b: str) -> str:
 async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     """The stored latest result per equivalent, by the `is_latest` marker (one row each, partial unique
     index). ONE bounded read of stored rows: nothing is reconciled here. 030 `T3091`: with the time of the
-    equivalent's latest integrity checkpoint - the stored trace of the last integrity run, in any process."""
+    equivalent's latest integrity checkpoint - the stored trace of the last integrity run, in any process.
+    """
 
     columns = debt_reconciliation_results.c
     checkpoint_at = (
@@ -140,7 +151,11 @@ async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     rows = (
         await db.execute(
             select(
-                columns.equivalent_id, columns.id, columns.status, columns.detail, columns.last_checked_at,
+                columns.equivalent_id,
+                columns.id,
+                columns.status,
+                columns.detail,
+                columns.last_checked_at,
                 checkpoint_at.label("checkpoint_at"),
             ).where(columns.is_latest.is_(True))
         )
@@ -148,7 +163,9 @@ async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     return {row.equivalent_id: row for row in rows}
 
 
-def _reconciliation_view(eq: Equivalent, latest, *, run_problem: str | None = None) -> tuple[str, list[str]]:
+def _reconciliation_view(
+    eq: Equivalent, latest, *, run_problem: str | None = None
+) -> tuple[str, list[str]]:
     """What the integrity hold and the latest stored reconciliation result add to one equivalent's status.
 
     024 `T2412.1`, mapping decided by the Sh2 consultation (2026-09-29). The hold and the verdict are
@@ -170,7 +187,9 @@ def _reconciliation_view(eq: Equivalent, latest, *, run_problem: str | None = No
             f"(hold_result_id={hold_id})"
         )
     if latest is None:
-        return _worse(severity, "warning"), alerts + [f"Debt reconciliation result missing for {eq.code}"]
+        return _worse(severity, "warning"), alerts + [
+            f"Debt reconciliation result missing for {eq.code}"
+        ]
 
     if run_problem:
         severity = _worse(severity, "warning")
@@ -180,21 +199,32 @@ def _reconciliation_view(eq: Equivalent, latest, *, run_problem: str | None = No
     checkpoint_at = getattr(latest, "checkpoint_at", None)
     if (
         checkpoint_at is not None
-        and checkpoint_at - latest.last_checked_at > _reconciliation.RESULT_CLOCK_TOLERANCE
+        and checkpoint_at - latest.last_checked_at
+        > _reconciliation.RESULT_CLOCK_TOLERANCE
         and _now() - checkpoint_at > _reconciliation.RESULT_RUN_ALLOWANCE
     ):
         severity = _worse(severity, "warning")
-        alerts.append(f"Debt reconciliation of {eq.code} published no result after the integrity run of "
-                      f"{checkpoint_at.isoformat()}")
+        alerts.append(
+            f"Debt reconciliation of {eq.code} published no result after the integrity run of "
+            f"{checkpoint_at.isoformat()}"
+        )
     if _now() - latest.last_checked_at > result_freshness_threshold():
         severity = _worse(severity, "warning")
-        alerts.append(f"Debt reconciliation result of {eq.code} is older than the freshness policy "
-                      f"(last_checked_at={latest.last_checked_at.isoformat()})")
+        alerts.append(
+            f"Debt reconciliation result of {eq.code} is older than the freshness policy "
+            f"(last_checked_at={latest.last_checked_at.isoformat()})"
+        )
     if latest.status == FAILED:
         severity = "critical"
-        alerts.append(f"Debt reconciliation FAILED in {eq.code} (result_id={latest.id})")
+        alerts.append(
+            f"Debt reconciliation FAILED in {eq.code} (result_id={latest.id})"
+        )
     elif latest.status == UNVERIFIABLE:
-        detail = latest.detail if isinstance(latest.detail, dict) else json.loads(latest.detail or "{}")
+        detail = (
+            latest.detail
+            if isinstance(latest.detail, dict)
+            else json.loads(latest.detail or "{}")
+        )
         missing = ",".join(str(item) for item in detail.get("missing_evidence") or [])
         severity = _worse(severity, "warning")
         alerts.append(
@@ -222,18 +252,24 @@ async def get_integrity_summary(
     """
 
     latest = await _latest_reconciliation_results(db)
-    equivalents = (await db.execute(select(Equivalent).order_by(Equivalent.code))).scalars().all()
-    return IntegritySummaryResponse(equivalents=[
-        EquivalentIntegritySummary(
-            equivalent=eq.code,
-            status=_reconciliation_view(
-                eq, latest.get(eq.id), run_problem=debt_reconciliation_run_problem(request.app, eq.id)
-            )[0],
-            checked_at=getattr(latest.get(eq.id), "last_checked_at", None),
-            hold=eq.integrity_hold_result_id is not None,
-        )
-        for eq in equivalents
-    ])
+    equivalents = (
+        (await db.execute(select(Equivalent).order_by(Equivalent.code))).scalars().all()
+    )
+    return IntegritySummaryResponse(
+        equivalents=[
+            EquivalentIntegritySummary(
+                equivalent=eq.code,
+                status=_reconciliation_view(
+                    eq,
+                    latest.get(eq.id),
+                    run_problem=debt_reconciliation_run_problem(request.app, eq.id),
+                )[0],
+                checked_at=getattr(latest.get(eq.id), "last_checked_at", None),
+                hold=eq.integrity_hold_result_id is not None,
+            )
+            for eq in equivalents
+        ]
+    )
 
 
 @router.get("/status", response_model=IntegrityStatusResponse)
@@ -260,7 +296,9 @@ async def get_integrity_status(
         alerts.extend(invariant_alerts)
 
         reconciliation_severity, reconciliation_alerts = _reconciliation_view(
-            eq, latest_results.get(eq.id), run_problem=debt_reconciliation_run_problem(request.app, eq.id)
+            eq,
+            latest_results.get(eq.id),
+            run_problem=debt_reconciliation_run_problem(request.app, eq.id),
         )
         status = _worse(status, reconciliation_severity)
         overall_status = _worse(overall_status, status)
@@ -286,7 +324,12 @@ async def get_integrity_status(
     "/checksum/{equivalent}",
     response_model=IntegrityChecksumResponse,
     # 054-E-7: declared here as in api/openapi.yaml.
-    responses={400: {"model": ErrorEnvelope, "description": "The path code is not a well-formed equivalent code (E009)"}},
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "The path code is not a well-formed equivalent code (E009)",
+        }
+    },
 )
 async def get_integrity_checksum(
     equivalent: str,
@@ -295,7 +338,9 @@ async def get_integrity_checksum(
 ) -> IntegrityChecksumResponse:
     validate_equivalent_code(equivalent)
 
-    eq = (await db.execute(select(Equivalent).where(Equivalent.code == equivalent))).scalar_one_or_none()
+    eq = (
+        await db.execute(select(Equivalent).where(Equivalent.code == equivalent))
+    ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {equivalent} not found")
 
@@ -315,7 +360,12 @@ async def get_integrity_checksum(
     "/verify",
     response_model=IntegrityVerifyResponse,
     # 054-E-7: declared here as in api/openapi.yaml.
-    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"}},
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a well-formed equivalent code (E009)",
+        }
+    },
 )
 async def verify_integrity(
     body: IntegrityVerifyRequest,
@@ -382,13 +432,17 @@ async def verify_integrity(
                 affected_participants={},
                 invariants_checked={k: v.model_dump() for k, v in invariants.items()},
                 verification_passed=passed,
-                error_details=None
-                if passed
-                else {
-                    "status": status,
-                    "checked_at": checked_at.isoformat(),
-                    "invariants": {k: v.model_dump() for k, v in invariants.items()},
-                },
+                error_details=(
+                    None
+                    if passed
+                    else {
+                        "status": status,
+                        "checked_at": checked_at.isoformat(),
+                        "invariants": {
+                            k: v.model_dump() for k, v in invariants.items()
+                        },
+                    }
+                ),
             )
         )
 

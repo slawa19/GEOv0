@@ -43,7 +43,9 @@ async def refresh_store_id() -> str:
         return _process_start_marker
     await _redis_client.set(_REFRESH_STORE_ID_KEY, uuid.uuid4().hex, nx=True)
     stored = await _redis_client.get(_REFRESH_STORE_ID_KEY)
-    if not stored:  # lost between the two commands: refuse loudly rather than issue or accept on a guess
+    if (
+        not stored
+    ):  # lost between the two commands: refuse loudly rather than issue or accept on a guess
         raise RuntimeError("Redis did not return the refresh store id")
     return stored.decode() if isinstance(stored, bytes) else str(stored)
 
@@ -69,13 +71,23 @@ async def claim_jti(jti: str, *, exp: Any) -> bool:
     if not jti or (exp_epoch and exp_epoch <= now_epoch):
         return False
     if _revocations_live_in_redis():
-        ttl = exp_epoch - now_epoch if exp_epoch else int(settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
-        return bool(await _redis_client.set(f"jwt:jti:revoked:{jti}", "1", ex=max(1, int(ttl)), nx=True))
+        ttl = (
+            exp_epoch - now_epoch
+            if exp_epoch
+            else int(settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
+        )
+        return bool(
+            await _redis_client.set(
+                f"jwt:jti:revoked:{jti}", "1", ex=max(1, int(ttl)), nx=True
+            )
+        )
     async with _revoked_jti_lock:
         known = _revoked_jti.get(jti)
         if known is not None and (not known or known > now_epoch):
             return False
-        for stale in [key for key, until in _revoked_jti.items() if until and until <= now_epoch]:
+        for stale in [
+            key for key, until in _revoked_jti.items() if until and until <= now_epoch
+        ]:
             del _revoked_jti[stale]
         _revoked_jti[jti] = exp_epoch
         return True
@@ -113,7 +125,9 @@ def create_access_token(subject: str | Any) -> str:
 
 
 async def create_refresh_token(subject: str | Any) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(
+        days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
+    )
     payload = {
         "exp": expire,
         "sub": str(subject),
@@ -124,7 +138,9 @@ async def create_refresh_token(subject: str | Any) -> str:
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-async def decode_token(token: str, *, expected_type: str = "access") -> dict[str, Any] | None:
+async def decode_token(
+    token: str, *, expected_type: str = "access"
+) -> dict[str, Any] | None:
     try:
         payload = jwt.decode(
             token,

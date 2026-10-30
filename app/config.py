@@ -110,18 +110,34 @@ def _require_read_committed_isolation(value: str) -> str:
 
 #: Integer simulator knobs parsed by the lenient rule of the raw reads they replace (024 `T2414.1`).
 _LENIENT_SIMULATOR_INTS = (
-    "SIMULATOR_TICK_MS_BASE", "SIMULATOR_ACTIONS_PER_TICK_MAX", "SIMULATOR_CLEARING_EVERY_N_TICKS",
-    "SIMULATOR_MAX_ACTIVE_RUNS", "SIMULATOR_MAX_RUN_RECORDS", "SIMULATOR_RUN_PERSIST_EVERY_MS",
-    "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", "SIMULATOR_ARTIFACTS_TTL_HOURS",
-    "SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "SIMULATOR_EVENT_BUFFER_SIZE", "SIMULATOR_EVENT_BUFFER_TTL_SEC",
-    "SIMULATOR_SSE_SUB_QUEUE_MAX", "SIMULATOR_SSE_MAX_CONNECTIONS", "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN",
-    "SIMULATOR_REAL_MAX_IN_FLIGHT", "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
-    "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK", "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
-    "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", "SIMULATOR_REAL_ENABLE_INJECT",
-    "SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS", "SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS",
-    "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS", "SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS",
-    "SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", "SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS",
-    "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC",
+    "SIMULATOR_TICK_MS_BASE",
+    "SIMULATOR_ACTIONS_PER_TICK_MAX",
+    "SIMULATOR_CLEARING_EVERY_N_TICKS",
+    "SIMULATOR_MAX_ACTIVE_RUNS",
+    "SIMULATOR_MAX_RUN_RECORDS",
+    "SIMULATOR_RUN_PERSIST_EVERY_MS",
+    "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS",
+    "SIMULATOR_ARTIFACTS_TTL_HOURS",
+    "SIMULATOR_ARTIFACT_SHA_MAX_BYTES",
+    "SIMULATOR_EVENT_BUFFER_SIZE",
+    "SIMULATOR_EVENT_BUFFER_TTL_SEC",
+    "SIMULATOR_SSE_SUB_QUEUE_MAX",
+    "SIMULATOR_SSE_MAX_CONNECTIONS",
+    "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN",
+    "SIMULATOR_REAL_MAX_IN_FLIGHT",
+    "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
+    "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK",
+    "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
+    "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX",
+    "SIMULATOR_REAL_ENABLE_INJECT",
+    "SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS",
+    "SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS",
+    "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS",
+    "SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS",
+    "SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS",
+    "SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS",
+    "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS",
+    "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC",
 )
 
 
@@ -233,14 +249,20 @@ class Settings(BaseSettings):
     SIMULATOR_SESSION_TTL_SEC: int = 604800  # 7 days
     SIMULATOR_SESSION_CLOCK_SKEW_SEC: int = 300  # 5 min tolerance
     SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER: int = 1
-    SIMULATOR_CSRF_ORIGIN_ALLOWLIST: str = ""  # comma-separated origins, empty = allow all in dev
+    SIMULATOR_CSRF_ORIGIN_ALLOWLIST: str = (
+        ""  # comma-separated origins, empty = allow all in dev
+    )
 
     # --- Simulator runtime knobs (024 `T2414.1`: until then raw `os.getenv` reads beside Settings) ---
     # Names and defaults are the ones the raw reads had. So is the parsing: an empty or unparseable value
     # falls back to the default instead of refusing to start (`_lenient_simulator_value`). What changed: they
     # are read with every other setting - from the environment and from `.env` - once, at process start.
-    SIMULATOR_ACTIONS_ENABLE: bool = False  # Interact mode; true only for "1", "true", "TRUE", "yes"
-    SIMULATOR_SCENARIO_ALLOWLIST: str = ""  # empty: the canonical demo presets; "*"/"all": every scenario
+    SIMULATOR_ACTIONS_ENABLE: bool = (
+        False  # Interact mode; true only for "1", "true", "TRUE", "yes"
+    )
+    SIMULATOR_SCENARIO_ALLOWLIST: str = (
+        ""  # empty: the canonical demo presets; "*"/"all": every scenario
+    )
     SIMULATOR_TICK_MS_BASE: int = 1000
     SIMULATOR_ACTIONS_PER_TICK_MAX: int = 20
     SIMULATOR_CLEARING_EVERY_N_TICKS: int = 25
@@ -273,7 +295,9 @@ class Settings(BaseSettings):
     SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK: int | None = None
     SIMULATOR_REAL_MAX_ERRORS_TOTAL: int | None = None
     SIMULATOR_CLEARING_MAX_EDGES_FOR_FX: int = 30
-    SIMULATOR_REAL_AMOUNT_CAP: Decimal | None = None  # opt-in; positive; applied in each equivalent's step (028)
+    SIMULATOR_REAL_AMOUNT_CAP: Decimal | None = (
+        None  # opt-in; positive; applied in each equivalent's step (028)
+    )
     SIMULATOR_REAL_ENABLE_INJECT: int = 0  # enabled at >= 1
     SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS: int = 3
     SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS: int = 10
@@ -285,7 +309,9 @@ class Settings(BaseSettings):
     SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC: int = 60
 
     # Reported by `/health`. GEO_APP_VERSION wins over the older APP_VERSION; neither set: "dev".
-    GEO_APP_VERSION: str = Field(default="", validation_alias=AliasChoices("GEO_APP_VERSION", "APP_VERSION"))
+    GEO_APP_VERSION: str = Field(
+        default="", validation_alias=AliasChoices("GEO_APP_VERSION", "APP_VERSION")
+    )
 
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
@@ -453,7 +479,8 @@ class Settings(BaseSettings):
     @classmethod
     def _integrity_interval(cls, value: int) -> int:
         """047 (2026-10-18, Codex §15 P3): not positive -> 300 s, the meaning an explicit 0 already had (`or 300` in its
-        readers). A negative interval was the loop's wait as is - runs back to back, the stop unheard in that wait."""
+        readers). A negative interval was the loop's wait as is - runs back to back, the stop unheard in that wait.
+        """
         return value if value > 0 else 300
 
     @field_validator("SIMULATOR_ACTIONS_ENABLE", mode="before")
@@ -467,7 +494,8 @@ class Settings(BaseSettings):
     @classmethod
     def _amount_cap(cls, value: object) -> Decimal | None:
         """Empty, not a number, not finite or not positive -> None (no cap). Not quantized (028 `F-028-32`): the
-        planner floors each amount to its equivalent's step, so the cap is applied in that step."""
+        planner floors each amount to its equivalent's step, so the cap is applied in that step.
+        """
         # One boundary around the whole parse, as the raw read had: quantize() refuses Infinity and 1e100 too.
         try:
             cap = Decimal(str(value if value is not None else "").strip())
@@ -642,7 +670,9 @@ def simulator_state_dir() -> Path:
     """
 
     configured = str(settings.SIMULATOR_STATE_DIR or "").strip()
-    repository_root = Path(__file__).resolve().parents[1]  # app/config.py -> the repository root
+    repository_root = (
+        Path(__file__).resolve().parents[1]
+    )  # app/config.py -> the repository root
     if not configured:
         return repository_root / ".local-run" / "simulator"
     path = Path(configured)

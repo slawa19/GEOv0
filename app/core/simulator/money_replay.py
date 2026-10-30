@@ -217,13 +217,17 @@ class _AttemptRunState:
 
     def restore(self, run: RunRecord, lock: Any) -> None:
         with lock:
-            for key in [k for k in (run._real_viz_by_eq or {}) if k not in self.viz_keys]:
+            for key in [
+                k for k in (run._real_viz_by_eq or {}) if k not in self.viz_keys
+            ]:
                 run._real_viz_by_eq.pop(key, None)
             run._real_consec_all_rejected_ticks = int(self.consec_all_rejected_ticks)
             run._real_consec_tick_failures = int(self.consec_tick_failures)
 
 
-async def _close_quietly(stack: AsyncExitStack, logger: logging.Logger, *, run_id: str) -> None:
+async def _close_quietly(
+    stack: AsyncExitStack, logger: logging.Logger, *, run_id: str
+) -> None:
     """Close a discarded attempt's session. A failure here must not mask the original error."""
     try:
         await stack.aclose()
@@ -269,7 +273,9 @@ async def _publish_committed(
             await build(open_session)
         except asyncio.CancelledError as exc:
             cancelled = exc
-            logger.warning("simulator.real.payment_patches_cancelled run_id=%s", str(run_id))
+            logger.warning(
+                "simulator.real.payment_patches_cancelled run_id=%s", str(run_id)
+            )
         except Exception as exc:
             logger.warning(
                 "simulator.real.payment_patches_failed run_id=%s error_type=%s",
@@ -335,18 +341,28 @@ async def _commit_money(
             # The commit landed while the caller was being cancelled: its payments are published all the same, at
             # once and without patches - the caller is leaving, and a visual read is not worth making it wait.
             await _publish_committed(
-                phase, open_session=open_session, logger=logger, run_id=run_id, read_patches=False
+                phase,
+                open_session=open_session,
+                logger=logger,
+                run_id=run_id,
+                read_patches=False,
             )
         raise
-    except BaseException as exc:  # noqa: BLE001 - classified by the caller, never swallowed
+    except (
+        BaseException
+    ) as exc:  # noqa: BLE001 - classified by the caller, never swallowed
         error = exc
     if state == "committed":
-        await _publish_committed(phase, open_session=open_session, logger=logger, run_id=run_id)
+        await _publish_committed(
+            phase, open_session=open_session, logger=logger, run_id=run_id
+        )
     if state == "rolled_back" and error is not None and not _commit_refused(error):
         # 030 `F-030-12`: a ROLLBACK that succeeds after a failed COMMIT does not refute the COMMIT - it may have
         # landed and only lost its answer. The rollback has drained the connection, so the attempt's own `tx_id`s,
         # read on a new session, now settle it (`_attempt_landed`).
-        return _CommitResolution(state="unknown", error=error, rollback_after_unproven_commit=True)
+        return _CommitResolution(
+            state="unknown", error=error, rollback_after_unproven_commit=True
+        )
     return _CommitResolution(state=state, error=error)
 
 
@@ -380,8 +396,14 @@ async def _attempt_landed(
     try:
         session = await stack.enter_async_context(open_session())
         rows = (
-            await session.execute(select(Transaction.tx_id).where(Transaction.tx_id.in_(ids)))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(Transaction.tx_id).where(Transaction.tx_id.in_(ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
     except asyncio.CancelledError:
         await _close_quietly(stack, logger, run_id=run_id)
         raise
@@ -398,7 +420,9 @@ async def _attempt_landed(
     return bool(rows)
 
 
-async def _roll_back_the_phase(session: Any, logger: logging.Logger, *, run_id: str) -> bool:
+async def _roll_back_the_phase(
+    session: Any, logger: logging.Logger, *, run_id: str
+) -> bool:
     """End the phase's transaction and say whether its rollback is POSITIVELY established.
 
     The owner has sent no `COMMIT` on this transaction - the unusable branch is entered from inside
@@ -419,7 +443,9 @@ async def _roll_back_the_phase(session: Any, logger: logging.Logger, *, run_id: 
         raise
     except Exception:
         logger.warning(
-            "simulator.real.unusable_phase_rollback_failed run_id=%s", str(run_id), exc_info=True
+            "simulator.real.unusable_phase_rollback_failed run_id=%s",
+            str(run_id),
+            exc_info=True,
         )
     try:
         await session.invalidate()
@@ -428,7 +454,9 @@ async def _roll_back_the_phase(session: Any, logger: logging.Logger, *, run_id: 
         raise
     except Exception:
         logger.error(
-            "simulator.real.unusable_phase_rollback_unconfirmed run_id=%s", str(run_id), exc_info=True
+            "simulator.real.unusable_phase_rollback_unconfirmed run_id=%s",
+            str(run_id),
+            exc_info=True,
         )
         return False
 
@@ -484,7 +512,9 @@ async def _settle_cancelled_phase(
                 len(admitted),
             )
             return
-        await _record_admitted_refusals(admitted, open_session=open_session, logger=logger, run_id=run_id)
+        await _record_admitted_refusals(
+            admitted, open_session=open_session, logger=logger, run_id=run_id
+        )
 
     await drain_call(settle)
 
@@ -530,7 +560,9 @@ async def _settle_unusable_phase(
         )
     if refusal is None:
         return
-    stored, failure = await drain_call(lambda: record_definitive_refusal(open_session, refusal))
+    stored, failure = await drain_call(
+        lambda: record_definitive_refusal(open_session, refusal)
+    )
     if failure is not None:
         logger.error(
             "simulator.real.staged_refusal_record_failed run_id=%s tx_id=%s error_type=%s",
@@ -557,7 +589,11 @@ async def _settle_unusable_phase(
     if error.publish_refusal is not None:
         try:
             # 030 `T3094` #1: a stored `ABORTED` of the same request it yielded to is the outcome - published as such.
-            yielded = stored is not None and stored.status == "ABORTED" and stored.error is not None
+            yielded = (
+                stored is not None
+                and stored.status == "ABORTED"
+                and stored.error is not None
+            )
             if yielded:
                 error.publish_refusal(public_error_of_stored(stored))
             else:
@@ -686,7 +722,9 @@ async def run_money_phase_with_bounded_replay(
                     # recorded as failed and its tail is skipped, but nothing may replay it.
                     # Counted first: the patch read inside the publication is an optional, cancellable wait.
                     _count_committed()
-                    await _publish_committed(phase, open_session=open_session, logger=logger, run_id=run_id)
+                    await _publish_committed(
+                        phase, open_session=open_session, logger=logger, run_id=run_id
+                    )
                     logger.warning(
                         "simulator.real.money_commit_landed_after_unknown run_id=%s tick=%s",
                         str(run_id),
@@ -715,11 +753,17 @@ async def run_money_phase_with_bounded_replay(
                 # recorded once the phase rollback is established (019 stage-3 review, P2 #3). Never
                 # after a commit attempt - its outcome is unknown, and nothing may be terminalized.
                 await _settle_cancelled_phase(
-                    admitted, session=session, open_session=open_session, logger=logger, run_id=run_id
+                    admitted,
+                    session=session,
+                    open_session=open_session,
+                    logger=logger,
+                    run_id=run_id,
                 )
             await _close_quietly(stack, logger, run_id=run_id)
             raise
-        except BaseException as exc:  # noqa: BLE001 - classified below, always re-raised
+        except (
+            BaseException
+        ) as exc:  # noqa: BLE001 - classified below, always re-raised
             if error is None:
                 # The attempt failed BEFORE any commit was attempted: the owner locks, the debt
                 # snapshot, the planner or a staged write. No commit means nothing durable.
@@ -794,5 +838,7 @@ async def run_money_phase_with_bounded_replay(
                 attempt,
                 conflict,
             )
-        assert error is not None  # noqa: S101 - the loop only reaches here with a failure
+        assert (
+            error is not None
+        )  # noqa: S101 - the loop only reaches here with a failure
         raise error

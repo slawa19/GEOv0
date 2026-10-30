@@ -52,7 +52,14 @@ class ClearingAutoResponse(BaseModel):
     cleared_cycles: int = Field(ge=0)
     status: Literal["complete", "interrupted"]
     reason: Optional[
-        Literal["cancelled", "lease_lost", "budget_exhausted", "replan_limit", "operational_limit", "error"]
+        Literal[
+            "cancelled",
+            "lease_lost",
+            "budget_exhausted",
+            "replan_limit",
+            "operational_limit",
+            "error",
+        ]
     ]
     v_edge: str
     v_cyc: str

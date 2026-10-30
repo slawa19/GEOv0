@@ -21,16 +21,26 @@ from app.utils.validation import floor_to_step
 
 
 def pair_capacity(
-    *, line_limit: Decimal | None, payer_owes: Decimal, payee_owes: Decimal, pair_has_active_line: bool
+    *,
+    line_limit: Decimal | None,
+    payer_owes: Decimal,
+    payee_owes: Decimal,
+    pair_has_active_line: bool,
 ) -> Decimal:
     """`line_limit` is the payee's active line to the payer (None when there is none)."""
 
     if not pair_has_active_line:
         return Decimal("0")
-    return (line_limit if line_limit is not None else Decimal("0")) - payer_owes + payee_owes
+    return (
+        (line_limit if line_limit is not None else Decimal("0"))
+        - payer_owes
+        + payee_owes
+    )
 
 
-def pending_pair_capacity(capacity: Decimal, *, payee_owes: Decimal, step: Decimal) -> Decimal:
+def pending_pair_capacity(
+    capacity: Decimal, *, payee_owes: Decimal, step: Decimal
+) -> Decimal:
     """A hop over a pair with a requested close: the pair's debt must end strictly lower (В2).
 
     Only the payee's debt to the payer can shrink by this hop: paying `t` turns it into `payee_owes - t`, whose
@@ -40,10 +50,16 @@ def pending_pair_capacity(capacity: Decimal, *, payee_owes: Decimal, step: Decim
     storage grain `1E-8` a payment of 2.00 over owes 1 split into 1.99999999 here plus 0.00000001 elsewhere.
     """
 
-    return floor_to_step(min(capacity, 2 * payee_owes - step), step) if payee_owes > 0 else Decimal("0")
+    return (
+        floor_to_step(min(capacity, 2 * payee_owes - step), step)
+        if payee_owes > 0
+        else Decimal("0")
+    )
 
 
-def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str], frozenset[str]]:
+def pair_rules(
+    lines: Iterable[tuple[str, dict | None]]
+) -> tuple[frozenset[str], frozenset[str]]:
     """(owners forbidding mediation, blocked pids) of one pair's active lines `(owner_pid, policy)`."""
 
     forbid: set[str] = set()
@@ -51,20 +67,33 @@ def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str]
     for owner_pid, policy in lines:
         policy = policy if isinstance(policy, dict) else {}
         # `null` is "not set", as the API stores it (028 `F-028-3`); a non-bool never gets here - the doors refuse it.
-        forbids = policy.get("can_be_intermediate") is not None and not bool(policy.get("can_be_intermediate"))
+        forbids = policy.get("can_be_intermediate") is not None and not bool(
+            policy.get("can_be_intermediate")
+        )
         try:  # owner decision B (024 T2415.3): forbids EXACTLY at zero - "0.0", "0e0", 0 yes, 0.5 no
             forbids = forbids or Decimal(str(policy.get("max_hop_usage", 1))) == 0
-        except (InvalidOperation, ValueError, TypeError):  # unparsable (None, "abc", NaN signal): permits, as before
+        except (
+            InvalidOperation,
+            ValueError,
+            TypeError,
+        ):  # unparsable (None, "abc", NaN signal): permits, as before
             pass
         if forbids:
             forbid.add(owner_pid)
         listed = policy.get("blocked_participants")
-        blocked.update(x for x in (listed if isinstance(listed, list) else []) if isinstance(x, str) and x)
+        blocked.update(
+            x
+            for x in (listed if isinstance(listed, list) else [])
+            if isinstance(x, str) and x
+        )
     return frozenset(forbid), frozenset(blocked)
 
 
 def route_breaks_policy(
-    path: list[str], rules: Callable[[str, str], tuple[frozenset, frozenset]], *, payee: Optional[str] = None
+    path: list[str],
+    rules: Callable[[str, str], tuple[frozenset, frozenset]],
+    *,
+    payee: Optional[str] = None,
 ) -> Optional[str]:
     """Why `path` (possibly a prefix ending before `payee`) breaks a policy, or None."""
 
@@ -76,4 +105,8 @@ def route_breaks_policy(
         if forbid & inner & {u, v}:
             return f"{sorted(forbid & inner & {u, v})} may not mediate over {u}->{v}"
         blocked |= b
-    return f"{sorted(blocked & inner)} blocked by a line of the route" if blocked & inner else None
+    return (
+        f"{sorted(blocked & inner)} blocked by a line of the route"
+        if blocked & inner
+        else None
+    )

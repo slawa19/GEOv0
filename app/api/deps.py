@@ -121,6 +121,7 @@ async def get_redis_client(request: Request):
     state = getattr(getattr(request, "app", None), "state", None)
     return getattr(state, "redis", None)
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async for session in get_db_session():
         yield session
@@ -138,7 +139,10 @@ def get_payment_session_factory():
 
     return db_session.AsyncSessionLocal
 
-async def _active_participant_from_token(db: AsyncSession, token: str) -> Participant | None:
+
+async def _active_participant_from_token(
+    db: AsyncSession, token: str
+) -> Participant | None:
     """The one chain "bearer token -> participant -> active" (024 `T2414.2`; it was copied three times).
 
     None when the token does not decode or names no subject - each caller decides what that means: the
@@ -159,8 +163,7 @@ async def _active_participant_from_token(db: AsyncSession, token: str) -> Partic
 
 
 async def get_current_participant(
-    db: AsyncSession = Depends(get_db),
-    token: str = Depends(reusable_oauth2)
+    db: AsyncSession = Depends(get_db), token: str = Depends(reusable_oauth2)
 ) -> Participant:
     participant = await _active_participant_from_token(db, token)
     if participant is None:
@@ -284,7 +287,9 @@ async def require_simulator_actor(
         if x_simulator_owner is not None:
             # FIX-7: trim whitespace before validation (§9)
             owner_override = x_simulator_owner.strip()
-            if not owner_override or not _SIMULATOR_OWNER_HEADER_RE.match(owner_override):
+            if not owner_override or not _SIMULATOR_OWNER_HEADER_RE.match(
+                owner_override
+            ):
                 raise GeoException(
                     "Invalid X-Simulator-Owner header",
                     code=ErrorCode.E009,

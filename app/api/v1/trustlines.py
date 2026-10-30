@@ -19,40 +19,53 @@ from app.utils.exceptions import NotFoundException
 
 router = APIRouter()
 
+
 @router.post(
     "",
     response_model=TrustLine,
     status_code=status.HTTP_201_CREATED,
     # 054-E-4: declared here as in api/openapi.yaml.
-    responses={404: {"model": ErrorEnvelope, "description": "The recipient `to` or the equivalent does not exist (E009)"}},
+    responses={
+        404: {
+            "model": ErrorEnvelope,
+            "description": "The recipient `to` or the equivalent does not exist (E009)",
+        }
+    },
 )
 async def create_trustline(
     data: TrustLineCreateRequest,
     current_participant: Participant = Depends(deps.get_current_participant),
-    db: AsyncSession = Depends(deps.get_db)
+    db: AsyncSession = Depends(deps.get_db),
 ):
     service = TrustLineService(db)
     return await service.create(current_participant.id, data)
+
 
 @router.get(
     "",
     response_model=TrustLinesList,
     # 054-E-3: declared here as in api/openapi.yaml.
     responses={
-        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
-        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009)"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a well-formed equivalent code (E009)",
+        },
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No equivalent has this code (E009)",
+        },
     },
 )
 async def get_trustlines(
-    direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
+    direction: Literal["outgoing", "incoming", "all"] = Query("all"),
     equivalent: Optional[str] = Query(None),
-    status: Optional[Literal['active', 'closed']] = Query(
+    status: Optional[Literal["active", "closed"]] = Query(
         None, description="Filter by status; omitted selects active trustlines."
     ),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=200),
     current_participant: Participant = Depends(deps.get_current_participant),
-    db: AsyncSession = Depends(deps.get_db)
+    db: AsyncSession = Depends(deps.get_db),
 ):
     service = TrustLineService(db)
     offset = (page - 1) * per_page
@@ -84,25 +97,31 @@ async def get_trustline(
 
     return trustline
 
+
 @router.patch("/{id}", response_model=TrustLine)
 async def update_trustline(
     id: UUID,
     data: TrustLineUpdateRequest,
     current_participant: Participant = Depends(deps.get_current_participant),
-    db: AsyncSession = Depends(deps.get_db)
+    db: AsyncSession = Depends(deps.get_db),
 ):
     service = TrustLineService(db)
     return await service.update(id, current_participant.id, data)
 
-@router.delete("/{id}", status_code=status.HTTP_200_OK, response_model=TrustLineCloseResult)
+
+@router.delete(
+    "/{id}", status_code=status.HTTP_200_OK, response_model=TrustLineCloseResult
+)
 async def close_trustline(
     id: UUID,
     data: TrustLineCloseRequest,
     current_participant: Participant = Depends(deps.get_current_participant),
-    db: AsyncSession = Depends(deps.get_db)
+    db: AsyncSession = Depends(deps.get_db),
 ):
     service = TrustLineService(db)
     line = await service.close(id, current_participant.id, data)
     closed = str(line.status) == "closed"
-    return TrustLineCloseResult(message="Trustline closed" if closed else "Trustline close requested",
-                                trustline=TrustLine.model_validate(line))
+    return TrustLineCloseResult(
+        message="Trustline closed" if closed else "Trustline close requested",
+        trustline=TrustLine.model_validate(line),
+    )

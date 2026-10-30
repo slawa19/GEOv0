@@ -41,33 +41,64 @@ class GeoException(Exception):
         super().__init__(self.message)
 
     def to_dict(self) -> dict:
-        return {"error": {"code": self.code, "message": self.message, "details": self.details}}
+        return {
+            "error": {
+                "code": self.code,
+                "message": self.message,
+                "details": self.details,
+            }
+        }
 
 
 class BadRequestException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
         super().__init__(message, code=ErrorCode.E009, details=details, status_code=400)
 
 
 class UnauthorizedException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
-        super().__init__(message or "Unauthorized", code=ErrorCode.E006, details=details, status_code=401)
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
+        super().__init__(
+            message or "Unauthorized",
+            code=ErrorCode.E006,
+            details=details,
+            status_code=401,
+        )
 
 
 class NotFoundException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
         # 029 F-029-6: `E009`, not `E001` - that code means a routing refusal (`RoutingException`), and a client
         # telling refusals apart by code read "participant not found" as "no route". HTTP 404 and the text stay.
-        super().__init__(message or "Not Found", code=ErrorCode.E009, details=details, status_code=404)
+        super().__init__(
+            message or "Not Found",
+            code=ErrorCode.E009,
+            details=details,
+            status_code=404,
+        )
 
 
 class ForbiddenException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
-        super().__init__(message or "Forbidden", code=ErrorCode.E006, details=details, status_code=403)
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
+        super().__init__(
+            message or "Forbidden",
+            code=ErrorCode.E006,
+            details=details,
+            status_code=403,
+        )
 
 
 class ConflictException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
         super().__init__(message, code=ErrorCode.E008, details=details, status_code=409)
 
 
@@ -86,17 +117,30 @@ class RetryablePaymentConflictException(ConflictException):
 
 
 class TooManyRequestsException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
-        super().__init__(message or "Too many requests", code=ErrorCode.E009, details=details, status_code=429)
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
+        super().__init__(
+            message or "Too many requests",
+            code=ErrorCode.E009,
+            details=details,
+            status_code=429,
+        )
 
 
 class GoneException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
-        super().__init__(message or "Gone", code=ErrorCode.E009, details=details, status_code=410)
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
+        super().__init__(
+            message or "Gone", code=ErrorCode.E009, details=details, status_code=410
+        )
 
 
 class InvalidSignatureException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
         super().__init__(message, code=ErrorCode.E005, details=details, status_code=400)
 
 
@@ -105,18 +149,32 @@ class CryptoException(InvalidSignatureException):
 
 
 class TimeoutException(GeoException):
-    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self, message: str | None = None, *, details: Optional[dict[str, Any]] = None
+    ):
         super().__init__(message, code=ErrorCode.E007, details=details, status_code=504)
 
 
 class RoutingException(GeoException):
-    def __init__(self, message: str | None = None, *, insufficient_capacity: bool = False, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        insufficient_capacity: bool = False,
+        details: Optional[dict[str, Any]] = None,
+    ):
         code = ErrorCode.E002 if insufficient_capacity else ErrorCode.E001
         super().__init__(message, code=code, details=details, status_code=400)
 
 
 class TrustLineException(GeoException):
-    def __init__(self, message: str | None = None, *, limit_exceeded: bool = False, details: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        limit_exceeded: bool = False,
+        details: Optional[dict[str, Any]] = None,
+    ):
         code = ErrorCode.E003 if limit_exceeded else ErrorCode.E004
         super().__init__(message, code=code, details=details, status_code=400)
 

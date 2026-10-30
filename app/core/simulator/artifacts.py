@@ -63,7 +63,9 @@ class ArtifactsManager:
 
             _atomic_write_text(
                 artifacts_dir / "last_tick.json",
-                json.dumps({"tick_index": 0, "sim_time_ms": 0}, ensure_ascii=False, indent=2),
+                json.dumps(
+                    {"tick_index": 0, "sim_time_ms": 0}, ensure_ascii=False, indent=2
+                ),
             )
             (artifacts_dir / "status.json").write_text(
                 json.dumps(
@@ -84,7 +86,9 @@ class ArtifactsManager:
             # Raw events export (NDJSON). The writer task appends lines.
             (artifacts_dir / "events.ndjson").write_text("", encoding="utf-8")
         except Exception:
-            self._logger.exception("simulator.artifacts.init_failed run_id=%s", getattr(run, "run_id", ""))
+            self._logger.exception(
+                "simulator.artifacts.init_failed run_id=%s", getattr(run, "run_id", "")
+            )
             run.artifacts_dir = None
 
     def cleanup_old_runs(self, *, ttl_hours: int) -> None:
@@ -118,7 +122,9 @@ class ArtifactsManager:
             except FileNotFoundError:
                 continue
             except Exception:
-                self._logger.exception("simulator.artifacts.cleanup_failed path=%s", str(p))
+                self._logger.exception(
+                    "simulator.artifacts.cleanup_failed path=%s", str(p)
+                )
 
     async def list_artifacts(self, *, run_id: str) -> ArtifactIndex:
         run = self._get_run(run_id)
@@ -160,7 +166,11 @@ class ArtifactsManager:
         if self._db_enabled():
             try:
                 async with db_session.AsyncSessionLocal() as session:
-                    await session.execute(delete(SimulatorRunArtifact).where(SimulatorRunArtifact.run_id == run_id))
+                    await session.execute(
+                        delete(SimulatorRunArtifact).where(
+                            SimulatorRunArtifact.run_id == run_id
+                        )
+                    )
                     rows = [
                         SimulatorRunArtifact(
                             run_id=run_id,
@@ -175,7 +185,9 @@ class ArtifactsManager:
                     session.add_all(rows)
                     await session.commit()
             except Exception:
-                self._logger.exception("simulator.artifacts.db_sync_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.artifacts.db_sync_failed run_id=%s", run_id
+                )
 
         return ArtifactIndex(
             api_version=SIMULATOR_API_VERSION,
@@ -183,7 +195,9 @@ class ArtifactsManager:
             artifact_path=self._public_artifact_path(base),
             items=items,
             bundle_url=(
-                f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip" if (base / "bundle.zip").exists() else None
+                f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip"
+                if (base / "bundle.zip").exists()
+                else None
             ),
         )
 
@@ -195,7 +209,9 @@ class ArtifactsManager:
         relative name, so the field is omitted (it is nullable) rather than leaking.
         """
         try:
-            return base.resolve().relative_to(self._local_state_dir().resolve()).as_posix()
+            return (
+                base.resolve().relative_to(self._local_state_dir().resolve()).as_posix()
+            )
         except ValueError:
             return None
 
@@ -225,11 +241,16 @@ class ArtifactsManager:
             if not path.exists():
                 path.write_text("", encoding="utf-8")
         except Exception:
-            self._logger.exception("simulator.artifacts.events_writer_init_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.artifacts.events_writer_init_failed run_id=%s", run_id
+            )
             return
 
         with self._lock:
-            if run._artifact_events_task is not None and not run._artifact_events_task.done():
+            if (
+                run._artifact_events_task is not None
+                and not run._artifact_events_task.done()
+            ):
                 return
             q: asyncio.Queue[Optional[str]] = asyncio.Queue(maxsize=10_000)
             run._artifact_events_queue = q
@@ -255,7 +276,10 @@ class ArtifactsManager:
             try:
                 q.put_nowait(None)
             except Exception:
-                self._logger.exception("simulator.artifacts.events_writer_stop_enqueue_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.artifacts.events_writer_stop_enqueue_failed run_id=%s",
+                    run_id,
+                )
 
         try:
             await asyncio.wait_for(task, timeout=2.0)
@@ -264,9 +288,14 @@ class ArtifactsManager:
             try:
                 await task
             except Exception:
-                self._logger.exception("simulator.artifacts.events_writer_stop_cancel_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.artifacts.events_writer_stop_cancel_failed run_id=%s",
+                    run_id,
+                )
         except Exception:
-            self._logger.exception("simulator.artifacts.events_writer_stop_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.artifacts.events_writer_stop_failed run_id=%s", run_id
+            )
             return
 
     async def _events_writer_loop(
@@ -307,11 +336,15 @@ class ArtifactsManager:
                 await asyncio.to_thread(_append_text, path, text)
             except Exception:
                 # Best-effort: the batch is dropped on an IO error - and counted (034 `F-034-8`).
-                self._logger.exception("simulator.artifacts.events_writer_append_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.artifacts.events_writer_append_failed run_id=%s", run_id
+                )
                 self._count_dropped_events(run_id, reason="write_failed", count=lines)
                 continue
 
-    def _count_dropped_events(self, run_id: str, *, reason: str, count: int = 1) -> None:
+    def _count_dropped_events(
+        self, run_id: str, *, reason: str, count: int = 1
+    ) -> None:
         """034 `F-034-8`: an event the writer could not record is COUNTED - on the run, on the `/metrics` counter
         `geo_simulator_artifact_events_dropped_total{reason}` - and the loss is logged: at the run's first drop
         and then once per thousand, with the run's total. Never raises; a drop stays a drop.
@@ -323,7 +356,8 @@ class ArtifactsManager:
         on `q is None`); events still queued when `stop_events_writer` cancels a writer that did not finish in
         its 2 s; and the BATCH that writer had already taken off the queue when it was cancelled - the loop
         takes a batch before it awaits the append in a thread, and the stop's timeout can cancel an append that
-        has not started, or stop watching one that is running (it may still land, or not; nobody counts either)."""
+        has not started, or stop watching one that is running (it may still land, or not; nobody counts either).
+        """
 
         total = count
         try:
@@ -334,12 +368,19 @@ class ArtifactsManager:
                     total = int(run._artifact_events_dropped)
             from app.utils import metrics
 
-            metrics.SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL.labels(reason=reason).inc(count)
+            metrics.SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL.labels(reason=reason).inc(
+                count
+            )
         except Exception:
-            self._logger.debug("simulator.artifacts.drop_count_failed run_id=%s", run_id, exc_info=True)
+            self._logger.debug(
+                "simulator.artifacts.drop_count_failed run_id=%s", run_id, exc_info=True
+            )
         if total == count or total // 1000 != (total - count) // 1000:
             self._logger.warning(
-                "simulator.artifacts.events_dropped run_id=%s reason=%s dropped_total=%d", run_id, reason, total
+                "simulator.artifacts.events_dropped run_id=%s reason=%s dropped_total=%d",
+                run_id,
+                reason,
+                total,
             )
 
     def enqueue_event_artifact(self, run_id: str, payload: dict[str, Any]) -> None:
@@ -350,7 +391,9 @@ class ArtifactsManager:
         try:
             line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         except Exception:
-            self._logger.exception("simulator.artifacts.events_json_encode_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.artifacts.events_json_encode_failed run_id=%s", run_id
+            )
             self._count_dropped_events(run_id, reason="encode_failed")
             return
         try:
@@ -359,7 +402,9 @@ class ArtifactsManager:
             # Best-effort drop: the event is not recorded in `events.ndjson`, and that is counted.
             self._count_dropped_events(run_id, reason="queue_full")
 
-    async def finalize_run_artifacts(self, *, run_id: str, status_payload: dict[str, Any]) -> None:
+    async def finalize_run_artifacts(
+        self, *, run_id: str, status_payload: dict[str, Any]
+    ) -> None:
         run = self._get_run(run_id)
         base = run.artifacts_dir
         if base is None or not base.exists():
@@ -376,11 +421,15 @@ class ArtifactsManager:
         }
 
         def _write_json(path: Path, payload: dict[str, Any]) -> None:
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
         def _build_bundle(artifacts_dir: Path) -> None:
             bundle = artifacts_dir / "bundle.zip"
-            with zipfile.ZipFile(bundle, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            with zipfile.ZipFile(
+                bundle, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as zf:
                 for p in sorted(artifacts_dir.iterdir()):
                     if not p.is_file():
                         continue
@@ -393,7 +442,9 @@ class ArtifactsManager:
             await asyncio.to_thread(_write_json, base / "summary.json", summary_payload)
             await asyncio.to_thread(_build_bundle, base)
         except Exception:
-            self._logger.exception("simulator.artifacts.finalize_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.artifacts.finalize_failed run_id=%s", run_id
+            )
             return
 
         try:
@@ -415,5 +466,8 @@ class ArtifactsManager:
             )
             tmp.replace(path)
         except Exception:
-            self._logger.exception("simulator.artifacts.last_tick_write_failed run_id=%s", getattr(run, "run_id", ""))
+            self._logger.exception(
+                "simulator.artifacts.last_tick_write_failed run_id=%s",
+                getattr(run, "run_id", ""),
+            )
             return

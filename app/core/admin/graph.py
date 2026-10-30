@@ -51,7 +51,9 @@ _TRUSTLINE_LIVE_FIRST = case((TrustLine.status == "closed", 1), else_=0)
 _EQUIVALENT_INDEX, _FROM_INDEX, _TO_INDEX = 6, 7, 9
 
 
-def _dedupe_trustline_rows(rows, *, equivalent_index: int, from_index: int, to_index: int):
+def _dedupe_trustline_rows(
+    rows, *, equivalent_index: int, from_index: int, to_index: int
+):
     """Keep one row per (equivalent, from, to) -- the live one when it exists.
 
     Restores the "one edge per triple" shape the graph had while the unique constraint was
@@ -188,7 +190,12 @@ def trustline_page_statements(
         .join(p_to, TrustLine.to_participant_id == p_to.id)
         .where(*predicates)
     )
-    page = page.where(*predicates).order_by(TrustLine.created_at.desc(), TrustLine.id.asc()).offset(offset).limit(limit)
+    page = (
+        page.where(*predicates)
+        .order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
+        .offset(offset)
+        .limit(limit)
+    )
     return page, count
 
 
@@ -258,7 +265,9 @@ async def fetch_optional_collections(
     return audit_log, transactions, included, truncated
 
 
-async def fetch_graph_audit_log(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
+async def fetch_graph_audit_log(
+    db: AsyncSession, *, limit: int
+) -> list[dict[str, Any]]:
     limit = max(0, int(limit))
     if limit <= 0:
         return []
@@ -267,13 +276,17 @@ async def fetch_graph_audit_log(db: AsyncSession, *, limit: int) -> list[dict[st
     return [AdminAuditLogItem.model_validate(x).model_dump() for x in items]
 
 
-async def fetch_graph_transactions(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
+async def fetch_graph_transactions(
+    db: AsyncSession, *, limit: int
+) -> list[dict[str, Any]]:
     limit = max(0, int(limit))
     if limit <= 0:
         return []
     stmt = (
         select(Transaction, Participant.pid)
-        .outerjoin(Participant, Transaction.initiator_id == Participant.id)  # a CLEARING has none (028 F-028-45)
+        .outerjoin(
+            Participant, Transaction.initiator_id == Participant.id
+        )  # a CLEARING has none (028 F-028-45)
         .order_by(desc(Transaction.updated_at))
         .limit(limit)
     )
@@ -319,7 +332,12 @@ async def fetch_graph_transactions(db: AsyncSession, *, limit: int) -> list[dict
                         continue
                     debtor = edge.get("debtor")
                     creditor = edge.get("creditor")
-                    if isinstance(debtor, str) and isinstance(creditor, str) and debtor and creditor:
+                    if (
+                        isinstance(debtor, str)
+                        and isinstance(creditor, str)
+                        and debtor
+                        and creditor
+                    ):
                         edges.append({"debtor": debtor, "creditor": creditor})
                 if edges:
                     item["edges"] = edges
@@ -357,9 +375,9 @@ async def ego_participant_ids(
             )
         )
         if equivalent:
-            stmt = stmt.join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id).where(
-                EquivalentModel.code == equivalent
-            )
+            stmt = stmt.join(
+                EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id
+            ).where(EquivalentModel.code == equivalent)
         if statuses:
             stmt = stmt.where(TrustLine.status.in_(list(statuses)))
 
@@ -398,7 +416,9 @@ async def _attach_net_viz(
     )
     if scope_ids is not None:
         scope = list(scope_ids)
-        role_stmt = role_stmt.where(or_(Debt.debtor_id.in_(scope), Debt.creditor_id.in_(scope)))
+        role_stmt = role_stmt.where(
+            or_(Debt.debtor_id.in_(scope), Debt.creditor_id.in_(scope))
+        )
 
     debt_by_id: dict[Any, Decimal] = {}
     credit_by_id: dict[Any, Decimal] = {}
@@ -420,9 +440,14 @@ async def _attach_net_viz(
         p.net_balance_atoms = str(atoms)
         p.net_sign = viz_rules.net_sign_from_atoms(atoms)
         p.viz_color_key = viz_rules.node_color_key(
-            atoms=atoms, status_key=p.status, type_key=p.type, debt_mags_sorted=debt_mags_sorted
+            atoms=atoms,
+            status_key=p.status,
+            type_key=p.type,
+            debt_mags_sorted=debt_mags_sorted,
         )
-        w, h = viz_rules.node_size_wh(atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=p.type)
+        w, h = viz_rules.node_size_wh(
+            atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=p.type
+        )
         p.viz_size = {"w": w, "h": h}
 
 
@@ -444,10 +469,18 @@ async def load_graph(
 
     Guardrail: a trustline's direction in the output is ``from -> to`` = creditor -> debtor.
     """
-    participant_stmt = select(Participant.id, Participant.pid, Participant.display_name, Participant.type, Participant.status)
+    participant_stmt = select(
+        Participant.id,
+        Participant.pid,
+        Participant.display_name,
+        Participant.type,
+        Participant.status,
+    )
     if scope_ids is not None:
         participant_stmt = participant_stmt.where(Participant.id.in_(list(scope_ids)))
-    participant_rows = (await db.execute(participant_stmt.order_by(Participant.pid.asc()))).all()
+    participant_rows = (
+        await db.execute(participant_stmt.order_by(Participant.pid.asc()))
+    ).all()
     id_by_pid: dict[str, Any] = {}
     participants: list[AdminGraphParticipant] = []
     for id_, pid, display_name, type_, status in participant_rows:
@@ -466,7 +499,11 @@ async def load_graph(
         )
 
     # Equivalents: the full list, for the UI's dropdown.
-    eq_models = (await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))).scalars().all()
+    eq_models = (
+        (await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc())))
+        .scalars()
+        .all()
+    )
     equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
     net_code = net_equivalent  # already the canonical code: the route reads it through `canonical_code`
@@ -530,7 +567,9 @@ async def load_graph(
         for eq, debtor, creditor, amount in (await db.execute(debt_stmt)).all()
     ]
 
-    audit_log, transactions, included, truncated = await fetch_optional_collections(db, include)
+    audit_log, transactions, included, truncated = await fetch_optional_collections(
+        db, include
+    )
 
     return {
         "participants": participants,

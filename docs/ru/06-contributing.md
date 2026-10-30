@@ -255,7 +255,7 @@ $env:LOG_LEVEL = "DEBUG"
 
 Используем:
 - **Ruff** — blocking CI-линтер для `app migrations` (замена flake8, isort, pyupgrade)
-- **Black** — пока non-blocking formatting diagnostic
+- **Black** — blocking CI-форматтер для `app` (с 2026-10-30; применённые миграции вне области)
 - **mypy** — опционально (не закреплён в зависимостях репозитория)
 
 ```powershell
@@ -268,8 +268,8 @@ $env:LOG_LEVEL = "DEBUG"
 # Автоисправление Ruff в blocking scope
 .\.venv\Scripts\python.exe -m ruff check --fix app migrations
 
-# Black пока только non-blocking diagnostic; массовое форматирование требует отдельного среза
-.\.venv\Scripts\python.exe -m black --check app migrations
+# Black — blocking для app/ (миграции исключены в pyproject)
+.\.venv\Scripts\python.exe -m black --check app
 ```
 
 ### 4.2. Конфигурация (pyproject.toml)

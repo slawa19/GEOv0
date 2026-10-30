@@ -29,7 +29,11 @@ from app.db.models.audit_log import (
     trust_line_close_completed,
 )
 from app.db.sqlstate import deliberate_chain, sqlstate
-from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
+from app.schemas.trustline import (
+    TrustLineCloseRequest,
+    TrustLineCreateRequest,
+    TrustLineUpdateRequest,
+)
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
     parse_money_amount,
@@ -49,22 +53,34 @@ TRUSTLINE_STATE_CHANGED = "TRUSTLINE_STATE_CHANGED"
 
 
 def _rfc3339(value: datetime | None) -> str | None:
-    return None if value is None else value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        None
+        if value is None
+        else value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
 
 
 #: RFC 3339 `date-time` with an offset or `Z` (030 S6b, `T3095` #2): `fromisoformat` alone took `2026-10-06X12:00:00Z`;
 #: the offset is `HH 00-23`, `MM 00-59` (RFC 3339 §5.6; S6 `T3096` #4: `+00:60` was taken and normalised to an hour).
-_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z")
+_RFC3339 = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z"
+)
 
 
 def _parse_rfc3339(text: object, *, field: str) -> datetime:
     try:
-        value = datetime.fromisoformat(text) if isinstance(text, str) and _RFC3339.match(text) else None
+        value = (
+            datetime.fromisoformat(text)
+            if isinstance(text, str) and _RFC3339.match(text)
+            else None
+        )
     except ValueError:
         value = None
     if value is None or value.tzinfo is None:
-        raise BadRequestException(f"{field} must be an RFC 3339 date-time with a UTC offset",
-                                  details={"field": field, "reason": "not_rfc3339"})
+        raise BadRequestException(
+            f"{field} must be an RFC 3339 date-time with a UTC offset",
+            details={"field": field, "reason": "not_rfc3339"},
+        )
     return value
 
 
@@ -72,8 +88,12 @@ def line_state(trustline: TrustLine) -> dict:
     """The four fields a signed UPDATE/CLOSE binds as `expected`, as the 409 reports them (`limit` as stored; a
     client compares it numerically)."""
 
-    return {"limit": format(trustline.limit, "f"), "policy": dict(trustline.policy or {}),
-            "status": str(trustline.status), "close_requested_at": _rfc3339(trustline.close_requested_at)}
+    return {
+        "limit": format(trustline.limit, "f"),
+        "policy": dict(trustline.policy or {}),
+        "status": str(trustline.status),
+        "close_requested_at": _rfc3339(trustline.close_requested_at),
+    }
 
 
 def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
@@ -120,10 +140,7 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     # with a sqlstate therefore saw an empty table and a message without the DETAIL line,
     # and rejected a genuine live-triple conflict -- a 500 on exactly the path this
     # classifier exists to keep declared.
-    if any(
-        sqlstate(link, walk=False, bare_code=False) == "23505"
-        for link in chain
-    ):
+    if any(sqlstate(link, walk=False, bare_code=False) == "23505" for link in chain):
         tables = [str(getattr(link, "table_name", "") or "") for link in chain]
         tables = [t for t in tables if t]
         if tables and all(t != "trust_lines" for t in tables):
@@ -146,7 +163,10 @@ def _matches_live_triple(text: str) -> bool:
 
 
 def _pair_key(equivalent_id: UUID, a: UUID, b: UUID) -> tuple[UUID, UUID, UUID]:
-    return (equivalent_id, *sorted((a, b), key=str))  # a pair as `lock_pair_lines` locks it: both directions
+    return (
+        equivalent_id,
+        *sorted((a, b), key=str),
+    )  # a pair as `lock_pair_lines` locks it: both directions
 
 
 #: Where the internal trust-line path labels an audit row as part of a caller transaction (programme 021, stage 1;
@@ -210,9 +230,15 @@ class TrustLineWriteBatch:
         self._finished = False
         self._discarded = False
         self._armed = False
-        self._pairs: set[tuple[UUID, UUID, UUID]] = set()  # pairs whose lines this transaction holds FOR UPDATE
-        self._steps: dict[UUID, tuple[str, int] | None] = {}  # equivalents held FOR SHARE, not stopped or held
-        self._rows: dict[tuple, object] = {}  # reference rows by (kind, key): only their identity is read
+        self._pairs: set[tuple[UUID, UUID, UUID]] = (
+            set()
+        )  # pairs whose lines this transaction holds FOR UPDATE
+        self._steps: dict[UUID, tuple[str, int] | None] = (
+            {}
+        )  # equivalents held FOR SHARE, not stopped or held
+        self._rows: dict[tuple, object] = (
+            {}
+        )  # reference rows by (kind, key): only their identity is read
 
     @property
     def applied_operations(self) -> int:
@@ -226,26 +252,40 @@ class TrustLineWriteBatch:
         """Before the first mutation of `equivalent_id` in this batch: remember its code for the audit rows."""
 
         if self._finishing:
-            raise RuntimeError("TrustLineWriteBatch: already finished; open a new batch for new writes")
+            raise RuntimeError(
+                "TrustLineWriteBatch: already finished; open a new batch for new writes"
+            )
         self._codes.setdefault(equivalent_id, equivalent_code)
 
     def _record(self, operation_type: str, equivalent_id: UUID, affected: dict) -> None:
         if equivalent_id not in self._codes:
-            raise RuntimeError("TrustLineWriteBatch: an operation was recorded before its equivalent was touched")
+            raise RuntimeError(
+                "TrustLineWriteBatch: an operation was recorded before its equivalent was touched"
+            )
         self._operations.append((operation_type, equivalent_id, affected))
         self._arm()
 
     def _arm(self) -> None:
         if not self._armed:
             self._armed = True
-            event.listen(self.session.sync_session, "before_commit", self._refuse_unfinished)
-            event.listen(self.session.sync_session, "after_soft_rollback", self._on_rollback)
+            event.listen(
+                self.session.sync_session, "before_commit", self._refuse_unfinished
+            )
+            event.listen(
+                self.session.sync_session, "after_soft_rollback", self._on_rollback
+            )
 
-    async def lock(self, participant_ids: Iterable[UUID], pairs: Iterable[tuple[UUID, UUID, UUID]], *,
-                   timeout_ms: int | None = None) -> list:
+    async def lock(
+        self,
+        participant_ids: Iterable[UUID],
+        pairs: Iterable[tuple[UUID, UUID, UUID]],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list:
         """Every participant `FOR SHARE`, then every live line of `pairs` (both directions) `FOR UPDATE` in ONE
         statement by `trust_lines.id` - a payment's own statement; RETURNS the locked line rows (`MoneyBoundary._LINE`).
-        Until S6b the seeder locked pair by pair in participant order and deadlocked with a payment."""
+        Until S6b the seeder locked pair by pair in participant order and deadlocked with a payment.
+        """
         self._arm()
         pairs, boundary = list(pairs), MoneyBoundary(self.session)
         await boundary.lock_participants(participant_ids, timeout_ms=timeout_ms)
@@ -253,21 +293,32 @@ class TrustLineWriteBatch:
         self._pairs.update(_pair_key(*pair) for pair in pairs)
         return rows
 
-    async def _hold_pair(self, pair: tuple[UUID, UUID, UUID], *, timeout_ms: int | None) -> None:
+    async def _hold_pair(
+        self, pair: tuple[UUID, UUID, UUID], *, timeout_ms: int | None
+    ) -> None:
         """027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` - a creation waits for a money writer over the pair."""
         self._arm()
         if _pair_key(*pair) not in self._pairs:
-            await MoneyBoundary(self.session).lock_pair_lines([pair], timeout_ms=timeout_ms)
+            await MoneyBoundary(self.session).lock_pair_lines(
+                [pair], timeout_ms=timeout_ms
+            )
             self._pairs.add(_pair_key(*pair))
 
-    async def _hold_equivalent(self, equivalent_id: UUID, *, timeout_ms: int | None) -> tuple[str, int] | None:
+    async def _hold_equivalent(
+        self, equivalent_id: UUID, *, timeout_ms: int | None
+    ) -> tuple[str, int] | None:
         """030 S3b (F-030-19), 028 `F-028-25`: the equivalent row `FOR SHARE`, the writers' third lock - refused when
-        stopped or held; `(code, precision)` is the step every limit is checked against."""
+        stopped or held; `(code, precision)` is the step every limit is checked against.
+        """
         self._arm()
         if equivalent_id not in self._steps:
             boundary = MoneyBoundary(self.session)
-            await boundary.refuse_inactive_equivalents([equivalent_id], timeout_ms=timeout_ms)
-            self._steps[equivalent_id] = await boundary.share_equivalent_step(equivalent_id, timeout_ms=timeout_ms)
+            await boundary.refuse_inactive_equivalents(
+                [equivalent_id], timeout_ms=timeout_ms
+            )
+            self._steps[equivalent_id] = await boundary.share_equivalent_step(
+                equivalent_id, timeout_ms=timeout_ms
+            )
         return self._steps[equivalent_id]
 
     async def _row(self, key: tuple, stmt):
@@ -298,7 +349,9 @@ class TrustLineWriteBatch:
         if self._finishing:
             raise RuntimeError("TrustLineWriteBatch: finish() called twice")
         if self._discarded:
-            raise RuntimeError("TrustLineWriteBatch: its transaction was rolled back; nothing to finish")
+            raise RuntimeError(
+                "TrustLineWriteBatch: its transaction was rolled back; nothing to finish"
+            )
         # `_finished` only once everything below succeeded: a finish() that fails half-way (an audit row that
         # did not flush) leaves the detector armed, so a commit that skips the owner's rollback still cannot
         # make the batch durable.
@@ -366,9 +419,13 @@ class TrustLineService:
 
     # ------------------------------------------------------------------ public operations (always signed)
 
-    async def create(self, from_participant_id: UUID, data: TrustLineCreateRequest) -> TrustLine:
+    async def create(
+        self, from_participant_id: UUID, data: TrustLineCreateRequest
+    ) -> TrustLine:
         batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
-        trustline = await self.execute_create(batch, from_participant_id, data, require_signature=True)
+        trustline = await self.execute_create(
+            batch, from_participant_id, data, require_signature=True
+        )
         await batch.finish()
         # `execute_create` found the equivalent BY this code, so it is the row's code.
         equivalent_code = data.equivalent
@@ -404,9 +461,13 @@ class TrustLineService:
         PaymentRouter.invalidate_cache(equivalent_code)
         return response
 
-    async def update(self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest) -> TrustLine:
+    async def update(
+        self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest
+    ) -> TrustLine:
         batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
-        trustline = await self.execute_update(batch, trustline_id, user_id, data, require_signature=True)
+        trustline = await self.execute_update(
+            batch, trustline_id, user_id, data, require_signature=True
+        )
         await batch.finish()
 
         equivalent_code = (
@@ -422,12 +483,17 @@ class TrustLineService:
         PaymentRouter.invalidate_cache(equivalent_code)
         return response
 
-    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> TrustLine:
+    async def close(
+        self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest
+    ) -> TrustLine:
         """Close, or request the close of, a line; returns its FACTUAL state (026 `T2603.1`): `closed`, or still
-        `active` with limit 0 and `close_requested_at` while the debt it supports is owed."""
+        `active` with limit 0 and `close_requested_at` while the debt it supports is owed.
+        """
 
         batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
-        trustline = await self.execute_close(batch, trustline_id, user_id, data, require_signature=True)
+        trustline = await self.execute_close(
+            batch, trustline_id, user_id, data, require_signature=True
+        )
         await batch.finish()
 
         equivalent_code = (
@@ -466,7 +532,9 @@ class TrustLineService:
         classifies - and `batch.finish()` flushes before it stages the audit rows either way.
         """
 
-        if require_signature and (not isinstance(getattr(data, "signature", None), str) or not data.signature):
+        if require_signature and (
+            not isinstance(getattr(data, "signature", None), str) or not data.signature
+        ):
             raise InvalidSignatureException("Missing signature")
 
         from_participant = await self.session.get(Participant, from_participant_id)
@@ -519,7 +587,9 @@ class TrustLineService:
             validate_trustline_policy(data.policy)
 
         # Check existence of 'to' participant (by PID) - once per batch (030 S6b): only its id and pid are read
-        to_participant = await batch._row(("pid", data.to), select(Participant).where(Participant.pid == data.to))
+        to_participant = await batch._row(
+            ("pid", data.to), select(Participant).where(Participant.pid == data.to)
+        )
         if not to_participant:
             raise NotFoundException("Recipient participant not found")
 
@@ -528,8 +598,10 @@ class TrustLineService:
             raise BadRequestException("Cannot create trustline to self")
 
         # Check equivalent - once per batch (030 S6b): only its id and code are read here
-        equivalent = await batch._row(("code", data.equivalent),
-                                      select(Equivalent).where(Equivalent.code == data.equivalent))
+        equivalent = await batch._row(
+            ("code", data.equivalent),
+            select(Equivalent).where(Equivalent.code == data.equivalent),
+        )
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
@@ -539,9 +611,15 @@ class TrustLineService:
         # line to or from a suspended participant (409 `participant_suspended`) - re-read, the status is the one
         # fact this transaction may itself have changed.
         await MoneyBoundary(self.session).refuse_suspended_participants(
-            [from_participant_id, to_participant.id], timeout_ms=lock_timeout_ms)
-        await batch._hold_pair((equivalent.id, from_participant_id, to_participant.id), timeout_ms=lock_timeout_ms)
-        code, precision = await batch._hold_equivalent(equivalent.id, timeout_ms=lock_timeout_ms) or ("?", 8)
+            [from_participant_id, to_participant.id], timeout_ms=lock_timeout_ms
+        )
+        await batch._hold_pair(
+            (equivalent.id, from_participant_id, to_participant.id),
+            timeout_ms=lock_timeout_ms,
+        )
+        code, precision = await batch._hold_equivalent(
+            equivalent.id, timeout_ms=lock_timeout_ms
+        ) or ("?", 8)
         require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
@@ -558,7 +636,7 @@ class TrustLineService:
                 TrustLine.from_participant_id == from_participant_id,
                 TrustLine.to_participant_id == to_participant.id,
                 TrustLine.equivalent_id == equivalent.id,
-                TrustLine.status != 'closed'
+                TrustLine.status != "closed",
             )
         )
         result = await self.session.execute(stmt)
@@ -575,7 +653,7 @@ class TrustLineService:
             equivalent_id=equivalent.id,
             limit=limit,
             policy=data.policy or {},
-            status='active'
+            status="active",
         )
         # NOTE ON TRANSACTION SHAPE.  The INSERT is deliberately left staged in the
         # caller-owned transaction rather than isolated in a SAVEPOINT.  The fail-closed
@@ -636,8 +714,12 @@ class TrustLineService:
 
         # 028 `F-028-6`: `populate_existing` - the row as the lock returns it. A caller that read the line earlier in
         # this session (the Interact actions do) would otherwise decide on its identity-map copy from before the wait.
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update().execution_options(
-            populate_existing=True)
+        stmt = (
+            select(TrustLine)
+            .where(TrustLine.id == trustline_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 
@@ -656,13 +738,19 @@ class TrustLineService:
             # `current` since 030 S5: every 409 of the signed routes names the line's state (a retry reads it).
             raise ConflictException(
                 "Cannot update a closed trustline",
-                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id),
-                         "current": line_state(trustline)},
+                details={
+                    "reason": "TRUSTLINE_CLOSED",
+                    "trustline_id": str(trustline_id),
+                    "current": line_state(trustline),
+                },
             )
 
         user = None
         if require_signature:
-            if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+            if (
+                not isinstance(getattr(data, "signature", None), str)
+                or not data.signature
+            ):
                 raise InvalidSignatureException("Missing signature")
 
             user = await self.session.get(Participant, user_id)
@@ -684,10 +772,17 @@ class TrustLineService:
         # Every refusal BEFORE the first mutation and before the batch is touched. There is no debt floor
         # any more (026 `T2602`): a limit below `used` is a trust change, see the docstring. A requested close
         # keeps the limit at 0 (026 `T2603.1`, fork 6): a positive limit is a conflict and does not cancel it.
-        if trustline.close_requested_at is not None and new_limit is not None and new_limit > 0:
+        if (
+            trustline.close_requested_at is not None
+            and new_limit is not None
+            and new_limit > 0
+        ):
             raise ConflictException(
                 "Trustline close is requested; its limit stays 0 until it closes",
-                details={"reason": "TRUSTLINE_CLOSE_REQUESTED", "trustline_id": str(trustline_id)},
+                details={
+                    "reason": "TRUSTLINE_CLOSE_REQUESTED",
+                    "trustline_id": str(trustline_id),
+                },
             )
         if data.policy is not None:
             validate_trustline_policy(data.policy)
@@ -744,8 +839,12 @@ class TrustLineService:
 
         # 028 `F-028-6`: `populate_existing` - the row as the lock returns it. A caller that read the line earlier in
         # this session (the Interact actions do) would otherwise decide on its identity-map copy from before the wait.
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update().execution_options(
-            populate_existing=True)
+        stmt = (
+            select(TrustLine)
+            .where(TrustLine.id == trustline_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 
@@ -763,12 +862,18 @@ class TrustLineService:
         if str(trustline.status) == "closed":
             raise ConflictException(
                 "Trustline is already closed",
-                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id),
-                         "current": line_state(trustline)},
+                details={
+                    "reason": "TRUSTLINE_CLOSED",
+                    "trustline_id": str(trustline_id),
+                    "current": line_state(trustline),
+                },
             )
 
         if require_signature:
-            if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+            if (
+                not isinstance(getattr(data, "signature", None), str)
+                or not data.signature
+            ):
                 raise InvalidSignatureException("Missing signature")
 
             user = await self.session.get(Participant, user_id)
@@ -787,17 +892,32 @@ class TrustLineService:
             trustline.limit = Decimal("0")
             trustline.close_requested_at = datetime.now(timezone.utc)
         from_pid, to_pid = await self._pids(trustline)
-        parties = (str(from_pid or trustline.from_participant_id), str(to_pid or trustline.to_participant_id))
+        parties = (
+            str(from_pid or trustline.from_participant_id),
+            str(to_pid or trustline.to_participant_id),
+        )
         if supported > 0:
-            batch._record(TRUST_LINE_CLOSE_REQUEST, trustline.equivalent_id,
-                          {"from": parties[0], "to": parties[1], "trustline_id": str(trustline_id)})
+            batch._record(
+                TRUST_LINE_CLOSE_REQUEST,
+                trustline.equivalent_id,
+                {
+                    "from": parties[0],
+                    "to": parties[1],
+                    "trustline_id": str(trustline_id),
+                },
+            )
             return trustline
         trustline.status = "closed"
-        batch._record(TRUST_LINE_CLOSE, trustline.equivalent_id,
-                      trust_line_close_completed(*parties, str(trustline_id), "request"))
+        batch._record(
+            TRUST_LINE_CLOSE,
+            trustline.equivalent_id,
+            trust_line_close_completed(*parties, str(trustline_id), "request"),
+        )
         return trustline
 
-    def _verify_line_operation(self, operation: str, trustline: TrustLine, user: Participant, data) -> None:
+    def _verify_line_operation(
+        self, operation: str, trustline: TrustLine, user: Participant, data
+    ) -> None:
         """030 S5 (F-030-13, `T3000` item 1): the signed bytes of an UPDATE/CLOSE are `operation` (the route's), `id`,
         the new `limit`/`policy` as sent, `expected` = {limit, policy, status, close_requested_at} and `issued_at`.
         Checked in this order, before any write and after the row lock: the body carries all of them (the pre-S5
@@ -812,22 +932,51 @@ class TrustLineService:
         """
 
         if data.operation is None or data.expected is None or data.issued_at is None:
-            raise InvalidSignatureException("Signed payload incomplete", details={
-                "reason": "signed_payload_incomplete", "required": ["operation", "expected", "issued_at", "signature"]})
+            raise InvalidSignatureException(
+                "Signed payload incomplete",
+                details={
+                    "reason": "signed_payload_incomplete",
+                    "required": ["operation", "expected", "issued_at", "signature"],
+                },
+            )
         if data.operation != operation:
-            raise InvalidSignatureException("Signed operation does not match the route", details={
-                "reason": "operation_mismatch", "route_operation": operation, "signed_operation": data.operation})
-        age = (datetime.now(timezone.utc) - _parse_rfc3339(data.issued_at, field="issued_at")).total_seconds()
+            raise InvalidSignatureException(
+                "Signed operation does not match the route",
+                details={
+                    "reason": "operation_mismatch",
+                    "route_operation": operation,
+                    "signed_operation": data.operation,
+                },
+            )
+        age = (
+            datetime.now(timezone.utc)
+            - _parse_rfc3339(data.issued_at, field="issued_at")
+        ).total_seconds()
         if age > SIGNATURE_MAX_AGE_SECONDS:
-            raise InvalidSignatureException("Signature expired", details={
-                "reason": "signature_expired", "issued_at": data.issued_at, "max_age_seconds": SIGNATURE_MAX_AGE_SECONDS})
+            raise InvalidSignatureException(
+                "Signature expired",
+                details={
+                    "reason": "signature_expired",
+                    "issued_at": data.issued_at,
+                    "max_age_seconds": SIGNATURE_MAX_AGE_SECONDS,
+                },
+            )
         if -age > SIGNATURE_MAX_CLOCK_AHEAD_SECONDS:
-            raise InvalidSignatureException("Signature issued in the future", details={
-                "reason": "signature_issued_in_the_future", "issued_at": data.issued_at,
-                "max_clock_ahead_seconds": SIGNATURE_MAX_CLOCK_AHEAD_SECONDS})
+            raise InvalidSignatureException(
+                "Signature issued in the future",
+                details={
+                    "reason": "signature_issued_in_the_future",
+                    "issued_at": data.issued_at,
+                    "max_clock_ahead_seconds": SIGNATURE_MAX_CLOCK_AHEAD_SECONDS,
+                },
+            )
 
-        signed_payload: dict = {"operation": operation, "id": str(trustline.id),
-                                "expected": data.expected.model_dump(), "issued_at": data.issued_at}
+        signed_payload: dict = {
+            "operation": operation,
+            "id": str(trustline.id),
+            "expected": data.expected.model_dump(),
+            "issued_at": data.issued_at,
+        }
         for field in ("limit", "policy"):
             if getattr(data, field, None) is not None:
                 signed_payload[field] = getattr(data, field)
@@ -838,27 +987,50 @@ class TrustLineService:
             raise InvalidSignatureException("Invalid signature")
 
         expected = data.expected
-        expected_at = None if expected.close_requested_at is None else _parse_rfc3339(
-            expected.close_requested_at, field="expected.close_requested_at")
-        if (parse_money_amount(expected.limit, field="expected.limit", require_non_negative=True) != trustline.limit
-                or (expected.policy or {}) != (trustline.policy or {})
-                or expected.status != str(trustline.status)
-                or expected_at != trustline.close_requested_at):
-            raise ConflictException("Trustline state differs from the signed expected state", details={
-                "reason": TRUSTLINE_STATE_CHANGED, "trustline_id": str(trustline.id), "current": line_state(trustline)})
+        expected_at = (
+            None
+            if expected.close_requested_at is None
+            else _parse_rfc3339(
+                expected.close_requested_at, field="expected.close_requested_at"
+            )
+        )
+        if (
+            parse_money_amount(
+                expected.limit, field="expected.limit", require_non_negative=True
+            )
+            != trustline.limit
+            or (expected.policy or {}) != (trustline.policy or {})
+            or expected.status != str(trustline.status)
+            or expected_at != trustline.close_requested_at
+        ):
+            raise ConflictException(
+                "Trustline state differs from the signed expected state",
+                details={
+                    "reason": TRUSTLINE_STATE_CHANGED,
+                    "trustline_id": str(trustline.id),
+                    "current": line_state(trustline),
+                },
+            )
 
-    async def _require_step(self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None) -> None:
+    async def _require_step(
+        self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None
+    ) -> None:
         """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.
         The step is read under the equivalent row `FOR SHARE`, held to commit, so a PATCH lowering the precision
-        either waits for this write and then sees it, or commits first and this write reads the new step."""
+        either waits for this write and then sees it, or commits first and this write reads the new step.
+        """
 
-        step_of = await MoneyBoundary(self.session).share_equivalent_step(equivalent_id, timeout_ms=timeout_ms)
+        step_of = await MoneyBoundary(self.session).share_equivalent_step(
+            equivalent_id, timeout_ms=timeout_ms
+        )
         code, precision = step_of or ("?", 8)
         require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
     async def _equivalent_code(self, equivalent_id: UUID) -> str:
         code = (
-            await self.session.execute(select(Equivalent.code).where(Equivalent.id == equivalent_id))
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == equivalent_id)
+            )
         ).scalar_one_or_none()
         return str(code or equivalent_id)
 
@@ -900,7 +1072,9 @@ class TrustLineService:
         query = (
             select(TrustLine, Equivalent, from_participant, to_participant, Debt.amount)
             .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
-            .join(from_participant, from_participant.id == TrustLine.from_participant_id)
+            .join(
+                from_participant, from_participant.id == TrustLine.from_participant_id
+            )
             .join(to_participant, to_participant.id == TrustLine.to_participant_id)
             # used = debt where debtor is 'to' and creditor is 'from' - the rule of `_get_used_amount`
             .outerjoin(
@@ -911,7 +1085,7 @@ class TrustLineService:
                     Debt.equivalent_id == TrustLine.equivalent_id,
                 ),
             )
-            .where(TrustLine.status == ('active' if status is None else status))
+            .where(TrustLine.status == ("active" if status is None else status))
         )
 
         if direction == "outgoing":
@@ -929,7 +1103,9 @@ class TrustLineService:
         if equivalent:
             validate_equivalent_code(equivalent)
             eq = (
-                await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent))
+                await self.session.execute(
+                    select(Equivalent).where(Equivalent.code == equivalent)
+                )
             ).scalar_one_or_none()
             if not eq:
                 raise NotFoundException(f"Equivalent '{equivalent}' not found")
@@ -944,11 +1120,19 @@ class TrustLineService:
             query = query.offset(offset)
         if limit is not None:
             query = query.limit(limit)
-        
+
         hydrated = []
-        for tl, line_equivalent, line_from, line_to, debt in (await self.session.execute(query)).all():
-            tl.equivalent, tl.from_participant, tl.to_participant = line_equivalent, line_from, line_to
-            hydrated.append(self._attach_read_fields(tl, self._used_of(tl, debt), in_step=True))
+        for tl, line_equivalent, line_from, line_to, debt in (
+            await self.session.execute(query)
+        ).all():
+            tl.equivalent, tl.from_participant, tl.to_participant = (
+                line_equivalent,
+                line_from,
+                line_to,
+            )
+            hydrated.append(
+                self._attach_read_fields(tl, self._used_of(tl, debt), in_step=True)
+            )
         return hydrated
 
     async def get_one(self, trustline_id: UUID) -> TrustLine:
@@ -959,30 +1143,49 @@ class TrustLineService:
             raise NotFoundException("Trustline not found")
         return await self._hydrate_trustline(trustline)
 
-    async def _hydrate_trustline(self, trustline: TrustLine, *, in_step: bool = True) -> TrustLine:
+    async def _hydrate_trustline(
+        self, trustline: TrustLine, *, in_step: bool = True
+    ) -> TrustLine:
         state = sa_inspect(trustline)
 
         # Fetch equivalent code (avoid triggering async lazy-load)
-        if "equivalent" in state.unloaded or getattr(trustline, "equivalent", None) is None:
+        if (
+            "equivalent" in state.unloaded
+            or getattr(trustline, "equivalent", None) is None
+        ):
             stmt = select(Equivalent).where(Equivalent.id == trustline.equivalent_id)
             result = await self.session.execute(stmt)
             trustline.equivalent = result.scalar_one()
 
         # Fetch participant PIDs (avoid triggering async lazy-load)
-        if "from_participant" in state.unloaded or getattr(trustline, "from_participant", None) is None:
-            stmt = select(Participant).where(Participant.id == trustline.from_participant_id)
+        if (
+            "from_participant" in state.unloaded
+            or getattr(trustline, "from_participant", None) is None
+        ):
+            stmt = select(Participant).where(
+                Participant.id == trustline.from_participant_id
+            )
             result = await self.session.execute(stmt)
             trustline.from_participant = result.scalar_one()
 
-        if "to_participant" in state.unloaded or getattr(trustline, "to_participant", None) is None:
-            stmt = select(Participant).where(Participant.id == trustline.to_participant_id)
+        if (
+            "to_participant" in state.unloaded
+            or getattr(trustline, "to_participant", None) is None
+        ):
+            stmt = select(Participant).where(
+                Participant.id == trustline.to_participant_id
+            )
             result = await self.session.execute(stmt)
             trustline.to_participant = result.scalar_one()
 
-        return self._attach_read_fields(trustline, await self._get_used_amount(trustline), in_step=in_step)
+        return self._attach_read_fields(
+            trustline, await self._get_used_amount(trustline), in_step=in_step
+        )
 
     @staticmethod
-    def _attach_read_fields(trustline: TrustLine, used: Decimal, *, in_step: bool) -> TrustLine:
+    def _attach_read_fields(
+        trustline: TrustLine, used: Decimal, *, in_step: bool
+    ) -> TrustLine:
         """The fields the schema reads off a line whose equivalent and participants are loaded."""
 
         # Attach dynamic properties for Pydantic schema
@@ -991,23 +1194,26 @@ class TrustLineService:
         # But since we return the ORM object, we can monkey-patch or use a wrapper.
         # The schema uses aliases.
         # schema.TrustLine: equivalent_code, used, available.
-        
+
         trustline.equivalent_code = trustline.equivalent.code
         # 029 F-029-5: the schema writes limit/used/available in this step; None = the stored scale.
-        trustline.equivalent_precision = int(trustline.equivalent.precision) if in_step else None
+        trustline.equivalent_precision = (
+            int(trustline.equivalent.precision) if in_step else None
+        )
         trustline.from_pid = trustline.from_participant.pid
         trustline.to_pid = trustline.to_participant.pid
         trustline.from_display_name = trustline.from_participant.display_name
         trustline.to_display_name = trustline.to_participant.display_name
         trustline.used = used
         trustline.available = trustline.limit - used
-        
+
         return trustline
 
     @staticmethod
     def _used_of(trustline: TrustLine, debt: Decimal | None) -> Decimal:
         """`used` of a line from the debt of its pair, read with it (`None`: no debt row). One rule with
-        `_get_used_amount`: a closed line's `used` is zero whatever its pair owes now."""
+        `_get_used_amount`: a closed line's `used` is zero whatever its pair owes now.
+        """
 
         if str(getattr(trustline, "status", "")) == "closed" or debt is None:
             return Decimal("0")
@@ -1028,9 +1234,9 @@ class TrustLineService:
             and_(
                 Debt.debtor_id == trustline.to_participant_id,
                 Debt.creditor_id == trustline.from_participant_id,
-                Debt.equivalent_id == trustline.equivalent_id
+                Debt.equivalent_id == trustline.equivalent_id,
             )
         )
         result = await self.session.execute(stmt)
         amount = result.scalar_one_or_none()
-        return amount if amount is not None else Decimal('0')
+        return amount if amount is not None else Decimal("0")

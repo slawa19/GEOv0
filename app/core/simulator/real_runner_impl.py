@@ -69,7 +69,8 @@ def scripted_event_idempotency_key(run_id: str, epoch: int, event_index: int) ->
     not tied to the tick it happens to run at. If a tick fails before the event is marked spent and the event runs
     again one tick later, the key is the same and the payment service answers with the stored payment - the debt
     moves once. After a `restart` the epoch differs, so the same event is a NEW operation that moves money again; the
-    first launch's key is never repeated (the class of F-034-1: a stored payment must not be reported as paid)."""
+    first launch's key is never repeated (the class of F-034-1: a stored payment must not be reported as paid).
+    """
 
     material = f"scripted|{run_id}|{int(epoch)}|{int(event_index)}"
     return "sim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
@@ -114,9 +115,21 @@ class RealRunnerImpl:
         self._logger = logger
 
         # Limits from Settings (024 `T2414.1`); None there keeps the runtime default passed in.
-        self._real_max_consec_tick_failures_limit = self._real_max_consec_tick_failures_default if settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES is None else settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES
-        self._real_max_timeouts_per_tick_limit = self._real_max_timeouts_per_tick_default if settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK is None else settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK
-        self._real_max_errors_total_limit = self._real_max_errors_total_default if settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL is None else settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL
+        self._real_max_consec_tick_failures_limit = (
+            self._real_max_consec_tick_failures_default
+            if settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES is None
+            else settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES
+        )
+        self._real_max_timeouts_per_tick_limit = (
+            self._real_max_timeouts_per_tick_default
+            if settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK is None
+            else settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK
+        )
+        self._real_max_errors_total_limit = (
+            self._real_max_errors_total_default
+            if settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL is None
+            else settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL
+        )
         # `SIMULATOR_CLEARING_MAX_DEPTH` is no longer read (programme 023 slice (d), R4): clearing execution has no
         # depth. The runbook records the variable as removed.
         self._clearing_max_fx_edges_limit = settings.SIMULATOR_CLEARING_MAX_EDGES_FOR_FX
@@ -128,22 +141,40 @@ class RealRunnerImpl:
         # `..._MONEY_REPLAY_ATTEMPTS` counts ATTEMPTS, not retries, so 1 disables the replay.
         # `..._MAX_CONSEC_MONEY_NO_PROGRESS` is the explicit no-progress criterion that may stop a
         # run under permanent contention - the replacement for stopping a run on a SQLSTATE.
-        self._real_money_replay_attempts_limit = settings.SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS
-        self._real_max_consec_money_no_progress_limit = settings.SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS
+        self._real_money_replay_attempts_limit = (
+            settings.SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS
+        )
+        self._real_max_consec_money_no_progress_limit = (
+            settings.SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS
+        )
 
         # Throttling knobs from Settings.
-        self._real_db_metrics_every_n_ticks = settings.SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS
-        self._real_db_bottlenecks_every_n_ticks = settings.SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS
-        self._real_last_tick_write_every_ms = settings.SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS
-        self._real_artifacts_sync_every_ms = settings.SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS
+        self._real_db_metrics_every_n_ticks = (
+            settings.SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS
+        )
+        self._real_db_bottlenecks_every_n_ticks = (
+            settings.SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS
+        )
+        self._real_last_tick_write_every_ms = (
+            settings.SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS
+        )
+        self._real_artifacts_sync_every_ms = (
+            settings.SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS
+        )
 
         # Clearing loop throttling: keep default behavior, but avoid long event-loop stalls.
         # If budget is exceeded, clearing will continue on the next tick.
-        self._real_clearing_time_budget_ms = settings.SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS
+        self._real_clearing_time_budget_ms = (
+            settings.SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS
+        )
 
         # Sub-components: eager init (the runner is created once on startup).
-        self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(logger=self._logger)
-        self._real_debt_snapshot_loader: RealDebtSnapshotLoader = RealDebtSnapshotLoader()
+        self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(
+            logger=self._logger
+        )
+        self._real_debt_snapshot_loader: RealDebtSnapshotLoader = (
+            RealDebtSnapshotLoader()
+        )
         self._sse_emitter: SseEventEmitter = SseEventEmitter(
             sse=self._sse,
             utc_now=self._utc_now,
@@ -397,16 +428,31 @@ class RealRunnerImpl:
         # 036 B2: the scenario's opt-in (`settings.playback.inject_enabled`) can only narrow the process flag, never raise it.
         # Absent: the flag alone decides, as before. A skipped inject is said aloud - the events artifact and the run's
         # progress - and is spent (a flag does not change during a run).
-        playback = ((scenario.get("settings") or {}).get("playback") or {}) if isinstance(scenario, dict) else {}
-        scenario_disables = isinstance(playback, dict) and playback.get("inject_enabled") is False
+        playback = (
+            ((scenario.get("settings") or {}).get("playback") or {})
+            if isinstance(scenario, dict)
+            else {}
+        )
+        scenario_disables = (
+            isinstance(playback, dict) and playback.get("inject_enabled") is False
+        )
         if not self._real_enable_inject or scenario_disables:
-            reason = "inject_disabled_by_process" if not self._real_enable_inject else "inject_disabled_by_scenario"
+            reason = (
+                "inject_disabled_by_process"
+                if not self._real_enable_inject
+                else "inject_disabled_by_scenario"
+            )
             # ONE note, written by the progress writer, with the reason in words (not a second, direct one).
             self._write_story_progress(
-                run, event_index, event_time_ms, int(run._launch_epoch), {"kind": "inject", "status": "refused", "reason": reason},
+                run,
+                event_index,
+                event_time_ms,
+                int(run._launch_epoch),
+                {"kind": "inject", "status": "refused", "reason": reason},
                 spend=True,
                 note=(
-                    "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)" if not self._real_enable_inject
+                    "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)"
+                    if not self._real_enable_inject
                     else "inject skipped (settings.playback.inject_enabled=false)"
                 ),
             )
@@ -436,11 +482,26 @@ class RealRunnerImpl:
                 # 028 `F-028-28`: the FIRST locks of the event - the rows of every participant its effects name, in
                 # `participants.id` order, `FOR UPDATE` for the targets of its freezes (taken now, never upgraded from
                 # `FOR SHARE` mid-event), `FOR SHARE` for the rest. Each effect reads the status under them.
-                event_ids = dict((await session.execute(select(Participant.pid, Participant.id).where(
-                    Participant.pid.in_(sorted(inject_event_participant_pids(event=event)))))).all())
+                event_ids = dict(
+                    (
+                        await session.execute(
+                            select(Participant.pid, Participant.id).where(
+                                Participant.pid.in_(
+                                    sorted(inject_event_participant_pids(event=event))
+                                )
+                            )
+                        )
+                    ).all()
+                )
                 await MoneyBoundary(session).lock_participants(
-                    event_ids.values(), exclusive=[event_ids[p] for p in inject_event_freeze_participant_pids(
-                        event=event) if p in event_ids], timeout_ms=MoneyBoundary.lock_budget_ms())
+                    event_ids.values(),
+                    exclusive=[
+                        event_ids[p]
+                        for p in inject_event_freeze_participant_pids(event=event)
+                        if p in event_ids
+                    ],
+                    timeout_ms=MoneyBoundary.lock_budget_ms(),
+                )
                 # NO DEBT IS WRITTEN HERE (030 S3b, F-030-6): the event is participants, lines and freezes, each through
                 # its service with that service's own checks (the line creation refuses a stopped or held equivalent),
                 # so there is no operation envelope, no line lock set for debts and no stop check of the event's own.
@@ -667,7 +728,9 @@ class RealRunnerImpl:
         await self._tick.tick(run_id)
         self._pause_after_spent_episodes(run, spent_before, epoch)
 
-    def _pause_after_spent_episodes(self, run: RunRecord, spent_before: frozenset[int], epoch: int) -> None:
+    def _pause_after_spent_episodes(
+        self, run: RunRecord, spent_before: frozenset[int], epoch: int
+    ) -> None:
         """036 B2: pause the run after the tick that SPENT an episode with `pause_after: true` (after its money phase and
         clearing; the sim time stands until `resume`). "Spent" is the B1 meaning: a clearing that did not complete, a
         payment whose outcome is not established and an event of another launch are not spent and do not pause. A run that
@@ -680,15 +743,20 @@ class RealRunnerImpl:
             pausing = sorted(
                 index
                 for index in run._real_fired_scenario_event_indexes - spent_before
-                if isinstance(events, list) and 0 <= index < len(events)
-                and isinstance(events[index], dict) and events[index].get("pause_after") is True
+                if isinstance(events, list)
+                and 0 <= index < len(events)
+                and isinstance(events[index], dict)
+                and events[index].get("pause_after") is True
             )
             if not pausing:
                 return
             run.state = "paused"
         # The status is published by the heartbeat loop right after the tick returns (`_heartbeat_loop`), once: not here.
         self._logger.info(
-            "simulator.real.paused_after_episode run_id=%s event_index=%s tick=%s", str(run.run_id), pausing[0], int(run.tick_index)
+            "simulator.real.paused_after_episode run_id=%s event_index=%s tick=%s",
+            str(run.run_id),
+            pausing[0],
+            int(run.tick_index),
         )
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None:
@@ -711,7 +779,14 @@ class RealRunnerImpl:
 
     # ── scripted `payment` / `clearing` events (036 B1) ───────────────────────────────────────────────
 
-    def _refuse_scripted_event(self, run: RunRecord, index: int, event: dict[str, Any], reason: str, **extra: Any) -> None:
+    def _refuse_scripted_event(
+        self,
+        run: RunRecord,
+        index: int,
+        event: dict[str, Any],
+        reason: str,
+        **extra: Any,
+    ) -> None:
         """An event that cannot even be attempted (malformed, unresolved equivalent): said aloud, then spent.
 
         Never a silent skip: a warning in the log, a note in the events artifact and the run's story progress. A
@@ -719,8 +794,17 @@ class RealRunnerImpl:
         is an ordinary `tx.failed` of the payment itself."""
 
         self._write_story_progress(
-            run, int(index), int(event.get("time") or 0), int(run._launch_epoch),
-            {"kind": str(event.get("type")), "status": "refused", "reason": reason, **extra}, spend=True,
+            run,
+            int(index),
+            int(event.get("time") or 0),
+            int(run._launch_epoch),
+            {
+                "kind": str(event.get("type")),
+                "status": "refused",
+                "reason": reason,
+                **extra,
+            },
+            spend=True,
         )
 
     def _write_story_progress(
@@ -751,50 +835,101 @@ class RealRunnerImpl:
         not compared (the announcement has none).
 
         ONE attempt is one call: `attempts` counts the calls that reach here for an event within an epoch, so a caller that
-        reports the same attempt twice (the money phase does: see `report_durable` in `tick.py`) would count it twice."""
+        reports the same attempt twice (the money phase does: see `report_durable` in `tick.py`) would count it twice.
+        """
 
         with self._lock:
             if int(run._launch_epoch) != int(epoch):
                 self._logger.info(
                     "simulator.real.scripted_event_discarded_after_restart run_id=%s event_index=%s planned_epoch=%s epoch=%s",
-                    str(run.run_id), int(index), int(epoch), int(run._launch_epoch),
+                    str(run.run_id),
+                    int(index),
+                    int(epoch),
+                    int(run._launch_epoch),
                 )
                 return
             previous = run._real_story_progress.get(int(index)) or {}
             same_epoch = previous.get("epoch") == int(epoch)
-            stored = {**record, "epoch": int(epoch), "attempts": int(previous.get("attempts", 0) if same_epoch else 0) + 1}
+            stored = {
+                **record,
+                "epoch": int(epoch),
+                "attempts": int(previous.get("attempts", 0) if same_epoch else 0) + 1,
+            }
             if add_cycles is not None:
-                cycles = [*((previous.get("cycles") or []) if same_epoch else []), *add_cycles]
+                cycles = [
+                    *((previous.get("cycles") or []) if same_epoch else []),
+                    *add_cycles,
+                ]
                 stored["cycles"], stored["cleared_cycles"] = cycles, len(cycles)
-                if expected_cycle and stored["status"] == "done" and stored.get("reason") is None:
-                    announced = {(str(a).strip(), str(b).strip()) for a, b in zip(expected_cycle, [*expected_cycle[1:], expected_cycle[0]])}
-                    if not any({(e["from"], e["to"]) for e in c["edges"]} == announced for c in cycles):
+                if (
+                    expected_cycle
+                    and stored["status"] == "done"
+                    and stored.get("reason") is None
+                ):
+                    announced = {
+                        (str(a).strip(), str(b).strip())
+                        for a, b in zip(
+                            expected_cycle, [*expected_cycle[1:], expected_cycle[0]]
+                        )
+                    }
+                    if not any(
+                        {(e["from"], e["to"]) for e in c["edges"]} == announced
+                        for c in cycles
+                    ):
                         stored["reason"] = EXPECTED_CYCLE_NOT_CLEARED
-            changed = (previous.get("status"), previous.get("reason")) != (stored["status"], stored.get("reason")) or not same_epoch
+            changed = (previous.get("status"), previous.get("reason")) != (
+                stored["status"],
+                stored.get("reason"),
+            ) or not same_epoch
             run._real_story_progress[int(index)] = stored
             if spend:
                 run._real_fired_scenario_event_indexes.add(int(index))
         if changed:
-            log = self._logger.info if stored["status"] == "done" and not stored.get("reason") else self._logger.warning
+            log = (
+                self._logger.info
+                if stored["status"] == "done" and not stored.get("reason")
+                else self._logger.warning
+            )
             log(
                 "simulator.real.scripted_event_status run_id=%s event_index=%s kind=%s status=%s reason=%s attempts=%s",
-                str(run.run_id), int(index), stored.get("kind"), stored["status"], stored.get("reason"), stored["attempts"],
+                str(run.run_id),
+                int(index),
+                stored.get("kind"),
+                stored["status"],
+                stored.get("reason"),
+                stored["attempts"],
             )
             self._inject_executor.enqueue_inject_note(
-                run.run_id, run=run, event_index=index, event_time_ms=int(event_time_ms),
-                description=note or f"scripted {stored.get('kind')} {stored['status']}", stats=stored,
+                run.run_id,
+                run=run,
+                event_index=index,
+                event_time_ms=int(event_time_ms),
+                description=note or f"scripted {stored.get('kind')} {stored['status']}",
+                stats=stored,
             )
 
     def _scenario_of(self, run: RunRecord) -> dict[str, Any]:
         """The scenario a tick of this run reads: the run's own deep copy, else the registry's (as `RealTick.tick` does)."""
 
-        return getattr(run, "_scenario_raw", None) or self._get_scenario_raw(run.scenario_id) or {}
+        return (
+            getattr(run, "_scenario_raw", None)
+            or self._get_scenario_raw(run.scenario_id)
+            or {}
+        )
 
     def _event_time_ms_of(self, run: RunRecord, index: int) -> int:
         events = self._scenario_of(run).get("events")
-        event = events[index] if isinstance(events, list) and 0 <= index < len(events) else None
+        event = (
+            events[index]
+            if isinstance(events, list) and 0 <= index < len(events)
+            else None
+        )
         time_ms = event.get("time") if isinstance(event, dict) else 0
-        return int(time_ms) if isinstance(time_ms, int) and not isinstance(time_ms, bool) else 0
+        return (
+            int(time_ms)
+            if isinstance(time_ms, int) and not isinstance(time_ms, bool)
+            else 0
+        )
 
     def scripted_payments_due(
         self, run: RunRecord, scenario: dict[str, Any], *, first_seq: int
@@ -812,15 +947,25 @@ class RealRunnerImpl:
         index_by_seq: dict[int, int] = {}
         epoch = int(run._launch_epoch)
         for idx, evt in enumerate(events if isinstance(events, list) else []):
-            if not isinstance(evt, dict) or evt.get("type") != "payment" or idx in run._real_fired_scenario_event_indexes:
+            if (
+                not isinstance(evt, dict)
+                or evt.get("type") != "payment"
+                or idx in run._real_fired_scenario_event_indexes
+            ):
                 continue
             t0 = self._parse_event_time_ms(evt)
             if t0 is None or int(run.sim_time_ms) < int(t0):
                 continue
             sender, receiver, amount = evt.get("from"), evt.get("to"), evt.get("amount")
             equivalent = effective_equivalent(scenario, evt)
-            if not (isinstance(sender, str) and sender and isinstance(receiver, str) and receiver
-                    and isinstance(amount, str) and amount):
+            if not (
+                isinstance(sender, str)
+                and sender
+                and isinstance(receiver, str)
+                and receiver
+                and isinstance(amount, str)
+                and amount
+            ):
                 self._refuse_scripted_event(run, idx, evt, "malformed_payment")
                 continue
             if not equivalent:
@@ -828,10 +973,14 @@ class RealRunnerImpl:
                 # default, and guessing would pay in a currency the author never named.
                 self._refuse_scripted_event(run, idx, evt, "unresolved_equivalent")
                 continue
-            if equivalent not in {str(x).upper() for x in (run._real_equivalents or [])}:
+            if equivalent not in {
+                str(x).upper() for x in (run._real_equivalents or [])
+            }:
                 # The money phase locked the lines of the RUN's equivalents as its first statement (027 stage 2); a payment
                 # in any other equivalent would run without those locks. Refused aloud, not attempted.
-                self._refuse_scripted_event(run, idx, evt, "equivalent_not_in_the_run", equivalent=equivalent)
+                self._refuse_scripted_event(
+                    run, idx, evt, "equivalent_not_in_the_run", equivalent=equivalent
+                )
                 continue
             actions.append(
                 _RealPaymentAction(
@@ -840,14 +989,20 @@ class RealRunnerImpl:
                     sender_pid=sender,
                     receiver_pid=receiver,
                     amount=amount,
-                    idempotency_key=scripted_event_idempotency_key(run.run_id, epoch, idx),
+                    idempotency_key=scripted_event_idempotency_key(
+                        run.run_id, epoch, idx
+                    ),
                 )
             )
             index_by_seq[int(first_seq) + len(actions) - 1] = idx
         return actions, index_by_seq, epoch
 
     def mark_scripted_events_fired(
-        self, run: RunRecord, indexes: frozenset[int], epoch: int, progress: dict[int, dict[str, Any]] | None = None
+        self,
+        run: RunRecord,
+        indexes: frozenset[int],
+        epoch: int,
+        progress: dict[int, dict[str, Any]] | None = None,
     ) -> None:
         """The money phase that carried these payments is DURABLE (committed, or landed after an unknown commit).
 
@@ -855,18 +1010,28 @@ class RealRunnerImpl:
         transiently before admission). `epoch` is the launch the phase was planned under: if the run has been restarted
         since, the events are those of a launch that is over and the NEW epoch's events are still due - nothing is
         marked. `progress` is the outcome of each scripted payment of the phase (done, refused, or incomplete for one whose
-        outcome is not established); it is written here, once, when the phase is durable."""
+        outcome is not established); it is written here, once, when the phase is durable.
+        """
 
         with self._lock:
             if int(run._launch_epoch) != int(epoch):
                 self._logger.info(
                     "simulator.real.scripted_events_not_spent_after_restart run_id=%s planned_epoch=%s epoch=%s",
-                    str(run.run_id), int(epoch), int(run._launch_epoch),
+                    str(run.run_id),
+                    int(epoch),
+                    int(run._launch_epoch),
                 )
                 return
             run._real_fired_scenario_event_indexes.update(int(i) for i in indexes)
         for index, record in sorted((progress or {}).items()):
-            self._write_story_progress(run, int(index), self._event_time_ms_of(run, int(index)), int(epoch), record, spend=False)
+            self._write_story_progress(
+                run,
+                int(index),
+                self._event_time_ms_of(run, int(index)),
+                int(epoch),
+                record,
+                spend=False,
+            )
 
     def _sim_idempotency_key(
         self,
@@ -914,7 +1079,9 @@ class RealRunnerImpl:
             equivalents=equivalents,
         )
 
-    async def _seed_scenario_into_db(self, session, scenario: dict[str, Any], *, run_id: str | None) -> None:
+    async def _seed_scenario_into_db(
+        self, session, scenario: dict[str, Any], *, run_id: str | None
+    ) -> None:
         await self._real_scenario_seeder.seed_scenario_into_db(
             session=session,
             scenario=scenario,

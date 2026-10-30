@@ -69,9 +69,7 @@ async def get_payment_for_participant(
     requester_pid: str,
 ) -> PaymentResult:
     tx = (
-        await session.execute(
-            select(Transaction).where(Transaction.tx_id == tx_id)
-        )
+        await session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one_or_none()
     if not tx or tx.type != "PAYMENT":
         raise NotFoundException(f"Payment {tx_id} not found")

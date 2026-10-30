@@ -71,7 +71,12 @@ _UNSIGNED = "__internal__"
 
 # The trust-line service's REFUSALS: each is raised before the service stages anything or touches the batch, so
 # an inject effect it refuses is skipped like any other unusable effect.
-_TRUST_LINE_REFUSALS = (BadRequestException, ConflictException, ForbiddenException, NotFoundException)
+_TRUST_LINE_REFUSALS = (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
 
 
 class InjectTrustLineWriteFailed(Exception):
@@ -160,16 +165,20 @@ def inject_event_equivalent_codes(
     return codes
 
 
-def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
+def inject_event_freeze_participant_pids(
+    *, event: Mapping[str, Any] | None
+) -> set[str]:
     """The targets of the event's `freeze_participant` effects: the owner takes their rows `FOR UPDATE` before the
     event's first other lock (028 `F-028-28`), never upgrading a shared lock mid-event. Since `F-028-29` a freeze
-    writes no trust line, so `freeze_trustlines` no longer matters. Mirrors staging: an empty pid is skipped."""
+    writes no trust line, so `freeze_trustlines` no longer matters. Mirrors staging: an empty pid is skipped.
+    """
 
     effects = (event or {}).get("effects")
     return {
         pid
         for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]
-        if isinstance(eff, dict) and str(eff.get("op") or "").strip() == "freeze_participant"
+        if isinstance(eff, dict)
+        and str(eff.get("op") or "").strip() == "freeze_participant"
         for pid in (str(eff.get("participant_id") or "").strip(),)
         if pid
     }
@@ -177,7 +186,8 @@ def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> 
 
 def inject_event_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
     """Every participant an effect of the event names - freezes, new lines (both ends) and the sponsors of a
-    new participant's lines: the owner locks their rows first, in `participants.id` order (028 `F-028-28`)."""
+    new participant's lines: the owner locks their rows first, in `participants.id` order (028 `F-028-28`).
+    """
 
     pids = inject_event_freeze_participant_pids(event=event)
     effects = (event or {}).get("effects")
@@ -187,7 +197,11 @@ def inject_event_participant_pids(*, event: Mapping[str, Any] | None) -> set[str
         op = str(eff.get("op") or "").strip()
         named = [eff.get("from"), eff.get("to")] if op == "create_trustline" else []
         if op == "add_participant" and isinstance(eff.get("initial_trustlines"), list):
-            named = [itl.get("sponsor") for itl in eff["initial_trustlines"] if isinstance(itl, dict)]
+            named = [
+                itl.get("sponsor")
+                for itl in eff["initial_trustlines"]
+                if isinstance(itl, dict)
+            ]
         pids |= {str(pid).strip() for pid in named if str(pid or "").strip()}
     return pids
 
@@ -422,7 +436,9 @@ class InjectExecutor:
             ).one_or_none()
             if row is not None:
                 eq_id_by_code[eq_upper] = row[0]
-                eq_precision_by_code[eq_upper] = int(2 if row[1] is None else row[1])  # 024 T2416.1
+                eq_precision_by_code[eq_upper] = int(
+                    2 if row[1] is None else row[1]
+                )  # 024 T2416.1
                 return row[0]
             return None
 
@@ -467,7 +483,9 @@ class InjectExecutor:
                 )
                 # 029 `F-029-13`: the service's own reason, whichever it is (028: only `participant_suspended` was).
                 if reason := (exc.details or {}).get("reason"):
-                    skipped_reasons[str(reason)] = skipped_reasons.get(str(reason), 0) + 1
+                    skipped_reasons[str(reason)] = (
+                        skipped_reasons.get(str(reason), 0) + 1
+                    )
                 return False
             except SQLAlchemyError:
                 raise
@@ -506,12 +524,16 @@ class InjectExecutor:
                 # (programme 024, F-024-4b). Perimeter members were vetted when they entered it.
                 existing_p = (
                     await session.execute(
-                        select(Participant.id, Participant.public_key).where(Participant.pid == pid)
+                        select(Participant.id, Participant.public_key).where(
+                            Participant.pid == pid
+                        )
                     )
                 ).one_or_none()
                 if existing_p is not None:
                     if pid not in pids:
-                        require_simulated_participant(pid=pid, public_key=existing_p.public_key)
+                        require_simulated_participant(
+                            pid=pid, public_key=existing_p.public_key
+                        )
                     self._logger.info(
                         "simulator.real.inject.add_participant.skip_exists pid=%s",
                         pid,
@@ -523,13 +545,20 @@ class InjectExecutor:
                 p_type = str(p_data.get("type") or "person").strip()
                 if p_type not in {"person", "business", "hub"}:
                     p_type = "person"
-                status = scenario_participant_status(p_data.get("status"))  # the seeder's rule (034 S4, F-034-14)
+                status = scenario_participant_status(
+                    p_data.get("status")
+                )  # the seeder's rule (034 S4, F-034-14)
                 public_key = simulated_public_key(pid)
 
                 # Inserted ACTIVE through the participant service (030 S3b, F-030-19): the lines below are created by
                 # the trust-line service, which refuses a suspended end, so any other status is set AFTER them.
                 new_p = await ParticipantService(session).insert_participant(
-                    pid=pid, display_name=name, public_key=public_key, type=p_type, profile={})
+                    pid=pid,
+                    display_name=name,
+                    public_key=public_key,
+                    type=p_type,
+                    profile={},
+                )
 
                 new_participants_for_cache.append((new_p.id, pid))
                 new_participants_for_scenario.append(
@@ -551,9 +580,13 @@ class InjectExecutor:
                         if not isinstance(itl, dict):
                             continue
                         sponsor_pid = str(itl.get("sponsor") or "").strip()
-                        eq_code = effective_equivalent(scenario=scenario, payload=(itl or {}))
+                        eq_code = effective_equivalent(
+                            scenario=scenario, payload=(itl or {})
+                        )
                         raw_limit = itl.get("limit")
-                        direction = str(itl.get("direction") or "sponsor_credits_new").strip()
+                        direction = str(
+                            itl.get("direction") or "sponsor_credits_new"
+                        ).strip()
 
                         if not sponsor_pid or not eq_code:
                             continue
@@ -583,9 +616,9 @@ class InjectExecutor:
                         if sponsor_id is None:
                             sponsor_row = (
                                 await session.execute(
-                                    select(Participant.id, Participant.public_key).where(
-                                        Participant.pid == sponsor_pid
-                                    )
+                                    select(
+                                        Participant.id, Participant.public_key
+                                    ).where(Participant.pid == sponsor_pid)
                                 )
                             ).one_or_none()
                             if sponsor_row is None:
@@ -635,7 +668,10 @@ class InjectExecutor:
                             continue
 
                         if not await write_trustline(
-                            from_id=from_id, to_pid=to_pid_str, eq_code=eq_code, limit=tl_limit_val
+                            from_id=from_id,
+                            to_pid=to_pid_str,
+                            eq_code=eq_code,
+                            limit=tl_limit_val,
                         ):
                             skipped += 1
                             continue
@@ -657,7 +693,9 @@ class InjectExecutor:
 
                 if status != "active":
                     # The row was inserted ACTIVE above, in this transaction (032 A-5: the scenario's status from it).
-                    await ParticipantService(session).set_status(pid, status, from_statuses=("active",))
+                    await ParticipantService(session).set_status(
+                        pid, status, from_statuses=("active",)
+                    )
                 applied += 1
                 return True
             except (
@@ -697,7 +735,9 @@ class InjectExecutor:
                 except Exception:
                     skipped += 1
                     return False
-                if tl_limit_val.is_finite() and tl_limit_val <= 0:  # non-finite: the storability door below (034 S4b)
+                if (
+                    tl_limit_val.is_finite() and tl_limit_val <= 0
+                ):  # non-finite: the storability door below (034 S4b)
                     skipped += 1
                     return False
                 # Storage-capacity door (012 / F-012-1).
@@ -729,7 +769,9 @@ class InjectExecutor:
                         )
                         skipped += 1
                         return False
-                    require_simulated_participant(pid=from_pid_val, public_key=row.public_key)
+                    require_simulated_participant(
+                        pid=from_pid_val, public_key=row.public_key
+                    )
                     from_id = row.id
                     remember_pid(from_pid_val, from_id)
 
@@ -749,7 +791,9 @@ class InjectExecutor:
                         )
                         skipped += 1
                         return False
-                    require_simulated_participant(pid=to_pid_val, public_key=row.public_key)
+                    require_simulated_participant(
+                        pid=to_pid_val, public_key=row.public_key
+                    )
                     to_id = row.id
                     remember_pid(to_pid_val, to_id)
 
@@ -783,7 +827,10 @@ class InjectExecutor:
                     return False
 
                 if not await write_trustline(
-                    from_id=from_id, to_pid=to_pid_val, eq_code=eq_code, limit=tl_limit_val
+                    from_id=from_id,
+                    to_pid=to_pid_val,
+                    eq_code=eq_code,
+                    limit=tl_limit_val,
                 ):
                     skipped += 1
                     return False
@@ -832,8 +879,15 @@ class InjectExecutor:
                 # no trust line is written (`frozen` is gone). The mutation is the participant service's, the one the
                 # admin freeze calls (030 S3b), and it is SENT here: the session runs with `autoflush=False`, and every
                 # later effect of the event must read `suspended`.
-                p_row = (await session.execute(select(Participant.id, Participant.public_key, Participant.status).where(
-                    Participant.pid == freeze_pid).with_for_update())).one_or_none()
+                p_row = (
+                    await session.execute(
+                        select(
+                            Participant.id, Participant.public_key, Participant.status
+                        )
+                        .where(Participant.pid == freeze_pid)
+                        .with_for_update()
+                    )
+                ).one_or_none()
                 if p_row is None:
                     self._logger.warning(
                         "simulator.real.inject.freeze_participant.not_found pid=%s",
@@ -843,7 +897,9 @@ class InjectExecutor:
                     return False
                 if freeze_pid not in pids:
                     # Outside the perimeter only a simulator-created row may be frozen (F-024-4b).
-                    require_simulated_participant(pid=freeze_pid, public_key=p_row.public_key)
+                    require_simulated_participant(
+                        pid=freeze_pid, public_key=p_row.public_key
+                    )
 
                 if p_row.status == "suspended":
                     self._logger.info(
@@ -863,7 +919,9 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                await ParticipantService(session).set_status(freeze_pid, "suspended", from_statuses=("active",))
+                await ParticipantService(session).set_status(
+                    freeze_pid, "suspended", from_statuses=("active",)
+                )
 
                 # Invalidate only incident equivalents (best-effort).
                 # Freezing a participant affects routing; avoid evicting all equivalents.
@@ -1031,7 +1089,11 @@ class InjectExecutor:
             stats={
                 "applied": int(result.applied),
                 "skipped": int(result.skipped),
-                **({"skipped_reasons": dict(result.skipped_reasons)} if result.skipped_reasons else {}),
+                **(
+                    {"skipped_reasons": dict(result.skipped_reasons)}
+                    if result.skipped_reasons
+                    else {}
+                ),
             },
         )
 

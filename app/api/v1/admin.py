@@ -64,7 +64,6 @@ from app.utils.exceptions import (
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
 
-
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
 
 logger = logging.getLogger(__name__)
@@ -128,7 +127,11 @@ def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
         field = Settings.model_fields[key]
         # 054-D-7: the field's constraints (`ge=1` and the like) live in `field.metadata`, not in the annotation;
         # validating by the bare annotation dropped them, so 0 was accepted where the start-up check refuses it.
-        annotation = Annotated[(field.annotation, *field.metadata)] if field.metadata else field.annotation
+        annotation = (
+            Annotated[(field.annotation, *field.metadata)]
+            if field.metadata
+            else field.annotation
+        )
         try:
             validated[key] = TypeAdapter(annotation).validate_python(
                 value,
@@ -260,7 +263,9 @@ def _ilike_contains(column, needle: str):
 async def list_admin_participants(
     q: str | None = None,
     status: str | None = None,
-    type: Literal["person", "business", "hub"] | None = Query(None, description="Participant type"),
+    type: Literal["person", "business", "hub"] | None = Query(
+        None, description="Participant type"
+    ),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),
@@ -268,7 +273,10 @@ async def list_admin_participants(
     base = select(Participant)
 
     if q:
-        base = base.where(_ilike_contains(Participant.pid, q) | _ilike_contains(Participant.display_name, q))
+        base = base.where(
+            _ilike_contains(Participant.pid, q)
+            | _ilike_contains(Participant.display_name, q)
+        )
     status_db_values = _participant_status_db_values_for_filter(status)
     if status_db_values:
         if len(status_db_values) == 1:
@@ -282,7 +290,11 @@ async def list_admin_participants(
         await db.execute(select(func.count()).select_from(base.subquery()))
     ).scalar_one()
 
-    stmt = base.order_by(Participant.id.asc()).limit(per_page).offset((page - 1) * per_page)
+    stmt = (
+        base.order_by(Participant.id.asc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
     items = (await db.execute(stmt)).scalars().all()
 
     return AdminParticipantsListResponse(
@@ -309,14 +321,12 @@ async def admin_participants_stats(
 ) -> AdminParticipantsStatsResponse:
     status_rows = (
         await db.execute(
-            select(Participant.status, func.count())
-            .group_by(Participant.status)
+            select(Participant.status, func.count()).group_by(Participant.status)
         )
     ).all()
     type_rows = (
         await db.execute(
-            select(Participant.type, func.count())
-            .group_by(Participant.type)
+            select(Participant.type, func.count()).group_by(Participant.type)
         )
     ).all()
 
@@ -341,10 +351,18 @@ async def admin_participants_stats(
 @router.get(
     "/liquidity/summary",
     response_model=AdminLiquiditySummaryResponse,
-    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not an equivalent code after normalisation"}},
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not an equivalent code after normalisation",
+        }
+    },
 )
 async def admin_liquidity_summary(
-    equivalent: str | None = Query(None, description="Equivalent code (optional; omitted: counters only, money null)"),
+    equivalent: str | None = Query(
+        None,
+        description="Equivalent code (optional; omitted: counters only, money null)",
+    ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminLiquiditySummaryResponse:
     """The Dashboard's row of one equivalent: its active lines and their money (032 S5, F-2, F-3).
@@ -354,7 +372,9 @@ async def admin_liquidity_summary(
     equivalent still shows its own sums.
     """
 
-    eq_code = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    eq_code = (
+        equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    )
     now = _utc_now()
 
     used_expr = func.coalesce(Debt.amount, 0)
@@ -427,10 +447,17 @@ async def _set_participant_status(
 ) -> dict:
     # The lock, the matrix check and the mutation are the core's (`ParticipantService.set_status`, 030 S3b, 032 A-5);
     # the audit and the commit here.
-    async with audited(db, request=request, action=audit_action, object_type="participant", object_id=pid,
-                       reason=body.reason) as audit:
+    async with audited(
+        db,
+        request=request,
+        action=audit_action,
+        object_type="participant",
+        object_id=pid,
+        reason=body.reason,
+    ) as audit:
         participant, before_status = await ParticipantService(db).set_status(
-            pid, status_value, from_statuses=_OPERATOR_STATUS_SOURCES[status_value])
+            pid, status_value, from_statuses=_OPERATOR_STATUS_SOURCES[status_value]
+        )
         result = {"pid": participant.pid, "status": participant.status}
         audit.before_state = {"status": before_status}
         audit.after_state = {"status": participant.status}
@@ -526,7 +553,9 @@ async def list_audit_log(
         .offset((page - 1) * per_page)
     )
     items = (await db.execute(stmt)).scalars().all()
-    return AdminAuditLogListResponse(items=items, page=page, per_page=per_page, total=int(total))
+    return AdminAuditLogListResponse(
+        items=items, page=page, per_page=per_page, total=int(total)
+    )
 
 
 @router.get("/equivalents", response_model=EquivalentsList)
@@ -537,7 +566,9 @@ async def admin_list_equivalents(
     stmt = select(EquivalentModel)
     if not include_inactive:
         stmt = stmt.where(EquivalentModel.is_active.is_(True))
-    items = (await db.execute(stmt.order_by(EquivalentModel.code.asc()))).scalars().all()
+    items = (
+        (await db.execute(stmt.order_by(EquivalentModel.code.asc()))).scalars().all()
+    )
     return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])
 
 
@@ -547,13 +578,23 @@ async def admin_list_equivalents(
 #: `participants/{pid}/metrics` reads through the same function, so a code means the same thing wherever it is typed.
 #: `/admin/trustlines?equivalent=` is the deliberate exception: its filter is exact (032 S4, pinned by
 #: `test_trustline_filters_are_exact_and_compose`).
-_CODE_CANNOT_EXIST = {400: {"model": ErrorEnvelope, "description": "Not an equivalent code after normalisation"}}
+_CODE_CANNOT_EXIST = {
+    400: {
+        "model": ErrorEnvelope,
+        "description": "Not an equivalent code after normalisation",
+    }
+}
 
 
 @router.post(
     "/equivalents",
     response_model=EquivalentSchema,
-    responses={409: {"model": ErrorEnvelope, "description": "The code is taken (code_exists); nothing created"}},
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "The code is taken (code_exists); nothing created",
+        }
+    },
 )
 async def admin_create_equivalent(
     body: AdminEquivalentCreateRequest,
@@ -561,8 +602,14 @@ async def admin_create_equivalent(
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
     # 024 `T2412.2`, 030 F-030-9: the row and its baseline in this transaction, by the one core function.
-    async with audited(db, request=request, action="admin.equivalents.create", object_type="equivalent",
-                       object_id=body.code, reason=body.reason) as audit:
+    async with audited(
+        db,
+        request=request,
+        action="admin.equivalents.create",
+        object_type="equivalent",
+        object_id=body.code,
+        reason=body.reason,
+    ) as audit:
         eq = await equivalents_core.create_equivalent(
             db,
             code=body.code,
@@ -588,7 +635,7 @@ async def admin_create_equivalent(
             "model": ErrorEnvelope,
             "description": "Stored equivalent requires an explicit legacy-data repair, or a lower precision under "
             "stored lines, debts or journal entries (precision_in_use)",
-        }
+        },
     },
 )
 async def admin_update_equivalent(
@@ -599,16 +646,24 @@ async def admin_update_equivalent(
 ) -> EquivalentSchema:
     # The stop and the step are the core's (`app/core/equivalents.py`, 032 A-6): its row lock, its checks.
     normalized = equivalents_core.canonical_code(code)
-    async with audited(db, request=request, action="admin.equivalents.patch", object_type="equivalent",
-                       object_id=normalized, reason=body.reason) as audit:
-        eq, audit.before_state, audit.after_state = await equivalents_core.update_equivalent(
-            db,
-            normalized,
-            symbol=body.symbol,
-            description=body.description,
-            precision=body.precision,
-            metadata=body.metadata,
-            is_active=body.is_active,
+    async with audited(
+        db,
+        request=request,
+        action="admin.equivalents.patch",
+        object_type="equivalent",
+        object_id=normalized,
+        reason=body.reason,
+    ) as audit:
+        eq, audit.before_state, audit.after_state = (
+            await equivalents_core.update_equivalent(
+                db,
+                normalized,
+                symbol=body.symbol,
+                description=body.description,
+                precision=body.precision,
+                metadata=body.metadata,
+                is_active=body.is_active,
+            )
         )
         result = EquivalentSchema.model_validate(eq)
     return result
@@ -618,7 +673,13 @@ _ResultStatus = Literal["PASSED", "FAILED", "UNVERIFIABLE"]
 # The null is IN the enum, as the canon requires beside `nullable` (`test_p011_nullable_needs_a_sibling_type`).
 _NullableResultStatus = Annotated[
     _ResultStatus | None,
-    WithJsonSchema({"type": "string", "nullable": True, "enum": ["PASSED", "FAILED", "UNVERIFIABLE", None]}),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "nullable": True,
+            "enum": ["PASSED", "FAILED", "UNVERIFIABLE", None],
+        }
+    ),
 ]
 
 
@@ -663,12 +724,21 @@ async def admin_clear_equivalent_integrity_hold(
 
     The predicate and its row locks are the core's (`app/core/equivalents.py::clear_integrity_hold`, 032 A-6): the
     hold is set by the core and lifted by it. A refusal leaves nothing behind - the frame rolls back, so the row
-    locks end with the refusal, not when the request's session is torn down after the response was sent."""
+    locks end with the refusal, not when the request's session is torn down after the response was sent.
+    """
 
     normalized = equivalents_core.canonical_code(code)
-    async with audited(db, request=request, action="admin.equivalents.integrity_hold.clear",
-                       object_type="equivalent", object_id=normalized, reason=body.reason) as audit:
-        eq, hold_result_id, cleared_on = await equivalents_core.clear_integrity_hold(db, normalized)
+    async with audited(
+        db,
+        request=request,
+        action="admin.equivalents.integrity_hold.clear",
+        object_type="equivalent",
+        object_id=normalized,
+        reason=body.reason,
+    ) as audit:
+        eq, hold_result_id, cleared_on = await equivalents_core.clear_integrity_hold(
+            db, normalized
+        )
         result = EquivalentSchema.model_validate(eq)
         audit.before_state = {"integrity_hold_result_id": str(hold_result_id)}
         audit.after_state = {
@@ -678,7 +748,11 @@ async def admin_clear_equivalent_integrity_hold(
     return result
 
 
-@router.get("/equivalents/{code}/usage", response_model=AdminEquivalentUsageResponse, responses=_CODE_CANNOT_EXIST)
+@router.get(
+    "/equivalents/{code}/usage",
+    response_model=AdminEquivalentUsageResponse,
+    responses=_CODE_CANNOT_EXIST,
+)
 async def admin_equivalent_usage(
     code: str,
     db: AsyncSession = Depends(deps.get_db),
@@ -686,7 +760,9 @@ async def admin_equivalent_usage(
     normalized = equivalents_core.canonical_code(code)
 
     eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
+        await db.execute(
+            select(EquivalentModel).where(EquivalentModel.code == normalized)
+        )
     ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {normalized} not found")
@@ -703,7 +779,7 @@ async def admin_equivalent_usage(
         409: {
             "model": ErrorEnvelope,
             "description": "Active, in use, or named by rows it must not outlive; nothing deleted",
-        }
+        },
     },
 )
 async def admin_delete_equivalent(
@@ -714,8 +790,14 @@ async def admin_delete_equivalent(
 ) -> AdminDeleteResponse:
     normalized = equivalents_core.canonical_code(code)
     # The lock, the refusals (active, in use, referenced by rows it must not outlive) and the delete are the core's.
-    async with audited(db, request=request, action="admin.equivalents.delete", object_type="equivalent",
-                       object_id=normalized, reason=body.reason) as audit:
+    async with audited(
+        db,
+        request=request,
+        action="admin.equivalents.delete",
+        object_type="equivalent",
+        object_id=normalized,
+        reason=body.reason,
+    ) as audit:
         audit.before_state = await equivalents_core.delete_equivalent(db, normalized)
     return AdminDeleteResponse(deleted=normalized)
 
@@ -727,7 +809,8 @@ async def migrations_status() -> AdminMigrationsStatus:
     032 A-1: the application's engine is ASYNC, and `engine.sync_engine.connect()` from a coroutine raises
     `MissingGreenlet` every time - which the old `except Exception` turned into "not up to date" on every database.
     The revision is read on an async connection through `run_sync` now, and a failure is LOGGED with its traceback
-    before the degraded answer (both revisions `null`, `is_up_to_date: false`) - never swallowed silently."""
+    before the degraded answer (both revisions `null`, `is_up_to_date: false`) - never swallowed silently.
+    """
 
     try:
         from alembic.config import Config
@@ -746,7 +829,9 @@ async def migrations_status() -> AdminMigrationsStatus:
 
         async with engine.connect() as conn:
             current = await conn.run_sync(
-                lambda sync_conn: MigrationContext.configure(sync_conn).get_current_revision()
+                lambda sync_conn: MigrationContext.configure(
+                    sync_conn
+                ).get_current_revision()
             )
 
         return AdminMigrationsStatus(
@@ -756,7 +841,9 @@ async def migrations_status() -> AdminMigrationsStatus:
         )
     except Exception:
         logger.error("admin.migrations.status_failed", exc_info=True)
-        return AdminMigrationsStatus(current_revision=None, head_revision=None, is_up_to_date=False)
+        return AdminMigrationsStatus(
+            current_revision=None, head_revision=None, is_up_to_date=False
+        )
 
 
 @router.get("/trustlines", response_model=AdminTrustLinesListResponse)
@@ -780,16 +867,25 @@ async def admin_list_trustlines(
     )
     total = (await db.execute(count_stmt)).scalar_one()
     items = [trustline_schema(row) for row in (await db.execute(page_stmt)).all()]
-    return AdminTrustLinesListResponse(items=items, page=page, per_page=per_page, total=int(total))
+    return AdminTrustLinesListResponse(
+        items=items, page=page, per_page=per_page, total=int(total)
+    )
 
 
 @router.get(
     "/graph/snapshot",
     response_model=AdminGraphSnapshotResponse,
-    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not a valid equivalent code"}},
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a valid equivalent code",
+        }
+    },
 )
 async def admin_graph_snapshot(
-    equivalent: str | None = Query(None, description="Optional equivalent code for net visualization"),
+    equivalent: str | None = Query(
+        None, description="Optional equivalent code for net visualization"
+    ),
     include: str | None = Query(
         None,
         description="Optional extras to include (comma-separated): audit_log,transactions",
@@ -802,16 +898,23 @@ async def admin_graph_snapshot(
     Guardrail: TrustLine direction in output is from→to = creditor→debtor.
     """
 
-    net_equivalent = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    net_equivalent = (
+        equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    )
 
-    return AdminGraphSnapshotResponse(**await load_graph(db, net_equivalent=net_equivalent, include=include))
+    return AdminGraphSnapshotResponse(
+        **await load_graph(db, net_equivalent=net_equivalent, include=include)
+    )
 
 
 @router.get(
     "/graph/ego",
     response_model=AdminGraphEgoResponse,
     responses={
-        400: {"model": ErrorEnvelope, "description": "`pid` is blank, or `equivalent` is not a valid equivalent code"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`pid` is blank, or `equivalent` is not a valid equivalent code",
+        },
         404: {"model": ErrorEnvelope, "description": "No participant has this `pid`"},
     },
 )
@@ -839,13 +942,19 @@ async def admin_graph_ego(
     if not root_pid:
         raise BadRequestException("pid is required")
 
-    equivalent = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    equivalent = (
+        equivalents_core.canonical_code(equivalent) if equivalent is not None else None
+    )
 
-    root = (await db.execute(select(Participant).where(Participant.pid == root_pid))).scalar_one_or_none()
+    root = (
+        await db.execute(select(Participant).where(Participant.pid == root_pid))
+    ).scalar_one_or_none()
     if not root:
         raise NotFoundException("Participant not found")
 
-    scope_ids = await ego_participant_ids(db, root.id, depth=depth, equivalent=equivalent, statuses=status)
+    scope_ids = await ego_participant_ids(
+        db, root.id, depth=depth, equivalent=equivalent, statuses=status
+    )
     data = await load_graph(
         db,
         net_equivalent=equivalent,
@@ -857,13 +966,18 @@ async def admin_graph_ego(
     return AdminGraphEgoResponse(root_pid=root_pid, **data)
 
 
-
 @router.get(
     "/participants/{pid}/metrics",
     response_model=AdminParticipantMetricsResponse,
     responses={
-        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a valid equivalent code"},
-        404: {"model": ErrorEnvelope, "description": "No participant has this `pid`, or no equivalent has this code"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a valid equivalent code",
+        },
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No participant has this `pid`, or no equivalent has this code",
+        },
     },
 )
 async def admin_participant_metrics(

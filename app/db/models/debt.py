@@ -1,14 +1,26 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.types import MoneyNumeric, finite_money_clauses
 
+
 class Debt(Base):
     __tablename__ = "debts"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     # RESTRICT, not CASCADE - T1533 of programme 015, the participant half of the same defect
     # T1524 closed for the equivalent below. Deleting a participant removed every obligation they
     # owed or were owed INSIDE THE DATABASE: no Debt instance loaded, no grant, no `_RowState`, no
@@ -20,20 +32,39 @@ class Debt(Base):
     # participant a `status` of `active | suspended | left | deleted`, and `deleted` is that status,
     # not a missing row. There is no participant hard-delete endpoint in `app/`.
     # Migration 025 makes the same change on existing databases.
-    debtor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=False, index=True)
-    creditor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=False, index=True)
+    debtor_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("participants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    creditor_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("participants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     # RESTRICT, not CASCADE - T1524 of programme 015. Deleting an equivalent must never delete
     # the obligations denominated in it. Under CASCADE the database removed them itself, with no
     # Debt row ever loaded, so no application code, audit or journal hook could see a single
     # obligation disappear. Migration 020 makes the same change on existing databases.
-    equivalent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('equivalents.id', ondelete='RESTRICT'), nullable=False, index=True)
+    equivalent_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("equivalents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     # `MoneyNumeric`, not `Numeric` - T1526. The DDL is unchanged (`NUMERIC(20, 8)`); what the
     # type adds is a refusal to BIND a non-finite value, before the statement is sent. HISTORY
     # (SQLite left with programme 017): on SQLite it was the only guard that could refuse a `NaN`,
     # which the driver turned into `NULL`. The database-level half is the CHECK below.
     amount: Mapped[Decimal] = mapped_column(MoneyNumeric(20, 8), nullable=False)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     __mapper_args__ = {"version_id_col": version}
@@ -43,7 +74,12 @@ class Debt(Base):
     equivalent = relationship("Equivalent")
 
     __table_args__ = (
-        UniqueConstraint('debtor_id', 'creditor_id', 'equivalent_id', name='uq_debts_debtor_creditor_equivalent'),
+        UniqueConstraint(
+            "debtor_id",
+            "creditor_id",
+            "equivalent_id",
+            name="uq_debts_debtor_creditor_equivalent",
+        ),
         # T1526. THREE CLAUSES, THREE JOBS, and none of them may be dropped as a simplification:
         #   `amount > 0`                        SIGN - a debt of zero is not a debt.
         #   `amount <= 999999999999.99999999`   MAGNITUDE - the column's own maximum. Refuses
@@ -67,9 +103,9 @@ class Debt(Base):
         # live in `app/db/types.py::finite_money_clauses`.
         CheckConstraint(
             f"amount > 0 AND {finite_money_clauses('amount')}",
-            name='chk_debt_amount_positive',
+            name="chk_debt_amount_positive",
         ),
-        CheckConstraint('debtor_id != creditor_id', name='chk_debt_no_self_loop'),
-        Index('ix_debts_debtor_creditor', 'debtor_id', 'creditor_id'),
-        Index('ix_debts_equivalent_debtor', 'equivalent_id', 'debtor_id'),
+        CheckConstraint("debtor_id != creditor_id", name="chk_debt_no_self_loop"),
+        Index("ix_debts_debtor_creditor", "debtor_id", "creditor_id"),
+        Index("ix_debts_equivalent_debtor", "equivalent_id", "debtor_id"),
     )

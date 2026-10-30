@@ -314,7 +314,10 @@ _FUNCTIONS_OF_TABLE = {
         "geo_journal_refuse_truncate",
         "geo_debt_operation_must_complete",
     ),
-    "debt_journal_entries": ("geo_debt_journal_entries_guard", "geo_journal_refuse_truncate"),
+    "debt_journal_entries": (
+        "geo_debt_journal_entries_guard",
+        "geo_journal_refuse_truncate",
+    ),
     "debt_operation_equivalents": (
         "geo_debt_operation_equivalents_guard",
         "geo_journal_refuse_truncate",

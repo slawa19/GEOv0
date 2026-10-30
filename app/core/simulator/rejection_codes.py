@@ -14,14 +14,16 @@ from app.core.money_boundary import MoneyBoundary
 #: a reused `tx_id` - none of them is the line's policy.
 #: A scripted payment whose sender the story has not introduced yet (036 B1) is the story's own refusal too and counts as
 #: it did before the review: its `details.reason` is `SCRIPTED_SENDER_NOT_FOUND_REASON` with no exception class.
-SCENARIO_REFUSAL_CODES = frozenset({
-    "ROUTING_NO_CAPACITY",
-    "ROUTING_NO_ROUTE",
-    "ROUTING_REJECTED",
-    "TRUSTLINE_LIMIT_EXCEEDED",
-    "TRUSTLINE_NOT_ACTIVE",
-    "TRUSTLINE_REJECTED",
-})
+SCENARIO_REFUSAL_CODES = frozenset(
+    {
+        "ROUTING_NO_CAPACITY",
+        "ROUTING_NO_ROUTE",
+        "ROUTING_REJECTED",
+        "TRUSTLINE_LIMIT_EXCEEDED",
+        "TRUSTLINE_NOT_ACTIVE",
+        "TRUSTLINE_REJECTED",
+    }
+)
 
 #: `details.reason` of a scripted payment refused because its sender is not in the run (`real_payments_executor.py`,
 #: `_do_one`); the same reason of a PLANNED payment is an error of the run, never a refusal.
@@ -41,9 +43,15 @@ def is_scenario_refusal(rejection_code: str, err_details: Any) -> bool:
     if not isinstance(err_details, dict):
         return False
     inner = err_details.get("details")
-    if isinstance(inner, dict) and inner.get("reason") in MoneyBoundary.MONEY_STOP_REASONS:
+    if (
+        isinstance(inner, dict)
+        and inner.get("reason") in MoneyBoundary.MONEY_STOP_REASONS
+    ):
         return False
-    if not err_details.get("exc") and err_details.get("reason") == SCRIPTED_SENDER_NOT_FOUND_REASON:
+    if (
+        not err_details.get("exc")
+        and err_details.get("reason") == SCRIPTED_SENDER_NOT_FOUND_REASON
+    ):
         return True
     return str(rejection_code) in SCENARIO_REFUSAL_CODES
 

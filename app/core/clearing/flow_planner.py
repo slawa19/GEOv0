@@ -154,14 +154,18 @@ def money_of(atoms: int) -> Decimal:
 # --------------------------------------------------------------------------------------------- the input
 
 
-def _index(edges: Sequence[PlanEdge]) -> tuple[list[uuid.UUID], list[int], list[int], list[int]]:
+def _index(
+    edges: Sequence[PlanEdge],
+) -> tuple[list[uuid.UUID], list[int], list[int], list[int]]:
     """Validate the input and index it: vertices sorted by canonical UUID; tails, heads, capacities."""
 
     seen_ids: set = set()
     pairs: set = set()
     for e in edges:
         if not isinstance(e.atoms, int) or isinstance(e.atoms, bool) or e.atoms <= 0:
-            raise PlanIntegrityError(f"debt {e.debt_id}: amount must be a positive integer of atoms, got {e.atoms!r}")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: amount must be a positive integer of atoms, got {e.atoms!r}"
+            )
         if e.debtor_id == e.creditor_id:
             raise PlanIntegrityError(f"debt {e.debt_id}: debtor and creditor coincide")
         if e.debt_id in seen_ids:
@@ -169,12 +173,16 @@ def _index(edges: Sequence[PlanEdge]) -> tuple[list[uuid.UUID], list[int], list[
         seen_ids.add(e.debt_id)
         pair = (e.debtor_id, e.creditor_id)
         if pair in pairs:
-            raise PlanIntegrityError(f"two debts {e.debtor_id} -> {e.creditor_id} in one equivalent")
+            raise PlanIntegrityError(
+                f"two debts {e.debtor_id} -> {e.creditor_id} in one equivalent"
+            )
         pairs.add(pair)
     for debtor, creditor in pairs:
         if (creditor, debtor) in pairs:
             # The book nets opposing debt; an opposing pair would make a 2-cycle "clearable" by the flow.
-            raise PlanIntegrityError(f"opposing debts between {debtor} and {creditor}: the book never leaves them")
+            raise PlanIntegrityError(
+                f"opposing debts between {debtor} and {creditor}: the book never leaves them"
+            )
     vertices = sorted({v for e in edges for v in (e.debtor_id, e.creditor_id)}, key=str)
     pos = {v: i for i, v in enumerate(vertices)}
     tails = [pos[e.debtor_id] for e in edges]
@@ -183,7 +191,9 @@ def _index(edges: Sequence[PlanEdge]) -> tuple[list[uuid.UUID], list[int], list[
     return vertices, tails, heads, caps
 
 
-def _supplies(n: int, tails: Sequence[int], heads: Sequence[int], amounts: Sequence[int]) -> list[int]:
+def _supplies(
+    n: int, tails: Sequence[int], heads: Sequence[int], amounts: Sequence[int]
+) -> list[int]:
     b = [0] * n
     for k, amount in enumerate(amounts):
         b[tails[k]] += amount
@@ -279,7 +289,9 @@ def solve_transshipment(
                     break
                 base = d_x + pi[x]
                 for a, y, cost in adj[x]:
-                    if res[a] < delta:  # THE SCALING THRESHOLD: only arcs of the Δ-residual graph
+                    if (
+                        res[a] < delta
+                    ):  # THE SCALING THRESHOLD: only arcs of the Δ-residual graph
                         continue
                     if settled_stamp[y] == stamp:
                         continue
@@ -324,16 +336,22 @@ def check_feasible(edges: Sequence[PlanEdge], remaining: dict) -> None:
     for e in edges:
         mk = remaining[e.debt_id]
         if not isinstance(mk, int) or not 0 <= mk <= e.atoms:
-            raise PlanIntegrityError(f"debt {e.debt_id}: remaining {mk!r} outside [0, {e.atoms}]")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: remaining {mk!r} outside [0, {e.atoms}]"
+            )
         t = e.atoms - mk
         net[e.debtor_id] = net.get(e.debtor_id, 0) + t
         net[e.creditor_id] = net.get(e.creditor_id, 0) - t
     unbalanced = [v for v, x in net.items() if x != 0]
     if unbalanced:
-        raise PlanIntegrityError(f"the reduction is not a circulation at {len(unbalanced)} vertex(es)")
+        raise PlanIntegrityError(
+            f"the reduction is not a circulation at {len(unbalanced)} vertex(es)"
+        )
 
 
-def check_certificate(edges: Sequence[PlanEdge], remaining: dict, potentials: dict) -> None:
+def check_certificate(
+    edges: Sequence[PlanEdge], remaining: dict, potentials: dict
+) -> None:
     """Optimality of `M` by integer potentials: `r = 1 + π_debtor - π_creditor`; `M < L => r >= 0`; `M > 0 => r <= 0`.
 
     Assumes `check_feasible` passed. `O(n + m)`. Raises `PlanIntegrityError` naming the first violated edge.
@@ -342,38 +360,58 @@ def check_certificate(edges: Sequence[PlanEdge], remaining: dict, potentials: di
     for e in edges:
         pu, pv = potentials.get(e.debtor_id), potentials.get(e.creditor_id)
         if not isinstance(pu, int) or not isinstance(pv, int):
-            raise PlanIntegrityError(f"debt {e.debt_id}: an endpoint has no integer potential")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: an endpoint has no integer potential"
+            )
         r = 1 + pu - pv
         mk = remaining[e.debt_id]
         if mk < e.atoms and r < 0:
-            raise PlanIntegrityError(f"debt {e.debt_id}: residual forward arc with reduced cost {r} < 0")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: residual forward arc with reduced cost {r} < 0"
+            )
         if mk > 0 and r > 0:
-            raise PlanIntegrityError(f"debt {e.debt_id}: residual backward arc with reduced cost {-r} < 0")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: residual backward arc with reduced cost {-r} < 0"
+            )
 
 
-def check_decomposition(edges: Sequence[PlanEdge], remaining: dict, cycles: Iterable[PlannedCycle]) -> None:
+def check_decomposition(
+    edges: Sequence[PlanEdge], remaining: dict, cycles: Iterable[PlannedCycle]
+) -> None:
     """`Σ c_i χ_{C_i} == L - M` exactly; each cycle simple, closed, length >= 3, `0 < c_i <= L_e`."""
 
     by_id = {e.debt_id: e for e in edges}
     total: dict = {}
     for i, cycle in enumerate(cycles):
         if cycle.atoms <= 0 or len(cycle.edges) < 3:
-            raise PlanIntegrityError(f"cycle {i}: amount {cycle.atoms}, length {len(cycle.edges)}")
+            raise PlanIntegrityError(
+                f"cycle {i}: amount {cycle.atoms}, length {len(cycle.edges)}"
+            )
         seen_vertices: set = set()
         for j, e in enumerate(cycle.edges):
             if by_id.get(e.debt_id) != e:
-                raise PlanIntegrityError(f"cycle {i}: debt {e.debt_id} is not a snapshot edge")
+                raise PlanIntegrityError(
+                    f"cycle {i}: debt {e.debt_id} is not a snapshot edge"
+                )
             if e.creditor_id != cycle.edges[(j + 1) % len(cycle.edges)].debtor_id:
-                raise PlanIntegrityError(f"cycle {i}: not a closed walk at position {j}")
+                raise PlanIntegrityError(
+                    f"cycle {i}: not a closed walk at position {j}"
+                )
             if e.debtor_id in seen_vertices:
-                raise PlanIntegrityError(f"cycle {i}: vertex {e.debtor_id} repeats - not simple")
+                raise PlanIntegrityError(
+                    f"cycle {i}: vertex {e.debtor_id} repeats - not simple"
+                )
             seen_vertices.add(e.debtor_id)
             if cycle.atoms > e.atoms:
-                raise PlanIntegrityError(f"cycle {i}: amount {cycle.atoms} exceeds debt {e.debt_id}")
+                raise PlanIntegrityError(
+                    f"cycle {i}: amount {cycle.atoms} exceeds debt {e.debt_id}"
+                )
             total[e.debt_id] = total.get(e.debt_id, 0) + cycle.atoms
     for e in edges:
         if total.get(e.debt_id, 0) != e.atoms - remaining[e.debt_id]:
-            raise PlanIntegrityError(f"debt {e.debt_id}: cycles reduce {total.get(e.debt_id, 0)}, flow {e.atoms - remaining[e.debt_id]}")
+            raise PlanIntegrityError(
+                f"debt {e.debt_id}: cycles reduce {total.get(e.debt_id, 0)}, flow {e.atoms - remaining[e.debt_id]}"
+            )
 
 
 # --------------------------------------------------------------------------------------------- decompose
@@ -403,13 +441,17 @@ def decompose(edges: Sequence[PlanEdge], remaining: dict) -> list[PlannedCycle]:
         if t[start] == 0:
             continue
         path: list[int] = []  # edge indices of the current walk
-        position = {edges[start].debtor_id: 0}  # vertex -> index in path where it starts
+        position = {
+            edges[start].debtor_id: 0
+        }  # vertex -> index in path where it starts
         v = edges[start].debtor_id
         while True:
             k = next_edge(v)
             if k < 0:
                 if path:
-                    raise PlanIntegrityError(f"the reduction is not a circulation: the walk sticks at {v}")
+                    raise PlanIntegrityError(
+                        f"the reduction is not a circulation: the walk sticks at {v}"
+                    )
                 break
             path.append(k)
             w = edges[k].creditor_id
@@ -420,7 +462,9 @@ def decompose(edges: Sequence[PlanEdge], remaining: dict) -> list[PlannedCycle]:
                 for j in cyc:
                     t[j] -= c
                 first = min(range(len(cyc)), key=lambda i: str(edges[cyc[i]].debt_id))
-                cycles.append(PlannedCycle(tuple(edges[j] for j in cyc[first:] + cyc[:first]), c))
+                cycles.append(
+                    PlannedCycle(tuple(edges[j] for j in cyc[first:] + cyc[:first]), c)
+                )
                 for j in cyc:
                     del position[edges[j].creditor_id]
                 del path[at:]
@@ -432,7 +476,9 @@ def decompose(edges: Sequence[PlanEdge], remaining: dict) -> list[PlannedCycle]:
                 position[w] = len(path)
                 v = w
             if len(cycles) > len(edges):
-                raise PlanIntegrityError("more cycles than edges: the decomposition does not terminate")
+                raise PlanIntegrityError(
+                    "more cycles than edges: the decomposition does not terminate"
+                )
     return cycles
 
 
@@ -481,7 +527,10 @@ _SCOPE_SQL = """
 
 
 async def load_snapshot(
-    session, equivalent_code: str, *, allowed_participant_pids: AbstractSet[str] | None = None
+    session,
+    equivalent_code: str,
+    *,
+    allowed_participant_pids: AbstractSet[str] | None = None,
 ) -> list[PlanEdge]:
     """The eligible subgraph of one equivalent, read in one statement (plus the equivalent and the perimeter).
 
@@ -497,20 +546,31 @@ async def load_snapshot(
     from app.utils.exceptions import NotFoundException
 
     equivalent_id = (
-        await session.execute(select(Equivalent.id).where(Equivalent.code == equivalent_code))
+        await session.execute(
+            select(Equivalent.id).where(Equivalent.code == equivalent_code)
+        )
     ).scalar_one_or_none()
     if equivalent_id is None:
         raise NotFoundException(f"Equivalent {equivalent_code} not found")
-    params: dict = {"equivalent_id": equivalent_id, "statuses": list(_CLEARABLE_TRUSTLINE_STATUSES)}
+    params: dict = {
+        "equivalent_id": equivalent_id,
+        "statuses": list(_CLEARABLE_TRUSTLINE_STATUSES),
+    }
     sql = _ELIGIBLE_EDGES_SQL
     if allowed_participant_pids is not None:
         if not allowed_participant_pids:
             return []
         scope = (
-            await session.execute(
-                select(Participant.id).where(Participant.pid.in_(sorted(allowed_participant_pids)))
+            (
+                await session.execute(
+                    select(Participant.id).where(
+                        Participant.pid.in_(sorted(allowed_participant_pids))
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not scope:
             return []
         params["scope"] = sorted(scope, key=str)
@@ -520,14 +580,21 @@ async def load_snapshot(
     for r in rows:
         policy = None if r.policy is None else json.loads(r.policy)
         if ClearingService._policy_flag(policy, "auto_clearing", default=True):
-            edges.append(PlanEdge(r.id, r.debtor_id, r.creditor_id, atoms_of(Decimal(r.amount))))
+            edges.append(
+                PlanEdge(r.id, r.debtor_id, r.creditor_id, atoms_of(Decimal(r.amount)))
+            )
     return edges
 
 
 async def plan_for_equivalent(
-    session, equivalent_code: str, *, allowed_participant_pids: AbstractSet[str] | None = None
+    session,
+    equivalent_code: str,
+    *,
+    allowed_participant_pids: AbstractSet[str] | None = None,
 ) -> ClearingPlan:
     """Snapshot read + `plan_clearing`. The caller owns the transaction; nothing is written."""
 
-    edges = await load_snapshot(session, equivalent_code, allowed_participant_pids=allowed_participant_pids)
+    edges = await load_snapshot(
+        session, equivalent_code, allowed_participant_pids=allowed_participant_pids
+    )
     return plan_clearing(edges)

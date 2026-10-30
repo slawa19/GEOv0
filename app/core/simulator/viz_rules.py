@@ -50,7 +50,9 @@ def net_sign_from_atoms(atoms: int) -> int:
 
 
 def node_shape_key(type_key: str | None) -> str:
-    return "rounded-rect" if (type_key or "").strip().lower() == "business" else "circle"
+    return (
+        "rounded-rect" if (type_key or "").strip().lower() == "business" else "circle"
+    )
 
 
 def percentile_rank(sorted_mags: list[int], mag: int) -> float:
@@ -62,7 +64,9 @@ def percentile_rank(sorted_mags: list[int], mag: int) -> float:
     return i / (n - 1)
 
 
-def scale_from_pct(pct: float, *, max_scale: float = 1.90, gamma: float = 0.75) -> float:
+def scale_from_pct(
+    pct: float, *, max_scale: float = 1.90, gamma: float = 0.75
+) -> float:
     if pct <= 0:
         return 1.0
     if pct >= 1:
@@ -81,7 +85,13 @@ def debt_bin(debt_mags_sorted: list[int], mag: int, *, bins: int = 9) -> int:
     return max(0, min(b, bins - 1))
 
 
-def node_color_key(*, atoms: int, status_key: str | None, type_key: str | None, debt_mags_sorted: list[int]) -> str | None:
+def node_color_key(
+    *,
+    atoms: int,
+    status_key: str | None,
+    type_key: str | None,
+    debt_mags_sorted: list[int],
+) -> str | None:
     sk = (status_key or "").strip().lower()
     tk = (type_key or "").strip().lower()
 
@@ -99,7 +109,9 @@ def node_color_key(*, atoms: int, status_key: str | None, type_key: str | None, 
     return "business" if tk == "business" else "person"
 
 
-def node_size_wh(*, atoms_abs: int, mags_sorted: list[int], type_key: str | None) -> tuple[int, int]:
+def node_size_wh(
+    *, atoms_abs: int, mags_sorted: list[int], type_key: str | None
+) -> tuple[int, int]:
     pct = percentile_rank(mags_sorted, atoms_abs) if mags_sorted else 0.0
     s = scale_from_pct(pct)
 

@@ -15,11 +15,15 @@ from app.schemas.simulator import RunMode, RunState, ScenarioDetail, ScenarioSum
 @dataclass(frozen=True)
 class InjectResult:
     affected_equivalents: set[str] = field(default_factory=set)
-    new_participants: list[tuple[uuid.UUID, str]] = field(default_factory=list)  # (id, pid)
+    new_participants: list[tuple[uuid.UUID, str]] = field(
+        default_factory=list
+    )  # (id, pid)
     new_participants_scenario: list[dict[str, Any]] = field(default_factory=list)
     new_trustlines_scenario: list[dict[str, Any]] = field(default_factory=list)
     frozen_participant_pids: list[str] = field(default_factory=list)
-    frozen_edges: list[dict[str, str]] = field(default_factory=list)  # {from_pid,to_pid,equivalent_code}
+    frozen_edges: list[dict[str, str]] = field(
+        default_factory=list
+    )  # {from_pid,to_pid,equivalent_code}
     applied: int = 0
     skipped: int = 0
     skipped_reasons: dict[str, int] = field(default_factory=dict)
@@ -71,7 +75,8 @@ class ScenarioRecord:
     def detail(self) -> ScenarioDetail:
         """The summary plus the story (036): the episodes (events with a caption) and the playback settings.
 
-        Raises `ScenarioStoryInvalid` (409) when the story cannot be served as written - see `scenario_story`."""
+        Raises `ScenarioStoryInvalid` (409) when the story cannot be served as written - see `scenario_story`.
+        """
 
         from app.core.simulator.scenario_story import build_story
 
@@ -143,9 +148,11 @@ class RunRecord:
     mode: RunMode
     state: RunState
 
-    owner_id: str = ""          # e.g. "admin", "pid:abc", "anon:xyz", "cli:label"
-    owner_kind: str = ""        # "admin", "participant", "anon"
-    created_by: Optional[dict] = field(default=None)  # {"actor_kind": "...", "owner_id": "...", "ip": "..."}
+    owner_id: str = ""  # e.g. "admin", "pid:abc", "anon:xyz", "cli:label"
+    owner_kind: str = ""  # "admin", "participant", "anon"
+    created_by: Optional[dict] = field(
+        default=None
+    )  # {"actor_kind": "...", "owner_id": "...", "ip": "..."}
 
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None
@@ -302,9 +309,7 @@ class RunRecord:
 
     # Trust drift: per-edge clearing history and config.
     # Key format: "{creditor_pid}:{debtor_pid}:{equivalent_code}"
-    _edge_clearing_history: dict[str, EdgeClearingHistory] = field(
-        default_factory=dict
-    )
+    _edge_clearing_history: dict[str, EdgeClearingHistory] = field(default_factory=dict)
     _trust_drift_config: TrustDriftConfig | None = None
 
 
@@ -315,12 +320,18 @@ def note_subscribers_locked(run: Any, now: float) -> None:
     run._no_subscribers_since = None if run._subs else float(now)
 
 
-def bump_topology_epoch(run: Any, equivalent: Any, creditor_pid: Any, debtor_pid: Any) -> None:
+def bump_topology_epoch(
+    run: Any, equivalent: Any, creditor_pid: Any, debtor_pid: Any
+) -> None:
     """026 `T2603.2`: the run's pair was (re)added or updated in its topology - a closure publication that began
     before this must not remove it. The caller holds the run lock where it has one."""
 
     epochs = getattr(run, "_topology_epoch", None)
     if not isinstance(epochs, dict):
         return
-    key = (str(equivalent or "").strip().upper(), str(creditor_pid or "").strip(), str(debtor_pid or "").strip())
+    key = (
+        str(equivalent or "").strip().upper(),
+        str(creditor_pid or "").strip(),
+        str(debtor_pid or "").strip(),
+    )
     epochs[key] = epochs.get(key, 0) + 1

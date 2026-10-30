@@ -432,15 +432,15 @@ and Windows Simulator visual E2E jobs run only on the weekly schedule or manual 
 `.github/workflows/quality.yml`. The presence of the workflow is not evidence of a
 green CI run until the published job finishes successfully.
 
-Pinned Ruff is a blocking CI gate for `app migrations`; Black still has known
-repository-wide formatting debt. To run both locally after the required checks, use:
+Pinned Ruff is a blocking CI gate for `app migrations`; pinned Black is a blocking CI gate
+for `app` (since 2026-10-30; applied migrations are outside its area). To run both locally after the required checks, use:
 
 ```powershell
 .\scripts\verify_local.ps1 -StaticDiagnostics
 ```
 
 The local `-StaticDiagnostics` wrapper reports both tools without changing its exit
-status. In CI, however, Ruff is blocking and Black alone has `continue-on-error`.
+status. In CI, however, both are blocking.
 Mypy is not configured. Do not report a named command/job as green unless it actually
 reached a final successful state.
 

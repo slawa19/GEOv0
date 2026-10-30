@@ -119,10 +119,14 @@ class RealPaymentPlanner:
 
         return float(mult_all), mult_by_group, mult_by_profile
 
-    def candidates_from_scenario(self, scenario: dict[str, Any]) -> list[dict[str, Any]]:
+    def candidates_from_scenario(
+        self, scenario: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         tls = scenario.get("trustlines") or []
         out: list[dict[str, Any]] = []
-        active_pair_lines: dict[tuple[str, str, str], list[tuple[str, dict | None]]] = {}
+        active_pair_lines: dict[tuple[str, str, str], list[tuple[str, dict | None]]] = (
+            {}
+        )
         for tl in tls:
             if str(tl.get("status") or "active").strip().lower() != "active":
                 continue
@@ -132,7 +136,9 @@ class RealPaymentPlanner:
             if eq and frm and to:
                 pair = (eq, *sorted((frm, to)))
                 active_pair_lines.setdefault(pair, []).append((frm, tl.get("policy")))
-        rules_by_pair = {pair: pair_rules(lines) for pair, lines in active_pair_lines.items()}
+        rules_by_pair = {
+            pair: pair_rules(lines) for pair, lines in active_pair_lines.items()
+        }
         for tl in tls:
             status = str(tl.get("status") or "active").strip().lower()
             if status != "active":
@@ -175,8 +181,12 @@ class RealPaymentPlanner:
         amount_model: dict[str, Any] | None = None,
         precision: int = 2,
     ) -> str | None:
-        step = Decimal(1).scaleb(-int(precision))  # 028 `F-028-32`: the equivalent's step, not always cents
-        bounds = _amount_bounds(limit, amount_cap_limit=self._amount_cap_limit, amount_model=amount_model)
+        step = Decimal(1).scaleb(
+            -int(precision)
+        )  # 028 `F-028-32`: the equivalent's step, not always cents
+        bounds = _amount_bounds(
+            limit, amount_cap_limit=self._amount_cap_limit, amount_model=amount_model
+        )
         if bounds is None:
             return None
         cap, model_min = bounds
@@ -285,7 +295,10 @@ class RealPaymentPlanner:
         if not candidates:
             return []
 
-        tick_seed = (int(getattr(run, "seed", 0)) * 1_000_003 + int(getattr(run, "tick_index", 0))) & 0xFFFFFFFF
+        tick_seed = (
+            int(getattr(run, "seed", 0)) * 1_000_003
+            + int(getattr(run, "tick_index", 0))
+        ) & 0xFFFFFFFF
         tick_rng = random.Random(tick_seed)
 
         order = list(candidates)
@@ -363,13 +376,20 @@ class RealPaymentPlanner:
                 amount_model = maybe
 
         receiver_pid = _choose_receiver(
-            ctx, rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props,
-            amount_model=amount_model, amount_cap_limit=self._amount_cap_limit,
+            ctx,
+            rng=action_rng,
+            eq=eq,
+            sender=sender_pid,
+            sender_props=sender_props,
+            amount_model=amount_model,
+            amount_cap_limit=self._amount_cap_limit,
         )
         if receiver_pid is None:
             return None
 
-        limit = self._capacity_limit(ctx, eq=eq, sender_pid=sender_pid, receiver_pid=receiver_pid)
+        limit = self._capacity_limit(
+            ctx, eq=eq, sender_pid=sender_pid, receiver_pid=receiver_pid
+        )
 
         amount = self.pick_amount(
             action_rng,
@@ -381,7 +401,11 @@ class RealPaymentPlanner:
             return None
 
         if not _passes_periodicity(
-            ctx, action_rng, sender_pid=sender_pid, amount=amount, amount_model=amount_model
+            ctx,
+            action_rng,
+            sender_pid=sender_pid,
+            amount=amount,
+            amount_model=amount_model,
         ):
             return None
 
@@ -421,13 +445,28 @@ class RealPaymentPlanner:
             out_used = ctx.debt_out_agg.get((sender_pid, eq_upper), _ZERO)
             in_used = ctx.debt_in_agg.get((receiver_pid, eq_upper), _ZERO)
             # Reciprocal debt can be repaid in addition to using fresh credit.
-            available_out = max(_ZERO, available_out - out_used + ctx.debt_in_agg.get((sender_pid, eq_upper), _ZERO))
-            available_in = max(_ZERO, available_in - in_used + ctx.debt_out_agg.get((receiver_pid, eq_upper), _ZERO))
+            available_out = max(
+                _ZERO,
+                available_out
+                - out_used
+                + ctx.debt_in_agg.get((sender_pid, eq_upper), _ZERO),
+            )
+            available_in = max(
+                _ZERO,
+                available_in
+                - in_used
+                + ctx.debt_out_agg.get((receiver_pid, eq_upper), _ZERO),
+            )
         limit = min(limit, available_out, available_in)
         if debt_snapshot and static_limit > 0 and limit < static_limit / 2:
             self._logger.debug(
                 "capacity_aware: edge %s→%s eq=%s static_limit=%s available=%s (%.0f%%)",
-                sender_pid, receiver_pid, eq, static_limit, limit, limit / static_limit * 100,
+                sender_pid,
+                receiver_pid,
+                eq,
+                static_limit,
+                limit,
+                limit / static_limit * 100,
             )
 
         # ── Reciprocity Bonus (Phase 4.2) ─────────────────────────
@@ -449,7 +488,10 @@ _ZERO = Decimal("0")
 
 
 def _amount_bounds(
-    limit: Decimal, *, amount_cap_limit: Decimal | None, amount_model: dict[str, Any] | None
+    limit: Decimal,
+    *,
+    amount_cap_limit: Decimal | None,
+    amount_model: dict[str, Any] | None,
 ) -> tuple[Decimal, Decimal | None] | None:
     """Deterministic bounds shared by amount sampling and direct-neighbor eligibility."""
     cap = limit
@@ -538,7 +580,9 @@ LAUNCH_OPENING_TICKS = 5
 VISITOR_FAST_STEP_PERCENT = 15  # twin of the `fast` percent in TopBar.vue `TEMPO_STEPS`; held equal by tooling-tests/portable/test_p049_12_policy_visitor_fast_step_matches_the_planner_threshold.py
 
 
-def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, Any]) -> int:
+def _actions_this_tick(
+    actions_per_tick_max: int, run: Any, scenario: dict[str, Any]
+) -> int:
     """049 decision 10: the tick's share of a FRACTIONAL action budget, accumulated between ticks.
 
     The run's ticks spend the accumulator ``carry += r_t; actions = floor(carry); carry -= actions``, started at 0 at
@@ -592,9 +636,9 @@ def _actions_this_tick(actions_per_tick_max: int, run: Any, scenario: dict[str, 
     warmup_ticks, warmup_floor = _warmup_of(scenario)
     t = max(0, int(getattr(run, "tick_index", 0) or 0))
     rate_max = int(actions_per_tick_max)
-    share = math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)) - math.floor(
-        rate_max * _budget_through(base, warmup_ticks, warmup_floor, t - 1)
-    )
+    share = math.floor(
+        rate_max * _budget_through(base, warmup_ticks, warmup_floor, t)
+    ) - math.floor(rate_max * _budget_through(base, warmup_ticks, warmup_floor, t - 1))
     if 1 <= t <= LAUNCH_OPENING_TICKS:
         return max(1, share)
     return share
@@ -628,7 +672,9 @@ def _warmup_of(scenario: dict[str, Any]) -> tuple[int, Fraction]:
     return warmup_ticks, Fraction(warmup_floor).limit_denominator(1_000_000)
 
 
-def _budget_through(base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t: int) -> Fraction:
+def _budget_through(
+    base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t: int
+) -> Fraction:
     """Sum of the intensities of ticks ``0..t`` at ``base`` (0 for ``t < 0``), exact.
 
     The intensity of tick ``k`` is ``min(base, fast) + ramp_k * max(base - fast, 0)``, ``fast`` being the visitor's
@@ -646,7 +692,11 @@ def _budget_through(base: Fraction, warmup_ticks: int, warmup_floor: Fraction, t
     if warmup_ticks > 0:
         last_ramped = min(t, warmup_ticks - 1)
         n = last_ramped + 1
-        ramp_sum = n * warmup_floor + (1 - warmup_floor) * Fraction(n * (n - 1), 2 * warmup_ticks) + (t - last_ramped)
+        ramp_sum = (
+            n * warmup_floor
+            + (1 - warmup_floor) * Fraction(n * (n - 1), 2 * warmup_ticks)
+            + (t - last_ramped)
+        )
     else:
         ramp_sum = Fraction(t + 1)
     fast = Fraction(VISITOR_FAST_STEP_PERCENT, 100)
@@ -697,7 +747,9 @@ def _build_plan_context(
     precision_by_eq: dict[str, int] | None,
 ) -> _PlanContext:
     profiles_props_by_id, profiles_full_by_id = _index_profiles(scenario)
-    participant_profile_id_by_pid, participant_group_by_pid = _index_participants(scenario)
+    participant_profile_id_by_pid, participant_group_by_pid = _index_participants(
+        scenario
+    )
 
     # ── Phase 4: profile_by_pid lookup for flow/periodicity/reciprocity ──
     profile_by_pid: dict[str, dict[str, Any]] = {}
@@ -716,8 +768,14 @@ def _build_plan_context(
     # Active stress multipliers (tx_rate) for this tick.
     mult_all, mult_by_group, mult_by_profile = stress
 
-    (adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit,
-     total_outgoing_limit, total_incoming_limit) = _build_limit_graph(candidates)
+    (
+        adjacency_by_eq,
+        max_outgoing_limit,
+        max_incoming_limit,
+        direct_edge_limit,
+        total_outgoing_limit,
+        total_incoming_limit,
+    ) = _build_limit_graph(candidates)
     debt_out_agg, debt_in_agg = _aggregate_debts(debt_snapshot)
 
     return _PlanContext(
@@ -739,8 +797,10 @@ def _build_plan_context(
         total_outgoing_limit=total_outgoing_limit,
         total_incoming_limit=total_incoming_limit,
         direct_edge_limit=direct_edge_limit,
-        rules_by_edge={(c["sender_pid"], c["receiver_pid"], c["equivalent"]): c["pair_rules"]
-                       for c in candidates},
+        rules_by_edge={
+            (c["sender_pid"], c["receiver_pid"], c["equivalent"]): c["pair_rules"]
+            for c in candidates
+        },
         debt_snapshot=debt_snapshot,
         debt_out_agg=debt_out_agg,
         debt_in_agg=debt_in_agg,
@@ -765,7 +825,9 @@ def _index_profiles(
     return profiles_props_by_id, profiles_full_by_id
 
 
-def _index_participants(scenario: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+def _index_participants(
+    scenario: dict[str, Any]
+) -> tuple[dict[str, str], dict[str, str]]:
     participant_profile_id_by_pid: dict[str, str] = {}
     participant_group_by_pid: dict[str, str] = {}
     for p in scenario.get("participants") or []:
@@ -836,8 +898,14 @@ def _build_limit_graph(
             # Deterministic neighbor order.
             edges.sort(key=lambda x: x[0])
 
-    return (adjacency_by_eq, max_outgoing_limit, max_incoming_limit, direct_edge_limit,
-            total_outgoing_limit, total_incoming_limit)
+    return (
+        adjacency_by_eq,
+        max_outgoing_limit,
+        max_incoming_limit,
+        direct_edge_limit,
+        total_outgoing_limit,
+        total_incoming_limit,
+    )
 
 
 def _aggregate_debts(
@@ -898,6 +966,7 @@ def _reachable_nodes(
     # Keep paths, not a global node expansion guard: a later edge may block an
     # interior node of one path but permit another path to the same endpoint.
     queue: list[list[str]] = [[sender]]
+
     def rules(u: str, v: str) -> tuple[frozenset[str], frozenset[str]]:
         return ctx.rules_by_edge[(u, v, eq)]
 
@@ -941,14 +1010,21 @@ def _choose_receiver(
     # A direct member must fit the sender's amount bounds and a positive monetary
     # step before it beats a deeper group member. Indirect path capacity remains
     # the router's job; this checks only the direct pair.
-    step = Decimal(1).scaleb(-int((ctx.precision_by_eq or {}).get(eq.strip().upper(), 2)))
+    step = Decimal(1).scaleb(
+        -int((ctx.precision_by_eq or {}).get(eq.strip().upper(), 2))
+    )
     eligible_direct = set()
     for pid in direct:
-        bounds = _amount_bounds(_direct_capacity(ctx, sender, pid, eq),
-                                amount_cap_limit=amount_cap_limit, amount_model=amount_model)
+        bounds = _amount_bounds(
+            _direct_capacity(ctx, sender, pid, eq),
+            amount_cap_limit=amount_cap_limit,
+            amount_model=amount_model,
+        )
         if bounds is not None and bounds[0].quantize(step, rounding=ROUND_DOWN) > 0:
             eligible_direct.add(pid)
-    reachable = [pid for pid in reachable if pid not in direct or pid in eligible_direct]
+    reachable = [
+        pid for pid in reachable if pid not in direct or pid in eligible_direct
+    ]
     if not reachable:
         return None
 
@@ -960,7 +1036,11 @@ def _choose_receiver(
         sender_group = participant_group_by_pid.get(sender)
         if sender_group:
             sender_profile = ctx.profile_by_pid.get(sender, {})
-            sender_profile_props = sender_profile.get("props") if isinstance(sender_profile.get("props"), dict) else {}
+            sender_profile_props = (
+                sender_profile.get("props")
+                if isinstance(sender_profile.get("props"), dict)
+                else {}
+            )
             flow_chains = sender_profile_props.get("flow_chains", [])
             if isinstance(flow_chains, list) and flow_chains:
                 affinity = ctx.flow_default_affinity
@@ -1005,9 +1085,7 @@ def _choose_receiver(
         rng.shuffle(ctx.all_group_ids)
         for g in ctx.all_group_ids:
             in_group = [
-                pid
-                for pid in reachable
-                if participant_group_by_pid.get(pid) == g
+                pid for pid in reachable if participant_group_by_pid.get(pid) == g
             ]
             if in_group:
                 return rng.choice(prefer_direct(in_group))
@@ -1030,7 +1108,11 @@ def _passes_periodicity(
     """
 
     _sender_profile_period = ctx.profile_by_pid.get(sender_pid, {})
-    _sender_props_period = _sender_profile_period.get("props") if isinstance(_sender_profile_period.get("props"), dict) else {}
+    _sender_props_period = (
+        _sender_profile_period.get("props")
+        if isinstance(_sender_profile_period.get("props"), dict)
+        else {}
+    )
     _periodicity_factor = 1.0
     try:
         _pf_raw = _sender_props_period.get("periodicity_factor")
@@ -1056,10 +1138,7 @@ def _passes_periodicity(
             pass
     if _p50_period <= 0:
         return True
-    _den = 1.0 + (
-        math.log(max(_amount_val / _p50_period, 0.1))
-        * _periodicity_factor
-    )
+    _den = 1.0 + (math.log(max(_amount_val / _p50_period, 0.1)) * _periodicity_factor)
     if _den <= 0:
         _period_accept = 0.0
     else:

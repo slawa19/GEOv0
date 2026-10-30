@@ -4,8 +4,10 @@ from pydantic import BaseModel, Field
 
 from app.schemas.participant import ParticipantPublic
 
+
 class ChallengeRequest(BaseModel):
     pid: str
+
 
 class ChallengeResponse(BaseModel):
     challenge: str
@@ -26,6 +28,7 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
 
 class TokenPair(BaseModel):
     access_token: str

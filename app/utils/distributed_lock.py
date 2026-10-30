@@ -60,7 +60,9 @@ async def redis_distributed_lock(
             # Redis-py: returns True if set, None/False otherwise.
             try:
                 async with asyncio.timeout(call_timeout_seconds):  # None: no bound
-                    ok = await redis_client.set(key, token, nx=True, ex=int(ttl_seconds))
+                    ok = await redis_client.set(
+                        key, token, nx=True, ex=int(ttl_seconds)
+                    )
             except TimeoutError:
                 _lease_logger.warning("event=lock.acquire_timeout key=%s", key)
                 await _release(redis_client, key, token, call_timeout_seconds)
@@ -74,7 +76,11 @@ async def redis_distributed_lock(
                 _lease_logger.info("event=lock.busy key=%s", key)
                 raise ConflictException(
                     "Resource is busy",
-                    details={"reason": "busy", "retryable": True, "wait_timeout_seconds": wait_timeout_seconds},
+                    details={
+                        "reason": "busy",
+                        "retryable": True,
+                        "wait_timeout_seconds": wait_timeout_seconds,
+                    },
                 )
 
             await asyncio.sleep(poll_interval_seconds)
@@ -85,7 +91,9 @@ async def redis_distributed_lock(
             await _release(redis_client, key, token, call_timeout_seconds)
 
 
-async def _release(redis_client: Any, key: str, token: str, call_timeout_seconds: float | None) -> None:
+async def _release(
+    redis_client: Any, key: str, token: str, call_timeout_seconds: float | None
+) -> None:
     """Compare-and-delete our token. Best-effort: an error is not raised (it must not mask the block's own), and
     a bounded call past its bound is given up - the key's TTL expires it."""
 
@@ -93,7 +101,9 @@ async def _release(redis_client: Any, key: str, token: str, call_timeout_seconds
         async with asyncio.timeout(call_timeout_seconds):  # None: no bound
             await redis_client.eval(_UNLOCK_LUA, 1, key, token)
     except Exception as exc:  # noqa: BLE001 - the timeout included: the TTL decides
-        _lease_logger.warning("event=lock.release_uncertain key=%s error=%s", key, type(exc).__name__)
+        _lease_logger.warning(
+            "event=lock.release_uncertain key=%s error=%s", key, type(exc).__name__
+        )
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -139,9 +149,17 @@ class RenewableLease:
         safety_margin_seconds: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        if min(ttl_seconds, renew_interval_seconds, renew_timeout_seconds) <= 0 or safety_margin_seconds < 0:
-            raise ValueError("lease durations must be positive (the margin non-negative)")
-        if renew_interval_seconds + renew_timeout_seconds + safety_margin_seconds >= ttl_seconds:
+        if (
+            min(ttl_seconds, renew_interval_seconds, renew_timeout_seconds) <= 0
+            or safety_margin_seconds < 0
+        ):
+            raise ValueError(
+                "lease durations must be positive (the margin non-negative)"
+            )
+        if (
+            renew_interval_seconds + renew_timeout_seconds + safety_margin_seconds
+            >= ttl_seconds
+        ):
             raise ValueError(
                 "renew interval + renew timeout + safety margin must stay below the lease TTL "
                 f"({renew_interval_seconds} + {renew_timeout_seconds} + {safety_margin_seconds} >= {ttl_seconds})"
@@ -171,7 +189,9 @@ class RenewableLease:
     def _confirm(self, sent_at: float) -> None:
         self._valid_until = sent_at + self.ttl_seconds - self.safety_margin_seconds
 
-    async def acquire(self, *, wait_timeout_seconds: float, poll_interval_seconds: float = 0.05) -> None:
+    async def acquire(
+        self, *, wait_timeout_seconds: float, poll_interval_seconds: float = 0.05
+    ) -> None:
         """Take the key or raise `ConflictException` after `wait_timeout_seconds` (0 = one try).
 
         Every `SET` is bounded (review P2-3): it may take at most what is left of the wait budget plus one round
@@ -185,19 +205,29 @@ class RenewableLease:
             self._acquired = True
             return
         if wait_timeout_seconds < 0 or poll_interval_seconds <= 0:
-            raise ValueError("wait_timeout_seconds must be non-negative, poll_interval_seconds positive")
+            raise ValueError(
+                "wait_timeout_seconds must be non-negative, poll_interval_seconds positive"
+            )
         deadline = self._clock() + wait_timeout_seconds
         while True:
             sent_at = self._clock()
             try:
-                async with asyncio.timeout(max(0.0, deadline - sent_at) + self.renew_timeout_seconds):
-                    ok = await self._redis.set(self.key, self.token, nx=True, px=int(self.ttl_seconds * 1000))
+                async with asyncio.timeout(
+                    max(0.0, deadline - sent_at) + self.renew_timeout_seconds
+                ):
+                    ok = await self._redis.set(
+                        self.key, self.token, nx=True, px=int(self.ttl_seconds * 1000)
+                    )
             except TimeoutError:
                 _lease_logger.warning("event=lease.acquire_timeout key=%s", self.key)
                 await self._delete_own_token(event="acquire_uncertain")
                 raise ConflictException(
                     "Resource is busy",
-                    details={"wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout", "retryable": True},
+                    details={
+                        "wait_timeout_seconds": wait_timeout_seconds,
+                        "reason": "timeout",
+                        "retryable": True,
+                    },
                 )
             if ok:
                 self._acquired = True
@@ -206,8 +236,14 @@ class RenewableLease:
             if self._clock() >= deadline:
                 _lease_logger.info("event=lease.busy key=%s", self.key)
                 # 028 §15 review `T2899.4` #4: another owner holds the key - transient, the caller may retry.
-                raise ConflictException("Resource is busy", details={"wait_timeout_seconds": wait_timeout_seconds,
-                                                                     "reason": "busy", "retryable": True})
+                raise ConflictException(
+                    "Resource is busy",
+                    details={
+                        "wait_timeout_seconds": wait_timeout_seconds,
+                        "reason": "busy",
+                        "retryable": True,
+                    },
+                )
             await asyncio.sleep(poll_interval_seconds)
 
     async def renew(self) -> bool:
@@ -222,12 +258,18 @@ class RenewableLease:
             # `asyncio.timeout`, not `wait_for`: on 3.11 `wait_for` can swallow a cancellation that races the inner
             # call's completion, and the renewal task would then outlive its lease (measured: a hung test).
             async with asyncio.timeout(self.renew_timeout_seconds):
-                renewed = await self._redis.eval(_RENEW_LUA, 1, self.key, self.token, int(self.ttl_seconds * 1000))
+                renewed = await self._redis.eval(
+                    _RENEW_LUA, 1, self.key, self.token, int(self.ttl_seconds * 1000)
+                )
         except TimeoutError:
             _lease_logger.warning("event=lease.renew_timeout key=%s", self.key)
             return False
-        except Exception as exc:  # noqa: BLE001 - a failed round trip proves nothing; the local expiry decides
-            _lease_logger.warning("event=lease.renew_failed key=%s error=%s", self.key, type(exc).__name__)
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - a failed round trip proves nothing; the local expiry decides
+            _lease_logger.warning(
+                "event=lease.renew_failed key=%s error=%s", self.key, type(exc).__name__
+            )
             return False
         if renewed:
             self._confirm(sent_at)
@@ -238,7 +280,8 @@ class RenewableLease:
 
     async def release(self) -> None:
         """Compare-and-delete our token, bounded by `renew_timeout_seconds` (review P2-3): an unresponsive Redis
-        must not hold back a result already computed, or shutdown. An uncertain release relies on the TTL."""
+        must not hold back a result already computed, or shutdown. An uncertain release relies on the TTL.
+        """
 
         if self._redis is None or not self._acquired:
             return
@@ -249,7 +292,9 @@ class RenewableLease:
         try:
             async with asyncio.timeout(self.renew_timeout_seconds):
                 await self._redis.eval(_UNLOCK_LUA, 1, self.key, self.token)
-        except Exception as exc:  # noqa: BLE001 - timeout or transport error alike: the key's TTL expires it
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - timeout or transport error alike: the key's TTL expires it
             _lease_logger.warning(
                 "event=lease.%s key=%s error=%s relying_on_ttl_seconds=%s",
                 event,
@@ -280,10 +325,15 @@ async def renewable_lease(
     """
 
     lease = RenewableLease(redis_client, key, **lease_kwargs)
-    await lease.acquire(wait_timeout_seconds=wait_timeout_seconds, poll_interval_seconds=poll_interval_seconds)
+    await lease.acquire(
+        wait_timeout_seconds=wait_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
     renewer: asyncio.Task | None = None
     if lease.distributed:
-        renewer = asyncio.create_task(lease._renew_until_lost(), name=f"geo:lease:{key}")
+        renewer = asyncio.create_task(
+            lease._renew_until_lost(), name=f"geo:lease:{key}"
+        )
     try:
         yield lease
     finally:

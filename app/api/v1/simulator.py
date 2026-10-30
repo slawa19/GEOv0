@@ -43,7 +43,10 @@ from app.core.payments.service import (
     public_refusal_details,
     public_refusal_message,
 )
-from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
+from app.core.simulator.edge_patch_builder import (
+    EdgePatchBuilder,
+    line_pairs_of_payment_hops,
+)
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import (
     RealScenarioSeeder,
@@ -82,11 +85,9 @@ from app.schemas.simulator import (
     SetIntensityRequest,
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
-
     # SSE payloads
     TopologyChangedEdgeRef,
     TopologyChangedPayload,
-
     # Interact Mode action endpoints
     SimulatorActionError,
     SimulatorActionTrustlineCreateRequest,
@@ -107,7 +108,6 @@ from app.schemas.simulator import (
     SimulatorActionParticipantItem,
     SimulatorActionTrustlinesListResponse,
     SimulatorActionTrustlineListItem,
-
     # Phase 2.5 payment targets
     SimulatorPaymentTargetsResponse,
     SimulatorPaymentTargetsItem,
@@ -196,8 +196,8 @@ def _build_clearing_done_cycle_edges_payload(
     seen: set[tuple[str, str]] = set()
     out: list[dict[str, str]] = []
 
-    for cycle in (executed_cycles or []):
-        for e in (getattr(cycle, "edges", None) or []):
+    for cycle in executed_cycles or []:
+        for e in getattr(cycle, "edges", None) or []:
             from_pid = str(getattr(e, "from_", "") or "").strip()
             to_pid = str(getattr(e, "to", "") or "").strip()
             if not from_pid or not to_pid or from_pid == to_pid:
@@ -281,13 +281,23 @@ async def _emit_interact_clearing_done_best_effort(
             exc_info=True,
         )
     # 026 `T2603.2`: every occurrence above is committed (`on_committed`); the lines it closed leave the run.
-    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=equivalent_code, pairs=closed)
+    await _publish_closed_best_effort(
+        run_id=run_id, run=run, equivalent=equivalent_code, pairs=closed
+    )
 
 
-async def _publish_closed_best_effort(*, run_id: str, run, equivalent: str, pairs) -> None:
+async def _publish_closed_best_effort(
+    *, run_id: str, run, equivalent: str, pairs
+) -> None:
     emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-    await publish_closed_trustlines(emitter=emitter, lock=runtime._lock, run_id=run_id, run=run,  # type: ignore[attr-defined]
-                                    equivalent=equivalent, pairs=pairs)
+    await publish_closed_trustlines(
+        emitter=emitter,
+        lock=runtime._lock,
+        run_id=run_id,
+        run=run,  # type: ignore[attr-defined]
+        equivalent=equivalent,
+        pairs=pairs,
+    )
 
 
 def _emit_interact_clearing_done_without_patches_best_effort(
@@ -364,7 +374,9 @@ async def _compute_viz_patches_best_effort(
             helper = await VizPatchHelper.create(
                 session,
                 equivalent_code=eq_upper,
-                refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
+                refresh_every_ticks=int(
+                    settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10
+                ),
             )
             try:
                 with runtime._lock:  # type: ignore[attr-defined]
@@ -399,7 +411,9 @@ async def _compute_viz_patches_best_effort(
         if not pids:
             return None, None
 
-        res = await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+        res = await session.execute(
+            select(Participant).where(Participant.pid.in_(pids))
+        )
         pid_to_participant = {p.pid: p for p in res.scalars().all()}
 
         # 4) Node patch (net balances + viz_*).
@@ -494,20 +508,30 @@ def _action_error(
     message: str,
     details: Optional[dict[str, Any]] = None,
 ) -> JSONResponse:
-    payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json", by_alias=True)
+    payload = SimulatorActionError(
+        code=code, message=message, details=details
+    ).model_dump(mode="json", by_alias=True)
     return JSONResponse(status_code=int(status_code), content=payload)
 
 
 #: 028 `T2864`: `resume` and `restart` re-enter `running` under the limits of create (`F-028-5`).
-_ENTRY_LIMIT_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
-                         "limit of active runs is reached (E008, `details.conflict_kind`)"}
+_ENTRY_LIMIT_CONFLICT = {
+    "model": ErrorEnvelope,
+    "description": "The owner already has an active run, or the global "
+    "limit of active runs is reached (E008, `details.conflict_kind`)",
+}
 #: 054-A-7c: `resume` also refuses a run that failed terminally (`details.reason = run_failed_terminal`).
-_RESUME_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
-                    "limit of active runs is reached (E008, `details.conflict_kind`); or the run failed terminally "
-                    "(E008, `details.reason = run_failed_terminal`, `details.code` = its `last_error.code`) - restart it"}
+_RESUME_CONFLICT = {
+    "model": ErrorEnvelope,
+    "description": "The owner already has an active run, or the global "
+    "limit of active runs is reached (E008, `details.conflict_kind`); or the run failed terminally "
+    "(E008, `details.reason = run_failed_terminal`, `details.code` = its `last_error.code`) - restart it",
+}
 
 
-def _flat_trustline_conflict(exc: ConflictException, details: dict, reasons: tuple[str, ...]) -> JSONResponse:
+def _flat_trustline_conflict(
+    exc: ConflictException, details: dict, reasons: tuple[str, ...]
+) -> JSONResponse:
     """A trust-line action's own conflict in its flat 409 body (`SimulatorActionError`); any other one propagates.
 
     The service names it in `details.reason` (`TRUSTLINE_CLOSE_REQUESTED`, 026 `T2603.1`; `TRUSTLINE_CLOSED`, 028
@@ -517,7 +541,9 @@ def _flat_trustline_conflict(exc: ConflictException, details: dict, reasons: tup
     reason = (exc.details or {}).get("reason")
     if reason not in reasons:
         raise exc
-    return _action_error(status_code=409, code=str(reason), message=exc.message, details=details)
+    return _action_error(
+        status_code=409, code=str(reason), message=exc.message, details=details
+    )
 
 
 def _get_run_checked_or_error(
@@ -620,7 +646,11 @@ def _get_run_checked(run_id: str, actor: "deps.SimulatorActor"):
     if run.state in ("stopped", "error"):
         raise ConflictException(
             "Run is in terminal state",
-            details={"run_id": run_id, "state": run.state, "conflict_kind": "run_terminal"},
+            details={
+                "run_id": run_id,
+                "state": run.state,
+                "conflict_kind": "run_terminal",
+            },
         )
     return run
 
@@ -706,7 +736,10 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
         try:
             try:
                 await _real_scenario_seeder.seed_scenario_into_db(
-                    session=session, scenario=scenario, run_id=getattr(run, "_identity_run_id", None))
+                    session=session,
+                    scenario=scenario,
+                    run_id=getattr(run, "_identity_run_id", None),
+                )
                 await session.commit()
             except SimulatorPidTakenError:
                 # The 024 perimeter refuses before the seeder stages anything (`seed_scenario_into_db`
@@ -720,7 +753,9 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 raise
             # The seed is durable. Keep the flag false until refresh succeeds so a
             # failure/cancellation retries idempotent seeding, without running money.
-            await refresh_seeded_routing_after_commit(session=session, scenario=scenario)
+            await refresh_seeded_routing_after_commit(
+                session=session, scenario=scenario
+            )
             run._real_seeded = True
             logger.debug(
                 "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",
@@ -752,10 +787,22 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
             )
         except ScenarioTrustLineRefused as exc:
             # 028 `F-028-3`/`F-028-24`: a line of the scenario breaks the trust-line rules - not transient.
-            logger.warning("interact.ensure_seeded: refused run_id=%s line=%s reason=%s", run_id, exc.line,
-                           exc.details["reason"])
-            return _action_error(status_code=409, code=str(exc.details["code"]), message=exc.message,
-                                 details={"run_id": str(run_id), "line": exc.line, "reason": exc.details["reason"]})
+            logger.warning(
+                "interact.ensure_seeded: refused run_id=%s line=%s reason=%s",
+                run_id,
+                exc.line,
+                exc.details["reason"],
+            )
+            return _action_error(
+                status_code=409,
+                code=str(exc.details["code"]),
+                message=exc.message,
+                details={
+                    "run_id": str(run_id),
+                    "line": exc.line,
+                    "reason": exc.details["reason"],
+                },
+            )
         except Exception:
             logger.error(
                 "interact.ensure_seeded: seeding failed for run_id=%s",
@@ -803,10 +850,14 @@ async def _run_perimeter(*, run_id: str, session) -> tuple[set[str], bool]:
     P1 authorisation guard once really was switched off by an exception that way.
     """
     try:
-        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=session)
+        snap = await runtime.build_graph_snapshot(
+            run_id=run_id, equivalent="", session=session
+        )
     except Exception:
         logger.warning(
-            "simulator.actions.perimeter_unavailable run_id=%s", str(run_id), exc_info=True
+            "simulator.actions.perimeter_unavailable run_id=%s",
+            str(run_id),
+            exc_info=True,
         )
         return set(), False
     nodes = getattr(snap, "nodes", None) or []
@@ -825,7 +876,12 @@ def _perimeter_unavailable_error(run_id: str) -> JSONResponse:
 
 
 async def _resolve_participant_or_error(
-    *, session, pid: str, field: str, scoped_pids: Optional[set[str]] = None, reason: Optional[str] = None
+    *,
+    session,
+    pid: str,
+    field: str,
+    scoped_pids: Optional[set[str]] = None,
+    reason: Optional[str] = None,
 ) -> tuple[Optional[Participant], Optional[JSONResponse]]:
     """Resolve a participant, optionally restricted to the perimeter of one run.
 
@@ -840,7 +896,11 @@ async def _resolve_participant_or_error(
         status_code=404,
         code="PARTICIPANT_NOT_FOUND",
         message="Participant not found",
-        details={"field": field, "pid": pid_s, **({"reason": reason} if reason else {})},
+        details={
+            "field": field,
+            "pid": pid_s,
+            **({"reason": reason} if reason else {}),
+        },
     )
     if not pid_s:
         return None, not_found
@@ -926,7 +986,10 @@ async def _trustline_reverse_used_amount(
         return Decimal("0")
 
 
-_INTERACT_ROUTING_CODE = {"no_route": "NO_ROUTE", "insufficient_capacity": "INSUFFICIENT_CAPACITY"}
+_INTERACT_ROUTING_CODE = {
+    "no_route": "NO_ROUTE",
+    "insufficient_capacity": "INSUFFICIENT_CAPACITY",
+}
 
 
 def _fmt_decimal_for_api(v: Decimal, precision: int) -> str:
@@ -938,18 +1001,28 @@ def _norm_pid(v: object) -> str:
     return str(v or "").strip()
 
 
-def _step_error_or_none(value: Decimal, eq: Any, *, field: str, raw: object) -> Optional[JSONResponse]:
+def _step_error_or_none(
+    value: Decimal, eq: Any, *, field: str, raw: object
+) -> Optional[JSONResponse]:
     """028 `F-028-23` (owner В-4): an amount or limit finer than the equivalent's step - the action's own 400."""
 
     try:
-        require_money_step(value, precision=eq.precision, equivalent=eq.code, field=field)
+        require_money_step(
+            value, precision=eq.precision, equivalent=eq.code, field=field
+        )
     except BadRequestException as exc:
-        return _action_error(status_code=400, code="INVALID_AMOUNT", message=exc.message,
-                             details={field: raw, **(exc.details or {})})
+        return _action_error(
+            status_code=400,
+            code="INVALID_AMOUNT",
+            message=exc.message,
+            details={field: raw, **(exc.details or {})},
+        )
     return None
 
 
-def _guard_no_self_loop_or_error(*, from_pid: object, to_pid: object) -> Optional[JSONResponse]:
+def _guard_no_self_loop_or_error(
+    *, from_pid: object, to_pid: object
+) -> Optional[JSONResponse]:
     """Guard against self-loop trustlines.
 
     Spec: for trustline-create/update/close, reject from_pid == to_pid.
@@ -1005,7 +1078,10 @@ def _mutate_runtime_trustline_topology_best_effort(
             tp = _norm_pid(to_pid)
             if not (eq and fp and tp):
                 return
-            if op in ("create", "update"):  # 026 `T2603.2`: a closure publication begun before this skips the pair.
+            if op in (
+                "create",
+                "update",
+            ):  # 026 `T2603.2`: a closure publication begun before this skips the pair.
                 bump_topology_epoch(run, eq, fp, tp)
 
             # Invalidate per-equivalent viz cache so subsequent node/edge patches are consistent.
@@ -1075,7 +1151,9 @@ def _mutate_runtime_trustline_topology_best_effort(
                     edges_by_eq[eq] = lst
                 elif op == "close":
                     lst = list(edges_by_eq.get(eq) or [])
-                    edges_by_eq[eq] = [(a, b) for (a, b) in lst if not (a == fp and b == tp)]
+                    edges_by_eq[eq] = [
+                        (a, b) for (a, b) in lst if not (a == fp and b == tp)
+                    ]
 
         if lock_ctx is None:
             _apply()
@@ -1121,7 +1199,13 @@ class _ActionParties:
 
 
 async def _action_parties_or_error(
-    *, run_id: str, db, from_pid: str, to_pid: str, equivalent: str, payment: bool = False
+    *,
+    run_id: str,
+    db,
+    from_pid: str,
+    to_pid: str,
+    equivalent: str,
+    payment: bool = False,
 ) -> tuple[Optional[_ActionParties], Optional[JSONResponse]]:
     """The perimeter half of a mutating action, in its fixed order of refusals.
 
@@ -1139,20 +1223,33 @@ async def _action_parties_or_error(
         return None, _perimeter_unavailable_error(run_id)
     # `payment`: the refusals carry the payment's machine reason (028 `F-028-42`, §15 review `T2899.4` #3).
     from_p, err = await _resolve_participant_or_error(
-        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids, reason="other" if payment else None
+        session=db,
+        pid=from_pid,
+        field="from_pid",
+        scoped_pids=scoped_pids,
+        reason="other" if payment else None,
     )
     if err is not None:
         return None, err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=to_pid, field="to_pid", scoped_pids=scoped_pids,
-                                                     reason="recipient_not_found" if payment else None)
+    to_p, err = await _resolve_participant_or_error(
+        session=db,
+        pid=to_pid,
+        field="to_pid",
+        scoped_pids=scoped_pids,
+        reason="recipient_not_found" if payment else None,
+    )
     if err is not None:
         return None, err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=equivalent,
-                                                 reason="equivalent_not_found" if payment else None)
+    eq, err = await _resolve_equivalent_or_error(
+        session=db, code=equivalent, reason="equivalent_not_found" if payment else None
+    )
     if err is not None:
         return None, err
     assert from_p is not None and to_p is not None and eq is not None
-    return _ActionParties(scoped_pids=scoped_pids, from_p=from_p, to_p=to_p, eq=eq), None
+    return (
+        _ActionParties(scoped_pids=scoped_pids, from_p=from_p, to_p=to_p, eq=eq),
+        None,
+    )
 
 
 async def _live_trustline(db, parties: _ActionParties) -> Optional[TrustLine]:
@@ -1185,10 +1282,18 @@ async def _pair_debts_or_error(
     other way. A failed read is NOT taken as 0: that could create or keep a line whose limit is below its debt.
     """
 
-    ids = {"from_id": parties.from_p.id, "to_id": parties.to_p.id, "equivalent_id": parties.eq.id}
+    ids = {
+        "from_id": parties.from_p.id,
+        "to_id": parties.to_p.id,
+        "equivalent_id": parties.eq.id,
+    }
     try:
         used = await _trustline_used_amount(db, **ids)
-        reverse_used = await _trustline_reverse_used_amount(db, **ids) if with_reverse else Decimal("0")
+        reverse_used = (
+            await _trustline_reverse_used_amount(db, **ids)
+            if with_reverse
+            else Decimal("0")
+        )
     except Exception:
         logger.error(
             "Failed to read used amount for %s: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
@@ -1235,7 +1340,12 @@ async def _publish_trustline_change_best_effort(
 
     eq_code, from_pid, to_pid = parties.eq.code, parties.from_p.pid, parties.to_p.pid
     _mutate_runtime_trustline_topology_best_effort(
-        run_id=run_id, op=op, equivalent=eq_code, from_pid=from_pid, to_pid=to_pid, limit=limit_raw
+        run_id=run_id,
+        op=op,
+        equivalent=eq_code,
+        from_pid=from_pid,
+        to_pid=to_pid,
+        limit=limit_raw,
     )
     # Trust-line topology is the routing graph.
     try:
@@ -1243,7 +1353,10 @@ async def _publish_trustline_change_best_effort(
     except Exception:
         logger.warning(
             "Router cache invalidation failed: interact.trustline_%s run_id=%s equivalent=%s",
-            op, run_id, eq_code, exc_info=True,
+            op,
+            run_id,
+            eq_code,
+            exc_info=True,
         )
 
     try:
@@ -1253,7 +1366,9 @@ async def _publish_trustline_change_best_effort(
         patch_failed = False
         if op in ("create", "update"):
             try:
-                edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
+                edge_patch = await EdgePatchBuilder(
+                    logger=logger
+                ).build_edge_patch_for_equivalent(
                     session=db,
                     run=run,
                     equivalent_code=eq_code,
@@ -1266,7 +1381,12 @@ async def _publish_trustline_change_best_effort(
                 edge_patch = None
                 logger.warning(
                     "Edge patch build failed: interact.trustline_%s run_id=%s equivalent=%s from_pid=%s to_pid=%s",
-                    op, run_id, eq_code, from_pid, to_pid, exc_info=True,
+                    op,
+                    run_id,
+                    eq_code,
+                    from_pid,
+                    to_pid,
+                    exc_info=True,
                 )
 
         if op == "create":
@@ -1287,10 +1407,16 @@ async def _publish_trustline_change_best_effort(
             if not edge_patch and not patch_failed:
                 return
             # A failed build publishes the change without a patch: the UI answers it with a snapshot refresh.
-            payload = TopologyChangedPayload(node_patch=None, edge_patch=(edge_patch or None))
+            payload = TopologyChangedPayload(
+                node_patch=None, edge_patch=(edge_patch or None)
+            )
         else:
             payload = TopologyChangedPayload(
-                removed_edges=[TopologyChangedEdgeRef(from_pid=from_pid, to_pid=to_pid, equivalent_code=eq_code)],
+                removed_edges=[
+                    TopologyChangedEdgeRef(
+                        from_pid=from_pid, to_pid=to_pid, equivalent_code=eq_code
+                    )
+                ],
                 node_patch=None,
                 edge_patch=None,
             )
@@ -1314,13 +1440,31 @@ async def _publish_trustline_change_best_effort(
     "/runs/{run_id}/actions/trustline-create",
     response_model=SimulatorActionTrustlineCreateResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request payload for the action (flat envelope)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "Run is terminal, or the action conflicts with current state (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_trustline_create(
@@ -1335,7 +1479,9 @@ async def action_trustline_create(
     if run_err is not None:
         return run_err
 
-    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+    if (
+        err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)
+    ) is not None:
         return err
 
     # Validate and normalize amounts early.
@@ -1352,19 +1498,29 @@ async def action_trustline_create(
         )
 
     parties, err = await _action_parties_or_error(
-        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
+        run_id=run_id,
+        db=db,
+        from_pid=req.from_pid,
+        to_pid=req.to_pid,
+        equivalent=req.equivalent,
     )
     if err is not None:
         return err
     assert parties is not None
     from_p, to_p, eq = parties.from_p, parties.to_p, parties.eq
-    if (err := _step_error_or_none(limit_dec, eq, field="limit", raw=req.limit)) is not None:
+    if (
+        err := _step_error_or_none(limit_dec, eq, field="limit", raw=req.limit)
+    ) is not None:
         return err
 
     # If there is already debt, the new limit may not be below it: the action's own check, STRONGER than the
     # service's create (spec, "Решения" item 5).
     used_now, _, err = await _pair_debts_or_error(
-        run_id=run_id, action="trustline-create", db=db, parties=parties, with_reverse=False
+        run_id=run_id,
+        action="trustline-create",
+        db=db,
+        parties=parties,
+        with_reverse=False,
     )
     if err is not None:
         return err
@@ -1450,7 +1606,10 @@ async def action_trustline_create(
         reason = (exc.details or {}).get("reason")
         if reason in (None, CONCURRENT_TRUSTLINE_CREATE):
             concurrent_create = True
-        elif reason in MoneyBoundary.MONEY_STOP_REASONS or reason == MoneyBoundary.PARTICIPANT_SUSPENDED_REASON:
+        elif (
+            reason in MoneyBoundary.MONEY_STOP_REASONS
+            or reason == MoneyBoundary.PARTICIPANT_SUSPENDED_REASON
+        ):
             refused = exc
         else:
             raise
@@ -1488,7 +1647,12 @@ async def action_trustline_create(
         )
 
     await _publish_trustline_change_best_effort(
-        run_id=run_id, db=db, op="create", parties=parties, limit_raw=req.limit, limit_dec=limit_dec
+        run_id=run_id,
+        db=db,
+        op="create",
+        parties=parties,
+        limit_raw=req.limit,
+        limit_dec=limit_dec,
     )
 
     return SimulatorActionTrustlineCreateResponse(
@@ -1505,13 +1669,31 @@ async def action_trustline_create(
     "/runs/{run_id}/actions/trustline-update",
     response_model=SimulatorActionTrustlineUpdateResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request payload for the action (flat envelope)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, seeding or engine unavailable (flat envelope)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "Run is terminal, or the action conflicts with current state (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_trustline_update(
@@ -1526,7 +1708,9 @@ async def action_trustline_update(
     if run_err is not None:
         return run_err
 
-    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+    if (
+        err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)
+    ) is not None:
         return err
 
     try:
@@ -1542,7 +1726,11 @@ async def action_trustline_update(
         )
 
     parties, err = await _action_parties_or_error(
-        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
+        run_id=run_id,
+        db=db,
+        from_pid=req.from_pid,
+        to_pid=req.to_pid,
+        equivalent=req.equivalent,
     )
     if err is not None:
         return err
@@ -1553,10 +1741,18 @@ async def action_trustline_update(
             status_code=404,
             code="TRUSTLINE_NOT_FOUND",
             message="Trustline not found",
-            details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
+            details={
+                "from_pid": parties.from_p.pid,
+                "to_pid": parties.to_p.pid,
+                "equivalent": parties.eq.code,
+            },
         )
 
-    if (err := _step_error_or_none(new_limit_dec, parties.eq, field="new_limit", raw=req.new_limit)) is not None:
+    if (
+        err := _step_error_or_none(
+            new_limit_dec, parties.eq, field="new_limit", raw=req.new_limit
+        )
+    ) is not None:
         return err
     # 026 `T2602`: no debt floor - a limit below `used` is a trust change, same rule as the public PATCH; the
     # service validates the change (`TrustLineService.execute_update`).
@@ -1576,8 +1772,12 @@ async def action_trustline_update(
     try:
         # OMR-5: the response's before-value must come from the row as its lock returns it, not the earlier
         # live-line lookup. Refresh the same identity after any wait; the service reuses this transaction's lock.
-        locked = await db.execute(select(TrustLine).where(TrustLine.id == tl.id).with_for_update().execution_options(
-            populate_existing=True))
+        locked = await db.execute(
+            select(TrustLine)
+            .where(TrustLine.id == tl.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         tl = locked.scalar_one_or_none()
         if tl is None:
             raise NotFoundException("Trustline not found")
@@ -1586,7 +1786,9 @@ async def action_trustline_update(
             batch,
             tl.id,
             tl.from_participant_id,
-            TrustLineUpdateRequest(limit=format(new_limit_dec, "f"), signature=_UNSIGNED),
+            TrustLineUpdateRequest(
+                limit=format(new_limit_dec, "f"), signature=_UNSIGNED
+            ),
             require_signature=False,
         )
         await batch.finish()
@@ -1597,7 +1799,9 @@ async def action_trustline_update(
         # requested (026 `T2603.1`) is this action's own refusal and answers in its flat body; any other conflict
         # propagates unchanged.
         await db.rollback()
-        return _flat_trustline_conflict(exc, refusal_details, ("TRUSTLINE_CLOSE_REQUESTED", "TRUSTLINE_CLOSED"))
+        return _flat_trustline_conflict(
+            exc, refusal_details, ("TRUSTLINE_CLOSE_REQUESTED", "TRUSTLINE_CLOSED")
+        )
     except Exception:
         await db.rollback()
         raise
@@ -1618,13 +1822,31 @@ async def action_trustline_update(
     "/runs/{run_id}/actions/trustline-close",
     response_model=SimulatorActionTrustlineCloseResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request payload for the action (flat envelope)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, seeding or engine unavailable (flat envelope)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "Run is terminal, or the action conflicts with current state (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_trustline_close(
@@ -1639,11 +1861,17 @@ async def action_trustline_close(
     if run_err is not None:
         return run_err
 
-    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+    if (
+        err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)
+    ) is not None:
         return err
 
     parties, err = await _action_parties_or_error(
-        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
+        run_id=run_id,
+        db=db,
+        from_pid=req.from_pid,
+        to_pid=req.to_pid,
+        equivalent=req.equivalent,
     )
     if err is not None:
         return err
@@ -1654,14 +1882,22 @@ async def action_trustline_close(
             status_code=404,
             code="TRUSTLINE_NOT_FOUND",
             message="Trustline not found",
-            details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
+            details={
+                "from_pid": parties.from_p.pid,
+                "to_pid": parties.to_p.pid,
+                "equivalent": parties.eq.code,
+            },
         )
 
     # 026 `T2603.1` (owner В1): no debt refusal here - the service closes at once when the debt the line supports
     # is 0 and otherwise records the request (limit 0, the line stays live until `Book` closes it).
     # Programme 021, stage 2: as in `action_trustline_update`.
-    refusal_details = {"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code,
-                       "trustline_id": str(tl.id)}
+    refusal_details = {
+        "from_pid": parties.from_p.pid,
+        "to_pid": parties.to_p.pid,
+        "equivalent": parties.eq.code,
+        "trustline_id": str(tl.id),
+    }
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
     try:
@@ -1686,9 +1922,13 @@ async def action_trustline_close(
     # `close_requested_at`). The later completion leaves the run after its commit (026 `T2603.2`,
     # `publish_closed_trustlines`).
     if str(tl.status) == "closed":
-        await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="close", parties=parties)
+        await _publish_trustline_change_best_effort(
+            run_id=run_id, db=db, op="close", parties=parties
+        )
     else:
-        await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="update", parties=parties, limit_raw="0")
+        await _publish_trustline_change_best_effort(
+            run_id=run_id, db=db, op="update", parties=parties, limit_raw="0"
+        )
 
     return SimulatorActionTrustlineCloseResponse(
         trustline_id=str(tl.id),
@@ -1729,24 +1969,40 @@ async def _idempotency_key_spent(run_id: str, tx_id: str) -> bool | None:
 
     async def read():
         async with _db_session_module.AsyncSessionLocal() as session:
-            return (await session.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))).first()
+            return (
+                await session.execute(
+                    select(Transaction.state).where(Transaction.tx_id == tx_id)
+                )
+            ).first()
 
     try:
         row = await asyncio.wait_for(read(), timeout=_KEY_STATE_READ_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        logger.warning("event=simulator.payment_key_state_read_timeout run_id=%s tx_id=%s", run_id, tx_id)
+        logger.warning(
+            "event=simulator.payment_key_state_read_timeout run_id=%s tx_id=%s",
+            run_id,
+            tx_id,
+        )
         return None
     except Exception as exc:
         logger.warning(
             "event=simulator.payment_key_state_read_failed run_id=%s tx_id=%s error_type=%s",
-            run_id, tx_id, type(exc).__name__,
+            run_id,
+            tx_id,
+            type(exc).__name__,
         )
         return None
     return row is not None and str(row[0]) == "ABORTED"
 
 
 async def _payment_refusal(
-    *, run_id: str, tx_id: str | None, status_code: int, code: str, message: str, details: Optional[dict[str, Any]]
+    *,
+    run_id: str,
+    tx_id: str | None,
+    status_code: int,
+    code: str,
+    message: str,
+    details: Optional[dict[str, Any]],
 ) -> JSONResponse:
     """An error answer of `payment-real`. For a request WITH a key it carries `details.idempotency_key_spent` (see
     `_idempotency_key_spent`); without a key nothing is added and nothing is read."""
@@ -1755,7 +2011,9 @@ async def _payment_refusal(
         spent = await _idempotency_key_spent(run_id, tx_id)
         if spent is not None:
             details = {**(details or {}), "idempotency_key_spent": spent}
-    return _action_error(status_code=status_code, code=code, message=message, details=details)
+    return _action_error(
+        status_code=status_code, code=code, message=message, details=details
+    )
 
 
 def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
@@ -1775,7 +2033,10 @@ def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
             continue
         out.append(
             SimulatorActionPaymentRoute(
-                hops=[SimulatorActionPaymentHop(from_=a, to=b, amount=amount) for a, b in zip(path, path[1:])]
+                hops=[
+                    SimulatorActionPaymentHop(from_=a, to=b, amount=amount)
+                    for a, b in zip(path, path[1:])
+                ]
             )
         )
     return out
@@ -1785,14 +2046,32 @@ def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
     "/runs/{run_id}/actions/payment-real",
     response_model=SimulatorActionPaymentRealResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request payload for the action (flat envelope)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "Run is terminal, or the action conflicts with current state (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
         500: _ACTION_INTERNAL_ERROR_RESPONSE,
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_payment_real(
@@ -1809,12 +2088,22 @@ async def action_payment_real(
     assert run is not None
 
     parties, err = await _action_parties_or_error(
-        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent, payment=True
+        run_id=run_id,
+        db=db,
+        from_pid=req.from_pid,
+        to_pid=req.to_pid,
+        equivalent=req.equivalent,
+        payment=True,
     )
     if err is not None:
         return err
     assert parties is not None
-    scoped_pids, from_p, to_p, eq = parties.scoped_pids, parties.from_p, parties.to_p, parties.eq
+    scoped_pids, from_p, to_p, eq = (
+        parties.scoped_pids,
+        parties.from_p,
+        parties.to_p,
+        parties.eq,
+    )
     # Plain values from here on. A payment whose COMMIT failed is settled by a rollback of the request's session
     # (`_settle_failed_commit` -> `_rollback_attempt`), which expires every ORM object loaded before it; reading an
     # attribute of one afterwards is a lazy load inside an async handler (`MissingGreenlet`, a 500) - it was, in the
@@ -1824,15 +2113,22 @@ async def action_payment_real(
 
     # Amount validation per spec.
     try:
-        amount_dec = parse_money_amount(req.amount, field="amount", require_positive=True)
+        amount_dec = parse_money_amount(
+            req.amount, field="amount", require_positive=True
+        )
     except BadRequestException as exc:
         return _action_error(
             status_code=400,
             code="INVALID_AMOUNT",
             message=str(getattr(exc, "message", None) or "Invalid amount"),
-            details={"amount": req.amount, "reason": public_refusal_details(exc.details, exc.code)["reason"]},
+            details={
+                "amount": req.amount,
+                "reason": public_refusal_details(exc.details, exc.code)["reason"],
+            },
         )
-    if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
+    if (
+        err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)
+    ) is not None:
         return err
     # 054-A-17: the answer and `tx.updated` carry the moved value in the equivalent's form, not the request's spelling.
     amount_s = _fmt_decimal_for_api(amount_dec, eq.precision)
@@ -1845,7 +2141,9 @@ async def action_payment_real(
         # A HINT for the publication only. The service is called either way, so its identity, fingerprint and
         # perimeter checks decide what the request gets; this read decides nothing but whether to publish again.
         already_stored = (
-            await db.execute(select(Transaction.id).where(Transaction.tx_id == tx_id_hint).limit(1))
+            await db.execute(
+                select(Transaction.id).where(Transaction.tx_id == tx_id_hint).limit(1)
+            )
         ).first() is not None
 
     try:
@@ -1862,7 +2160,9 @@ async def action_payment_real(
         # through the same mapping below as the refusal did when it was first raised.
         if str(res.status).upper() != "COMMITTED":
             raise public_error_of_stored(res) or GeoException(
-                "The stored payment is not committed", code=ErrorCode.E010, status_code=500
+                "The stored payment is not committed",
+                code=ErrorCode.E010,
+                status_code=500,
             )
     except RetryablePaymentConflictException as exc:
         return await _payment_refusal(
@@ -1875,12 +2175,16 @@ async def action_payment_real(
         )
     except RoutingException as exc:
         # 028 `F-028-42`: the refusal's machine reason (and `max_available`) beside the action's own fields.
-        reason = {k: v for k, v in public_refusal_details(exc.details, exc.code).items()
-                  if k in ("reason", "max_available")}
+        reason = {
+            k: v
+            for k, v in public_refusal_details(exc.details, exc.code).items()
+            if k in ("reason", "max_available")
+        }
         # 029 F-029-8: the code is a function of the core's reason - one source for one fact. A routing refusal
         # with another reason answers by its own code (`E002` is capacity, `E001` is no route).
         code = _INTERACT_ROUTING_CODE.get(reason.get("reason")) or (
-            "INSUFFICIENT_CAPACITY" if exc.code == ErrorCode.E002.value else "NO_ROUTE")
+            "INSUFFICIENT_CAPACITY" if exc.code == ErrorCode.E002.value else "NO_ROUTE"
+        )
         return await _payment_refusal(
             run_id=run_id,
             tx_id=tx_id_hint,
@@ -1902,7 +2206,12 @@ async def action_payment_real(
             status_code=503,
             code="ENGINE_TIMEOUT",
             message=str(getattr(exc, "message", None) or "Engine timeout"),
-            details={"equivalent": eq_code, "from_pid": from_pid, "to_pid": to_pid, "reason": "timeout"},
+            details={
+                "equivalent": eq_code,
+                "from_pid": from_pid,
+                "to_pid": to_pid,
+                "reason": "timeout",
+            },
         )
     except GeoException as exc:
         # Best-effort mapping for unexpected business errors.
@@ -1928,7 +2237,9 @@ async def action_payment_real(
                 routes = res.routes or []
                 if routes:
                     path = routes[0].path
-                    edges = [{"from": str(a), "to": str(b)} for a, b in zip(path, path[1:])]
+                    edges = [
+                        {"from": str(a), "to": str(b)} for a, b in zip(path, path[1:])
+                    ]
             except Exception:
                 edges = []
             if not edges:
@@ -1972,7 +2283,9 @@ async def action_payment_real(
                 exc_info=True,
             )
         # 026 `T2603.2`: the payment is committed (`create_payment_internal`); a line its book operation closed leaves.
-        await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq_code, pairs=closed)
+        await _publish_closed_best_effort(
+            run_id=run_id, run=run, equivalent=eq_code, pairs=closed
+        )
 
     return SimulatorActionPaymentRealResponse(
         payment_id=str(res.tx_id),
@@ -1990,14 +2303,32 @@ async def action_payment_real(
     "/runs/{run_id}/actions/clearing-real",
     response_model=SimulatorActionClearingRealResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request payload for the action (flat envelope)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "Run is terminal, or the action conflicts with current state (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
         500: _ACTION_INTERNAL_ERROR_RESPONSE,
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_clearing_real(
@@ -2061,7 +2392,10 @@ async def action_clearing_real(
         cleared_count += 1
 
     def _shape() -> None:
-        executed[:] = [_interact_cycle_of(occurrence, pid_by_id, eq_precision) for occurrence in committed]
+        executed[:] = [
+            _interact_cycle_of(occurrence, pid_by_id, eq_precision)
+            for occurrence in committed
+        ]
 
     done_emitted = False
 
@@ -2158,7 +2492,10 @@ async def action_clearing_real(
                 message=exc.message,
                 details=details or None,
             )
-        if isinstance(exc, ConflictException) and (exc.details or {}).get("reason") == OCCURRENCE_AMOUNT_NOT_IN_STEP:
+        if (
+            isinstance(exc, ConflictException)
+            and (exc.details or {}).get("reason") == OCCURRENCE_AMOUNT_NOT_IN_STEP
+        ):
             # 030 S2 (`F-030-1`, §15 `T3092`): the executor refused an amount finer than the step - debts finer than the
             # step are in the database, which is reseeded. A logical refusal, not a failed execution; not a money stop.
             return _action_error(
@@ -2188,7 +2525,9 @@ async def action_clearing_real(
                 **_progress_details(),
                 "remaining_cycles": result.remaining_cycles,
                 "remaining_v_edge": (
-                    None if result.remaining_v_edge_atoms is None else atoms_text(result.remaining_v_edge_atoms)
+                    None
+                    if result.remaining_v_edge_atoms is None
+                    else atoms_text(result.remaining_v_edge_atoms)
                 ),
             },
         )
@@ -2208,12 +2547,18 @@ async def _perimeter_pid_by_id(db, scoped_pids) -> dict:
     if not scoped_pids:
         return {}
     rows = (
-        await db.execute(select(Participant.id, Participant.pid).where(Participant.pid.in_(sorted(scoped_pids))))
+        await db.execute(
+            select(Participant.id, Participant.pid).where(
+                Participant.pid.in_(sorted(scoped_pids))
+            )
+        )
     ).all()
     return {participant_id: str(pid) for participant_id, pid in rows}
 
 
-def _interact_cycle_of(occurrence, pid_by_id: dict, precision: int) -> SimulatorActionClearingCycle:
+def _interact_cycle_of(
+    occurrence, pid_by_id: dict, precision: int
+) -> SimulatorActionClearingCycle:
     """One committed occurrence on the wire: its amount and its edges in the trust-line direction creditor -> debtor.
 
     The runner's progress edge is debtor -> creditor by participant UUID (decision R3); the Interact wire and
@@ -2226,17 +2571,28 @@ def _interact_cycle_of(occurrence, pid_by_id: dict, precision: int) -> Simulator
         debtor = pid_by_id.get(edge.debtor_id)
         if creditor and debtor and creditor != debtor:
             edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
-    return SimulatorActionClearingCycle(cleared_amount=_fmt_decimal_for_api(occurrence.amount, precision), edges=edges)
+    return SimulatorActionClearingCycle(
+        cleared_amount=_fmt_decimal_for_api(occurrence.amount, precision), edges=edges
+    )
 
 
 @router.get(
     "/runs/{run_id}/actions/participants-list",
     response_model=SimulatorActionParticipantsListResponse,
     responses={
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
     },
 )
 async def action_participants_list(
@@ -2256,7 +2612,9 @@ async def action_participants_list(
 
     # Run/snapshot-scoped: build from current run snapshot (not global Participant table).
     try:
-        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=db)
+        snap = await runtime.build_graph_snapshot(
+            run_id=run_id, equivalent="", session=db
+        )
     except NotFoundException:
         return _action_error(
             status_code=404,
@@ -2266,7 +2624,7 @@ async def action_participants_list(
         )
 
     items: list[SimulatorActionParticipantItem] = []
-    for n in (getattr(snap, "nodes", None) or []):
+    for n in getattr(snap, "nodes", None) or []:
         pid = _norm_pid(getattr(n, "id", ""))
         if not pid:
             continue
@@ -2290,13 +2648,31 @@ async def action_participants_list(
     "/runs/{run_id}/actions/trustlines-list",
     response_model=SimulatorActionTrustlinesListResponse,
     responses={
-        400: {"model": SimulatorActionError, "description": "Invalid request: `equivalent` is missing (flat envelope, 054-E-12)"},
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        400: {
+            "model": SimulatorActionError,
+            "description": "Invalid request: `equivalent` is missing (flat envelope, 054-E-12)",
+        },
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)",
+        },
     },
 )
 async def action_trustlines_list(
@@ -2331,18 +2707,26 @@ async def action_trustlines_list(
     if participant_pid is not None:
         # 044 `T4405`: within the run's perimeter, like every other Interact resolution - a pid of another run answers
         # as an unknown one (404), never as "exists, no lines here".
-        scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+        scoped_pids, perimeter_available = await _run_perimeter(
+            run_id=run_id, session=db
+        )
         if not perimeter_available:
             return _perimeter_unavailable_error(run_id)
         p, p_err = await _resolve_participant_or_error(
-            session=db, pid=participant_pid, field="participant_pid", scoped_pids=scoped_pids)
+            session=db,
+            pid=participant_pid,
+            field="participant_pid",
+            scoped_pids=scoped_pids,
+        )
         if p_err is not None:
             return p_err
         assert p is not None
 
     # Run/snapshot-scoped: build from current run snapshot (not global TrustLine table).
     try:
-        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent=eq.code, session=db)
+        snap = await runtime.build_graph_snapshot(
+            run_id=run_id, equivalent=eq.code, session=db
+        )
     except NotFoundException:
         return _action_error(
             status_code=404,
@@ -2352,7 +2736,7 @@ async def action_trustlines_list(
         )
 
     pid_to_name: dict[str, str] = {}
-    for n in (getattr(snap, "nodes", None) or []):
+    for n in getattr(snap, "nodes", None) or []:
         pid = _norm_pid(getattr(n, "id", ""))
         if not pid:
             continue
@@ -2378,7 +2762,7 @@ async def action_trustlines_list(
 
     active_links: list[tuple[str, str, object]] = []
     pids_needed: set[str] = set()
-    for link in (getattr(snap, "links", None) or []):
+    for link in getattr(snap, "links", None) or []:
         from_pid = _norm_pid(getattr(link, "source", ""))
         to_pid = _norm_pid(getattr(link, "target", ""))
         if not from_pid or not to_pid:
@@ -2404,7 +2788,11 @@ async def action_trustlines_list(
     pid_to_id: dict[str, uuid.UUID] = {}
     if pids_needed:
         rows = (
-            await db.execute(select(Participant.pid, Participant.id).where(Participant.pid.in_(sorted(pids_needed))))
+            await db.execute(
+                select(Participant.pid, Participant.id).where(
+                    Participant.pid.in_(sorted(pids_needed))
+                )
+            )
         ).all()
         pid_to_id = {str(pid): pid_id for pid, pid_id in rows if pid and pid_id}
 
@@ -2430,7 +2818,9 @@ async def action_trustlines_list(
                 continue
             if amount is None:
                 continue
-            debt_map[(debtor_id, creditor_id)] = debt_map.get((debtor_id, creditor_id), Decimal("0")) + amount
+            debt_map[(debtor_id, creditor_id)] = (
+                debt_map.get((debtor_id, creditor_id), Decimal("0")) + amount
+            )
 
     items: list[SimulatorActionTrustlineListItem] = []
     for from_pid, to_pid, link in active_links:
@@ -2473,13 +2863,31 @@ async def action_trustlines_list(
     "/runs/{run_id}/payment-targets",
     response_model=SimulatorPaymentTargetsResponse,
     responses={
-        401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
+        401: {
+            "model": ErrorEnvelope,
+            "description": "Missing or invalid simulator identity",
+        },
         403: _ACTION_FORBIDDEN_RESPONSE,
-        404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
-        422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
-        504: {"model": ErrorEnvelope, "description": "The reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)"},
+        404: {
+            "model": SimulatorActionError,
+            "description": "Run, participant, equivalent or trustline not found (flat envelope)",
+        },
+        409: {
+            "model": SimulatorActionError,
+            "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)",
+        },
+        503: {
+            "model": SimulatorActionError,
+            "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)",
+        },
+        504: {
+            "model": ErrorEnvelope,
+            "description": "The reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)",
+        },
     },
 )
 async def payment_targets(
@@ -2623,7 +3031,9 @@ async def _run_events_stream(
                 type="run_status",
                 run_id=run.run_id,
                 scenario_id=run.scenario_id,
-                state=published_state(run),  # 054-A review FD2: `stopping` while a stop drains
+                state=published_state(
+                    run
+                ),  # 054-A review FD2: `stopping` while a stop drains
                 sim_time_ms=run.sim_time_ms,
                 intensity_percent=run.intensity_percent,
                 ops_sec=run.ops_sec,
@@ -2706,7 +3116,9 @@ async def _run_events_stream(
             yield _sse_format(payload=evt, event_id=event_id)
 
             # Once the run is terminal, close the stream after emitting status.
-            if str(evt.get("type") or "") == "run_status" and str(evt.get("state") or "") in ("stopped", "error"):
+            if str(evt.get("type") or "") == "run_status" and str(
+                evt.get("state") or ""
+            ) in ("stopped", "error"):
                 return
     finally:
         await runtime.unsubscribe(run_id, sub)
@@ -2723,7 +3135,14 @@ class _RunEventsResponse(StreamingResponse):
     `unsubscribe` (the generator's own `finally`) is a no-op.
     """
 
-    def __init__(self, content: AsyncIterator[str], *, run_id: str, subscription: _Subscription, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        content: AsyncIterator[str],
+        *,
+        run_id: str,
+        subscription: _Subscription,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(content, **kwargs)
         self._run_id = run_id
         self._subscription = subscription
@@ -2751,14 +3170,20 @@ async def graph_snapshot_active_run(
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
-        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+        return SimulatorGraphSnapshot(
+            equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[]
+        )
     try:
         run = runtime.get_run(run_id)
     except NotFoundException:
-        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+        return SimulatorGraphSnapshot(
+            equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[]
+        )
 
     _check_run_access(run, actor, run_id)
-    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
+    return await runtime.build_graph_snapshot(
+        run_id=run_id, equivalent=equivalent, session=db
+    )
 
 
 @router.get("/graph/ego", response_model=SimulatorGraphSnapshot)
@@ -2772,14 +3197,20 @@ async def ego_snapshot_active_run(
     equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
-        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+        return SimulatorGraphSnapshot(
+            equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[]
+        )
     try:
         run = runtime.get_run(run_id)
     except NotFoundException:
-        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+        return SimulatorGraphSnapshot(
+            equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[]
+        )
 
     _check_run_access(run, actor, run_id)
-    return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
+    return await runtime.build_ego_snapshot(
+        run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db
+    )
 
 
 @router.get(
@@ -2830,7 +3261,9 @@ async def events_stream_active_run(
             run_id, equivalent=equivalent, after_event_id=last_event_id
         )
     except SseReplayUnavailable as exc:
-        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
+        raise GoneException(
+            "Last-Event-ID replay is unavailable; please refresh state"
+        ) from exc
 
     return _RunEventsResponse(
         _run_events_stream(
@@ -2939,7 +3372,9 @@ async def get_scenario_summary(
     return runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin).detail()
 
 
-@router.get("/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot)
+@router.get(
+    "/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot
+)
 async def scenario_graph_preview(
     scenario_id: str,
     equivalent: str = Query(...),
@@ -2958,7 +3393,11 @@ async def scenario_graph_preview(
     """Preview the scenario graph topology without starting a run (the template's picture; 044: no database read)."""
     runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin)
     return await runtime.build_scenario_preview(
-        scenario_id=scenario_id, equivalent=_norm_equivalent(equivalent), mode=mode, session=db)
+        scenario_id=scenario_id,
+        equivalent=_norm_equivalent(equivalent),
+        mode=mode,
+        session=db,
+    )
 
 
 @router.post(
@@ -2976,7 +3415,9 @@ async def start_run(
     body: RunCreateRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    runtime.get_admitted_scenario(body.scenario_id, is_admin=actor.is_admin)  # 044 admission, before any effect
+    runtime.get_admitted_scenario(
+        body.scenario_id, is_admin=actor.is_admin
+    )  # 044 admission, before any effect
     run_id = await runtime.create_run(
         scenario_id=body.scenario_id,
         mode=body.mode,
@@ -3033,7 +3474,9 @@ async def pause_run(
     return await runtime.pause(run_id)
 
 
-@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _RESUME_CONFLICT})
+@router.post(
+    "/runs/{run_id}/resume", response_model=RunStatus, responses={409: _RESUME_CONFLICT}
+)
 async def resume_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
@@ -3046,8 +3489,12 @@ async def resume_run(
 async def stop_run(
     run_id: str,
     request: Request,
-    source: Optional[str] = Query(default=None, description="Client source (e.g. ui, cli, script)"),
-    reason: Optional[str] = Query(default=None, description="Human-readable stop reason"),
+    source: Optional[str] = Query(
+        default=None, description="Client source (e.g. ui, cli, script)"
+    ),
+    reason: Optional[str] = Query(
+        default=None, description="Human-readable stop reason"
+    ),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
@@ -3073,7 +3520,11 @@ async def stop_run(
     )
 
 
-@router.post("/runs/{run_id}/restart", response_model=RunStatus, responses={409: _ENTRY_LIMIT_CONFLICT})
+@router.post(
+    "/runs/{run_id}/restart",
+    response_model=RunStatus,
+    responses={409: _ENTRY_LIMIT_CONFLICT},
+)
 async def restart_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
@@ -3114,7 +3565,9 @@ async def run_events_stream(
             run_id, equivalent=equivalent, after_event_id=last_event_id
         )
     except SseReplayUnavailable as exc:
-        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
+        raise GoneException(
+            "Last-Event-ID replay is unavailable; please refresh state"
+        ) from exc
 
     return _RunEventsResponse(
         _run_events_stream(
@@ -3130,6 +3583,7 @@ async def run_events_stream(
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
+
 @router.get("/runs/{run_id}/graph/snapshot", response_model=SimulatorGraphSnapshot)
 async def graph_snapshot_for_run(
     run_id: str,
@@ -3138,13 +3592,17 @@ async def graph_snapshot_for_run(
     db=Depends(deps.get_db),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=_norm_equivalent(equivalent), session=db)
+    return await runtime.build_graph_snapshot(
+        run_id=run_id, equivalent=_norm_equivalent(equivalent), session=db
+    )
 
 
 @router.get(
     "/runs/{run_id}/metrics",
     response_model=MetricsResponse,
-    responses={503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}},
+    responses={
+        503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}
+    },
 )
 async def metrics_for_run(
     run_id: str,
@@ -3167,7 +3625,9 @@ async def metrics_for_run(
 @router.get(
     "/runs/{run_id}/bottlenecks",
     response_model=BottlenecksResponse,
-    responses={503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}},
+    responses={
+        503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}
+    },
 )
 async def bottlenecks_for_run(
     run_id: str,
@@ -3234,31 +3694,37 @@ async def admin_list_runs(
 
     all_runs = runtime.list_runs(state=state, owner_id=owner_id)
     total = len(all_runs)
-    page = all_runs[offset: offset + limit]
+    page = all_runs[offset : offset + limit]
 
     items = []
     for run in page:
         status = run_to_status(run)
-        items.append({
-            "run_id": run.run_id,
-            "scenario_id": run.scenario_id,
-            "mode": run.mode,
-            "state": run.state,
-            "owner_id": run.owner_id,
-            "owner_kind": run.owner_kind,
-            "intensity_percent": run.intensity_percent,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "stopped_at": run.stopped_at.isoformat() if run.stopped_at else None,
-            "sim_time_ms": run.sim_time_ms,
-            "ops_sec": run.ops_sec,
-            "errors_total": run.errors_total,
-            "committed_total": run.committed_total,
-            "rejected_total": run.rejected_total,
-            "attempts_total": run.attempts_total,
-            # 054-A-7d: why a run stopped or paused itself, as `GET /runs/{id}` says it (same serialisation).
-            "last_error": status.last_error.model_dump(mode="json") if status.last_error is not None else None,
-            "pause_reason": status.pause_reason,
-        })
+        items.append(
+            {
+                "run_id": run.run_id,
+                "scenario_id": run.scenario_id,
+                "mode": run.mode,
+                "state": run.state,
+                "owner_id": run.owner_id,
+                "owner_kind": run.owner_kind,
+                "intensity_percent": run.intensity_percent,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "stopped_at": run.stopped_at.isoformat() if run.stopped_at else None,
+                "sim_time_ms": run.sim_time_ms,
+                "ops_sec": run.ops_sec,
+                "errors_total": run.errors_total,
+                "committed_total": run.committed_total,
+                "rejected_total": run.rejected_total,
+                "attempts_total": run.attempts_total,
+                # 054-A-7d: why a run stopped or paused itself, as `GET /runs/{id}` says it (same serialisation).
+                "last_error": (
+                    status.last_error.model_dump(mode="json")
+                    if status.last_error is not None
+                    else None
+                ),
+                "pause_reason": status.pause_reason,
+            }
+        )
 
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -3266,7 +3732,9 @@ async def admin_list_runs(
 @router.post("/admin/runs/stop-all", summary="Stop all active runs (admin)")
 async def admin_stop_all_runs(
     body: AdminStopAllRequest = Body(default=AdminStopAllRequest()),
-    state: str = Query(default="*", description="State filter: running|paused|stopping|*"),
+    state: str = Query(
+        default="*", description="State filter: running|paused|stopping|*"
+    ),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     """Stop all currently active runs. Admin only.
@@ -3282,7 +3750,11 @@ async def admin_stop_all_runs(
     if state_s not in allowed:
         raise BadRequestException(
             "Invalid state filter",
-            details={"reason": "invalid_state_filter", "state": state, "allowed": sorted(allowed)},
+            details={
+                "reason": "invalid_state_filter",
+                "state": state,
+                "allowed": sorted(allowed),
+            },
         )
 
     # get_all_active_runs() returns a copy; safe to iterate while stop()
@@ -3294,7 +3766,10 @@ async def admin_stop_all_runs(
     for _owner_id, run_id in active_runs.items():
         try:
             st = runtime.get_run_status(run_id)
-            if state_s != "*" and str(getattr(st, "state", "") or "").lower() != state_s:
+            if (
+                state_s != "*"
+                and str(getattr(st, "state", "") or "").lower() != state_s
+            ):
                 continue
 
             await runtime.stop(

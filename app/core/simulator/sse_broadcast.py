@@ -30,7 +30,8 @@ SSE_SUBSCRIPTION_CLOSED_TYPE = "__subscription_closed__"
 def _equivalent_key(value: Any) -> str:
     """The one form an equivalent is matched in (054-A-16): a code is case-insensitive at every door
     (`EquivalentCode`) and every producer here publishes it upper-cased, so a subscription opened with `uah`
-    must see the `UAH` events - before, the subscription kept the caller's spelling and silently lost them."""
+    must see the `UAH` events - before, the subscription kept the caller's spelling and silently lost them.
+    """
 
     return str(value or "").strip().upper()
 
@@ -162,7 +163,9 @@ class SseBroadcast:
         self.prune_event_buffer_locked(run)
         current_seq = int(run._event_seq)
         if after_seq > current_seq:
-            raise SseReplayUnavailable("Last-Event-ID is ahead of the run event sequence")
+            raise SseReplayUnavailable(
+                "Last-Event-ID is ahead of the run event sequence"
+            )
 
         if after_seq < current_seq:
             if not run._event_buffer:
@@ -427,6 +430,7 @@ class SseBroadcast:
             except ValueError:
                 return
             note_subscribers_locked(run, self._idle_now())
+
 
 class SseEventEmitter:
     """Domain-level SSE event construction.
@@ -724,12 +728,20 @@ async def _live_pairs(eq: str, pairs: set[tuple[str, str]]) -> set[tuple[str, st
 
     src, dst = aliased(Participant), aliased(Participant)
     async with db_session.AsyncSessionLocal() as session:
-        rows = (await session.execute(
-            select(src.pid, dst.pid).select_from(TrustLine)
-            .join(src, src.id == TrustLine.from_participant_id).join(dst, dst.id == TrustLine.to_participant_id)
-            .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
-            .where(Equivalent.code == eq, TrustLine.status != "closed", tuple_(src.pid, dst.pid).in_(sorted(pairs)))
-        )).all()
+        rows = (
+            await session.execute(
+                select(src.pid, dst.pid)
+                .select_from(TrustLine)
+                .join(src, src.id == TrustLine.from_participant_id)
+                .join(dst, dst.id == TrustLine.to_participant_id)
+                .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+                .where(
+                    Equivalent.code == eq,
+                    TrustLine.status != "closed",
+                    tuple_(src.pid, dst.pid).in_(sorted(pairs)),
+                )
+            )
+        ).all()
     return {(str(a), str(b)) for a, b in rows}
 
 
@@ -765,7 +777,11 @@ async def publish_closed_trustlines(
         gone -= await _live_pairs(eq, gone)
     except Exception:
         logging.getLogger(__name__).warning(
-            "simulator.sse.trustline_closed_recheck_failed eq=%s pairs=%s", eq, len(gone), exc_info=True)
+            "simulator.sse.trustline_closed_recheck_failed eq=%s pairs=%s",
+            eq,
+            len(gone),
+            exc_info=True,
+        )
         return []
     if not gone:
         return []
@@ -781,23 +797,41 @@ async def publish_closed_trustlines(
             scenario = getattr(run, "_scenario_raw", None)
             lines = scenario.get("trustlines") if isinstance(scenario, dict) else None
             if isinstance(lines, list):
+
                 def _closed(tl: Any) -> tuple[str, str] | None:
-                    pair = (str(tl.get("from") or "").strip(), str(tl.get("to") or "").strip())
-                    same_eq = str(effective_equivalent(scenario, tl) or "").strip().upper() == eq
+                    pair = (
+                        str(tl.get("from") or "").strip(),
+                        str(tl.get("to") or "").strip(),
+                    )
+                    same_eq = (
+                        str(effective_equivalent(scenario, tl) or "").strip().upper()
+                        == eq
+                    )
                     return pair if same_eq and pair in gone else None
 
                 held |= {_closed(tl) for tl in lines if isinstance(tl, dict)} - {None}
-                scenario["trustlines"] = [tl for tl in lines if not (isinstance(tl, dict) and _closed(tl))]
+                scenario["trustlines"] = [
+                    tl for tl in lines if not (isinstance(tl, dict) and _closed(tl))
+                ]
         removed = sorted(held)
         if removed:
             emitter.emit_topology_changed(
-                run_id=run_id, run=run, equivalent=eq, reason="trustline_closed",
-                payload=TopologyChangedPayload(removed_edges=[
-                    TopologyChangedEdgeRef(from_pid=a, to_pid=b, equivalent_code=eq) for a, b in removed]),
+                run_id=run_id,
+                run=run,
+                equivalent=eq,
+                reason="trustline_closed",
+                payload=TopologyChangedPayload(
+                    removed_edges=[
+                        TopologyChangedEdgeRef(from_pid=a, to_pid=b, equivalent_code=eq)
+                        for a, b in removed
+                    ]
+                ),
             )
         return removed
     except Exception:
-        logging.getLogger(__name__).warning("simulator.sse.trustline_closed_publish_failed eq=%s", eq, exc_info=True)
+        logging.getLogger(__name__).warning(
+            "simulator.sse.trustline_closed_publish_failed eq=%s", eq, exc_info=True
+        )
         return []
 
 
@@ -817,7 +851,11 @@ def pending_closed_trustlines_publications(run_id: str) -> list[asyncio.Task]:
     """The run's closed-line publications scheduled and not yet done (054-A review FD4)."""
 
     name = _publication_task_name(run_id)
-    return [task for task in list(_PENDING_PUBLICATIONS) if not task.done() and task.get_name() == name]
+    return [
+        task
+        for task in list(_PENDING_PUBLICATIONS)
+        if not task.done() and task.get_name() == name
+    ]
 
 
 async def drain_closed_trustlines_publications(run_id: str) -> None:
@@ -825,12 +863,15 @@ async def drain_closed_trustlines_publications(run_id: str) -> None:
 
     054-A review FD4: a committed tick payment that completes a requested close schedules its publication from the
     synchronous post-commit callback, and nothing awaits it - so the heartbeat drain of a `stop()` does not cover it,
-    and `topology.changed` could follow `stopped`, which ends the live stream. `stop()` calls this after the drain."""
+    and `topology.changed` could follow `stopped`, which ends the live stream. `stop()` calls this after the drain.
+    """
 
     pending = pending_closed_trustlines_publications(run_id)
     if not pending:
         return
-    _done, still = await asyncio.wait(pending, timeout=CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC)
+    _done, still = await asyncio.wait(
+        pending, timeout=CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC
+    )
     if still:
         logging.getLogger(__name__).warning(
             "simulator.sse.trustline_closed_publication_drain_timeout run_id=%s pending=%d timeout_sec=%s",
@@ -851,10 +892,13 @@ def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None
         return None
     try:
         task = asyncio.get_running_loop().create_task(
-            publish_closed_trustlines(**kwargs), name=_publication_task_name(kwargs.get("run_id"))
+            publish_closed_trustlines(**kwargs),
+            name=_publication_task_name(kwargs.get("run_id")),
         )
     except RuntimeError:
-        logging.getLogger(__name__).warning("simulator.sse.trustline_closed_no_loop run_id=%s", kwargs.get("run_id"))
+        logging.getLogger(__name__).warning(
+            "simulator.sse.trustline_closed_no_loop run_id=%s", kwargs.get("run_id")
+        )
         return None
     _PENDING_PUBLICATIONS.add(task)
     task.add_done_callback(_PENDING_PUBLICATIONS.discard)

@@ -3,15 +3,18 @@ from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
+
 class CapacityResponse(BaseModel):
     can_pay: bool
     max_amount: str
     routes_count: int
     estimated_hops: int
 
+
 class MaxFlowPath(BaseModel):
     path: List[str]
     capacity: str
+
 
 class Bottleneck(BaseModel):
     from_: str = Field(..., alias="from")
@@ -20,12 +23,14 @@ class Bottleneck(BaseModel):
     used: str
     available: str
 
+
 class MaxFlowResponse(BaseModel):
     max_amount: str
     paths: List[MaxFlowPath]
     bottlenecks: List[Bottleneck]
     algorithm: str
     computed_at: str
+
 
 class PaymentConstraints(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,6 +39,7 @@ class PaymentConstraints(BaseModel):
     max_paths: Optional[int] = Field(default=None, ge=1, le=10)
     timeout_ms: Optional[int] = Field(default=None, ge=1, le=120_000)
     avoid: Optional[List[str]] = None
+
 
 class PaymentCreateRequest(BaseModel):
     tx_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")
@@ -56,6 +62,7 @@ class PaymentError(BaseModel):
     message: str
     details: Optional[Dict[str, Any]] = None
 
+
 class PaymentResult(BaseModel):
     tx_id: str
     status: str
@@ -67,6 +74,7 @@ class PaymentResult(BaseModel):
     error: Optional[PaymentError] = None
     created_at: datetime
     committed_at: Optional[datetime] = None
+
 
 class PaymentsList(BaseModel):
     items: List[PaymentResult]

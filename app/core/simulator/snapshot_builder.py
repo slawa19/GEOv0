@@ -69,11 +69,18 @@ class SnapshotBuilder:
         session=None,
     ) -> SimulatorGraphSnapshot:
         run = self._get_run(run_id)
-        scenario = getattr(run, "_scenario_raw", None) or self._get_scenario(run.scenario_id).raw
-        snap = scenario_to_snapshot(scenario, equivalent=equivalent, utc_now=self._utc_now)
+        scenario = (
+            getattr(run, "_scenario_raw", None)
+            or self._get_scenario(run.scenario_id).raw
+        )
+        snap = scenario_to_snapshot(
+            scenario, equivalent=equivalent, utc_now=self._utc_now
+        )
         if not self._db_enabled():
             return snap
-        return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
+        return await self._enrich_snapshot_from_db(
+            snap, equivalent=equivalent, session=session
+        )
 
     async def _enrich_snapshot_from_db(
         self,
@@ -103,21 +110,34 @@ class SnapshotBuilder:
         if not pids:
             return snap
 
-        async def _load_state(session) -> tuple[
-            Equivalent,
-            dict[str, Participant],
-            dict[str, uuid.UUID],
-            dict[tuple[uuid.UUID, uuid.UUID], Decimal],
-            dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]],
-            set[str],
-        ] | None:
-            eq = (await session.execute(select(Equivalent).where(Equivalent.code == eq_code))).scalar_one_or_none()
+        async def _load_state(session) -> (
+            tuple[
+                Equivalent,
+                dict[str, Participant],
+                dict[str, uuid.UUID],
+                dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+                dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]],
+                set[str],
+            ]
+            | None
+        ):
+            eq = (
+                await session.execute(
+                    select(Equivalent).where(Equivalent.code == eq_code)
+                )
+            ).scalar_one_or_none()
             if eq is None:
                 return None
 
             stored_rows = (
-                await session.execute(select(Participant).where(Participant.pid.in_(pids)))
-            ).scalars().all()
+                (
+                    await session.execute(
+                        select(Participant).where(Participant.pid.in_(pids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             # BACKLOG 049-1: every pid that has a row, the simulator's or not - the rest have no debt (see above).
             stored_pids = {p.pid for p in stored_rows}
             p_rows = [
@@ -151,7 +171,8 @@ class SnapshotBuilder:
                 )
             ).all()
             debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {
-                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0"))
+                for r in debt_rows
             }
 
             # Trustlines: from (creditor) -> to (debtor)
@@ -173,10 +194,15 @@ class SnapshotBuilder:
             # Since migration 019 a closed incarnation may coexist with the live one: the LIVE row wins whatever
             # order the rows arrive in. A pair with only closed rows is closed (026 `T2603.2`): its scenario
             # link must not come back with the scenario's limit and status.
-            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]] = {}
+            tl_by_pair: dict[
+                tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]
+            ] = {}
             for r in sorted(tl_rows, key=lambda r: str(r.status) != "closed"):
                 tl_by_pair[(r.from_participant_id, r.to_participant_id)] = (
-                    r.limit or Decimal("0"), r.status, r.close_requested_at)
+                    r.limit or Decimal("0"),
+                    r.status,
+                    r.close_requested_at,
+                )
 
             return eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair, stored_pids
 
@@ -191,7 +217,9 @@ class SnapshotBuilder:
 
         eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair, stored_pids = loaded
 
-        precision = int(2 if getattr(eq, "precision", None) is None else eq.precision)  # 024 T2416.1
+        precision = int(
+            2 if getattr(eq, "precision", None) is None else eq.precision
+        )  # 024 T2416.1
 
         def _to_money_str(v: Decimal) -> str:
             # 012 / T1207: was a private `format(v.quantize(1/10**precision, ROUND_DOWN), "f")`
@@ -229,14 +257,25 @@ class SnapshotBuilder:
 
         # Links
         live = [
-            link for link in snap.links
-            if str(tl_by_pair.get((pid_to_id.get(str(link.source or "").strip()),
-                                   pid_to_id.get(str(link.target or "").strip())), (0, None, None))[1]) != "closed"
+            link
+            for link in snap.links
+            if str(
+                tl_by_pair.get(
+                    (
+                        pid_to_id.get(str(link.source or "").strip()),
+                        pid_to_id.get(str(link.target or "").strip()),
+                    ),
+                    (0, None, None),
+                )[1]
+            )
+            != "closed"
         ]
         if len(live) != len(snap.links):
             snap.links = live
             for node in snap.nodes:
-                node.links_count = sum(node.id in (link.source, link.target) for link in live) or None
+                node.links_count = (
+                    sum(node.id in (link.source, link.target) for link in live) or None
+                )
         link_stats: list[tuple[SimulatorGraphLink, float | None, float | None]] = []
         for link in snap.links:
             src_pid = str(link.source or "").strip()
@@ -253,7 +292,9 @@ class SnapshotBuilder:
             limit_amt: Decimal
             status: str | None
             if (src_id, dst_id) in tl_by_pair:
-                limit_amt, status, link.close_requested_at = tl_by_pair[(src_id, dst_id)]
+                limit_amt, status, link.close_requested_at = tl_by_pair[
+                    (src_id, dst_id)
+                ]
             else:
                 status = link.status
                 try:
@@ -283,7 +324,9 @@ class SnapshotBuilder:
             else:
                 status_key = None
             link.viz_width_key = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
-            link.viz_alpha_key = viz_rules.link_alpha_key(status_key, used=used_num, limit=limit_num)
+            link.viz_alpha_key = viz_rules.link_alpha_key(
+                status_key, used=used_num, limit=limit_num
+            )
 
         # Nodes: net + viz
         atoms_by_pid: dict[str, int] = {}
@@ -298,7 +341,9 @@ class SnapshotBuilder:
                 continue
 
             # No row at all (049-1): no debt can name it, so its net is zero.
-            credit = Decimal("0") if rec is None else credit_sum.get(rec.id, Decimal("0"))
+            credit = (
+                Decimal("0") if rec is None else credit_sum.get(rec.id, Decimal("0"))
+            )
             debit = Decimal("0") if rec is None else debit_sum.get(rec.id, Decimal("0"))
             net = credit - debit
 
@@ -351,7 +396,9 @@ class SnapshotBuilder:
                 debt_mags_sorted=debt_mags_sorted,
             )
             node.viz_shape_key = viz_rules.node_shape_key(type_key)
-            w, h = viz_rules.node_size_wh(atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=type_key)
+            w, h = viz_rules.node_size_wh(
+                atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=type_key
+            )
             node.viz_size = SimulatorVizSize(w=float(w), h=float(h))
 
         return snap
@@ -363,7 +410,9 @@ _logger = logging.getLogger(__name__)
 _SCENARIO_MONEY_PRECISION = 2
 
 
-def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> SimulatorGraphSnapshot:
+def scenario_to_snapshot(
+    raw: dict[str, Any], *, equivalent: str, utc_now
+) -> SimulatorGraphSnapshot:
     participants = raw.get("participants") or []
     trustlines = raw.get("trustlines") or []
     eq_norm = str(equivalent or "").strip().upper()
@@ -418,7 +467,11 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         # precision is the fallback every database reader uses for a missing one (024 `T2416.1`) - the precision of
         # every shipped equivalent; `to_money_str` never drops a digit the value needs, whatever the precision.
         raw_limit = tl.get("limit")
-        limit = None if raw_limit is None else to_money_str(raw_limit, _SCENARIO_MONEY_PRECISION)
+        limit = (
+            None
+            if raw_limit is None
+            else to_money_str(raw_limit, _SCENARIO_MONEY_PRECISION)
+        )
         links.append(
             SimulatorGraphLink(
                 source=src,

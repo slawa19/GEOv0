@@ -23,8 +23,7 @@ def background_job_states(app: FastAPI) -> dict[str, dict[str, str]]:
 
 def background_jobs_degraded(app: FastAPI) -> bool:
     return any(
-        state.get("status") == "failed"
-        for state in background_job_states(app).values()
+        state.get("status") == "failed" for state in background_job_states(app).values()
     )
 
 

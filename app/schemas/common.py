@@ -10,6 +10,7 @@ class HealthResponse(BaseModel):
     uptime_seconds: int = Field(..., ge=0)
     timestamp: str
 
+
 class AdminDbHealthDetail(BaseModel):
     dialect: str
     reachable: bool
@@ -39,7 +40,10 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
     details: Optional[Dict[str, Any]] = None
-    request_id: Optional[str] = None  # = the `X-Request-ID` response header (024 `T2414.2`)
+    request_id: Optional[str] = (
+        None  # = the `X-Request-ID` response header (024 `T2414.2`)
+    )
+
 
 class ErrorEnvelope(BaseModel):
     error: ErrorDetail

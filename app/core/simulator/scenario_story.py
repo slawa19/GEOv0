@@ -107,7 +107,9 @@ def _pydantic_errors(prefix: str, exc: ValidationError) -> list[dict[str, str]]:
     return out
 
 
-def _description(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> Optional[LocalizedText]:
+def _description(
+    raw: Mapping[str, Any], errors: list[dict[str, str]]
+) -> Optional[LocalizedText]:
     value = raw.get("description")
     if value is None:
         return None
@@ -124,12 +126,15 @@ def _description(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> Option
 
 def scenario_description_or_none(raw: Mapping[str, Any]) -> Optional[LocalizedText]:
     """For the LIST: one stored scenario with a damaged description must not take the index down. The detail of the same
-    scenario refuses (`build_story`), so the damage is never served as if it were a description."""
+    scenario refuses (`build_story`), so the damage is never served as if it were a description.
+    """
 
     return _description(raw, [])
 
 
-def _episodes(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> list[ScenarioEpisode]:
+def _episodes(
+    raw: Mapping[str, Any], errors: list[dict[str, str]]
+) -> list[ScenarioEpisode]:
     out: list[ScenarioEpisode] = []
     events = raw.get("events")
     for index, event in enumerate(events if isinstance(events, list) else []):
@@ -152,7 +157,9 @@ def _episodes(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> list[Scen
     return out
 
 
-def _playback(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> Optional[ScenarioPlayback]:
+def _playback(
+    raw: Mapping[str, Any], errors: list[dict[str, str]]
+) -> Optional[ScenarioPlayback]:
     settings = raw.get("settings")
     playback = settings.get("playback") if isinstance(settings, dict) else None
     if playback is None:
@@ -171,13 +178,19 @@ def _declared_pids(raw: Mapping[str, Any]) -> set[str]:
     """The scenario's participants and those an `add_participant` inject introduces (their order in time is B's)."""
 
     pids: set[str] = set()
-    for participant in raw.get("participants") if isinstance(raw.get("participants"), list) else []:
+    for participant in (
+        raw.get("participants") if isinstance(raw.get("participants"), list) else []
+    ):
         if isinstance(participant, dict) and isinstance(participant.get("id"), str):
             pids.add(participant["id"])
     for event in raw.get("events") if isinstance(raw.get("events"), list) else []:
         effects = event.get("effects") if isinstance(event, dict) else None
         for effect in effects if isinstance(effects, list) else []:
-            new = effect.get("participant") if isinstance(effect, dict) and effect.get("op") == "add_participant" else None
+            new = (
+                effect.get("participant")
+                if isinstance(effect, dict) and effect.get("op") == "add_participant"
+                else None
+            )
             if isinstance(new, dict) and isinstance(new.get("id"), str):
                 pids.add(new["id"])
     return pids
@@ -197,13 +210,20 @@ def money_problem(value: Any) -> Optional[str]:
     return None
 
 
-def _reference_and_money_errors(raw: Mapping[str, Any], errors: list[dict[str, str]]) -> None:
+def _reference_and_money_errors(
+    raw: Mapping[str, Any], errors: list[dict[str, str]]
+) -> None:
     declared = _declared_pids(raw)
 
     def known(path: str, pid: Any) -> None:
         if isinstance(pid, str) and pid and pid not in declared:
-            errors.append({"path": path, "message": f"participant {pid} is neither a participant of the scenario nor "
-                                                    "introduced by an add_participant inject"})
+            errors.append(
+                {
+                    "path": path,
+                    "message": f"participant {pid} is neither a participant of the scenario nor "
+                    "introduced by an add_participant inject",
+                }
+            )
 
     events = raw.get("events")
     for index, event in enumerate(events if isinstance(events, list) else []):
@@ -213,16 +233,28 @@ def _reference_and_money_errors(raw: Mapping[str, Any], errors: list[dict[str, s
         # The schema types `pause_after` boolean on EVERY event (`$defs/timelineEvent`), an uncaptioned one included - the
         # engine obeys it there - so the type is checked here, not only through the projection of a captioned event.
         if "pause_after" in event and not isinstance(event["pause_after"], bool):
-            errors.append({"path": f"{base}/pause_after", "message": "pause_after must be a boolean"})
+            errors.append(
+                {
+                    "path": f"{base}/pause_after",
+                    "message": "pause_after must be a boolean",
+                }
+            )
         if event.get("type") == "payment":
             for key in ("from", "to"):
                 if not isinstance(event.get(key), str) or not event.get(key):
-                    errors.append({"path": f"{base}/{key}", "message": "a payment names its sender and receiver"})
+                    errors.append(
+                        {
+                            "path": f"{base}/{key}",
+                            "message": "a payment names its sender and receiver",
+                        }
+                    )
                 else:
                     known(f"{base}/{key}", event[key])
             problem = money_problem(event.get("amount"))
             if problem:
-                errors.append({"path": f"{base}/amount", "message": f"amount {problem}"})
+                errors.append(
+                    {"path": f"{base}/amount", "message": f"amount {problem}"}
+                )
         anchor = event.get("anchor")
         if isinstance(anchor, dict):
             known(f"{base}/anchor/from", anchor.get("from"))
@@ -230,12 +262,21 @@ def _reference_and_money_errors(raw: Mapping[str, Any], errors: list[dict[str, s
             if anchor.get("amount") is not None:
                 problem = money_problem(anchor["amount"])
                 if problem:
-                    errors.append({"path": f"{base}/anchor/amount", "message": f"amount {problem}"})
+                    errors.append(
+                        {
+                            "path": f"{base}/anchor/amount",
+                            "message": f"amount {problem}",
+                        }
+                    )
         focus = event.get("focus")
         if isinstance(focus, dict):
-            for i, pid in enumerate(focus.get("pids") if isinstance(focus.get("pids"), list) else []):
+            for i, pid in enumerate(
+                focus.get("pids") if isinstance(focus.get("pids"), list) else []
+            ):
                 known(f"{base}/focus/pids/{i}", pid)
-            for i, edge in enumerate(focus.get("edges") if isinstance(focus.get("edges"), list) else []):
+            for i, edge in enumerate(
+                focus.get("edges") if isinstance(focus.get("edges"), list) else []
+            ):
                 if isinstance(edge, dict):
                     known(f"{base}/focus/edges/{i}/from", edge.get("from"))
                     known(f"{base}/focus/edges/{i}/to", edge.get("to"))

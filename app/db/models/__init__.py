@@ -8,6 +8,7 @@ from app.db.base import Base
 # NOT re-exported below: nothing may treat it as a model, because being unreachable from the ORM
 # is the journal's enforcement (app/db/journal_tables.py).
 from app.db import journal_tables as _journal_tables  # noqa: F401
+
 # The reconciliation baseline and result (programme 015, step 5a), unmapped for the same reason.
 from app.db import reconciliation_tables as _reconciliation_tables  # noqa: F401
 from .equivalent import Equivalent
@@ -19,7 +20,12 @@ from .auth_challenge import AuthChallenge
 from .audit_log import AuditLog
 from .integrity_checkpoint import IntegrityCheckpoint
 from .config import Config
-from .simulator_storage import SimulatorRun, SimulatorRunMetric, SimulatorRunBottleneck, SimulatorRunArtifact
+from .simulator_storage import (
+    SimulatorRun,
+    SimulatorRunMetric,
+    SimulatorRunBottleneck,
+    SimulatorRunArtifact,
+)
 
 # THE DEBT JOURNAL IS WRITTEN BY THE DATABASE (programme 018 stage B, migration 029). This import
 # attaches the journal's sequence, functions and triggers to the tables' `after_create`, so that a

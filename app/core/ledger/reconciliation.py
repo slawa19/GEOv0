@@ -216,11 +216,15 @@ def _atoms(value: Any, *, what: str) -> int:
         return 0
     amount = value if isinstance(value, Decimal) else Decimal(str(value))
     if not amount.is_finite():
-        raise ReconciliationReadError(f"{what} read back as {amount!r}, which is not money")
+        raise ReconciliationReadError(
+            f"{what} read back as {amount!r}, which is not money"
+        )
     scaled = amount.scaleb(_ATOM_EXPONENT)
     integral = scaled.to_integral_value()
     if scaled != integral:
-        raise ReconciliationReadError(f"{what} {amount} is not a whole number of 1e-8 atoms")
+        raise ReconciliationReadError(
+            f"{what} {amount} is not a whole number of 1e-8 atoms"
+        )
     return int(integral)
 
 
@@ -281,13 +285,18 @@ class ReconciliationOutcome:
             "criterion_b": {
                 "criterion": CRITERION_B,
                 "operations_examined": sum(
-                    count for level, _kind, count in self.criterion_b_coverage if level != NOT_EXAMINED
+                    count
+                    for level, _kind, count in self.criterion_b_coverage
+                    if level != NOT_EXAMINED
                 ),
                 "coverage": coverage,
                 # What a PASSED here does NOT claim: operations checked only structurally or in part.
                 "limited": self._criterion_b_limited(),
             },
-            "correspondence": {"transactions_read": self.transactions_read, "transaction_pairs": self.transaction_pairs},
+            "correspondence": {
+                "transactions_read": self.transactions_read,
+                "transaction_pairs": self.transaction_pairs,
+            },
         }
 
     def fingerprint(self) -> str:
@@ -322,7 +331,10 @@ class ReconciliationOutcome:
                 {
                     "status": self.status,
                     "missing_evidence": sorted(self.missing_evidence),
-                    "findings": sorted(_canonical(_fault_identity(finding)) for finding in self.findings),
+                    "findings": sorted(
+                        _canonical(_fault_identity(finding))
+                        for finding in self.findings
+                    ),
                     "criterion_b_limited": self._criterion_b_limited(),
                 }
             ).encode("utf-8")
@@ -336,7 +348,14 @@ _FAULT_IDENTITY_FIELDS = {
     "entry_arithmetic": ("kind", "entry_id"),
     "b_intent_malformed": ("kind", "operation_id", "reason"),
     "b_version_unsupported": ("kind", "operation_id", "intent_encoding_version"),
-    "b_delta_mismatch": ("kind", "operation_id", "debtor_id", "creditor_id", "expected_delta", "recorded_delta"),
+    "b_delta_mismatch": (
+        "kind",
+        "operation_id",
+        "debtor_id",
+        "creditor_id",
+        "expected_delta",
+        "recorded_delta",
+    ),
     "b_prestate_mismatch": (
         "kind",
         "operation_id",
@@ -345,8 +364,20 @@ _FAULT_IDENTITY_FIELDS = {
         "recorded_prestate",
         "journal_amount_before",
     ),
-    "b_payment_v1_structure": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
-    "b_clearing_v2_effect": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
+    "b_payment_v1_structure": (
+        "kind",
+        "operation_id",
+        "rule",
+        "debtor_id",
+        "creditor_id",
+    ),
+    "b_clearing_v2_effect": (
+        "kind",
+        "operation_id",
+        "rule",
+        "debtor_id",
+        "creditor_id",
+    ),
     "tx_operation_correspondence": ("kind", "rule", "tx_id", "operation_id"),
     "debt_counter_debt": ("kind", "participant_a", "participant_b"),
     "debt_without_a_live_line": ("kind", "debtor_id", "creditor_id"),
@@ -386,7 +417,9 @@ async def _streamed(session: Any, statement: Any) -> AsyncIterator[Any]:
     `contextlib.aclosing`, so a cursor left unfinished is closed before the transaction goes on.
     """
 
-    result = await session.stream(statement.execution_options(yield_per=_STREAM_BATCH_ROWS))
+    result = await session.stream(
+        statement.execution_options(yield_per=_STREAM_BATCH_ROWS)
+    )
     try:
         async for partition in result.partitions():
             for row in partition:
@@ -395,12 +428,15 @@ async def _streamed(session: Any, statement: Any) -> AsyncIterator[Any]:
         await result.close()
 
 
-async def _journal_sums(session: Any, equivalent_id: uuid.UUID) -> tuple[dict[Edge, int], list[dict], int]:
+async def _journal_sums(
+    session: Any, equivalent_id: uuid.UUID
+) -> tuple[dict[Edge, int], list[dict], int]:
     """Per-edge sum of every recorded delta, the rows that contradict their own arithmetic, and the row count.
 
     Every row is read and checked, streamed (`_streamed`): what is held is one sum per edge and the
     contradictions. Criterion (b) reads the same rows again, per operation, in the same snapshot (`_streamed_criterion_b`);
-    until 047 `T4703` this one read also grouped every row by operation for it, which held the whole journal."""
+    until 047 `T4703` this one read also grouped every row by operation for it, which held the whole journal.
+    """
 
     entries = debt_journal_entries.c
     statement = select(
@@ -418,8 +454,16 @@ async def _journal_sums(session: Any, equivalent_id: uuid.UUID) -> tuple[dict[Ed
     async with aclosing(_streamed(session, statement)) as rows:
         async for row in rows:
             count += 1
-            before = None if row.amount_before is None else _atoms(row.amount_before, what="amount_before")
-            after = None if row.amount_after is None else _atoms(row.amount_after, what="amount_after")
+            before = (
+                None
+                if row.amount_before is None
+                else _atoms(row.amount_before, what="amount_before")
+            )
+            after = (
+                None
+                if row.amount_after is None
+                else _atoms(row.amount_after, what="amount_after")
+            )
             delta = _atoms(row.delta, what="delta")
             if (after or 0) - (before or 0) != delta:
                 contradictions.append(
@@ -473,7 +517,8 @@ async def _has_baseline(session: Any, equivalent_id: uuid.UUID) -> bool:
 def _here(equivalent_id: uuid.UUID) -> Any:
     """An operation is HERE when it NAMED this equivalent (`debt_operation_equivalents`, written at completion for
     the intent's equivalents and the touched ones - so an operation whose entries here went missing is still found
-    and recomputed against nothing) or has an entry in it (the journal's own foreign key)."""
+    and recomputed against nothing) or has an entry in it (the journal's own foreign key).
+    """
 
     ops = debt_operations.c
     named = select(debt_operation_equivalents.c.operation_id).where(
@@ -487,7 +532,8 @@ def _here(equivalent_id: uuid.UUID) -> Any:
 
 def _operations(equivalent_id: uuid.UUID) -> Any:
     """Every envelope that is here (`_here`), in ONE statement, ordered by id - the order criterion (b) examines
-    them in (PostgreSQL orders `uuid` bytewise, as `uuid.UUID` compares) and the order `_streamed_criterion_b` merges on."""
+    them in (PostgreSQL orders `uuid` bytewise, as `uuid.UUID` compares) and the order `_streamed_criterion_b` merges on.
+    """
 
     ops = debt_operations.c
     transactions = Transaction.__table__
@@ -523,7 +569,8 @@ def _entries_by_operation(equivalent_id: uuid.UUID) -> Any:
     """This equivalent's journal rows as criterion (b) reads them, ordered by operation id (`_streamed_criterion_b`).
 
     A row without an operation id exists only if the column's NOT NULL was dropped; no envelope has that id, so the
-    grouping by operation never handed it to a rule, and it is left out here too (criterion (a) has read it)."""
+    grouping by operation never handed it to a rule, and it is left out here too (criterion (a) has read it).
+    """
 
     entries = debt_journal_entries.c
     return (
@@ -536,7 +583,9 @@ def _entries_by_operation(equivalent_id: uuid.UUID) -> Any:
             entries.amount_before,
             entries.delta,
         )
-        .where(entries.equivalent_id == equivalent_id, entries.operation_id.is_not(None))
+        .where(
+            entries.equivalent_id == equivalent_id, entries.operation_id.is_not(None)
+        )
         .order_by(entries.operation_id)
     )
 
@@ -549,7 +598,11 @@ def _entry(row: Any) -> _Entry:
         debtor_id=row.debtor_id,
         creditor_id=row.creditor_id,
         effect=str(row.effect),
-        amount_before=None if row.amount_before is None else _atoms(row.amount_before, what="amount_before"),
+        amount_before=(
+            None
+            if row.amount_before is None
+            else _atoms(row.amount_before, what="amount_before")
+        ),
         delta=_atoms(row.delta, what="delta"),
     )
 
@@ -588,10 +641,17 @@ class _Malformed(Exception):
 
 
 def _finding(kind: str, op: Any, **fields: Any) -> dict[str, Any]:
-    return {"kind": kind, "operation_id": str(op.id), "operation_kind": op.kind, **fields}
+    return {
+        "kind": kind,
+        "operation_id": str(op.id),
+        "operation_kind": op.kind,
+        **fields,
+    }
 
 
-def _apply_payment_flow(state: dict[Edge, int], sender: uuid.UUID, receiver: uuid.UUID, amount: int) -> None:
+def _apply_payment_flow(
+    state: dict[Edge, int], sender: uuid.UUID, receiver: uuid.UUID, amount: int
+) -> None:
     """The documented payment rule, in integer atoms, written here and NOT imported from the engine.
 
     Reduce the receiver's debt to the sender first, put what remains on the sender's debt to the
@@ -668,20 +728,36 @@ def _require_tx_id(op: Any, intent: dict[str, Any]) -> None:
         raise _Malformed("tx_id_differs_from_the_envelope")
 
 
-def _clearing(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID) -> list:
+def _clearing(
+    op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID
+) -> list:
     _require_tx_id(op, intent)
     cycle = intent.get("cycle")
     clear = _intent_atoms(intent.get("clear_amount"))
     cycle_equivalent = _intent_uuid(intent.get("equivalent_id"))
-    if not isinstance(cycle, list) or len(cycle) < 2 or clear is None or clear <= 0 or cycle_equivalent is None:
+    if (
+        not isinstance(cycle, list)
+        or len(cycle) < 2
+        or clear is None
+        or clear <= 0
+        or cycle_equivalent is None
+    ):
         raise _Malformed("clearing_intent_shape")
     pre: dict[Edge, int] = {}
     for item in cycle:
         if not isinstance(item, dict):
             raise _Malformed("clearing_intent_shape")
-        debtor, creditor = _intent_uuid(item.get("debtor_id")), _intent_uuid(item.get("creditor_id"))
+        debtor, creditor = _intent_uuid(item.get("debtor_id")), _intent_uuid(
+            item.get("creditor_id")
+        )
         amount = _intent_atoms(item.get("amount"))
-        if debtor is None or creditor is None or debtor == creditor or amount is None or amount <= 0:
+        if (
+            debtor is None
+            or creditor is None
+            or debtor == creditor
+            or amount is None
+            or amount <= 0
+        ):
             raise _Malformed("clearing_intent_shape")
         if (debtor, creditor) in pre:
             raise _Malformed("clearing_cycle_repeats_an_edge")
@@ -691,11 +767,17 @@ def _clearing(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent
     # A cycle: every participant owes on exactly as many of its edges as it is owed on. Otherwise
     # reducing every edge by one amount moves net positions, which a clearing may never do.
     if Counter(debtor for debtor, _ in pre) != Counter(creditor for _, creditor in pre):
-        findings.append(_finding("b_intent_malformed", op, reason="clearing_cycle_is_not_closed"))
+        findings.append(
+            _finding("b_intent_malformed", op, reason="clearing_cycle_is_not_closed")
+        )
     # The documented rule is the cycle minimum; the writer's own number is checked, not trusted.
     minimum = min(pre.values())
     if clear != minimum:
-        findings.append(_finding("b_intent_malformed", op, reason="clear_amount_is_not_the_cycle_minimum"))
+        findings.append(
+            _finding(
+                "b_intent_malformed", op, reason="clear_amount_is_not_the_cycle_minimum"
+            )
+        )
 
     here = cycle_equivalent == equivalent_id
     expected = {edge: -minimum for edge in pre} if here else {}
@@ -709,8 +791,14 @@ def _clearing(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent
 _CLEARING_V2_OCCURRENCE_NAMESPACE = uuid.UUID("5f3c2e7a-0d6b-4a53-9e8f-023b00000002")
 
 
-def _clearing_v2_occurrence_id(plan_id: uuid.UUID, equivalent_id: uuid.UUID, ordinal: int) -> str:
-    return str(uuid.uuid5(_CLEARING_V2_OCCURRENCE_NAMESPACE, f"{plan_id}:{equivalent_id}:{ordinal}"))
+def _clearing_v2_occurrence_id(
+    plan_id: uuid.UUID, equivalent_id: uuid.UUID, ordinal: int
+) -> str:
+    return str(
+        uuid.uuid5(
+            _CLEARING_V2_OCCURRENCE_NAMESPACE, f"{plan_id}:{equivalent_id}:{ordinal}"
+        )
+    )
 
 
 def _descriptor_atoms(value: Any) -> int | None:
@@ -722,7 +810,9 @@ def _descriptor_atoms(value: Any) -> int | None:
     return atoms if atoms > 0 else None
 
 
-def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID) -> list:
+def _clearing_v2(
+    op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID
+) -> list:
     """CLEARING intent v2: a plan occurrence did exactly what its descriptor declared (spec 023, decision 5)."""
 
     _require_tx_id(op, intent)
@@ -764,7 +854,9 @@ def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equival
     for item in cycle:
         if not isinstance(item, dict):
             raise _Malformed("clearing_v2_intent_shape")
-        debtor, creditor = _intent_uuid(item.get("debtor_id")), _intent_uuid(item.get("creditor_id"))
+        debtor, creditor = _intent_uuid(item.get("debtor_id")), _intent_uuid(
+            item.get("creditor_id")
+        )
         amount = _intent_atoms(item.get("amount"))
         if debtor is None or creditor is None or debtor == creditor or amount is None:
             raise _Malformed("clearing_v2_intent_shape")
@@ -788,7 +880,9 @@ def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equival
     if recorded_ids != debt_ids:
         _malformed("clearing_v2_cycle_differs_from_the_descriptor")
     debtors = [debtor for debtor, _ in order]
-    closed = all(order[k][1] == order[(k + 1) % len(order)][0] for k in range(len(order)))
+    closed = all(
+        order[k][1] == order[(k + 1) % len(order)][0] for k in range(len(order))
+    )
     if not closed or len(set(debtors)) != len(debtors):
         _malformed("clearing_v2_not_one_simple_directed_cycle")
     # (3) Every locked pre-amount positive and at least `c`.
@@ -816,7 +910,9 @@ def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equival
     if here:
         effects: dict[Edge, set[str]] = {}
         for entry in entries:
-            effects.setdefault((entry.debtor_id, entry.creditor_id), set()).add(entry.effect)
+            effects.setdefault((entry.debtor_id, entry.creditor_id), set()).add(
+                entry.effect
+            )
         for edge in order:
             deleted = "D" in effects.get(edge, set())
             if pre[edge] - c == 0 and not deleted:
@@ -826,12 +922,20 @@ def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equival
             else:
                 continue
             findings.append(
-                _finding("b_clearing_v2_effect", op, rule=rule, debtor_id=str(edge[0]), creditor_id=str(edge[1]))
+                _finding(
+                    "b_clearing_v2_effect",
+                    op,
+                    rule=rule,
+                    debtor_id=str(edge[0]),
+                    creditor_id=str(edge[1]),
+                )
             )
     return findings
 
 
-def _payment_flows(intent: dict[str, Any]) -> list[tuple[uuid.UUID, uuid.UUID, int, uuid.UUID]]:
+def _payment_flows(
+    intent: dict[str, Any]
+) -> list[tuple[uuid.UUID, uuid.UUID, int, uuid.UUID]]:
     locks = intent.get("locks")
     if not isinstance(locks, list) or not locks:
         raise _Malformed("payment_intent_shape")
@@ -843,8 +947,12 @@ def _payment_flows(intent: dict[str, Any]) -> list[tuple[uuid.UUID, uuid.UUID, i
         for flow in raw:
             if not isinstance(flow, dict):
                 raise _Malformed("payment_intent_shape")
-            sender, receiver = _intent_uuid(flow.get("from")), _intent_uuid(flow.get("to"))
-            amount, flow_equivalent = _intent_atoms(flow.get("amount")), _intent_uuid(flow.get("equivalent"))
+            sender, receiver = _intent_uuid(flow.get("from")), _intent_uuid(
+                flow.get("to")
+            )
+            amount, flow_equivalent = _intent_atoms(flow.get("amount")), _intent_uuid(
+                flow.get("equivalent")
+            )
             if (
                 sender is None
                 or receiver is None
@@ -858,7 +966,9 @@ def _payment_flows(intent: dict[str, Any]) -> list[tuple[uuid.UUID, uuid.UUID, i
     return flows
 
 
-def _payment_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID) -> list:
+def _payment_v2(
+    op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID
+) -> list:
     _require_tx_id(op, intent)
     flows = [(s, r, a) for s, r, a, e in _payment_flows(intent) if e == equivalent_id]
     raw_prestate = intent.get("prestate")
@@ -869,9 +979,17 @@ def _payment_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equivale
         if not isinstance(item, dict):
             raise _Malformed("payment_prestate_shape")
         item_equivalent = _intent_uuid(item.get("equivalent"))
-        debtor, creditor = _intent_uuid(item.get("debtor")), _intent_uuid(item.get("creditor"))
+        debtor, creditor = _intent_uuid(item.get("debtor")), _intent_uuid(
+            item.get("creditor")
+        )
         amount = _intent_atoms(item.get("amount"))
-        if item_equivalent is None or debtor is None or creditor is None or amount is None or amount < 0:
+        if (
+            item_equivalent is None
+            or debtor is None
+            or creditor is None
+            or amount is None
+            or amount < 0
+        ):
             raise _Malformed("payment_prestate_shape")
         if item_equivalent != equivalent_id:
             continue
@@ -888,11 +1006,17 @@ def _payment_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equivale
     state = dict(prestate)
     for sender, receiver, amount in flows:
         _apply_payment_flow(state, sender, receiver, amount)
-    expected = {edge: state[edge] - prestate[edge] for edge in state if state[edge] != prestate[edge]}
+    expected = {
+        edge: state[edge] - prestate[edge]
+        for edge in state
+        if state[edge] != prestate[edge]
+    }
     return _compare_recomputation(op, entries, expected, prestate)
 
 
-def _payment_v1(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID) -> list:
+def _payment_v1(
+    op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID
+) -> list:
     _require_tx_id(op, intent)
     pairs = {
         edge
@@ -908,7 +1032,9 @@ def _payment_v1(op: Any, intent: dict[str, Any], entries: list[_Entry], equivale
             debtor_id=str(edge[0]),
             creditor_id=str(edge[1]),
         )
-        for edge in sorted({(e.debtor_id, e.creditor_id) for e in entries} - pairs, key=_edge_key)
+        for edge in sorted(
+            {(e.debtor_id, e.creditor_id) for e in entries} - pairs, key=_edge_key
+        )
     ]
 
 
@@ -921,7 +1047,10 @@ _RULES = {
 
 
 def _examine_operation(
-    op: Any, entries: list[_Entry], equivalent_id: uuid.UUID, coverage: Counter[tuple[str, str]]
+    op: Any,
+    entries: list[_Entry],
+    equivalent_id: uuid.UUID,
+    coverage: Counter[tuple[str, str]],
 ) -> list[dict[str, Any]]:
     """Criterion (b) for ONE envelope and its entries in this equivalent; counts its level into `coverage`."""
 
@@ -964,8 +1093,14 @@ def _criterion_b(
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
     for op in sorted(operations, key=lambda row: row.id.bytes):
-        findings.extend(_examine_operation(op, entries_by_operation.get(op.id, []), equivalent_id, coverage))
-    return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
+        findings.extend(
+            _examine_operation(
+                op, entries_by_operation.get(op.id, []), equivalent_id, coverage
+            )
+        )
+    return findings, tuple(
+        sorted((level, kind, count) for (level, kind), count in coverage.items())
+    )
 
 
 async def _in_operation_order(journal: AsyncIterator[Any]) -> AsyncIterator[Any]:
@@ -1009,14 +1144,18 @@ async def _streamed_criterion_b(
 
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
-    async with aclosing(_streamed(session, _operations(equivalent_id))) as operations, aclosing(
-        _streamed(session, _entries_by_operation(equivalent_id))
-    ) as journal, aclosing(_in_operation_order(journal)) as rows:
+    async with (
+        aclosing(_streamed(session, _operations(equivalent_id))) as operations,
+        aclosing(_streamed(session, _entries_by_operation(equivalent_id))) as journal,
+        aclosing(_in_operation_order(journal)) as rows,
+    ):
         previous_op: uuid.UUID | None = None
         pending = await anext(rows, None)
         async for op in operations:
             if previous_op is not None and not previous_op < op.id:
-                raise ReconciliationReadError(f"envelopes read out of id order: {op.id} after {previous_op}")
+                raise ReconciliationReadError(
+                    f"envelopes read out of id order: {op.id} after {previous_op}"
+                )
             previous_op = op.id
             entries: list[_Entry] = []
             while pending is not None and pending.operation_id <= op.id:
@@ -1028,7 +1167,9 @@ async def _streamed_criterion_b(
         # their ORDER is still checked: a row ahead of every envelope stops the merge from advancing, and the disorder
         # it hides lies in this suffix. Ordered as the query asks, the suffix is empty or orphans only.
         await _drain(rows)
-    return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
+    return findings, tuple(
+        sorted((level, kind, count) for (level, kind), count in coverage.items())
+    )
 
 
 #: The operation kinds that are protocol transactions and own a `tx_id` (`chk_debt_operations_tx_id_iff_kind`).
@@ -1036,7 +1177,9 @@ async def _streamed_criterion_b(
 _TX_KINDS = ("PAYMENT", "CLEARING")
 
 
-async def _correspondence(session: Any, equivalent_id: uuid.UUID) -> tuple[list[dict[str, Any]], int, int]:
+async def _correspondence(
+    session: Any, equivalent_id: uuid.UUID
+) -> tuple[list[dict[str, Any]], int, int]:
     """030 `F-030-5`: every `transactions` row of this equivalent against its operation, both directions.
 
     A row is this equivalent's when its payload names it (the code, or the id a clearing without a loaded
@@ -1055,18 +1198,43 @@ async def _correspondence(session: Any, equivalent_id: uuid.UUID) -> tuple[list[
 
     findings: list[dict[str, Any]] = []
 
-    def _refute(rule: str, tx_id: Any, op_id: Any, tx_type: Any = None, tx_state: Any = None) -> None:
-        findings.append({"kind": "tx_operation_correspondence", "rule": rule, "tx_id": tx_id, "tx_type": tx_type,
-                         "tx_state": tx_state, "operation_id": None if op_id is None else str(op_id)})
+    def _refute(
+        rule: str, tx_id: Any, op_id: Any, tx_type: Any = None, tx_state: Any = None
+    ) -> None:
+        findings.append(
+            {
+                "kind": "tx_operation_correspondence",
+                "rule": rule,
+                "tx_id": tx_id,
+                "tx_type": tx_type,
+                "tx_state": tx_state,
+                "operation_id": None if op_id is None else str(op_id),
+            }
+        )
 
     transactions = Transaction.__table__
     tx, ops, here = transactions.c, debt_operations.c, _here(equivalent_id)
     names_it = tx.payload["equivalent"].as_string()
     statement = (
-        select(tx.tx_id, tx.type, tx.state, ops.id.label("op_id"), ops.kind.label("op_kind"), here.label("op_here"))
+        select(
+            tx.tx_id,
+            tx.type,
+            tx.state,
+            ops.id.label("op_id"),
+            ops.kind.label("op_kind"),
+            here.label("op_here"),
+        )
         .select_from(transactions.outerjoin(debt_operations, ops.tx_id == tx.tx_id))
-        .where(or_(names_it == str(equivalent_id),
-                   names_it == select(Equivalent.code).where(Equivalent.id == equivalent_id).scalar_subquery(), here))
+        .where(
+            or_(
+                names_it == str(equivalent_id),
+                names_it
+                == select(Equivalent.code)
+                .where(Equivalent.id == equivalent_id)
+                .scalar_subquery(),
+                here,
+            )
+        )
     )
     pairs = read = 0
     async with aclosing(_streamed(session, statement)) as rows:
@@ -1076,11 +1244,29 @@ async def _correspondence(session: Any, equivalent_id: uuid.UUID) -> tuple[list[
             if committed and row.op_kind == row.type and row.op_here:
                 pairs += 1
             elif committed:
-                _refute("committed_transaction_without_its_operation", row.tx_id, row.op_id, row.type, row.state)
+                _refute(
+                    "committed_transaction_without_its_operation",
+                    row.tx_id,
+                    row.op_id,
+                    row.type,
+                    row.state,
+                )
             elif row.op_id is not None:
-                _refute("operation_without_its_committed_transaction", row.tx_id, row.op_id, row.type, row.state)
+                _refute(
+                    "operation_without_its_committed_transaction",
+                    row.tx_id,
+                    row.op_id,
+                    row.type,
+                    row.state,
+                )
             elif not (row.type == "PAYMENT" and row.state == "ABORTED"):
-                _refute("transaction_in_a_shape_no_writer_leaves", row.tx_id, None, row.type, row.state)
+                _refute(
+                    "transaction_in_a_shape_no_writer_leaves",
+                    row.tx_id,
+                    None,
+                    row.type,
+                    row.state,
+                )
     # The FK is RESTRICT, so a missing row is a write with the constraints off. A NULL `tx_id` meets no row.
     unmet = (
         select(ops.id, ops.tx_id)
@@ -1101,15 +1287,28 @@ async def _structure(session: Any, equivalent_id: uuid.UUID) -> list[dict[str, A
 
     checker, findings = InvariantChecker(session), []
     for check, invariant, kind, fields in (
-        (checker.check_debt_symmetry, "DEBT_SYMMETRY_VIOLATION", "debt_counter_debt", ("participant_a", "participant_b")),
-        (checker.check_trust_limits, "TRUST_LIMIT_VIOLATION", "debt_without_a_live_line", ("debtor_id", "creditor_id")),
+        (
+            checker.check_debt_symmetry,
+            "DEBT_SYMMETRY_VIOLATION",
+            "debt_counter_debt",
+            ("participant_a", "participant_b"),
+        ),
+        (
+            checker.check_trust_limits,
+            "TRUST_LIMIT_VIOLATION",
+            "debt_without_a_live_line",
+            ("debtor_id", "creditor_id"),
+        ),
     ):
         try:
             await check(equivalent_id=equivalent_id)
         except IntegrityViolationException as exc:
             if exc.details.get("invariant") != invariant:
                 raise
-            findings += [{"kind": kind, **{k: v[k] for k in fields}, "violation": v} for v in exc.details["violations"]]
+            findings += [
+                {"kind": kind, **{k: v[k] for k in fields}, "violation": v}
+                for v in exc.details["violations"]
+            ]
     return findings
 
 
@@ -1124,7 +1323,9 @@ async def verify_journal_equals_change(
     # conclusive on its own, like a row that contradicts its own arithmetic.
     b_findings, coverage = await _streamed_criterion_b(session, equivalent_id)
     findings.extend(b_findings)
-    correspondence, transactions_read, pairs = await _correspondence(session, equivalent_id)
+    correspondence, transactions_read, pairs = await _correspondence(
+        session, equivalent_id
+    )
     findings.extend(correspondence)
     findings.extend(await _structure(session, equivalent_id))
     seen = {"transactions_read": transactions_read, "transaction_pairs": pairs}
@@ -1284,7 +1485,11 @@ def result_freshness_threshold() -> timedelta:
 
     from app.config import settings
 
-    return 2 * timedelta(seconds=int(settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300)) + RESULT_RUN_ALLOWANCE
+    return (
+        2
+        * timedelta(seconds=int(settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300))
+        + RESULT_RUN_ALLOWANCE
+    )
 
 
 async def open_verification_snapshot(session: Any) -> None:
@@ -1312,7 +1517,10 @@ async def open_verification_snapshot(session: Any) -> None:
     """
 
     await session.connection(
-        execution_options={"isolation_level": "REPEATABLE READ", "postgresql_readonly": True}
+        execution_options={
+            "isolation_level": "REPEATABLE READ",
+            "postgresql_readonly": True,
+        }
     )
 
 
@@ -1336,7 +1544,9 @@ async def bound_the_waits(session: Any) -> None:
     from app.config import settings
 
     await session.execute(
-        text("SELECT set_config('lock_timeout', :lock, true), set_config('statement_timeout', :statement, true)"),
+        text(
+            "SELECT set_config('lock_timeout', :lock, true), set_config('statement_timeout', :statement, true)"
+        ),
         {
             # Never 0: PostgreSQL reads 0 as "no bound" - the very hang this exists against.
             "lock": f"{max(1, int(settings.INTEGRITY_DB_LOCK_TIMEOUT_MS))}ms",
@@ -1373,7 +1583,11 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
 
     # `FOR NO KEY UPDATE`: it conflicts with the writers' `FOR SHARE`, not with the `FOR KEY SHARE` a debt
     # INSERT's foreign key takes - a SEED still flushing is not waited for, and refused at its completion.
-    await session.execute(select(Equivalent.id).where(Equivalent.id == equivalent_id).with_for_update(key_share=True))
+    await session.execute(
+        select(Equivalent.id)
+        .where(Equivalent.id == equivalent_id)
+        .with_for_update(key_share=True)
+    )
 
     if await _has_baseline(session, equivalent_id):
         raise BaselineAlreadyTaken(
@@ -1468,12 +1682,17 @@ async def _lock_the_hold(session: Any, equivalent_id: uuid.UUID) -> Any:
     ).first()
 
 
-async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id: uuid.UUID) -> None:
+async def _set_integrity_hold(
+    session: Any, equivalent_id: uuid.UUID, result_id: uuid.UUID
+) -> None:
     """The hold itself: one UPDATE of the equivalent row, only while it is not held already."""
 
     await session.execute(
         update(Equivalent)
-        .where(Equivalent.id == equivalent_id, Equivalent.integrity_hold_result_id.is_(None))
+        .where(
+            Equivalent.id == equivalent_id,
+            Equivalent.integrity_hold_result_id.is_(None),
+        )
         .values(integrity_hold_result_id=result_id)
     )
 
@@ -1484,7 +1703,9 @@ def _findings_total(detail: Any) -> int:
     return int(detail.get("findings_total") or 0)
 
 
-async def _hold_latest_failed(session: Any, equivalent_id: uuid.UUID, locked: Any) -> HoldDecision:
+async def _hold_latest_failed(
+    session: Any, equivalent_id: uuid.UUID, locked: Any
+) -> HoldDecision:
     """Under `_lock_the_hold` (`locked` is what it returned): point the hold at the latest result row - only if that row
     is FAILED. NO VERIFICATION HERE (047 `T4704`, fail-closed): a published FAILED holds.
 
@@ -1509,7 +1730,9 @@ async def _hold_latest_failed(session: Any, equivalent_id: uuid.UUID, locked: An
     if latest is None or latest.status != FAILED:
         return HoldDecision(HOLD_NOT_CONFIRMED)
     await _set_integrity_hold(session, equivalent_id, latest.id)
-    return HoldDecision(HOLD_SET, result_id=latest.id, findings_total=_findings_total(latest.detail))
+    return HoldDecision(
+        HOLD_SET, result_id=latest.id, findings_total=_findings_total(latest.detail)
+    )
 
 
 def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
@@ -1525,11 +1748,15 @@ def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
         from app.utils.metrics import RECOVERY_EVENTS_TOTAL
 
         RECOVERY_EVENTS_TOTAL.labels(event=HOLD_METRIC_EVENT, result=HOLD_SET).inc()
-    except Exception:  # noqa: BLE001 - a metric must not turn a committed hold into an error
+    except (
+        Exception
+    ):  # noqa: BLE001 - a metric must not turn a committed hold into an error
         logger.debug("debt_reconciliation.integrity_hold_metric_failed", exc_info=True)
 
 
-async def _publish(session_factory: Callable[[], Any], outcome: ReconciliationOutcome) -> tuple[str, HoldDecision | None]:
+async def _publish(
+    session_factory: Callable[[], Any], outcome: ReconciliationOutcome
+) -> tuple[str, HoldDecision | None]:
     """The publication of one verdict - and, for a FAILED, its hold - in ONE transaction (047 `T4704`, fail-closed).
 
     For a FAILED the equivalent row is locked first (`_lock_the_hold`), then `record_outcome` writes the evidence and
@@ -1541,7 +1768,9 @@ async def _publish(session_factory: Callable[[], Any], outcome: ReconciliationOu
     async with session_factory() as session:
         await bound_the_waits(session)
         failed = outcome.status == FAILED
-        locked = await _lock_the_hold(session, outcome.equivalent_id) if failed else None
+        locked = (
+            await _lock_the_hold(session, outcome.equivalent_id) if failed else None
+        )
         stored = await record_outcome(session, outcome)
         if failed:
             decision = await _hold_latest_failed(session, outcome.equivalent_id, locked)
@@ -1551,7 +1780,9 @@ async def _publish(session_factory: Callable[[], Any], outcome: ReconciliationOu
     return stored, decision
 
 
-async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> HoldDecision:
+async def react_to_failed(
+    session_factory: Callable[[], Any], equivalent_id: uuid.UUID
+) -> HoldDecision:
     """Hold an equivalent whose latest STORED result is FAILED - WITHOUT a verification pass (047 `T4704`, fail-closed).
 
     A fresh transaction for this equivalent alone (a hold that fails to commit cannot roll back a neighbour's), the
@@ -1586,7 +1817,9 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     return decision
 
 
-async def _stored_failed_unheld(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> bool:
+async def _stored_failed_unheld(
+    session_factory: Callable[[], Any], equivalent_id: uuid.UUID
+) -> bool:
     """047 `T4704`: is the latest stored result of this equivalent `FAILED` while the equivalent is not held?
 
     The same two reads the code makes elsewhere - the hold column, the latest result row - in one short transaction of
@@ -1600,16 +1833,25 @@ async def _stored_failed_unheld(session_factory: Callable[[], Any], equivalent_i
         await bound_the_waits(session)
         hold = (
             await session.execute(
-                select(Equivalent.integrity_hold_result_id).where(Equivalent.id == equivalent_id)
+                select(Equivalent.integrity_hold_result_id).where(
+                    Equivalent.id == equivalent_id
+                )
             )
         ).first()
         latest = (
             await session.execute(
-                select(results.status).where(results.equivalent_id == equivalent_id, results.is_latest.is_(True))
+                select(results.status).where(
+                    results.equivalent_id == equivalent_id, results.is_latest.is_(True)
+                )
             )
         ).first()
         await session.rollback()
-    return hold is not None and hold[0] is None and latest is not None and latest.status == FAILED
+    return (
+        hold is not None
+        and hold[0] is None
+        and latest is not None
+        and latest.status == FAILED
+    )
 
 
 async def run_scheduled_reconciliation(
@@ -1643,8 +1885,10 @@ async def run_scheduled_reconciliation(
         async with session_factory() as session:
             await bound_the_waits(session)
             equivalent_ids = (
-                await session.execute(select(Equivalent.id).order_by(Equivalent.code))
-            ).scalars().all()
+                (await session.execute(select(Equivalent.id).order_by(Equivalent.code)))
+                .scalars()
+                .all()
+            )
 
     counts = {
         PASSED: 0,
@@ -1665,32 +1909,48 @@ async def run_scheduled_reconciliation(
         # 047: a lock wait or a statement past its bound (55P03 / 57014, `bound_the_waits`) lands here too - an
         # error of THIS equivalent only; the next one is still verified, so one held row hides no other's verdict.
         counts["error"] += 1
-        counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
-        logger.exception("debt_reconciliation.error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error))
+        counts["errored_equivalents"].append(
+            str(equivalent_id)
+        )  # 030 T3091: whose verdict is unknown
+        logger.exception(
+            "debt_reconciliation.error equivalent_id=%s sqlstate=%s",
+            equivalent_id,
+            sqlstate(error),
+        )
 
     def _hold_erred(equivalent_id: uuid.UUID, error: Exception) -> None:
         counts["hold_errors"] += 1
         counts["errored_equivalents"].append(str(equivalent_id))
         logger.exception(
-            "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s", equivalent_id, sqlstate(error)
+            "debt_reconciliation.integrity_hold_error equivalent_id=%s sqlstate=%s",
+            equivalent_id,
+            sqlstate(error),
         )
 
     for equivalent_id in list(equivalent_ids):
         # 047 `T4704`: a STORED FAILED that holds nothing yet is held first, with no verification pass - so a deadline
         # spent on equivalents before it (or on its own pass) can no longer leave it unheld while money moves.
         try:
-            stored_failed_unheld = await _stored_failed_unheld(session_factory, equivalent_id)
-        except Exception as error:  # noqa: BLE001 - classified: an error of this equivalent, as below
+            stored_failed_unheld = await _stored_failed_unheld(
+                session_factory, equivalent_id
+            )
+        except (
+            Exception
+        ) as error:  # noqa: BLE001 - classified: an error of this equivalent, as below
             _erred(equivalent_id, error)
             continue
         if stored_failed_unheld:
             try:
                 decision = await react_to_failed(session_factory, equivalent_id)
-            except Exception as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
+            except (
+                Exception
+            ) as error:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
                 _hold_erred(equivalent_id, error)
                 continue
             if decision.decision == HOLD_SET:
-                counts[f"hold_{HOLD_SET}"] += 1  # no verdict: nothing was verified; the next run verifies it
+                counts[
+                    f"hold_{HOLD_SET}"
+                ] += 1  # no verdict: nothing was verified; the next run verifies it
                 continue
             # Not held by this call (held meanwhile by another runner, gone, or the latest is no longer FAILED): the
             # equivalent takes the ordinary path below; the empty reaction is not counted.
@@ -1701,13 +1961,17 @@ async def run_scheduled_reconciliation(
                 await bound_the_waits(session)
                 outcome = await verify_journal_equals_change(session, equivalent_id)
                 await session.rollback()
-        except Exception as error:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
+        except (
+            Exception
+        ) as error:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
             _erred(equivalent_id, error)
             continue
         try:
             # The latest-row read and the write - and for a FAILED the hold - in one transaction of their own.
             stored, decision = await _publish(session_factory, outcome)
-        except Exception as error:  # noqa: BLE001 - classified below; no result substituted
+        except (
+            Exception
+        ) as error:  # noqa: BLE001 - classified below; no result substituted
             if outcome.status == FAILED:
                 # This run's verdict is FAILED; its evidence and its hold were one transaction and neither stands.
                 counts[FAILED] += 1

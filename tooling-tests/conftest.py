@@ -327,8 +327,8 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
     """Whether CI runs each partition as a blocking step, and the runner as a checked session.
 
     Each partition must be exactly one `verify_local.ps1 -ToolingOnly -ToolingPartition <name>` step
-    of its job, and neither the job nor the step may carry `if:` or `continue-on-error`: the Black
-    step's `continue-on-error` in the same job is a step attribute and must stay off this one. The
+    of its job, and neither the job nor the step may carry `if:` or `continue-on-error` (since 2026-10-30,
+    054 T5411, no step of the job is allowed to fail: Black blocks too, see test_static_diagnostics_policy). The
     runner's tooling session must run under `$runTooling` as an `Invoke-RequiredStep` (a diagnostic
     step turns a failure into a warning and exit 0) and pass `--tooling-partition`, and must not
     pass `--noconftest`, which would run the tests without any check of this file.

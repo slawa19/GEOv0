@@ -109,7 +109,9 @@ def validate_tx_id(tx_id: str) -> str:
 # for a future bare caller, not the money bound.  The money bound is `MONEY_MAX_SCALE` below, and
 # the counter-check in `test_p012_rt1_...` now flips THAT one, over HTTP.
 DEFAULT_MAX_AMOUNT_SCALE = 8
-DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excluding sign and '.')
+DEFAULT_MAX_AMOUNT_PRECISION = (
+    50  # total digits in the decimal string (excluding sign and '.')
+)
 
 # --- Money: the storage-capacity door (012 / F-012-1, T1201) ---
 #
@@ -556,7 +558,9 @@ def floor_to_step(value: Decimal, step: Decimal) -> Decimal:
     return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
 
 
-def require_money_step(value: Decimal, *, precision: int, equivalent: str, field: str = "amount") -> Decimal:
+def require_money_step(
+    value: Decimal, *, precision: int, equivalent: str, field: str = "amount"
+) -> Decimal:
     """Refuse (400 `E009`) a money value that is not a multiple of its equivalent's step - never round it.
 
     A rule on the VALUE, like the storage door above: `"1.50"` and `"1.500"` pass at precision 2, `"1.505"` does
@@ -567,8 +571,12 @@ def require_money_step(value: Decimal, *, precision: int, equivalent: str, field
     if value % money_step(precision) != 0:
         raise BadRequestException(
             f"{field} has more fraction digits than equivalent {equivalent} allows ({precision})",
-            details={"field": field, "reason": AMOUNT_PRECISION_EXCEEDED, "equivalent": equivalent,
-                     "precision": int(precision)},
+            details={
+                "field": field,
+                "reason": AMOUNT_PRECISION_EXCEEDED,
+                "equivalent": equivalent,
+                "precision": int(precision),
+            },
         )
     return value
 
@@ -590,11 +598,21 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
     if unknown:
         raise BadRequestException(f"Unknown trustline policy keys: {sorted(unknown)}")
 
-    if "auto_clearing" in policy and policy["auto_clearing"] is not None and not isinstance(policy["auto_clearing"], bool):
+    if (
+        "auto_clearing" in policy
+        and policy["auto_clearing"] is not None
+        and not isinstance(policy["auto_clearing"], bool)
+    ):
         raise BadRequestException("trustline.policy.auto_clearing must be boolean")
 
-    if "can_be_intermediate" in policy and policy["can_be_intermediate"] is not None and not isinstance(policy["can_be_intermediate"], bool):
-        raise BadRequestException("trustline.policy.can_be_intermediate must be boolean")
+    if (
+        "can_be_intermediate" in policy
+        and policy["can_be_intermediate"] is not None
+        and not isinstance(policy["can_be_intermediate"], bool)
+    ):
+        raise BadRequestException(
+            "trustline.policy.can_be_intermediate must be boolean"
+        )
 
     for key in ("max_hop_usage", "daily_limit"):
         if key not in policy or policy[key] is None:
@@ -632,7 +650,9 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
                 try:
                     candidate = format(Decimal(str(candidate)), "f")
                 except (InvalidOperation, ValueError):
-                    raise BadRequestException(f"trustline.policy.{key} must be a number")
+                    raise BadRequestException(
+                        f"trustline.policy.{key} must be a number"
+                    )
             as_decimal = parse_amount_decimal(
                 candidate,
                 max_scale=MONEY_MAX_LEXICAL_SCALE,
@@ -646,12 +666,18 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
                 as_decimal = Decimal(str(value))
             except (InvalidOperation, ValueError):
                 raise BadRequestException(f"trustline.policy.{key} must be a number")
-        if not as_decimal.is_finite():  # 028 F-028-2: "NaN" raised InvalidOperation below (500), "Infinity" passed
+        if (
+            not as_decimal.is_finite()
+        ):  # 028 F-028-2: "NaN" raised InvalidOperation below (500), "Infinity" passed
             raise BadRequestException(f"trustline.policy.{key} must be a finite number")
         if as_decimal < 0:
             raise BadRequestException(f"trustline.policy.{key} must be >= 0")
 
     if "blocked_participants" in policy and policy["blocked_participants"] is not None:
         value = policy["blocked_participants"]
-        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
-            raise BadRequestException("trustline.policy.blocked_participants must be a list of strings")
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) and item for item in value
+        ):
+            raise BadRequestException(
+                "trustline.policy.blocked_participants must be a list of strings"
+            )

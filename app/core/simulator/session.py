@@ -20,9 +20,9 @@ COOKIE_VERSION = "v1"
 
 @dataclass
 class SessionInfo:
-    sid: str          # base64url-encoded session id
-    iat: int          # issued-at timestamp
-    owner_id: str     # "anon:<sid>"
+    sid: str  # base64url-encoded session id
+    iat: int  # issued-at timestamp
+    owner_id: str  # "anon:<sid>"
 
 
 def create_session(secret: str) -> tuple[str, SessionInfo]:

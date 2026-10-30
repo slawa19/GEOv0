@@ -8,6 +8,7 @@ from nacl.encoding import Base64Encoder
 
 from app.utils.exceptions import CryptoException
 
+
 def verify_signature(public_key_b64: str, message: bytes, signature_b64: str) -> bool:
     """
     Verify Ed25519 signature.
@@ -21,6 +22,7 @@ def verify_signature(public_key_b64: str, message: bytes, signature_b64: str) ->
     except Exception as e:
         raise CryptoException(f"Unexpected crypto error: {str(e)}")
 
+
 def generate_keypair() -> tuple[str, str]:
     """
     Generate Ed25519 keypair.
@@ -28,11 +30,12 @@ def generate_keypair() -> tuple[str, str]:
     """
     signing_key = SigningKey.generate()
     verify_key = signing_key.verify_key
-    
-    private_key_b64 = signing_key.encode(encoder=Base64Encoder).decode('utf-8')
-    public_key_b64 = verify_key.encode(encoder=Base64Encoder).decode('utf-8')
-    
+
+    private_key_b64 = signing_key.encode(encoder=Base64Encoder).decode("utf-8")
+    public_key_b64 = verify_key.encode(encoder=Base64Encoder).decode("utf-8")
+
     return public_key_b64, private_key_b64
+
 
 def get_pid_from_public_key(public_key_b64: str) -> str:
     """

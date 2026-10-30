@@ -23,23 +23,31 @@ from app.openapi_postprocess import install_openapi
 
 # 029 `F-029-3`: the one logging configuration of the application - level from `LOG_LEVEL`, one format with time,
 # level and logger name. A no-op when the root logger already has handlers (a deployment's own `--log-config`).
-logging.basicConfig(level=settings.LOG_LEVEL.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=settings.LOG_LEVEL.upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 
 async def _require_redis_noeviction(client) -> None:
     """029 `T2991`: refuse a Redis that may evict keys. Under a `volatile-*` or `allkeys-*` policy the revocation
     of a used refresh token (a key with a TTL) can be evicted while the store id stays, and the token works again.
-    Checks the policy at start only; where CONFIG is not permitted (managed Redis) the operator guarantees it."""
+    Checks the policy at start only; where CONFIG is not permitted (managed Redis) the operator guarantees it.
+    """
     from redis.exceptions import ResponseError
 
     try:
         policy = (await client.config_get("maxmemory-policy")).get("maxmemory-policy")
     except ResponseError:
-        logger.error("lifespan.redis_eviction_policy_unverified CONFIG GET refused; maxmemory-policy must be noeviction")
+        logger.error(
+            "lifespan.redis_eviction_policy_unverified CONFIG GET refused; maxmemory-policy must be noeviction"
+        )
         return
     if policy != "noeviction":
-        raise RuntimeError(f"Redis maxmemory-policy must be noeviction (used refresh tokens would revive), got {policy!r}")
+        raise RuntimeError(
+            f"Redis maxmemory-policy must be noeviction (used refresh tokens would revive), got {policy!r}"
+        )
 
 
 @asynccontextmanager
@@ -68,7 +76,9 @@ async def lifespan(app: FastAPI):
         import redis.asyncio as redis
         from app.utils import security
 
-        client = redis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+        client = redis.from_url(
+            settings.REDIS_URL, encoding="utf-8", decode_responses=True
+        )
         try:
             await client.ping()
         except Exception as exc:
@@ -194,7 +204,9 @@ async def metrics_middleware(request: Request, call_next):
         status = str(getattr(response, "status_code", 0))
 
         HTTP_REQUESTS_TOTAL.labels(method=method, path=path_label, status=status).inc()
-        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, path=path_label).observe(elapsed_s)
+        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, path=path_label).observe(
+            elapsed_s
+        )
     except Exception:
         pass
 
@@ -214,8 +226,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         request.url.path,
         exc_info=(type(exc), exc, exc.__traceback__),
     )
-    internal = {"error": {"code": ErrorCode.E010.value, "message": ERROR_MESSAGES[ErrorCode.E010], "request_id": rid}}
-    return JSONResponse(status_code=500, content=internal, headers={"X-Request-ID": rid})
+    internal = {
+        "error": {
+            "code": ErrorCode.E010.value,
+            "message": ERROR_MESSAGES[ErrorCode.E010],
+            "request_id": rid,
+        }
+    }
+    return JSONResponse(
+        status_code=500, content=internal, headers={"X-Request-ID": rid}
+    )
 
 
 @app.exception_handler(GeoException)
@@ -224,9 +244,15 @@ async def geo_exception_handler(request: Request, exc: GeoException):
     if exc.code == ErrorCode.E010.value:
         # 028 `F-028-42`: an internal error's own text may carry internals (a Python repr); it is logged under the
         # request id and the caller gets the code's meaning.
-        logger.error("http.internal_error request_id=%s message=%s", request_id_var.get(), exc.message)
+        logger.error(
+            "http.internal_error request_id=%s message=%s",
+            request_id_var.get(),
+            exc.message,
+        )
         body["error"]["message"] = ERROR_MESSAGES[ErrorCode.E010]
-    return JSONResponse(status_code=exc.status_code, content=_error_with_request_id(body))
+    return JSONResponse(
+        status_code=exc.status_code, content=_error_with_request_id(body)
+    )
 
 
 @app.exception_handler(RequestValidationError)

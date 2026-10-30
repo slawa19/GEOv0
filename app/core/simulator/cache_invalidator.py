@@ -11,7 +11,9 @@ from app.core.simulator.scenario_equivalent import effective_equivalent
 
 def invalidate_routing_cache(*, equivalents: set[str]) -> None:
     for eq in equivalents:
-        if eq:  # an empty code evicts nothing, as before 034 `T3431`; `invalidate_cache("")` would clear every equivalent
+        if (
+            eq
+        ):  # an empty code evicts nothing, as before 034 `T3431`; `invalidate_cache("")` would clear every equivalent
             PaymentRouter.invalidate_cache(eq)
 
 
@@ -70,7 +72,9 @@ def invalidate_caches_after_inject(
                 dst = str(tl_dict.get("to") or "").strip()
                 if eq and src and dst:
                     run._edges_by_equivalent.setdefault(eq, []).append((src, dst))
-                    bump_topology_epoch(run, eq, src, dst)  # 026 `T2603.2`: see `publish_closed_trustlines`.
+                    bump_topology_epoch(
+                        run, eq, src, dst
+                    )  # 026 `T2603.2`: see `publish_closed_trustlines`.
 
         # 7. Frozen participants — update scenario dicts in-place.
         if frozen_pids:

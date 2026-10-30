@@ -14,7 +14,13 @@ from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
 from app.db.models.equivalent import Equivalent
 from app.utils.money import to_money_str
-from app.schemas.balance import BalanceSummary, BalanceEquivalent, DebtsDetails, OutgoingDebt, IncomingDebt
+from app.schemas.balance import (
+    BalanceSummary,
+    BalanceEquivalent,
+    DebtsDetails,
+    OutgoingDebt,
+    IncomingDebt,
+)
 from app.utils.exceptions import NotFoundException
 from app.config import settings
 from app.utils.observability import log_duration
@@ -26,6 +32,7 @@ logger = logging.getLogger(__name__)
 _SUMMARY_CACHE_MAX_ENTRIES = 1024
 
 _summary_cache: "OrderedDict[uuid.UUID, tuple[float, BalanceSummary]]" = OrderedDict()
+
 
 class BalanceService:
     def __init__(self, session: AsyncSession):
@@ -49,7 +56,9 @@ class BalanceService:
         _summary_cache.move_to_end(participant_id, last=True)
         return summary
 
-    def _set_cached_summary(self, participant_id: uuid.UUID, summary: BalanceSummary) -> None:
+    def _set_cached_summary(
+        self, participant_id: uuid.UUID, summary: BalanceSummary
+    ) -> None:
         ttl = settings.BALANCE_SUMMARY_CACHE_TTL_SECONDS
         if ttl <= 0:
             return
@@ -57,7 +66,7 @@ class BalanceService:
         _summary_cache.move_to_end(participant_id, last=True)
 
         while len(_summary_cache) > _SUMMARY_CACHE_MAX_ENTRIES:
-                _summary_cache.popitem(last=False)
+            _summary_cache.popitem(last=False)
 
     async def get_summary(self, participant_id: uuid.UUID) -> BalanceSummary:
         """Aggregated balance by equivalent for a participant.
@@ -66,13 +75,17 @@ class BalanceService:
         `available_to_spend` / `available_to_receive` - the direct capacity to / from every peer, summed:
         one `pair_capacity` per peer (protocol §6.3.1); a pair without an active line carries nothing.
         """
-        
+
         cached = self._get_cached_summary(participant_id)
         if cached is not None:
-            logger.debug("op=balance.get_summary cache=hit participant_id=%s", participant_id)
+            logger.debug(
+                "op=balance.get_summary cache=hit participant_id=%s", participant_id
+            )
             return cached
 
-        with log_duration(logger, "balance.get_summary", participant_id=str(participant_id)):
+        with log_duration(
+            logger, "balance.get_summary", participant_id=str(participant_id)
+        ):
             summary = await self._compute_summary(participant_id)
 
         self._set_cached_summary(participant_id, summary)
@@ -80,21 +93,41 @@ class BalanceService:
 
     async def _compute_summary(self, participant_id: uuid.UUID) -> BalanceSummary:
         # Fetch Outgoing Trustlines (Me -> Others)
-        out_tl_stmt = select(TrustLine).options(joinedload(TrustLine.equivalent)).where(
-            and_(TrustLine.from_participant_id == participant_id, TrustLine.status == 'active')
+        out_tl_stmt = (
+            select(TrustLine)
+            .options(joinedload(TrustLine.equivalent))
+            .where(
+                and_(
+                    TrustLine.from_participant_id == participant_id,
+                    TrustLine.status == "active",
+                )
+            )
         )
         out_tls = (await self.session.execute(out_tl_stmt)).scalars().all()
 
         # Fetch Incoming Trustlines (Others -> Me)
-        in_tl_stmt = select(TrustLine).options(joinedload(TrustLine.equivalent)).where(
-            and_(TrustLine.to_participant_id == participant_id, TrustLine.status == 'active')
+        in_tl_stmt = (
+            select(TrustLine)
+            .options(joinedload(TrustLine.equivalent))
+            .where(
+                and_(
+                    TrustLine.to_participant_id == participant_id,
+                    TrustLine.status == "active",
+                )
+            )
         )
         in_tls = (await self.session.execute(in_tl_stmt)).scalars().all()
 
         # Both roles must come from one statement snapshot under READ COMMITTED:
         # a payment can reverse a pair's debt between two separate SELECTs.
-        debts_stmt = select(Debt).options(joinedload(Debt.equivalent)).where(
-            or_(Debt.debtor_id == participant_id, Debt.creditor_id == participant_id)
+        debts_stmt = (
+            select(Debt)
+            .options(joinedload(Debt.equivalent))
+            .where(
+                or_(
+                    Debt.debtor_id == participant_id, Debt.creditor_id == participant_id
+                )
+            )
         )
         debts = (await self.session.execute(debts_stmt)).scalars().all()
         my_debts = [d for d in debts if d.debtor_id == participant_id]
@@ -121,10 +154,10 @@ class BalanceService:
         def get_eq_entry(code: str) -> Dict[str, Decimal]:
             if code not in equivalents_map:
                 equivalents_map[code] = {
-                    'total_debt': Decimal('0'),
-                    'total_credit': Decimal('0'),
-                    'spend_capacity': Decimal('0'),
-                    'receive_capacity': Decimal('0'),
+                    "total_debt": Decimal("0"),
+                    "total_credit": Decimal("0"),
+                    "spend_capacity": Decimal("0"),
+                    "receive_capacity": Decimal("0"),
                 }
             return equivalents_map[code]
 
@@ -133,14 +166,14 @@ class BalanceService:
         for d in my_debts:
             code = note_precision(d.equivalent)
             debts_i_owe[(d.creditor_id, code)] = d.amount
-            get_eq_entry(code)['total_debt'] += d.amount
+            get_eq_entry(code)["total_debt"] += d.amount
 
         # Debts Others Owe Me: key=(debtor_id, code), value=amount
         debts_others_owe: Dict[tuple[uuid.UUID, str], Decimal] = {}
         for d in others_debts:
             code = note_precision(d.equivalent)
             debts_others_owe[(d.debtor_id, code)] = d.amount
-            get_eq_entry(code)['total_credit'] += d.amount
+            get_eq_entry(code)["total_credit"] += d.amount
 
         # IMPORTANT: Payment routing semantics in this project treat an edge Me->Peer as enabled by the trustline
         # Peer->Me (Peer trusts Me to owe). Therefore:
@@ -156,13 +189,13 @@ class BalanceService:
 
             capacity = pair_capacity(
                 line_limit=limit,
-                payer_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
-                payee_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
+                payer_owes=debts_i_owe.get((peer_id, code), Decimal("0")),
+                payee_owes=debts_others_owe.get((peer_id, code), Decimal("0")),
                 pair_has_active_line=True,
             )
             # Lowered trust may leave this pair over limit; its shortfall
             # cannot consume the usable capacity of independent peers.
-            get_eq_entry(code)['spend_capacity'] += max(Decimal('0'), capacity)
+            get_eq_entry(code)["spend_capacity"] += max(Decimal("0"), capacity)
 
         # Receive capacity comes from Outgoing TrustLines (Me -> Peer)
         for tl in out_tls:
@@ -172,38 +205,42 @@ class BalanceService:
 
             capacity = pair_capacity(
                 line_limit=limit,
-                payer_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
-                payee_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
+                payer_owes=debts_others_owe.get((peer_id, code), Decimal("0")),
+                payee_owes=debts_i_owe.get((peer_id, code), Decimal("0")),
                 pair_has_active_line=True,
             )
-            get_eq_entry(code)['receive_capacity'] += max(Decimal('0'), capacity)
+            get_eq_entry(code)["receive_capacity"] += max(Decimal("0"), capacity)
 
         # A peer whose line to me is not active: the offset counts only if MY line to them is active.
         all_peers_equivalents = set(debts_i_owe.keys()) | set(debts_others_owe.keys())
 
-        processed_spend = set((tl.from_participant_id, tl.equivalent.code) for tl in in_tls)
-        processed_receive = set((tl.to_participant_id, tl.equivalent.code) for tl in out_tls)
+        processed_spend = set(
+            (tl.from_participant_id, tl.equivalent.code) for tl in in_tls
+        )
+        processed_receive = set(
+            (tl.to_participant_id, tl.equivalent.code) for tl in out_tls
+        )
 
-        for (peer, code) in all_peers_equivalents:
+        for peer, code in all_peers_equivalents:
             if (peer, code) not in processed_spend:
                 cap = pair_capacity(
                     line_limit=None,
-                    payer_owes=debts_i_owe.get((peer, code), Decimal('0')),
-                    payee_owes=debts_others_owe.get((peer, code), Decimal('0')),
+                    payer_owes=debts_i_owe.get((peer, code), Decimal("0")),
+                    payee_owes=debts_others_owe.get((peer, code), Decimal("0")),
                     pair_has_active_line=(peer, code) in processed_receive,
                 )
                 if cap > 0:
-                    get_eq_entry(code)['spend_capacity'] += cap
+                    get_eq_entry(code)["spend_capacity"] += cap
 
             if (peer, code) not in processed_receive:
                 cap = pair_capacity(
                     line_limit=None,
-                    payer_owes=debts_others_owe.get((peer, code), Decimal('0')),
-                    payee_owes=debts_i_owe.get((peer, code), Decimal('0')),
+                    payer_owes=debts_others_owe.get((peer, code), Decimal("0")),
+                    payee_owes=debts_i_owe.get((peer, code), Decimal("0")),
                     pair_has_active_line=(peer, code) in processed_spend,
                 )
                 if cap > 0:
-                    get_eq_entry(code)['receive_capacity'] += cap
+                    get_eq_entry(code)["receive_capacity"] += cap
 
         results: list[BalanceEquivalent] = []
         for code, data in equivalents_map.items():
@@ -219,27 +256,33 @@ class BalanceService:
                 # the value needs, so nothing is lost and the exponent is impossible.
                 BalanceEquivalent(
                     code=code,
-                    total_debt=to_money_str(data['total_debt'], precision),
-                    total_credit=to_money_str(data['total_credit'], precision),
+                    total_debt=to_money_str(data["total_debt"], precision),
+                    total_credit=to_money_str(data["total_credit"], precision),
                     net_balance=to_money_str(
-                        data['total_credit'] - data['total_debt'], precision
+                        data["total_credit"] - data["total_debt"], precision
                     ),
                     available_to_spend=to_money_str(
-                        max(Decimal('0'), data['spend_capacity']), precision
+                        max(Decimal("0"), data["spend_capacity"]), precision
                     ),
                     available_to_receive=to_money_str(
-                        max(Decimal('0'), data['receive_capacity']), precision
+                        max(Decimal("0"), data["receive_capacity"]), precision
                     ),
                 )
             )
 
         return BalanceSummary(equivalents=results)
 
-    async def get_debts(self, participant_id: uuid.UUID, equivalent_code: str, direction: str = 'all') -> DebtsDetails:
+    async def get_debts(
+        self, participant_id: uuid.UUID, equivalent_code: str, direction: str = "all"
+    ) -> DebtsDetails:
         """
         Get detailed debts for a specific equivalent.
         """
-        equivalent = (await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent_code))).scalar_one_or_none()
+        equivalent = (
+            await self.session.execute(
+                select(Equivalent).where(Equivalent.code == equivalent_code)
+            )
+        ).scalar_one_or_none()
         if not equivalent:
             raise NotFoundException(f"Equivalent {equivalent_code} not found")
 
@@ -254,38 +297,46 @@ class BalanceService:
 
         outgoing_res = []
         incoming_res = []
-        
+
         roles = []
-        if direction in ['outgoing', 'all']:
+        if direction in ["outgoing", "all"]:
             roles.append(Debt.debtor_id == participant_id)
-        if direction in ['incoming', 'all']:
+        if direction in ["incoming", "all"]:
             roles.append(Debt.creditor_id == participant_id)
 
         if roles:
             # As in summary, materialize both directions in one statement before
             # partitioning. Load both peers here to avoid later lazy reads.
-            stmt = select(Debt).options(joinedload(Debt.creditor), joinedload(Debt.debtor)).where(
-                or_(*roles), Debt.equivalent_id == equivalent.id, Debt.amount > 0
+            stmt = (
+                select(Debt)
+                .options(joinedload(Debt.creditor), joinedload(Debt.debtor))
+                .where(
+                    or_(*roles), Debt.equivalent_id == equivalent.id, Debt.amount > 0
+                )
             )
             debts = (await self.session.execute(stmt)).scalars().all()
         else:
             debts = []
 
         for d in debts:
-            if direction in ['outgoing', 'all'] and d.debtor_id == participant_id:
-                outgoing_res.append(OutgoingDebt(
-                    creditor=d.creditor.pid,
-                    creditor_name=d.creditor.display_name or "",
-                    equivalent=equivalent_code,
-                    amount=to_money_str(d.amount, precision)
-                ))
-                
-            if direction in ['incoming', 'all'] and d.creditor_id == participant_id:
-                incoming_res.append(IncomingDebt(
-                    debtor=d.debtor.pid,
-                    debtor_name=d.debtor.display_name or "",
-                    equivalent=equivalent_code,
-                    amount=to_money_str(d.amount, precision)
-                ))
-                
+            if direction in ["outgoing", "all"] and d.debtor_id == participant_id:
+                outgoing_res.append(
+                    OutgoingDebt(
+                        creditor=d.creditor.pid,
+                        creditor_name=d.creditor.display_name or "",
+                        equivalent=equivalent_code,
+                        amount=to_money_str(d.amount, precision),
+                    )
+                )
+
+            if direction in ["incoming", "all"] and d.creditor_id == participant_id:
+                incoming_res.append(
+                    IncomingDebt(
+                        debtor=d.debtor.pid,
+                        debtor_name=d.debtor.display_name or "",
+                        equivalent=equivalent_code,
+                        amount=to_money_str(d.amount, precision),
+                    )
+                )
+
         return DebtsDetails(outgoing=outgoing_res, incoming=incoming_res)

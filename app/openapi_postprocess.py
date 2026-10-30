@@ -21,9 +21,7 @@ from app.schemas.common import ErrorEnvelope
 
 def _register_openapi_model_schema(document: dict, model: type) -> None:
     schemas = document.setdefault("components", {}).setdefault("schemas", {})
-    model_schema = model.model_json_schema(
-        ref_template="#/components/schemas/{model}"
-    )
+    model_schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
     definitions = model_schema.pop("$defs", {})
     for name, schema in definitions.items():
         schemas.setdefault(name, schema)
@@ -33,8 +31,8 @@ def _register_openapi_model_schema(document: dict, model: type) -> None:
 def _is_default_fastapi_validation_response(response: object) -> bool:
     if not isinstance(response, dict):
         return False
-    schema = (
-        ((response.get("content") or {}).get("application/json") or {}).get("schema")
+    schema = ((response.get("content") or {}).get("application/json") or {}).get(
+        "schema"
     )
     return schema == {"$ref": "#/components/schemas/HTTPValidationError"}
 
@@ -364,7 +362,9 @@ def declare_auth_statuses(app: FastAPI, document: dict) -> None:
                 )
 
 
-_HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace"})
+_HTTP_METHODS = frozenset(
+    {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+)
 
 
 def declare_internal_error_status(app: FastAPI, document: dict) -> None:

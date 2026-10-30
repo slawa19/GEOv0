@@ -9,10 +9,15 @@ from app.utils.money import to_money_str
 
 # 029 F-029-5, matrix row 9: an Admin API amount keeps its stored scale and is plain decimal text - pydantic's own
 # `str(Decimal)` wrote a zero column or sum as `0E-8` (measured: `/admin/trustlines`, `/admin/liquidity/summary`).
-PlainDecimal = Annotated[Decimal, PlainSerializer(lambda v: format(v, "f"), return_type=str, when_used="json")]
+PlainDecimal = Annotated[
+    Decimal,
+    PlainSerializer(lambda v: format(v, "f"), return_type=str, when_used="json"),
+]
+
 
 class TrustLineBase(BaseModel):
     policy: Optional[Dict[str, Any]] = None
+
 
 class TrustLine(TrustLineBase):
     id: UUID
@@ -45,6 +50,7 @@ class TrustLine(TrustLineBase):
             return format(value, "f")
         return to_money_str(value, self.equivalent_precision)
 
+
 class TrustLineCreateRequest(BaseModel):
     to: str
     equivalent: str
@@ -59,6 +65,7 @@ class TrustLineCreateRequest(BaseModel):
     limit: str
     policy: Optional[Dict[str, Any]] = None
     signature: str
+
 
 class TrustLineExpectedState(BaseModel):
     """030 S5 (F-030-13, `T3000` item 1): the line as its owner saw it, bound by the signature of an UPDATE or CLOSE.
@@ -100,6 +107,7 @@ class TrustLineCloseResult(BaseModel):
     status: str = "success"
     message: str
     trustline: TrustLine
+
 
 class TrustLinesList(BaseModel):
     items: List[TrustLine]

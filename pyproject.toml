@@ -1,6 +1,8 @@
 [tool.black]
 line-length = 88
 target-version = ['py311']
+# Applied Alembic migrations are read-only by AGENTS.md §3; Black's area is app/ (054 T5411, 2026-10-30).
+extend-exclude = '^/migrations/'
 
 [tool.ruff]
 line-length = 88
