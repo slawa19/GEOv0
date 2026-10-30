@@ -642,11 +642,12 @@ produced, printing one line per acceptance check. The symbolic `ref -> PID` tabl
 written to `.local-run/seed-recipe/<community>/participants.json`; the private keys are not written
 anywhere, which is why a second run is refused rather than replayed.
 
-The recipe refuses rather than seeds half-true: a database that is not empty (the earlier run's keys are
+The recipe refuses rather than seeds half-true; among its refusals (the full list is in
+`scripts/seed_recipe.py`): a database that is not empty (the earlier run's keys are
 gone, so its participants cannot be addressed again); a database whose name is not a disposable one -
 only `geov0_dev_<slug>` and `geov0_test_<slug>` are, which is why the Compose database `geov0` is refused;
-and a community description that declares a state no product operation produces (a trust line in any
-status but `active`). Both shipped communities pass the last check: `greenfield-village-100`, refused
+and a community description that declares a state no product operation produces (for example a trust line
+in any status but `active`). Both shipped communities pass the last check: `greenfield-village-100`, refused
 until 2026-10-04 for nine `frozen` lines, seeds since 028 `F-028-29` (see `-SeedCommunity` above).
 
 Note: the Admin UI has no role selector and no read-only mode (the `admin/operator/auditor` selector was mock-only and
