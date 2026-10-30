@@ -487,19 +487,20 @@ async def load_snapshot(
 
     Consent is decided by the production parser itself, `ClearingService._policy_flag`, on the stored JSON, so
     admission cannot differ from execution's by construction (020 review P2-2). Statuses are the production
-    constant. A missing equivalent raises `GeoException`.
+    constant. A missing equivalent raises `NotFoundException` (404/E009, the client's error - 054-E-5; it was a bare
+    `GeoException`, so `/clearing/cycles` and `/clearing/auto` answered an unknown code with the internal 500/E010).
     """
 
     from app.core.clearing.service import _CLEARABLE_TRUSTLINE_STATUSES, ClearingService
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.utils.exceptions import GeoException
+    from app.utils.exceptions import NotFoundException
 
     equivalent_id = (
         await session.execute(select(Equivalent.id).where(Equivalent.code == equivalent_code))
     ).scalar_one_or_none()
     if equivalent_id is None:
-        raise GeoException(f"Equivalent {equivalent_code} not found")
+        raise NotFoundException(f"Equivalent {equivalent_code} not found")
     params: dict = {"equivalent_id": equivalent_id, "statuses": list(_CLEARABLE_TRUSTLINE_STATUSES)}
     sql = _ELIGIBLE_EDGES_SQL
     if allowed_participant_pids is not None:

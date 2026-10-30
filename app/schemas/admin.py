@@ -21,8 +21,9 @@ class AdminConfigResponse(BaseModel):
 
 
 class AdminConfigPatchRequest(BaseModel):
-    # Required, as in `api/openapi.yaml` (054-D-9): an empty body is a 422, not a 200 with an empty audit row.
-    updates: dict[str, Any]
+    # Required and non-empty, as in `api/openapi.yaml` (054-D-9, 054-E-16): an empty body or an empty `updates` is a
+    # 422, not a 200 with an empty audit row.
+    updates: dict[str, Any] = Field(min_length=1)
     reason: Optional[str] = None
 
 

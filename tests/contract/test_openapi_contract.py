@@ -151,8 +151,12 @@ TRANSPORT_HEADER_DRIFT_COUNT = 56
 # `PATCH /admin/config`: the generated side gains `required: [updates]`, which the canon has always declared, so the
 # entry moves towards the canon and keeps only its `additionalProperties` difference. Measured with a per-entry dump of
 # this ledger on `66f29397` and on this tree (not committed): those three leaf changes are the whole difference.
+# 2026-10-30 / programme 054 E-16 (`/admin/config` part): count HOLDS at 13, digest moves. `PATCH /admin/config`
+# gains `updates.minProperties: 1` on BOTH sides (canon and `Field(min_length=1)`); an empty `updates` was a 200 with
+# an audit row about nothing, now a declared 422. The entry keeps only its `additionalProperties` difference; no other
+# request schema is touched (the only other canon edit, 054-E-14, is an SSE event schema no request body references).
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "1ed65736ad3f289e048455648792042f08b04c2391445a6e3f5a8bc229724724"
+    "52a9d58560faa9df97a1ae974af64beed6957c5d42b3c819320d6b3c5e4c5af2"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
@@ -483,8 +487,16 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # declares no response model, so the generated half has no schema and the entry already differed as a whole
 # (`properties`, `required`, `type` canonical-only); the canonical half it hashes changed, the paths that differ did not
 # (measured with the same per-entry path dump).
+# Eighth move, 2026-10-30, `054-E-15` (after `054-A-15`): count HOLDS at 61, digest moves, NO difference path added or
+# removed. The canon narrows `SimulatorGraphLink.trust_limit/used/available` from `oneOf [string, number]` to
+# `type: string`. The four entries that carry the link (`GET /simulator/graph/ego`, `GET /simulator/graph/snapshot`,
+# `GET /simulator/runs/{run_id}/graph/snapshot`, `GET /simulator/scenarios/{scenario_id}/graph/preview`) already differed
+# on exactly these three paths - the generated half is pydantic's `anyOf [number, string, null]` of the `NumberOrString`
+# annotation, which the `money must be a decimal string` validator (054-A-15) refuses at runtime - and still differ
+# there; only the canonical value changed. Measured with a per-entry path dump of the success ledger before and after
+# (scratch, not committed). Narrowing the annotation to `str` would empty the difference; it is outside wave E's surface.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "d3d0f14ba3777ad948975bee083be0477441ff9dbbea6496b7cf421dde08135b"
+    "0272ed54378924953ace4ecb9e1f31bdad0e5a40d92f1854041563e1af770919"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -662,8 +674,24 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # `POST /simulator/runs/{run_id}/actions/tx-once` and `/clearing-once`, removed by the owner's decision of 2026-10-16 (spec 042).
 # Measured with a per-entry dump of every ledger on `1beb8670` and on this tree (`.local-run/p042-s1/dump_ledgers.py`,
 # not committed): the base ledger minus the two keys equals the new one entry by entry.
+# 2026-10-30 / programme 054 `054-E-10` (variant A, decision of the main session): count HOLDS at 44, digest moves; none
+# enters or leaves. Every operation declares `500` on BOTH halves - the canon through `components/responses/InternalError`,
+# the generated schema through `declare_internal_error_status` (`app/openapi_postprocess.py`), the same `ErrorEnvelope`
+# after normalisation; `payment-real` and `clearing-real` declare the same `oneOf[SimulatorActionError, ErrorEnvelope]`
+# on both halves (`SimulatorActionInternalError` / `_ACTION_INTERNAL_ERROR_RESPONSE`). 43 entries gain an EQUAL 500
+# pair; `POST /payments` had a canon-only 500 and now has its generated twin. Measured with a per-entry dump on
+# `721d96b1` and on this tree (a scratch script, not committed): both ledgers with every `500` key removed are equal.
+# 2026-10-30 / programme 054 `054-E-1`...`E-8`: count HOLDS at 44, digest moves; none enters or leaves. The statuses the
+# service always answered are declared in the canon AND on the decorators, IDENTICALLY after normalisation: `404` on
+# `POST /auth/challenge`, `409` on `POST /participants`, `400`/`404` on `GET /trustlines`, `404` on `POST /trustlines`,
+# `504` on `GET /payments/capacity`, `400` on `GET /integrity/checksum/{equivalent}` and `POST /integrity/verify`,
+# `404` on `POST /simulator/runs`; `400`/`404` on both clearing routes and `504` on `POST /clearing/auto` (E-5).
+# Seven of those operations were already in this ledger for older differences and gain an EQUAL pair; `GET
+# /trustlines` and the two clearing routes were not and stay out. `actions/trustlines-list` (054-E-12) declares its
+# `400` on both halves and stays out. Measured with the same per-entry dump: against the E-10 ledger exactly those
+# seven entries differ, each by the added equal pair.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "c933ffdfc609354d5876c3b4361a3c6872a1199f62c8853311dc4720b3801806"
+    "8483815a1f7588f3c0cb1d5a01de18bc563d0d11941228ae71889dd2f1bf3fcb"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 44
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

@@ -70,7 +70,7 @@ from app.db.models.participant import Participant
 from app.db.models.simulator_storage import SimulatorRun
 from app.utils.distributed_lock import RenewableLease, renewable_lease
 from app.utils.error_codes import ErrorCode
-from app.utils.exceptions import ConflictException, GeoException
+from app.utils.exceptions import ConflictException, GeoException, NotFoundException
 from app.utils.money import to_money_str
 from app.utils.validation import validate_equivalent_code
 
@@ -268,7 +268,7 @@ async def _read_snapshot(session_factory, equivalent_code, allowed_participant_p
         edges = await load_snapshot(session, equivalent_code, allowed_participant_pids=allowed_participant_pids)
         await session.rollback()
     if equivalent_id is None:  # load_snapshot has already refused a missing equivalent; kept explicit
-        raise GeoException(f"Equivalent {equivalent_code} not found")
+        raise NotFoundException(f"Equivalent {equivalent_code} not found")
     return equivalent_id, edges
 
 
@@ -392,7 +392,7 @@ async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, execu
     queue: the diagnostic worker still shares the machine's CPU with everything else.
 
     Each cycle is a list of `{debt_id, debtor, creditor, amount}`; `amount` is the debt's amount on the snapshot at
-    the equivalent's precision, not the cycle's `c`. A missing equivalent raises `GeoException`, as `load_snapshot`
+    the equivalent's precision, not the cycle's `c`. A missing equivalent raises `NotFoundException`, as `load_snapshot`
     does. A planner failure propagates unchanged (`BrokenProcessPool` after the broken pool is forgotten,
     `PlanIntegrityError`): there is no fallback and no other detector.
     """
