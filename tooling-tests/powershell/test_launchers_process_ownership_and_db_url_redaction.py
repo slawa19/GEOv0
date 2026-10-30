@@ -2806,10 +2806,13 @@ function netstat.exe {
         'Активные подключения',
         '',
         '  Имя    Локальный адрес        Внешний адрес          Состояние       PID',
+        '  TCP    0.0.0.0:30334          0.0.0.0:0              ПРОСЛУШИВАНИЕ   777',
+        '  TCP    0.0.0.0:30335          0.0.0.0:0              ПРОСЛУШИВАНИЕ   0',
         '  TCP    0.0.0.0:3033           0.0.0.0:0              ПРОСЛУШИВАНИЕ   111',
         '  TCP    127.0.0.1:30330        127.0.0.1:50000        ESTABLISHED     222',
         '  TCP    [::1]:30330            [::]:0                 ПРОСЛУШИВАНИЕ   333',
         '  TCP    [::]:30332             [::]:0                 ПРОСЛУШИВАНИЕ   444',
+        '  TCP    0.0.0.0:30332          0.0.0.0:0              ПРОСЛУШИВАНИЕ   445',
         '  UDP    0.0.0.0:30331          *:*                                    666'
     )
 }
@@ -2818,6 +2821,7 @@ $results += "30330=$(Get-ListeningPid -Port 30330)|$script:ListenerProbeNote"
 $results += "3033=$(Get-ListeningPid -Port 3033)"
 $results += "30332=$(Get-ListeningPid -Port 30332)"
 $results += "30331=$(Get-ListeningPid -Port 30331)|$script:ListenerProbeNote"
+$results += "30335=$(Get-ListeningPid -Port 30335)"
 $script:Primary = 'empty'
 $results += "empty=$(Get-ListeningPid -Port 30333)|$script:ListenerProbeNote"
 $script:Primary = 'object'
@@ -2854,18 +2858,23 @@ def test_listener_probe_falls_back_to_netstat_by_columns(
         "30331=|Get-NetTCPConnection threw System.InvalidOperationException; "
         "netstat fallback found no LISTENING socket"
     )
-    assert lines[4] == (
+    # A port that is a PREFIX of a listed one (3033 vs 30334, listed first) and the first of two
+    # listeners on one port (444 before 445) pin the anchored, first-match parse; PID 0 is no owner.
+    assert lines[4] == "30335="
+    assert lines[5] == (
         "empty=|Get-NetTCPConnection returned 0 objects; "
         "netstat fallback found no LISTENING socket"
     )
-    assert lines[5] == "object=555|netstat-calls=0"
-    assert len(lines) == 6
+    assert lines[6] == "object=555|netstat-calls=0"
+    assert len(lines) == 7
 
 
 def test_every_launcher_listener_lookup_goes_through_the_fallback_probe() -> None:
     """Source guard, not a behavioural proof: the one `Get-NetTCPConnection` call of each launcher is
-    the one inside `Get-ListeningPid`, so no lookup (wait, stop, free-port, ownership) bypasses the
-    netstat fallback. It does not see a lookup written with another API."""
+    the one inside `Get-ListeningPid`, so no `Get-NetTCPConnection -LocalPort` lookup bypasses the
+    netstat fallback. It does not see a lookup written with another API or without `-LocalPort`, and
+    `run_simulator_ui.ps1` decides that a port is busy (and searches a free one) by a TCP connect
+    (`Test-TcpOpen`), not by this lookup."""
     for launcher in (_RUN_LOCAL, _RUN_FULL_STACK, _RUN_REAL_SIMULATOR, _RUN_SIMULATOR_UI):
         source = launcher.read_text(encoding="utf-8-sig")
         function = source.split("function Get-ListeningPid {", 1)[1]
