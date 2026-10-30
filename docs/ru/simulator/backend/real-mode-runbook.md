@@ -79,14 +79,16 @@
 
 Simulator UI v2 — отдельный Vite‑прототип.
 
-Из корня репозитория:
+Из корня репозитория, против запущенного backend (Real Mode):
 
-- `./scripts/run_simulator_ui.ps1`
+- `./scripts/run_simulator_ui.ps1 -Mode real -BackendOrigin http://127.0.0.1:<порт backend>` (порт `run_local.ps1` по умолчанию — 18000)
+
+Без флагов скрипт стартует в `-Mode fixtures` — офлайн-снимок без backend (печатает `?mode=fixtures&debug=1`).
 
 По умолчанию:
 
-- порт: 5176
-- host: 127.0.0.1
+- порт: 5176 (`-Port`)
+- host: 127.0.0.1 (`-HostName`)
 
 Скрипт аккуратно обходит «зарезервированные» Windows порты (excludedportrange) и подбирает альтернативный, если надо.
 
