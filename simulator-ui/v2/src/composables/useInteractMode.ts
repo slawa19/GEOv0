@@ -1060,10 +1060,12 @@ export function useInteractMode(opts: {
 
       // BUG-5: log to history
       const clearedCycles = res.cleared_cycles
-      const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
         // The stream publishes a clearing that cleared (`clearing.done`) as well.
-        pushHistory({ historyContext: began, eq }, '🌀', { plural: 'history.clearing', count: clearedCycles, vars: { amount: clearedAmt, unit: eq } }, { publishedToStream: true })
+        // 054-B-6: the cycles only. `total_cleared_amount` is not the drop of the total debt (a cycle of three debts cleared by
+        // 10 lowers it by 30) that the bar and the feed's line state (039 P-5, 049); the answer carries no identity of the
+        // stream's `clearing.done`, so the pair of totals (`debtChange.ts`) cannot be bound to THIS clearing - no amount, no guess.
+        pushHistory({ historyContext: began, eq }, '🌀', { plural: 'history.clearing', count: clearedCycles }, { publishedToStream: true })
       } else {
         pushHistory({ historyContext: began, eq }, '🌀', { key: 'history.clearingNothing' })
       }

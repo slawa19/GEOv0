@@ -276,11 +276,12 @@ export const ru = {
     trustlineUpdated: 'Новый лимит линии: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Линия доверия закрыта: {from} → {to}',
     closeRequested: 'Линия закроется после погашения: {from} → {to}',
+    // 054-B-6: no amount - the answer's `total_cleared_amount` is not the drop of the total debt the bar and the feed state (039 P-5).
     clearing: plural({
-      one: 'Клиринг: {count} круг, −{amount} {unit}',
-      few: 'Клиринг: {count} круга, −{amount} {unit}',
-      many: 'Клиринг: {count} кругов, −{amount} {unit}',
-      other: 'Клиринг: {count} круга, −{amount} {unit}',
+      one: 'Клиринг: {count} круг',
+      few: 'Клиринг: {count} круга',
+      many: 'Клиринг: {count} кругов',
+      other: 'Клиринг: {count} круга',
     }),
     clearingNothing: 'Клиринг: ничего не погашено',
   },

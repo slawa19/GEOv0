@@ -318,7 +318,8 @@ export const en = {
     trustlineUpdated: 'New line limit: {from} → {to}, {limit} {unit}',
     trustlineClosed: 'Trustline closed: {from} → {to}',
     closeRequested: 'Closes once the debt is repaid: {from} → {to}',
-    clearing: plural({ one: 'Clearing: {count} cycle, −{amount} {unit}', other: 'Clearing: {count} cycles, −{amount} {unit}' }),
+    // 054-B-6: no amount - the answer's `total_cleared_amount` is not the drop of the total debt the bar and the feed state (039 P-5).
+    clearing: plural({ one: 'Clearing: {count} cycle', other: 'Clearing: {count} cycles' }),
     clearingNothing: 'Clearing: nothing cleared',
   },
 
