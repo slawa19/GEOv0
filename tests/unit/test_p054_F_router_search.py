@@ -193,14 +193,15 @@ def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
 
 
 def test_f3_max_flow_never_falls_below_the_one_before_and_searches_only_after_a_policy_refusal(monkeypatch):
-    """On seeded random graphs: without a policy refusal the search over every simple path never runs (the work is
-    the one before 054); with them the answer is >= the one before (that search answering None), and above it on some
-    graphs (counter-check)."""
+    """On seeded random graphs: without a route-dependent policy refusal the search over every simple path never runs
+    (the work is the one before 054) - the local rules (forbid-mediation, a pair line blocking an intermediary of its
+    own hop) kept, since they alone never hide a path from the node-visited BFS (Codex fix-delta review, 2026-10-30);
+    with route-dependent refusals the answer is >= the one before (that search answering None), and above it on
+    some graphs (counter-check)."""
 
     rng = random.Random(543)
     for _ in range(400):
         router = _random_policy_graph(rng, blocked=0)
-        router.edge_no_transit, router.edge_can_be_intermediate = {}, {}
         s, t = rng.sample(sorted(router.graph), 2)
 
         def _never(*a, **k):
@@ -219,6 +220,30 @@ def test_f3_max_flow_never_falls_below_the_one_before_and_searches_only_after_a_
         assert new >= old, (new, old)
         higher += new > old
     assert higher > 0
+
+
+def test_f3_local_transit_bans_alone_never_start_the_search_over_every_simple_path(monkeypatch):
+    """Codex fix-delta review (2026-10-30): P -> A1..A30 -> Q over a clique, every Ai -> Q forbidden to Ai by its own
+    line. Only local rules refuse, so the node-visited BFS is exact and its 0 is right; the search over every simple
+    path must not run (it held the event loop for the whole routing deadline on this graph)."""
+
+    a = [f"A{i}" for i in range(1, 31)]
+    router = PaymentRouter(None)
+    router.precision = 0
+    router.graph = {x: {} for x in ["P", "Q", *a]}
+    for x in a:
+        router.graph["P"][x] = Decimal(10)
+        router.graph[x]["Q"] = Decimal(10)
+        router.edge_no_transit.setdefault(x, {})["Q"] = frozenset({x})
+        for y in a:
+            if x != y:
+                router.graph[x][y] = Decimal(10)
+
+    def _never(*args, **kwargs):
+        raise AssertionError("the search over every simple path ran although only local rules refused")
+
+    monkeypatch.setattr(router, "_bfs_single_path", _never)
+    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == 0
 
 
 def test_f3_max_flow_out_of_time_answers_as_before(monkeypatch):

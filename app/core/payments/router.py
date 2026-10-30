@@ -686,8 +686,9 @@ class PaymentRouter:
         path, and an augmenting path over a residual reverse hop may still overstate (BACKLOG).
 
         054-F-3: the BFS keeps one prefix per node (`visited`) while the policy depends on the route, so it may miss
-        every path and answer 0 although a payment commits. Only then, and only when it refused a candidate by the
-        policy at least once (without a refusal it is exact and 0 is right), one `_bfs_single_path` - every simple
+        every path and answer 0 although a payment commits. Only then, and only when it refused a candidate by a
+        route-dependent rule at least once (a `blocked_participants` naming a node elsewhere on the route; without such
+        a refusal - local ones, `_hop_refuses`, included - it is exact and 0 is right), one `_bfs_single_path` - every simple
         path, under `ROUTING_PATH_FINDING_TIMEOUT_MS` - looks for a path; its bottleneck is returned as a LOWER bound.
         Out of time: 0, as before, logged (`event=routing.max_flow_truncated`) - never an exception, since a payment's
         refusal reads this value for its text.
@@ -724,7 +725,12 @@ class PaymentRouter:
                 for v, cap in residual_graph.get(u, {}).items():
                     # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
                     if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
-                        refused_by_policy = refused_by_policy or cap > 0
+                        # Only a route-dependent refusal of a node not yet reached can hide a path from the
+                        # node-visited BFS; a local one (`_hop_refuses`) refuses this hop on every route, and a visited
+                        # node (the payer included) is not expanded again anyway - 0 stays exact (Codex fix-delta review).
+                        refused_by_policy = refused_by_policy or (
+                            cap > 0 and v not in visited
+                            and not self._hop_refuses(u, v, payer=from_pid, payee=to_pid))
                         continue
                     if v not in visited and cap > 0:
                         visited.add(v)
