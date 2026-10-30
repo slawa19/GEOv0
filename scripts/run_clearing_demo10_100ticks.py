@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -215,192 +216,212 @@ def main() -> int:
     run_id = str(run["run_id"])
     print(f"run_id={run_id}")
 
-    # Resolve participant PIDs via interact endpoint.
-    plist = _http_json(
-        base_url=args.base_url,
-        method="GET",
-        path=f"/simulator/runs/{run_id}/actions/participants-list",
-        headers=headers,
-        timeout_sec=args.timeout_sec,
-    )
-    items = list(plist.get("items") or [])
+    # 054-G-4: from here on the run exists, so every exit stops it - a refused action (403 ACTIONS_DISABLED on a
+    # backend without SIMULATOR_ACTIONS_ENABLE), an exception or Ctrl+C left it `running` until the idle stop, and
+    # the next `POST runs` of the same owner was refused 409 E008 owner_active_exists.
+    stop_attempted = False
+    try:
+        # Resolve participant PIDs via interact endpoint.
+        plist = _http_json(
+            base_url=args.base_url,
+            method="GET",
+            path=f"/simulator/runs/{run_id}/actions/participants-list",
+            headers=headers,
+            timeout_sec=args.timeout_sec,
+        )
+        items = list(plist.get("items") or [])
 
-    def _pid_by_name_contains(substr: str) -> str | None:
-        s = substr.lower().strip()
-        for it in items:
-            name = str(it.get("name") or "").lower()
-            pid = str(it.get("pid") or "").strip()
-            if s and s in name and pid:
-                return pid
-        return None
+        def _pid_by_name_contains(substr: str) -> str | None:
+            s = substr.lower().strip()
+            for it in items:
+                name = str(it.get("name") or "").lower()
+                pid = str(it.get("pid") or "").strip()
+                if s and s in name and pid:
+                    return pid
+            return None
 
-    # Try to resolve canonical demo actors by name (preferred).
-    pid_shop = _pid_by_name_contains("магаз")
-    pid_farmer = _pid_by_name_contains("фер")
-    pid_bakery = _pid_by_name_contains("пек")
-    pid_workshop = _pid_by_name_contains("май")
-    pid_alice = _pid_by_name_contains("али")
-    pid_bob = _pid_by_name_contains("боб")
-    pid_olena = _pid_by_name_contains("олен")
-    pid_dmytro = _pid_by_name_contains("дмит")
+        # Try to resolve canonical demo actors by name (preferred).
+        pid_shop = _pid_by_name_contains("магаз")
+        pid_farmer = _pid_by_name_contains("фер")
+        pid_bakery = _pid_by_name_contains("пек")
+        pid_workshop = _pid_by_name_contains("май")
+        pid_alice = _pid_by_name_contains("али")
+        pid_bob = _pid_by_name_contains("боб")
+        pid_olena = _pid_by_name_contains("олен")
+        pid_dmytro = _pid_by_name_contains("дмит")
 
-    # Build trustline topology for routable payment generation (fallback).
-    # Payment S->R requires a trustline path from R to S (creditor->debtor direction).
-    tlist = _http_json(
-        base_url=args.base_url,
-        method="GET",
-        path=f"/simulator/runs/{run_id}/actions/trustlines-list?equivalent={args.equivalent}",
-        headers=headers,
-        timeout_sec=args.timeout_sec,
-    )
-    trust_items = list(tlist.get("items") or [])
-    adj: dict[str, list[str]] = {}
-    for it in trust_items:
-        fp = str(it.get("from_pid") or "").strip()
-        tp = str(it.get("to_pid") or "").strip()
-        if fp and tp and fp != tp:
-            adj.setdefault(fp, []).append(tp)
+        # Build trustline topology for routable payment generation (fallback).
+        # Payment S->R requires a trustline path from R to S (creditor->debtor direction).
+        tlist = _http_json(
+            base_url=args.base_url,
+            method="GET",
+            path=f"/simulator/runs/{run_id}/actions/trustlines-list?equivalent={args.equivalent}",
+            headers=headers,
+            timeout_sec=args.timeout_sec,
+        )
+        trust_items = list(tlist.get("items") or [])
+        adj: dict[str, list[str]] = {}
+        for it in trust_items:
+            fp = str(it.get("from_pid") or "").strip()
+            tp = str(it.get("to_pid") or "").strip()
+            if fp and tp and fp != tp:
+                adj.setdefault(fp, []).append(tp)
 
-    all_pids = [str(it.get("pid") or "").strip() for it in items if str(it.get("pid") or "").strip()]
+        all_pids = [str(it.get("pid") or "").strip() for it in items if str(it.get("pid") or "").strip()]
 
-    def _reachable(src: str, dst: str, *, max_hops: int = 6) -> bool:
-        if not src or not dst:
-            return False
-        if src == dst:
-            return True
-        q: list[tuple[str, int]] = [(src, 0)]
-        seen = {src}
-        while q:
-            cur, d = q.pop(0)
-            if d >= max_hops:
-                continue
-            for nxt in adj.get(cur, []):
-                if nxt == dst:
-                    return True
-                if nxt in seen:
+        def _reachable(src: str, dst: str, *, max_hops: int = 6) -> bool:
+            if not src or not dst:
+                return False
+            if src == dst:
+                return True
+            q: list[tuple[str, int]] = [(src, 0)]
+            seen = {src}
+            while q:
+                cur, d = q.pop(0)
+                if d >= max_hops:
                     continue
-                seen.add(nxt)
-                q.append((nxt, d + 1))
-        return False
+                for nxt in adj.get(cur, []):
+                    if nxt == dst:
+                        return True
+                    if nxt in seen:
+                        continue
+                    seen.add(nxt)
+                    q.append((nxt, d + 1))
+            return False
 
-    routable_pairs: list[tuple[str, str]] = []
-    for sender in all_pids:
-        for receiver in all_pids:
-            if sender == receiver:
-                continue
-            # receiver -> sender must be reachable
-            if _reachable(receiver, sender, max_hops=6):
-                routable_pairs.append((sender, receiver))
+        routable_pairs: list[tuple[str, str]] = []
+        for sender in all_pids:
+            for receiver in all_pids:
+                if sender == receiver:
+                    continue
+                # receiver -> sender must be reachable
+                if _reachable(receiver, sender, max_hops=6):
+                    routable_pairs.append((sender, receiver))
 
-    if not routable_pairs:
-        raise SystemExit("No routable payment pairs found for scenario topology")
+        if not routable_pairs:
+            raise SystemExit("No routable payment pairs found for scenario topology")
 
-    rng = random.Random(int.from_bytes(run_id.encode("utf-8"), "little") % (2**32))
-    rng.shuffle(routable_pairs)
+        rng = random.Random(int.from_bytes(run_id.encode("utf-8"), "little") % (2**32))
+        rng.shuffle(routable_pairs)
 
-    # Prefer a deterministic triangle-program that should create true 3-cycles in the debt graph.
-    # Each step is a real payment. After 3 steps, debts form a triangle:
-    #   alice -> shop, shop -> farmer, farmer -> alice
-    # and similarly for other participants.
-    scripted_steps: list[tuple[str, str]] = []
-    if all([pid_shop, pid_farmer, pid_bakery, pid_workshop, pid_alice, pid_bob, pid_olena, pid_dmytro]):
-        scripted_steps = [
-            # Triangle 1: alice -> shop -> farmer -> alice
-            (pid_alice, pid_shop),
-            (pid_shop, pid_farmer),
-            (pid_farmer, pid_alice),
+        # Prefer a deterministic triangle-program that should create true 3-cycles in the debt graph.
+        # Each step is a real payment. After 3 steps, debts form a triangle:
+        #   alice -> shop, shop -> farmer, farmer -> alice
+        # and similarly for other participants.
+        scripted_steps: list[tuple[str, str]] = []
+        if all([pid_shop, pid_farmer, pid_bakery, pid_workshop, pid_alice, pid_bob, pid_olena, pid_dmytro]):
+            scripted_steps = [
+                # Triangle 1: alice -> shop -> farmer -> alice
+                (pid_alice, pid_shop),
+                (pid_shop, pid_farmer),
+                (pid_farmer, pid_alice),
 
-            # Triangle 2: bob -> shop -> bakery -> bob
-            (pid_bob, pid_shop),
-            (pid_shop, pid_bakery),
-            (pid_bakery, pid_bob),
+                # Triangle 2: bob -> shop -> bakery -> bob
+                (pid_bob, pid_shop),
+                (pid_shop, pid_bakery),
+                (pid_bakery, pid_bob),
 
-            # Triangle 3: olena -> shop -> workshop -> olena
-            (pid_olena, pid_shop),
-            (pid_shop, pid_workshop),
-            (pid_workshop, pid_olena),
+                # Triangle 3: olena -> shop -> workshop -> olena
+                (pid_olena, pid_shop),
+                (pid_shop, pid_workshop),
+                (pid_workshop, pid_olena),
 
-            # Triangle 4: dmytro -> shop -> workshop -> dmytro
-            (pid_dmytro, pid_shop),
-            (pid_shop, pid_workshop),
-            (pid_workshop, pid_dmytro),
-        ]
+                # Triangle 4: dmytro -> shop -> workshop -> dmytro
+                (pid_dmytro, pid_shop),
+                (pid_shop, pid_workshop),
+                (pid_workshop, pid_dmytro),
+            ]
 
-    started_at = datetime.now().astimezone()
+        started_at = datetime.now().astimezone()
 
-    end_at = time.time() + max(1, int(args.run_seconds))
-    next_payment_at = time.time() + max(1, int(args.inject_payment_every_sec))
-    next_clearing_at = time.time() + max(1, int(args.clearing_every_sec))
+        end_at = time.time() + max(1, int(args.run_seconds))
+        next_payment_at = time.time() + max(1, int(args.inject_payment_every_sec))
+        next_clearing_at = time.time() + max(1, int(args.clearing_every_sec))
 
-    payment_ok = 0
-    payment_fail = 0
-    payment_fail_by_code: dict[str, int] = {}
-    clearing_calls = 0
-    clearing_errors = 0
-    clearing_cycles_reported = 0
+        payment_ok = 0
+        payment_fail = 0
+        payment_fail_by_code: dict[str, int] = {}
+        clearing_calls = 0
+        clearing_errors = 0
+        clearing_cycles_reported = 0
 
-    i = 0
-    while time.time() < end_at:
-        now = time.time()
+        i = 0
+        while time.time() < end_at:
+            now = time.time()
 
-        if now >= next_payment_at:
-            if scripted_steps:
-                a, b = scripted_steps[i % len(scripted_steps)]
-            else:
-                a, b = routable_pairs[i % len(routable_pairs)]
-            i += 1
+            if now >= next_payment_at:
+                if scripted_steps:
+                    a, b = scripted_steps[i % len(scripted_steps)]
+                else:
+                    a, b = routable_pairs[i % len(routable_pairs)]
+                i += 1
+                try:
+                    _http_json(
+                        base_url=args.base_url,
+                        method="POST",
+                        path=f"/simulator/runs/{run_id}/actions/payment-real",
+                        headers=headers,
+                        body={
+                            "equivalent": args.equivalent,
+                            "from_pid": a,
+                            "to_pid": b,
+                            "amount": str(args.payment_amount),
+                        },
+                        timeout_sec=args.timeout_sec,
+                    )
+                    payment_ok += 1
+                except Exception as e:
+                    payment_fail += 1
+                    detail = _try_parse_error_detail(str(e)) or {}
+                    code = str(detail.get("code") or "UNKNOWN")
+                    payment_fail_by_code[code] = int(payment_fail_by_code.get(code, 0)) + 1
+                next_payment_at = now + max(1, int(args.inject_payment_every_sec))
+
+            if now >= next_clearing_at:
+                try:
+                    resp = _http_json(
+                        base_url=args.base_url,
+                        method="POST",
+                        path=f"/simulator/runs/{run_id}/actions/clearing-real",
+                        headers=headers,
+                        # 023 (d): clearing depth is no longer an execution parameter; the schema forbids it.
+                        body={"equivalent": args.equivalent},
+                        timeout_sec=max(args.timeout_sec, 60),
+                    )
+                    clearing_calls += 1
+                    try:
+                        clearing_cycles_reported += int(resp.get("cleared_cycles") or 0)
+                    except Exception:
+                        pass
+                except Exception:
+                    clearing_errors += 1
+                next_clearing_at = now + max(1, int(args.clearing_every_sec))
+
+            time.sleep(0.25)
+
+        # Stop run
+        stop_attempted = True
+        _http_json(
+            base_url=args.base_url,
+            method="POST",
+            path=f"/simulator/runs/{run_id}/stop?source=cli&reason=demo10_100ticks",
+            headers=headers,
+            timeout_sec=max(args.timeout_sec, 60),
+        )
+    finally:
+        if not stop_attempted:
             try:
                 _http_json(
                     base_url=args.base_url,
                     method="POST",
-                    path=f"/simulator/runs/{run_id}/actions/payment-real",
+                    path=f"/simulator/runs/{run_id}/stop?source=cli&reason=demo10_100ticks_aborted",
                     headers=headers,
-                    body={
-                        "equivalent": args.equivalent,
-                        "from_pid": a,
-                        "to_pid": b,
-                        "amount": str(args.payment_amount),
-                    },
-                    timeout_sec=args.timeout_sec,
-                )
-                payment_ok += 1
-            except Exception as e:
-                payment_fail += 1
-                detail = _try_parse_error_detail(str(e)) or {}
-                code = str(detail.get("code") or "UNKNOWN")
-                payment_fail_by_code[code] = int(payment_fail_by_code.get(code, 0)) + 1
-            next_payment_at = now + max(1, int(args.inject_payment_every_sec))
-
-        if now >= next_clearing_at:
-            try:
-                resp = _http_json(
-                    base_url=args.base_url,
-                    method="POST",
-                    path=f"/simulator/runs/{run_id}/actions/clearing-real",
-                    headers=headers,
-                    # 023 (d): clearing depth is no longer an execution parameter; the schema forbids it.
-                    body={"equivalent": args.equivalent},
                     timeout_sec=max(args.timeout_sec, 60),
                 )
-                clearing_calls += 1
-                try:
-                    clearing_cycles_reported += int(resp.get("cleared_cycles") or 0)
-                except Exception:
-                    pass
-            except Exception:
-                clearing_errors += 1
-            next_clearing_at = now + max(1, int(args.clearing_every_sec))
-
-        time.sleep(0.25)
-
-    # Stop run
-    _http_json(
-        base_url=args.base_url,
-        method="POST",
-        path=f"/simulator/runs/{run_id}/stop?source=cli&reason=demo10_100ticks",
-        headers=headers,
-        timeout_sec=max(args.timeout_sec, 60),
-    )
+                print(f"run_id={run_id} stopped after an aborted drive", file=sys.stderr)
+            except Exception as stop_exc:
+                # Reported, never raised: the error that aborted the drive is the one the caller must see.
+                print(f"WARNING: could not stop run_id={run_id}: {stop_exc}", file=sys.stderr)
 
     # Download artifacts and analyze events
     idx = _http_json(
