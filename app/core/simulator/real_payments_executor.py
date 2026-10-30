@@ -271,6 +271,9 @@ class DeferredRealPaymentEffects:
                 # stopped phase is rolled back), and until 054-A-7c the last of them overwrote the stop's code with its
                 # own (`INTERNAL_ERROR`, `PAYMENT_TIMEOUT`) - so a run stopped by its budget did not say so, and `resume`
                 # could not tell it from any other error. The payment's own code stays in its `tx.failed`.
+                # 054-A review FD3: the stop's `fail_run` now comes AFTER the stopped phase's observations
+                # (`RealTick.run_payments_phase`) and writes its code last; this guard still keeps it where the stop
+                # was carried out first - a phase that ended by an exception, whose rollback resolves them later.
                 if self.run.state != "error":
                     self.run.last_error = {
                         "code": str(item.error_code or "INTERNAL_ERROR"),

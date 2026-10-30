@@ -144,3 +144,122 @@ async def test_a_violated_invariant_in_a_tick_payment_stops_the_run_as_an_error(
         assert (got.json()["state"], got.json()["last_error"]["code"]) == ("error", "INTEGRITY_VIOLATION"), got.json()
     finally:
         await runtime.stop(run_id)
+
+
+async def _read_run_stream(run_id: str, leave: asyncio.Event) -> str:
+    """The run's live HTTP SSE stream through the ASGI app, until it returns by itself (as in
+    `test_p054_A_stop_publication_order.py`: the recording `client` would put a `text/event-stream` body under the
+    session-wide conformance check)."""
+
+    from app.main import app
+
+    path = f"/api/v1/simulator/runs/{run_id}/events"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": f"equivalent={EQ}".encode(),
+        "root_path": "",
+        "headers": [(b"x-admin-token", settings.ADMIN_TOKEN.encode()), (b"accept", b"text/event-stream")],
+        "client": ("127.0.0.1", 50004),
+        "server": ("test", 80),
+    }
+    body = bytearray()
+    status: list[int] = []
+
+    async def receive() -> dict:
+        await leave.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.start":
+            status.append(int(message["status"]))
+        elif message["type"] == "http.response.body":
+            body.extend(message.get("body") or b"")
+
+    await app(scope, receive, send)
+    assert status == [200], status
+    return body.decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_the_live_stream_gets_the_ticks_tx_failed_before_the_runs_error(client, db_session, monkeypatch):
+    """054-A review FD3: `fail_run` was called INSIDE the money phase, so `run_status(error)` was published before the
+    rollback resolved the phase's observations: the live stream (which returns on `error`) never got the
+    `tx.failed INTEGRITY_VIOLATION` of its own tick, and `errors_total` in the `error` event lacked the tick's errors.
+    Target: the stop's `run_status(error)` follows every `tx.failed` of the tick and counts its errors; `last_error`
+    keeps the stop's code (054-A-7c)."""
+
+    import json
+
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
+
+    async def held(_run_id: str) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime._run_lifecycle, "_heartbeat_loop", held)
+    created = await client.post(
+        "/api/v1/simulator/runs", headers=_admin(), json={"scenario_id": "minimal", "mode": "real", "intensity_percent": 100}
+    )
+    assert created.status_code == 200, created.text
+    run_id = str(created.json()["run_id"])
+    run = runtime.get_run(run_id)
+    leave = asyncio.Event()
+    try:
+        ids = _ids(run_id)
+        seeded = await client.post(
+            f"/api/v1/simulator/runs/{run_id}/actions/payment-real",
+            headers=_admin(),
+            json={"from_pid": ids["p2"], "to_pid": ids["p1"], "equivalent": EQ, "amount": "5"},
+        )
+        assert seeded.status_code == 200, seeded.text
+        errors_before = int(run.errors_total)
+
+        original = book_module._apply_payment_flow
+
+        async def apply_then_lower_the_creditors_line(session, flow):
+            applied = await original(session, flow)
+            await session.execute(
+                text(
+                    'UPDATE trust_lines SET "limit" = 1 WHERE from_participant_id = :creditor '
+                    "AND to_participant_id = :debtor AND equivalent_id = :eq"
+                ),
+                {"creditor": flow.to_id, "debtor": flow.from_id, "eq": flow.equivalent_id},
+            )
+            return applied
+
+        monkeypatch.setattr(book_module, "_apply_payment_flow", apply_then_lower_the_creditors_line)
+        PaymentRouter.invalidate_cache(EQ)
+
+        stream = asyncio.create_task(_read_run_stream(run_id, leave))
+        async with asyncio.timeout(30):
+            while not run._subs:
+                await asyncio.sleep(0.01)
+        run.tick_index, run.sim_time_ms = 1, 1000
+        await runtime._real_runner.tick_real_mode(run_id)
+        body = await asyncio.wait_for(stream, timeout=30)
+        state_after_tick, last_error_after_tick = run.state, dict(run.last_error or {})
+    finally:
+        leave.set()
+        await runtime.stop(run_id)
+
+    streamed = []
+    for block in body.split("\n\n"):
+        data = [ln[len("data:"):].strip() for ln in block.splitlines() if ln.startswith("data:")]
+        if data:
+            streamed.append(json.loads("\n".join(data)))
+    kinds = [e.get("type") + ("/" + str(e.get("state")) if e.get("type") == "run_status" else "") for e in streamed]
+    print("054-A FD3 streamed:", kinds)
+    failed = [e for e in streamed if e.get("type") == "tx.failed"]
+    tick_errors = [e for e in failed if e["error"]["code"] == "INTEGRITY_VIOLATION"]
+    assert tick_errors, f"the live stream got no tx.failed INTEGRITY_VIOLATION before it ended: {kinds}"
+    assert streamed[-1].get("type") == "run_status" and streamed[-1].get("state") == "error", kinds
+    error_event = streamed[-1]
+    # Every error the tick resolved is in the `error` event's count, plus the stop itself (`fail_run` counts it).
+    assert error_event["errors_total"] == errors_before + len(failed) + 1, (error_event["errors_total"], errors_before, kinds)
+    assert error_event["last_error"]["code"] == "INTEGRITY_VIOLATION", error_event["last_error"]
+    assert (state_after_tick, last_error_after_tick.get("code")) == ("error", "INTEGRITY_VIOLATION"), last_error_after_tick

@@ -778,17 +778,33 @@ class RealTick:
         sender_id_by_pid = {pid: participant_id for (participant_id, pid) in participants}
         per_eq_metric_values: dict[str, dict[str, Any]] = {str(eq): {} for eq in equivalents}
 
-        payments_res: RealPaymentsResult = await rr._real_payments_executor.execute_planned_payments(
-            session=session,
-            run_id=run_id,
-            run=run,
-            planned=planned,
-            equivalents=equivalents,
-            sender_id_by_pid=sender_id_by_pid,
-            max_in_flight=int(run._real_max_in_flight),
-            max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
-            fail_run=lambda _run_id, code, message: rr.fail_run(_run_id, code=code, message=message),
-        )
+        # 054-A review FD3: a stop the executor decides (the timeouts of a tick, an integrity violation) and the error
+        # budget below are RECORDED here and carried out by `fail_run` only after the stopped phase's rollback has
+        # resolved its observations. Called inside the phase, `fail_run` published the terminal `run_status(error)`
+        # before the `tx.failed` of its own tick - the live stream returns on `error` and never got them - and that
+        # `error` counted none of the tick's errors. The executor stops at once all the same (`stop_requested`).
+        stop: list[tuple[str, str]] = []  # the first stop wins, as the first `fail_run` did
+
+        async def record_stop(_run_id: str, code: str, message: str) -> None:
+            if not stop:
+                stop.append((code, message))
+
+        try:
+            payments_res: RealPaymentsResult = await rr._real_payments_executor.execute_planned_payments(
+                session=session,
+                run_id=run_id,
+                run=run,
+                planned=planned,
+                equivalents=equivalents,
+                sender_id_by_pid=sender_id_by_pid,
+                max_in_flight=int(run._real_max_in_flight),
+                max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
+                fail_run=record_stop,
+            )
+        except BaseException:
+            if stop:  # a stop already decided is carried out however the phase ends (a conflict, a cancellation)
+                await rr.fail_run(run_id, code=stop[0][0], message=stop[0][1])
+            raise
 
         stall_ticks = int(payments_res.stall_ticks)
         # 054-A-7a: the stall is no longer only logged every fifth tick (`simulator.real.all_rejected_stall`, removed): at
@@ -802,11 +818,7 @@ class RealTick:
         max_errors_total = int(rr._real_max_errors_total_limit)
         projected_errors_total = int(run.errors_total) + int(payments_res.errors)
         if max_errors_total > 0 and projected_errors_total >= max_errors_total and not should_stop:
-            await rr.fail_run(
-                run_id,
-                code="REAL_MODE_TOO_MANY_ERRORS",
-                message=f"Too many total errors: {projected_errors_total}",
-            )
+            stop.append(("REAL_MODE_TOO_MANY_ERRORS", f"Too many total errors: {projected_errors_total}"))
             should_stop = True
 
         # `apply_deferred_effects` is reached twice by one durable phase (the commit's confirmation and the tail's
@@ -846,11 +858,15 @@ class RealTick:
         )
 
         if should_stop:
-            await resolve_rollback_under_cancellation(
-                rollback=session.rollback,
-                on_rollback=res.apply_rollback_observations,
-                on_unknown=res.apply_unknown_transaction_observations,
-            )
+            try:
+                await resolve_rollback_under_cancellation(
+                    rollback=session.rollback,
+                    on_rollback=res.apply_rollback_observations,
+                    on_unknown=res.apply_unknown_transaction_observations,
+                )
+            finally:
+                if stop:  # FD3: after the tick's `tx.failed` and counters, whatever the rollback's outcome
+                    await rr.fail_run(run_id, code=stop[0][0], message=stop[0][1])
 
         return res, should_stop
 
