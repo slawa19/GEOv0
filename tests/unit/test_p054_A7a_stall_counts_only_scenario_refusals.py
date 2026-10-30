@@ -1,10 +1,12 @@
 """054-A-7a review: which all-refused ticks extend the stall (`_real_consec_all_rejected_ticks`), at the executor.
 
 Owner, 2026-10-30: when the automatic payments do not go through the scenario is exhausted; an operator's stop or an
-integrity hold is a different state. So a tick counts only when EVERY refusal is the scenario's own - routing,
-capacity or the trust line's policy/limit (`SCENARIO_REFUSAL_CODES`) - and a tick with any other refusal (a money stop,
-`MoneyBoundary.MONEY_STOP_REASONS`; a participant out of circulation; an invalid input) is neutral: the counter neither
-grows nor resets. A commit or an error resets it, as before.
+integrity hold is a different state. So a tick with nothing committed and no error counts when AT LEAST ONE refusal is
+the scenario's own - routing, capacity or the line's policy (`SCENARIO_REFUSAL_CODES`) - whatever the other refusals
+are: in a run of two equivalents the stop of one must not silence the stall of the other. A tick with no refusal of
+the scenario at all (only money stops, `MoneyBoundary.MONEY_STOP_REASONS`; a participant out of circulation; an invalid
+input), or one cut short by a stop of the run, is neutral: the counter neither grows nor resets. A commit or an error
+resets it, as before.
 
 The executor runs for real (`execute_planned_payments`); only the payment core is replaced by a function that raises,
 or returns as a stored refusal (019 `T1905`), the exception the core itself raises for that refusal.
@@ -23,7 +25,6 @@ from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
     RoutingException,
-    TrustLineException,
 )
 from tests.unit.test_real_payments_ordered_journal import (
     _Action,
@@ -45,12 +46,12 @@ def _policy() -> Exception:
     return RoutingException("policy", insufficient_capacity=False, details={"reason": "policy", "rule": "x"})
 
 
-def _limit() -> Exception:
-    return TrustLineException("limit exceeded", limit_exceeded=True)
-
-
 def _stopped() -> Exception:
     return MoneyBoundary.inactive_equivalent_conflict(["UAH"])
+
+
+#: The run is paused while its payments run (the executor reads `run.state`), and the payment is refused for capacity.
+PAUSED_THEN_NO_CAPACITY = "paused-then-no-capacity"
 
 
 def _held() -> Exception:
@@ -80,9 +81,10 @@ def _aborted(to_pid: str, amount: str) -> PaymentResult:
     )
 
 
-async def _counter_after(monkeypatch, outcomes: list) -> int:
+async def _counter_after(monkeypatch, outcomes: list, *, equivalents: list[str] | None = None) -> int:
     """Run one tick whose payments end as `outcomes` (an exception factory, `("stored", factory)` for a refusal the core
-    returns, or "commit") from a counter of `START`; the counter the executor leaves."""
+    returns, "commit", or `PAUSED_THEN_NO_CAPACITY`) from a counter of `START`, payment `i` in `equivalents[i]` (UAH by
+    default); the counter the executor leaves."""
 
     session = _Session()
     run = _run()
@@ -91,6 +93,9 @@ async def _counter_after(monkeypatch, outcomes: list) -> int:
 
     async def staged(self, _sender_id, *, to_pid, amount, **_kwargs):
         outcome = by_receiver[to_pid]
+        if outcome == PAUSED_THEN_NO_CAPACITY:
+            run.state = "paused"
+            raise _no_capacity()
         if outcome == "commit":
             return StagedPaymentResult(result=_payment_result(to_pid=to_pid, amount=amount), post_commit_effects=None)
         if isinstance(outcome, tuple):
@@ -99,12 +104,13 @@ async def _counter_after(monkeypatch, outcomes: list) -> int:
         raise outcome()
 
     monkeypatch.setattr(PaymentService, "create_payment_internal_staged", staged, raising=True)
+    eqs = equivalents or ["UAH"] * len(outcomes)
     result = await _executor(_Sse()).execute_planned_payments(
         session=session,
         run_id=run.run_id,
         run=run,
-        planned=[_Action(i, "UAH", "A", f"R{i}", "1.00") for i in range(len(outcomes))],
-        equivalents=["UAH"],
+        planned=[_Action(i, eqs[i], "A", f"R{i}", "1.00") for i in range(len(outcomes))],
+        equivalents=sorted(set(eqs)),
         sender_id_by_pid={"A": uuid.uuid4()},
         max_in_flight=1,
         max_timeouts_per_tick=0,
@@ -122,12 +128,22 @@ async def _counter_after(monkeypatch, outcomes: list) -> int:
     [
         pytest.param([_no_capacity, _no_capacity], id="capacity"),
         pytest.param([_policy], id="line-policy"),
-        pytest.param([_limit], id="line-limit"),
         pytest.param([("stored", _no_capacity)], id="stored-capacity-refusal"),
+        pytest.param([_no_capacity, _stopped], id="mixed-capacity-and-stop"),
+        pytest.param([_held, _no_capacity], id="mixed-hold-and-capacity"),
+        pytest.param([_invalid, _no_capacity], id="mixed-invalid-input-and-capacity"),
     ],
 )
-async def test_a_tick_refused_by_routing_capacity_or_line_counts(monkeypatch, outcomes) -> None:
+async def test_a_tick_with_a_refusal_of_the_scenario_counts(monkeypatch, outcomes) -> None:
     assert await _counter_after(monkeypatch, outcomes) == START + 1
+
+
+@pytest.mark.asyncio
+async def test_the_stop_of_one_equivalent_does_not_silence_the_stall_of_another(monkeypatch) -> None:
+    """Two equivalents: UAH stopped by the operator, EUR refused for capacity - EUR's scenario is stalled, the tick
+    counts (ruling of the main session on review P3-1)."""
+
+    assert await _counter_after(monkeypatch, [_stopped, _no_capacity], equivalents=["UAH", "EUR"]) == START + 1
 
 
 @pytest.mark.asyncio
@@ -137,13 +153,13 @@ async def test_a_tick_refused_by_routing_capacity_or_line_counts(monkeypatch, ou
         pytest.param([_stopped, _stopped], id="operator-stop"),
         pytest.param([_held], id="integrity-hold"),
         pytest.param([("stored", _stopped)], id="stored-operator-stop"),
-        pytest.param([_no_capacity, _stopped], id="mixed-capacity-and-stop"),
-        pytest.param([_held, _no_capacity], id="mixed-hold-and-capacity"),
+        pytest.param([_stopped, _held], id="stop-and-hold"),
         pytest.param([_suspended], id="participant-suspended"),
-        pytest.param([_invalid, _no_capacity], id="mixed-invalid-input"),
+        pytest.param([_invalid], id="invalid-input"),
+        pytest.param([PAUSED_THEN_NO_CAPACITY, _no_capacity], id="capacity-refused-while-the-run-stops"),
     ],
 )
-async def test_a_tick_with_any_other_refusal_is_neutral(monkeypatch, outcomes) -> None:
+async def test_a_tick_with_no_refusal_of_the_scenario_is_neutral(monkeypatch, outcomes) -> None:
     assert await _counter_after(monkeypatch, outcomes) == START
 
 

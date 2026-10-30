@@ -297,7 +297,7 @@ Real Mode: тюнинг дисковой нагрузки (артефакты) �
 | `simulator.real.run_refused code=… run_id=…` | WARNING | засев сценария отказал (`SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`) |
 | `simulator.real.clearing_failed run_id=… eq=…` | WARNING | проход клиринга упал (трейсбек здесь); прогон продолжает работу |
 | `simulator.heartbeat.failed run_id=… error_type=…` | ERROR | упала сама итерация heartbeat (трейсбек здесь) |
-| `simulator.real.stall_clearing run_id=… consec_stall_ticks=…` | INFO | три тика подряд все платежи отвергнуты по маршруту, ёмкости или линии (тики остановленного или удержанного эквивалента не считаются) — запущен клиринг вне расписания |
+| `simulator.real.stall_clearing run_id=… consec_stall_ticks=…` | INFO | три тика подряд ни одного проведённого платежа и в каждом хотя бы один отказ по маршруту, ёмкости или политике линии (тики, где отказал только остановленный или удержанный эквивалент, не считаются) — запущен клиринг вне расписания |
 | `simulator.run.scenario_exhausted run_id=… ticks=…` | WARNING | после этого клиринга снова всё отвергнуто — прогон встал на паузу |
 
 **Файлы прогона.** `<SIMULATOR_STATE_DIR>/runs/<run_id>/artifacts/` (по умолчанию `.local-run/simulator/runs/<run_id>/artifacts/`, раздел 6.7): в `events.ndjson` — все события потока, в том числе каждый `tx.failed` с `error.code` и `error.details` и каждый `run_status`; после остановки — `status.json` с итоговым статусом и `last_error`.

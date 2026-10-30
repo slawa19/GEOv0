@@ -24,15 +24,16 @@ THE TICK, IN ORDER, WITH ITS DURABILITY BOUNDARIES (spec 021, "Решения" i
 A failure anywhere after the money boundary costs the tail, never the money: the observation buffer has already
 resolved, so the tail's rollback cannot un-publish a committed payment and nothing in it can replay money.
 
-A REFUSED PAYMENT IS AN OUTCOME, NOT AN ERROR (054-A-7a, owner's decision 2026-10-30). When every automatic payment of
-`STALL_CLEARING_AFTER_TICKS` attempted ticks in a row is refused (`_real_consec_all_rejected_ticks`, the executor), the
+A REFUSED PAYMENT IS AN OUTCOME, NOT AN ERROR (054-A-7a, owner's decision 2026-10-30). When the automatic payments of
+`STALL_CLEARING_AFTER_TICKS` counted ticks in a row go nowhere (`_real_consec_all_rejected_ticks`, the executor), the
 tick runs the clearing pass at once, out of the cadence (`maybe_run_clearing`, `CLEARING_ENABLED` respected). If the next
-attempted tick is refused whole again, the scenario has nothing left to do on its own: the run pauses itself with
+counted tick commits nothing again, the scenario has nothing left to do on its own: the run pauses itself with
 `pause_reason = "scenario_exhausted"` (`_stall_step`, `_pause_scenario_exhausted`). Manual Interact actions still work on
 the paused run; `resume` clears the counter and the reason. The counter is the executor's: since the 054-A-7a review
-(owner, 2026-10-30) it counts only a tick whose every refusal is the scenario's own - routing, capacity, a trust line
-(`rejection_codes.is_scenario_refusal`); a tick with a money stop (`MoneyBoundary.MONEY_STOP_REASONS`: the operator's
-stop, an integrity hold) or another refusal is neutral and holds it. A scripted `payment` event due on the tick is
+(owner, 2026-10-30) it counts a tick with nothing committed, no error and at least one refusal of the scenario -
+routing, capacity, a line's policy (`rejection_codes.is_scenario_refusal`), whatever the other refusals are; a tick with
+no such refusal (only money stops, `MoneyBoundary.MONEY_STOP_REASONS`: the operator's stop, an integrity hold; or other
+refusals) or one cut short by a stop of the run is neutral and holds it. A scripted `payment` event due on the tick is
 planned with the automatic payments and is counted by the same rule (its refusal for a sender the story has not
 introduced yet is the story's own and counts, as before).
 
@@ -1033,13 +1034,15 @@ class RealTick:
         """054-A-7a: "clear", "exhausted" or None - what the run of all-refused attempted ticks asks of this tick.
 
         Read from the counter the committed money phase left (`TickPaymentsPhase.stall_ticks`: +1 for an attempted tick
-        with nothing committed, no error and every refusal the scenario's own, 0 after a commit or an error, held by an
-        empty share and by a neutral tick - a money stop, 054-A-7a review). A counter below
+        with nothing committed, no error and at least one refusal of the scenario, 0 after a commit or an error, held by
+        an empty share and by a neutral tick - only money stops, 054-A-7a review). A counter below
         the mark of a stall clearing means a payment went through since: the mark is dropped. An empty share is no
         evidence (049 S2a) and decides nothing. Otherwise: at `STALL_CLEARING_AFTER_TICKS` or more with no mark - "clear"
         (the tick sets the mark once the pass has returned, with clearing disabled too: the pass is then skipped and the
-        next attempted tick answers all the same); above the mark - the tick after the clearing was refused whole again:
-        "exhausted".
+        next counted tick answers all the same); above the mark - the next counted tick after the clearing: "exhausted".
+        "clear" is decided on the counter alone: while it stands at the threshold or above with no mark (the tick that
+        reached it failed before setting the mark), ANY attempted tick runs the pass, a neutral one too - harmless, it is
+        the pass that was owed.
         """
 
         rr = self._runner

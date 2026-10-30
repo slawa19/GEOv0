@@ -333,7 +333,8 @@ class SimulatorRunStatusEvent(BaseModel):
     errors_total: Optional[int] = Field(default=None, ge=0)
     timeouts_total: Optional[int] = Field(default=None, ge=0)
 
-    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    # Diagnostic: consecutive attempted ticks with nothing committed, no error and at least one refusal of the scenario
+    # (routing, capacity, a line's policy); a tick refused only by a money stop holds it (054-A-7a review).
     consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_event_type: Optional[str] = None
@@ -612,9 +613,9 @@ class RunStatus(BaseModel):
     stop_reason: Optional[str] = None
     stop_client: Optional[str] = None
 
-    # 054-A-7a: why a `paused` run is paused when the run paused itself - "scenario_exhausted": every automatic payment
-    # was refused by routing, capacity or a trust line (a money stop does not count), and the clearing run for that did
-    # not help. Null for a user's pause and in every other state.
+    # 054-A-7a: why a `paused` run is paused when the run paused itself - "scenario_exhausted": the automatic payments
+    # go nowhere (nothing committed, refusals of the scenario - routing, capacity, a line's policy; a money stop alone does
+    # not count), and the clearing run for that did not help. Null for a user's pause and in every other state.
     pause_reason: Optional[PauseReason] = None
 
     sim_time_ms: Optional[int] = Field(default=None, ge=0)
@@ -629,8 +630,8 @@ class RunStatus(BaseModel):
     timeouts_total: Optional[int] = Field(default=None, ge=0)
     errors_last_1m: Optional[int] = Field(default=None, ge=0)
 
-    # Diagnostic: consecutive ticks where all planned payments were refused by the scenario (routing, capacity, a trust
-    # line); a tick refused by a money stop holds it (054-A-7a review).
+    # Diagnostic: consecutive attempted ticks with nothing committed, no error and at least one refusal of the scenario
+    # (routing, capacity, a line's policy); a tick refused only by a money stop holds it (054-A-7a review).
     consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_error: Optional[SimulatorLastError] = None

@@ -985,16 +985,18 @@ class RealPaymentsExecutor:
             # all-rejected ATTEMPTED ticks. At the slow step the attempted ticks are 2-3 ticks apart; a reset on the
             # empty ticks between them would keep the Stall plaque (threshold 3) from ever appearing. At intensity 0
             # nothing is being attempted, so an empty tick clears it as before (no stale plaque on a stopped tempo).
-            # 054-A-7a review (owner, 2026-10-30): the run counts only a tick whose every payment the SCENARIO refused -
-            # routing, capacity, a trust line's limit or policy (`is_scenario_refusal`). A tick with any other refusal
-            # (an equivalent the operator stopped or held for integrity, `MoneyBoundary.MONEY_STOP_REASONS`; a
-            # participant out of circulation; an invalid input), or one cut short by a stop, is NEUTRAL like an empty
-            # share: the counter neither grows nor resets, so a restarted equivalent continues the run where it was.
+            # 054-A-7a review (owner, 2026-10-30): a tick with nothing committed and no error counts when AT LEAST ONE of
+            # its refusals is the SCENARIO's - routing, capacity, the line's policy (`is_scenario_refusal`) - whatever
+            # the others are: in a run of two equivalents the stop of one must not silence the stall of the other
+            # (review P3-1). A tick with no refusal of the scenario at all (only an equivalent the operator stopped or
+            # held for integrity, `MoneyBoundary.MONEY_STOP_REASONS`; a participant out of circulation; an invalid
+            # input), or one cut short by a stop of the run, is NEUTRAL like an empty share: the counter neither grows
+            # nor resets, so a restarted equivalent continues the run where it was.
             empty_share = is_empty_share(run, len(planned))
             if len(planned) > 0:
                 if committed > 0 or errors > 0:
                     run._real_consec_all_rejected_ticks = 0
-                elif rejected > 0 and scenario_refusals == rejected and not stop_requested:
+                elif scenario_refusals > 0 and not stop_requested:
                     run._real_consec_all_rejected_ticks += 1
             elif not empty_share:
                 run._real_consec_all_rejected_ticks = 0
