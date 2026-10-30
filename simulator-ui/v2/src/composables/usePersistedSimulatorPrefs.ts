@@ -25,7 +25,6 @@ type PersistedKey =
   | 'geo.sim.quality'
   | 'geo.sim.labelsLod'
   | 'geo.uiTheme'
-  | 'geo.sim.v2.runId'
 
 type UsePersistedSimulatorPrefsDeps = {
   layoutMode: Ref<LayoutMode>

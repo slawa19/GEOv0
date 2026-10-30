@@ -43,7 +43,6 @@ import { useLayoutIndex } from './useLayoutIndex'
 import { syncLayoutFromSnapshot as syncLayoutFromSnapshotImpl } from './syncLayoutFromSnapshot'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
 import { useMetricsPolling } from './useMetricsPolling'
-import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
 import { useAppFxOverlays } from './useAppFxOverlays'
@@ -283,7 +282,6 @@ export type SimulatorAppApi = {
   selectedNode: ViewWiringApi['selectedNode']
   selectedNodeScreenCenter: ViewWiringApi['selectedNodeScreenCenter']
   getNodeScreenCenter: (nodeId: string) => Point | null
-  selectedNodeEdgeStats: ReturnType<typeof useSelectedNodeEdgeStats>['selectedNodeEdgeStats']
 
   dragToPin: DragToPinApi['dragToPin']
   isSelectedPinned: PhysicsAndPinningApi['isSelectedPinned']
@@ -1046,11 +1044,6 @@ export function useSimulatorApp(opts?: {
     if (!node) return null
     return worldToScreen(node.__x, node.__y)
   }
-
-  const selectedNodeEdgeStats = useSelectedNodeEdgeStats({
-    getSnapshot: () => state.snapshot,
-    getSelectedNodeId: () => state.selectedNodeId,
-  }).selectedNodeEdgeStats
 
   const fxOverlays = useAppFxOverlays({
     getLayoutNodeById: (id) => getLayoutNodeByIdLive(id) ?? undefined,
@@ -1969,7 +1962,6 @@ export function useSimulatorApp(opts?: {
     selectedNode: viewWiring.selectedNode,
     selectedNodeScreenCenter,
     getNodeScreenCenter,
-    selectedNodeEdgeStats,
 
     // pinning
     dragToPin,

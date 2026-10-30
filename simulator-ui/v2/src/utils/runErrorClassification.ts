@@ -210,15 +210,6 @@ function codeLine(key: MessageKey, error: RunError): RunErrorLine {
   return { kind: 'code', key, code: error.code, message: error.message, at: error.at, detail: `${error.code}: ${error.message}` }
 }
 
-export function runStatusErrorText(
-  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
-  isUserFacing: (code: string) => boolean,
-  locale: UiLocale = uiLocale(),
-): string {
-  const line = runStatusErrorLine(status, isUserFacing)
-  return line ? renderRunErrorLine(line, locale) : ''
-}
-
 /**
  * The run-level error line of a run that goes on. 054-B-7b (the owner's decision of 2026-10-30): the code, the server's
  * message and its time are in the text, the clearing step refusal too (until 054 a human text of its own, and since
@@ -241,10 +232,6 @@ export const IDLE_STOP_REASON = 'idle_no_subscribers'
  * Russian word in the English text and an English one in the Russian (the service row is not translated yet).
  */
 const IDLE_STOP_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.idleStopped' })
-
-export function idleStopText(locale: UiLocale = uiLocale()): string {
-  return renderRunErrorLine(IDLE_STOP_LINE, locale)
-}
 
 /** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
 export const GLOBAL_ACTIVE_LIMIT_CONFLICT = 'global_active_limit'
@@ -321,7 +308,3 @@ export function noScenarioText(locale: UiLocale = uiLocale()): string {
  * value is not replaced by another one behind the person's back. Stopping the payments is the pause.
  */
 export const ZERO_INTENSITY_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.zeroIntensity' })
-
-export function zeroIntensityText(locale: UiLocale = uiLocale()): string {
-  return renderRunErrorLine(ZERO_INTENSITY_LINE, locale)
-}

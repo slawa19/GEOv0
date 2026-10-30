@@ -25,10 +25,6 @@ export const FX_CONFIG = {
 } as const
 
 /**
- * Equivalent currency/unit codes shown in the EQ selector (BottomBar).
- * Single source of truth — avoids hardcoding in template HTML.
- */
-/**
  * Colour for clearing floating labels.
  * Corresponds to DS token --ds-warn (warning yellow).
  * Expressed as a CSS custom property so the browser resolves the

@@ -18,9 +18,7 @@ export type ScenarioSummary = {
   description?: LocalizedText | null
   /** UI-only compatibility field; REST decoder accepts only canonical backend fields. */
   label?: string
-  mode?: string
   created_at?: string | null
-  updated_at?: string
   participants_count?: number
   trustlines_count?: number
   equivalents?: string[]
