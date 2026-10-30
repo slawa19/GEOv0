@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.schemas.common import ErrorEnvelope
 from app.core.participants.service import ParticipantService
 from app.schemas.participant import (
     Participant,
@@ -48,7 +49,13 @@ async def search_participants(
     items = await service.list_participants(query=q, type_filter=type, limit=effective_limit, offset=offset)
     return ParticipantsList(items=items)
 
-@router.post("", response_model=Participant, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=Participant,
+    status_code=status.HTTP_201_CREATED,
+    # 054-E-2: declared here as in api/openapi.yaml.
+    responses={409: {"model": ErrorEnvelope, "description": "A participant with this pid or public key already exists (E008)"}},
+)
 async def register_participant(
     request: ParticipantCreateRequest,
     db: AsyncSession = Depends(deps.get_db),

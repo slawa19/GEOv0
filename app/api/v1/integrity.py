@@ -17,6 +17,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.reconciliation_tables import debt_reconciliation_results
+from app.schemas.common import ErrorEnvelope
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
     EquivalentIntegritySummary,
@@ -281,7 +282,12 @@ async def get_integrity_status(
     )
 
 
-@router.get("/checksum/{equivalent}", response_model=IntegrityChecksumResponse)
+@router.get(
+    "/checksum/{equivalent}",
+    response_model=IntegrityChecksumResponse,
+    # 054-E-7: declared here as in api/openapi.yaml.
+    responses={400: {"model": ErrorEnvelope, "description": "The path code is not a well-formed equivalent code (E009)"}},
+)
 async def get_integrity_checksum(
     equivalent: str,
     db: AsyncSession = Depends(deps.get_db),
@@ -305,7 +311,12 @@ async def get_integrity_checksum(
     )
 
 
-@router.post("/verify", response_model=IntegrityVerifyResponse)
+@router.post(
+    "/verify",
+    response_model=IntegrityVerifyResponse,
+    # 054-E-7: declared here as in api/openapi.yaml.
+    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"}},
+)
 async def verify_integrity(
     body: IntegrityVerifyRequest,
     db: AsyncSession = Depends(deps.get_db),

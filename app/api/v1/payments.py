@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.schemas.common import ErrorEnvelope
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService, public_payment_result, public_refusal_details
 from app.utils.distributed_lock import redis_distributed_lock
@@ -21,7 +22,12 @@ from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter()
 
-@router.get("/capacity", response_model=CapacityResponse)
+@router.get(
+    "/capacity",
+    response_model=CapacityResponse,
+    # 054-E-6: declared here as in api/openapi.yaml.
+    responses={504: {"model": ErrorEnvelope, "description": "Routing ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)"}},
+)
 async def check_capacity(
     to: str,
     equivalent: str,

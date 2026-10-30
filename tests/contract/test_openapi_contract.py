@@ -669,8 +669,17 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # on both halves (`SimulatorActionInternalError` / `_ACTION_INTERNAL_ERROR_RESPONSE`). 43 entries gain an EQUAL 500
 # pair; `POST /payments` had a canon-only 500 and now has its generated twin. Measured with a per-entry dump on
 # `721d96b1` and on this tree (a scratch script, not committed): both ledgers with every `500` key removed are equal.
+# 2026-10-30 / programme 054 `054-E-1`...`E-8`: count HOLDS at 44, digest moves; none enters or leaves. The statuses the
+# service always answered are declared in the canon AND on the decorators, IDENTICALLY after normalisation: `404` on
+# `POST /auth/challenge`, `409` on `POST /participants`, `400`/`404` on `GET /trustlines`, `404` on `POST /trustlines`,
+# `504` on `GET /payments/capacity`, `400` on `GET /integrity/checksum/{equivalent}` and `POST /integrity/verify`,
+# `404` on `POST /simulator/runs`; `400`/`404` on both clearing routes and `504` on `POST /clearing/auto` (E-5).
+# Seven of those operations were already in this ledger for older differences and gain an EQUAL pair; `GET
+# /trustlines` and the two clearing routes were not and stay out. `actions/trustlines-list` (054-E-12) declares its
+# `400` on both halves and stays out. Measured with the same per-entry dump: against the E-10 ledger exactly those
+# seven entries differ, each by the added equal pair.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "a4e5dd58c58f56823aab141d70714a151a81ba471077a1da96b9bc07aa00731a"
+    "8483815a1f7588f3c0cb1d5a01de18bc563d0d11941228ae71889dd2f1bf3fcb"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 44
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

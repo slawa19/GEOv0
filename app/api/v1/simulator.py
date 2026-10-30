@@ -2957,7 +2957,17 @@ async def scenario_graph_preview(
         scenario_id=scenario_id, equivalent=_norm_equivalent(equivalent), mode=mode, session=db)
 
 
-@router.post("/runs", response_model=RunCreateResponse)
+@router.post(
+    "/runs",
+    response_model=RunCreateResponse,
+    # 054-E-8: declared here as in api/openapi.yaml.
+    responses={
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No scenario has this id, or a non-administrator may not start it (E009)",
+        }
+    },
+)
 async def start_run(
     body: RunCreateRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),

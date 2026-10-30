@@ -7,13 +7,19 @@ from app.api import deps
 from app.api.audit import add_audit_entry
 from app.core.auth.service import AuthService
 from app.schemas.auth import ChallengeRequest, ChallengeResponse, LoginRequest, RefreshRequest, TokenPair
+from app.schemas.common import ErrorEnvelope
 from app.utils.exceptions import GeoException
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
-@router.post("/challenge", response_model=ChallengeResponse)
+@router.post(
+    "/challenge",
+    response_model=ChallengeResponse,
+    # 054-E-1: declared here as in api/openapi.yaml.
+    responses={404: {"model": ErrorEnvelope, "description": "No participant has this pid (E009)"}},
+)
 async def create_challenge(
     request: ChallengeRequest,
     db: AsyncSession = Depends(deps.get_db),

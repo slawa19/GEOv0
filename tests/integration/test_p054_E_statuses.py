@@ -13,14 +13,19 @@ compares with the canon; statuses on paths no test here sends.
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from nacl.signing import SigningKey
 
 from app.api.deps import get_db
 from app.config import settings
+from app.core.auth.canonical import canonical_json
+from app.core.auth.crypto import generate_keypair
 from app.main import app
+from app.utils.exceptions import TimeoutException
 from tests.contract import openapi_response_conformance as oc
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
@@ -60,6 +65,106 @@ def _assert_declared(method: str, path: str, response: Any, status: int) -> None
     pointer = _declared_schema_pointer(method, path, status, response.headers.get("content-type"))
     errors = oc.validate_body(_CANON, pointer, response.json())
     assert not errors, f"{method} {path} {status}: body does not match the declared schema: {errors}"
+
+
+def _signed_registration(name: str) -> dict:
+    public_key, private_key = generate_keypair()
+    signing_key = SigningKey(base64.b64decode(private_key))
+    body = {"display_name": name, "type": "person", "public_key": public_key, "profile": {}}
+    signature = base64.b64encode(signing_key.sign(canonical_json(body)).signature).decode("utf-8")
+    return {**body, "signature": signature}
+
+
+# ---- 054-E-1 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e1_auth_challenge_for_an_unknown_pid_is_a_declared_404(client) -> None:
+    response = await client.post("/api/v1/auth/challenge", json={"pid": "p054-no-such-participant"})
+    _assert_declared("POST", "/auth/challenge", response, 404)
+    assert response.json()["error"]["code"] == "E009"
+
+
+# ---- 054-E-2 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e2_registering_an_existing_participant_is_a_declared_409(client) -> None:
+    body = _signed_registration("p054 E-2")
+    first = await client.post("/api/v1/participants", json=body)
+    assert first.status_code == 201, first.text
+    again = await client.post("/api/v1/participants", json=body)
+    _assert_declared("POST", "/participants", again, 409)
+    assert again.json()["error"]["code"] == "E008"
+
+
+# ---- 054-E-3 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e3_trustlines_list_unknown_and_malformed_equivalent_are_declared(client, auth_headers) -> None:
+    unknown = await client.get("/api/v1/trustlines", headers=auth_headers, params={"equivalent": "ZZMISSING"})
+    malformed = await client.get("/api/v1/trustlines", headers=auth_headers, params={"equivalent": "uah"})
+    _assert_declared("GET", "/trustlines", unknown, 404)
+    _assert_declared("GET", "/trustlines", malformed, 400)
+
+
+# ---- 054-E-4 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e4_trustline_to_an_unknown_recipient_is_a_declared_404(client, auth_user) -> None:
+    signing_key = SigningKey(base64.b64decode(auth_user["private_key"]))
+    payload = {"to": "p054-no-such-recipient", "equivalent": "UAH", "limit": "10"}
+    signature = base64.b64encode(signing_key.sign(canonical_json(payload)).signature).decode("utf-8")
+    response = await client.post(
+        "/api/v1/trustlines", headers=auth_user["headers"], json={**payload, "signature": signature}
+    )
+    _assert_declared("POST", "/trustlines", response, 404)
+
+
+# ---- 054-E-6 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e6_payment_capacity_routing_timeout_is_a_declared_504(client, auth_headers, monkeypatch) -> None:
+    """Injection: routing raises the core's own `TimeoutException` (`PaymentRouter.find_flow_routes` out of
+    `ROUTING_PATH_FINDING_TIMEOUT_MS`)."""
+
+    from app.core.payments.router import PaymentRouter
+
+    def timed_out(self, *_a, **_kw):
+        raise TimeoutException("Routing timed out")
+
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", timed_out)
+    response = await client.get(
+        "/api/v1/payments/capacity",
+        headers=auth_headers,
+        params={"to": "p054-anyone", "equivalent": "UAH", "amount": "1"},
+    )
+    _assert_declared("GET", "/payments/capacity", response, 504)
+
+
+# ---- 054-E-7 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e7_integrity_malformed_equivalent_is_a_declared_400(client) -> None:
+    checksum = await client.get("/api/v1/integrity/checksum/uah", headers=ADMIN)
+    verify = await client.post("/api/v1/integrity/verify", headers=ADMIN, json={"equivalent": "uah"})
+    _assert_declared("GET", "/integrity/checksum/{equivalent}", checksum, 400)
+    _assert_declared("POST", "/integrity/verify", verify, 400)
+
+
+# ---- 054-E-8 ------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e8_simulator_run_of_an_unknown_scenario_is_a_declared_404(client, auth_headers) -> None:
+    response = await client.post(
+        "/api/v1/simulator/runs", headers=auth_headers, json={"scenario_id": "p054-no-such-scenario"}
+    )
+    _assert_declared("POST", "/simulator/runs", response, 404)
 
 
 # ---- 054-E-10 / E-9 -----------------------------------------------------------------------------------------------

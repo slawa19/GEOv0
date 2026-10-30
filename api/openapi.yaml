@@ -1483,6 +1483,9 @@ paths:
                 $ref: '#/components/schemas/RunCreateResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-8: no scenario has this id, or a non-administrator may not start it (E009).
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '401':
@@ -2058,6 +2061,9 @@ paths:
                 $ref: '#/components/schemas/ChallengeResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-1: no participant has this pid (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
@@ -2197,6 +2203,9 @@ paths:
                 $ref: '#/components/schemas/Participant'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          # 054-E-2: a participant with this pid or public key already exists (E008).
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
@@ -2375,6 +2384,12 @@ paths:
                 $ref: '#/components/schemas/TrustLinesList'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-3: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-3: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2402,6 +2417,9 @@ paths:
                 $ref: '#/components/schemas/TrustLine'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-4: the recipient `to` or the equivalent does not exist (E009).
+          $ref: '#/components/responses/NotFound'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
         '409':
@@ -2737,6 +2755,13 @@ paths:
           $ref: '#/components/responses/UnauthorizedBearer'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '504':
+          description: >-
+            054-E-6: routing ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007); no partial answer is given.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3084,6 +3109,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityChecksumResponse'
+        '400':
+          # 054-E-7: the path code is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3117,6 +3145,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityVerifyResponse'
+        '400':
+          # 054-E-7: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
