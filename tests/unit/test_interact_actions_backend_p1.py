@@ -674,7 +674,8 @@ async def test_action_payment_real_happy_mocked(client, db_session, interact_act
     assert payload["ok"] is True
     assert isinstance(payload.get("payment_id"), str) and payload["payment_id"]
     assert payload["status"] == "committed"
-    assert payload["amount"] == "1"
+    # 054-A-17: the moved amount in the equivalent's step (UAH, precision 2), not the request's spelling "1".
+    assert payload["amount"] == "1.00"
 
 
 @pytest.mark.asyncio
