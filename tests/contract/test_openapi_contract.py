@@ -487,8 +487,16 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # declares no response model, so the generated half has no schema and the entry already differed as a whole
 # (`properties`, `required`, `type` canonical-only); the canonical half it hashes changed, the paths that differ did not
 # (measured with the same per-entry path dump).
+# Eighth move, 2026-10-30, `054-E-15` (after `054-A-15`): count HOLDS at 61, digest moves, NO difference path added or
+# removed. The canon narrows `SimulatorGraphLink.trust_limit/used/available` from `oneOf [string, number]` to
+# `type: string`. The four entries that carry the link (`GET /simulator/graph/ego`, `GET /simulator/graph/snapshot`,
+# `GET /simulator/runs/{run_id}/graph/snapshot`, `GET /simulator/scenarios/{scenario_id}/graph/preview`) already differed
+# on exactly these three paths - the generated half is pydantic's `anyOf [number, string, null]` of the `NumberOrString`
+# annotation, which the `money must be a decimal string` validator (054-A-15) refuses at runtime - and still differ
+# there; only the canonical value changed. Measured with a per-entry path dump of the success ledger before and after
+# (scratch, not committed). Narrowing the annotation to `str` would empty the difference; it is outside wave E's surface.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "d3d0f14ba3777ad948975bee083be0477441ff9dbbea6496b7cf421dde08135b"
+    "0272ed54378924953ace4ecb9e1f31bdad0e5a40d92f1854041563e1af770919"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;

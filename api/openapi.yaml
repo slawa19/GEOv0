@@ -6759,19 +6759,19 @@ components:
         # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
         # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
         # Absent, or a value - never null.
+        #
+        # 054-E-15 (2026-10-30): money is a decimal string and nothing else (AGENTS.md §8). The
+        # `oneOf [string, number]` admitted a JSON number; since 054-A-15 the snapshot/preview
+        # link is built from money strings before the database is read
+        # (app/core/simulator/snapshot_builder.py) and `SimulatorGraphLink` refuses a number, and
+        # both patch builders emit `to_money_str` (edge_patch_builder.py).
         trust_limit:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         used:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         available:
           description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         status:
           type: string
           nullable: true
@@ -6917,19 +6917,19 @@ components:
         # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
         # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
         # Absent, or a value - never null.
+        #
+        # 054-E-15 (2026-10-30): money is a decimal string and nothing else (AGENTS.md §8). The
+        # `oneOf [string, number]` admitted a JSON number; since 054-A-15 the snapshot/preview
+        # link is built from money strings before the database is read
+        # (app/core/simulator/snapshot_builder.py) and `SimulatorGraphLink` refuses a number, and
+        # both patch builders emit `to_money_str` (edge_patch_builder.py).
         trust_limit:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         used:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         available:
           description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
-          oneOf:
-            - type: string
-            - type: number
+          type: string
         status:
           type: string
           nullable: true
