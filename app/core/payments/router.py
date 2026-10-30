@@ -55,13 +55,23 @@ class PaymentRouter:
     # (`itertools.count`, not a clock: two events in one coarse clock tick would be unordered).
     _read_started: Dict[str, int] = {}
     _ticks = itertools.count(1)
+    # 054-F-2: the tick of the last eviction of each equivalent, and of the last eviction of all of them. A build
+    # whose read began before it may have read the state the eviction was for, and is not published.
+    _invalidated: Dict[str, int] = {}
+    _invalidated_all: int = 0
 
     @classmethod
     def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
         if equivalent_code:
+            cls._invalidated[str(equivalent_code)] = next(cls._ticks)
             cls._graph_cache.pop(str(equivalent_code), None)
         else:
+            cls._invalidated_all = next(cls._ticks)
             cls._graph_cache.clear()
+
+    @classmethod
+    def _evicted_since(cls, equivalent_code: str, read_started: int) -> bool:
+        return max(cls._invalidated.get(equivalent_code, 0), cls._invalidated_all) > read_started
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -266,7 +276,13 @@ class PaymentRouter:
                     self.edge_no_transit.setdefault(payer_pid, {})[payee_pid] = forbid
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
-        if write_shared_cache and ttl > 0:
+        # 054-F-2: a topology edit committed and evicted while this build read; what it read may be the state before
+        # the edit, and publishing it after the eviction would serve that state for the whole TTL (the core then
+        # refuses the route on policy - E001, final). This instance still routes on it: a hint, as ever.
+        if write_shared_cache and ttl > 0 and self._evicted_since(equivalent_code, read_started):
+            logger.info("event=routing.graph_build_not_published equivalent=%s reason=evicted_during_read",
+                        equivalent_code)
+        elif write_shared_cache and ttl > 0:
             self._read_started[equivalent_code] = read_started
             self._graph_cache[equivalent_code] = (
                 time.time(),

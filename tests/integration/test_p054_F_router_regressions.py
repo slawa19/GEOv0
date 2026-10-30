@@ -6,8 +6,10 @@ commit (or refuse) as the protocol says, read back from the database. Mode B: a 
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
+from contextlib import asynccontextmanager
 from decimal import Decimal
 
 import pytest
@@ -15,6 +17,7 @@ from nacl.signing import SigningKey
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.payments.router import PaymentRouter
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -23,7 +26,9 @@ from tests.conftest import MODE_B, sessionmaker_of
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_update,
 )
 
 
@@ -128,3 +133,99 @@ async def test_f3_max_flow_finds_the_path_a_route_dependent_policy_leaves(client
     tx_id, status, body = await _http_pay(client, p["P"], p["Q"], code, "10.00")
     assert status == 200 and body["status"] == "COMMITTED", body
     assert await _debts(factory, code, p) == {"P->Y": "10.00", "Y->Z": "10.00", "Z->M": "10.00", "M->Q": "10.00"}
+
+
+def _barrier_reader(factory, read_done: asyncio.Event, release: asyncio.Event):
+    """The payment's route reader (`PaymentService._build_route_graph`) with a barrier after its last read (of the
+    participants): the build has read every line, and is held before it publishes."""
+
+    @asynccontextmanager
+    async def reader():
+        async with factory() as session:
+            original = session.execute
+
+            async def execute(statement, *a, **k):
+                result = await original(statement, *a, **k)
+                if any(d.get("entity") is Participant for d in getattr(statement, "column_descriptions", [])):
+                    read_done.set()
+                    await asyncio.wait_for(release.wait(), 20)
+                return result
+
+            session.execute = execute  # type: ignore[method-assign]
+            yield session
+
+    return reader
+
+
+# 054-F-2: a shared-cache build that read the lines BEFORE a committed policy PATCH finished AFTER the PATCH's eviction
+# and published the old policy; the next payment routed over B, the core refused it on policy (E001, ABORTED, no
+# re-route). Now a build older than the last eviction of its equivalent is not published; its waiter builds afresh.
+@MODE_B
+@pytest.mark.asyncio
+async def test_f2_a_build_older_than_the_eviction_is_not_published_and_the_next_payment_commits(client, db_session):
+    assert settings.ROUTING_GRAPH_CACHE_TTL_SECONDS == 2  # the production default, not raised for the stand
+    code, p, factory = await _world(client, db_session, "ABTCD", "F2")
+    line_ba = await _line(client, p["B"], p["A"], code, "100")
+    for cred, debt in (("T", "B"), ("C", "A"), ("D", "C"), ("T", "D")):
+        await _line(client, p[cred], p[debt], code, "100")
+
+    read_done, release = asyncio.Event(), asyncio.Event()
+    async with factory() as own, factory() as other:
+        leader_router, waiter_router = PaymentRouter(own), PaymentRouter(other)
+        leader = asyncio.create_task(leader_router.build_graph(
+            code, use_shared_cache=True, reader=_barrier_reader(factory, read_done, release)))
+        await asyncio.wait_for(read_done.wait(), 20)
+        # A second caller of the shared cache waits for the build in flight (single-flight).
+        waiter = asyncio.create_task(waiter_router.build_graph(code, use_shared_cache=True))
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        patched = await client.patch(f"/api/v1/trustlines/{line_ba}", headers=p["B"]["headers"],
+                                     json=signed_trustline_update(
+                                         signing_key=SigningKey(base64.b64decode(p["B"]["priv"])),
+                                         trustline_id=line_ba, policy={"can_be_intermediate": False},
+                                         expected=await expected_state_of(client, p["B"]["headers"], line_ba)))
+        assert patched.status_code == 200, patched.text
+        release.set()
+        await asyncio.wait_for(leader, 20)
+        await asyncio.wait_for(waiter, 20)
+
+    a, b = p["A"]["pid"], p["B"]["pid"]
+    # The leader routes on what it read (a hint, re-checked by the core) but did not publish it ...
+    assert leader_router.edge_no_transit[a][b] == frozenset()
+    # ... so its waiter did not take it: it built afresh and published the patched policy.
+    assert waiter_router.from_cache is False and waiter_router.edge_no_transit[a][b] == frozenset({b})
+    assert PaymentRouter._graph_cache[code][6][a][b] == frozenset({b})
+
+    tx_id, status, body = await _http_pay(client, p["A"], p["T"], code, "10.00")
+    assert status == 200 and body["status"] == "COMMITTED", body
+    assert await _tx_state(factory, tx_id) == ["COMMITTED"]
+    assert await _debts(factory, code, p) == {"A->C": "10.00", "C->D": "10.00", "D->T": "10.00"}
+
+
+# 054-F-2, the same race without a waiter: nothing is published, and the payment's own build reads the patched lines.
+@MODE_B
+@pytest.mark.asyncio
+async def test_f2_without_a_waiter_the_stale_build_leaves_the_cache_empty(client, db_session):
+    code, p, factory = await _world(client, db_session, "ABTCD", "F2")
+    line_ba = await _line(client, p["B"], p["A"], code, "100")
+    for cred, debt in (("T", "B"), ("C", "A"), ("D", "C"), ("T", "D")):
+        await _line(client, p[cred], p[debt], code, "100")
+
+    read_done, release = asyncio.Event(), asyncio.Event()
+    async with factory() as own:
+        leader = asyncio.create_task(PaymentRouter(own).build_graph(
+            code, use_shared_cache=True, reader=_barrier_reader(factory, read_done, release)))
+        await asyncio.wait_for(read_done.wait(), 20)
+        patched = await client.patch(f"/api/v1/trustlines/{line_ba}", headers=p["B"]["headers"],
+                                     json=signed_trustline_update(
+                                         signing_key=SigningKey(base64.b64decode(p["B"]["priv"])),
+                                         trustline_id=line_ba, policy={"can_be_intermediate": False},
+                                         expected=await expected_state_of(client, p["B"]["headers"], line_ba)))
+        assert patched.status_code == 200, patched.text
+        release.set()
+        await asyncio.wait_for(leader, 20)
+    assert code not in PaymentRouter._graph_cache
+
+    tx_id, status, body = await _http_pay(client, p["A"], p["T"], code, "10.00")
+    assert status == 200 and body["status"] == "COMMITTED", body
+    assert await _debts(factory, code, p) == {"A->C": "10.00", "C->D": "10.00", "D->T": "10.00"}
