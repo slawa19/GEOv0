@@ -6,6 +6,7 @@ import { toLower } from '../utils/stringHelpers'
 import { isAdminViewer, useTopBarContext } from '../composables/useTopBarContext'
 import { useUiLocale } from '../composables/useUiLocale'
 import { runStopText } from '../i18n/statusText'
+import { RUN_ERROR_LINE_MAX_CHARS } from '../utils/runErrorClassification'
 import HudBar from './common/HudBar.vue'
 import LanguageSwitch from './LanguageSwitch.vue'
 
@@ -592,7 +593,7 @@ function onApplyIntensity() {
       >
         <span class="ds-alert__icon" aria-hidden="true">✕</span>
         <span class="tb-error-lines">
-          <span class="ds-value ds-mono tb-fade-92" data-testid="error-text" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
+          <span class="ds-value ds-mono tb-fade-92" data-testid="error-text" :title="ctx.lastErrorTitle?.value || String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), RUN_ERROR_LINE_MAX_CHARS) }}</span>
         </span>
         <!-- 046 wave 1: a start refused by the limit of runs (409 global_active_limit) can be tried again from here, on the first view. -->
         <button

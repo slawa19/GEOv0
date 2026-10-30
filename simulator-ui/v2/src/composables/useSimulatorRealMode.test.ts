@@ -2215,7 +2215,8 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       }))
       await h.refreshRunStatus()
       expect(real.lastError).toBe(t('runLine.runningError', { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }))
-      expect(runErrorLineLog(real.lastErrorLine)).toBe('INTERNAL_ERROR: boom')
+      // 054-B-7b fix-delta (§15 Codex R3): the time of the failure is in its title and console line too.
+      expect(runErrorLineLog(real.lastErrorLine)).toBe('INTERNAL_ERROR: boom (t)')
 
       // BACKLOG 037-5 (a): a run in `error` shows the error it stopped with, whatever its code (page reload / attach path)
       getRunMock.mockImplementation(async () => ({

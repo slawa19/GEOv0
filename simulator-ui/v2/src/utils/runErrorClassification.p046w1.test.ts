@@ -163,7 +163,8 @@ describe('046 wave 1, full - a run that ended says what to do (the reload), in t
       kind: 'code', key: 'runLine.errorStopped', code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't',
       detail: 'REAL_MODE_TICK_FAILED: tick failed',
     })
-    expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed')
+    // 054-B-7b fix-delta (§15 Codex R3): with the time of the failure.
+    expect(runErrorLineTitle(line), 'the server full text: the title of the line (048 decision 3)').toBe('REAL_MODE_TICK_FAILED: tick failed (t)')
     expect(renderRunErrorLine(line!, 'en')).toBe('The run stopped: REAL_MODE_TICK_FAILED — tick failed (t). Restart the run.')
     expect(renderRunErrorLine(line!, 'ru')).toBe('Прогон остановлен: REAL_MODE_TICK_FAILED — tick failed (t). Перезапустите прогон.')
     const step = runStatusErrorLine(status('error', null, { code: 'CLEARING_REFUSED', message: 'x', at: 't' }), always)
@@ -194,7 +195,8 @@ describe('046 wave 1 - the server text of an ended run: one console line', () =>
       writeRunErrorLine(holder, ended('tick failed'), 'en')
       writeRunErrorLine(holder, ended('tick failed'), 'en') // the REST refresh repeats the status
       writeRunErrorLine(holder, holder.lastErrorLine, 'ru') // a switch of the language re-renders the same value
-      expect(warn.mock.calls).toEqual([['[run] stopped with an error:', 'REAL_MODE_TICK_FAILED: tick failed']])
+      // 054-B-7b fix-delta (§15 Codex R3): the console line carries the time of the failure too.
+      expect(warn.mock.calls).toEqual([['[run] stopped with an error:', 'REAL_MODE_TICK_FAILED: tick failed (t)']])
       writeRunErrorLine(holder, ended('another'), 'en')
       expect(warn).toHaveBeenCalledTimes(2)
       // Counter-check: a line without a server text logs nothing.

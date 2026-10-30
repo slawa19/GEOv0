@@ -71,6 +71,9 @@ export type RunErrorLine =
       readonly ref?: string | null
     }
 
+/** The top bar shows at most this many characters of the run's error line (`TopBar.vue`, the error line's text). */
+export const RUN_ERROR_LINE_MAX_CHARS = 160
+
 export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLocale()): string {
   switch (line.kind) {
     case 'dict':
@@ -80,15 +83,31 @@ export function renderRunErrorLine(line: RunErrorLine, locale: UiLocale = uiLoca
     case 'raw':
       return line.text
     case 'code':
-      return t(line.key, { code: line.code, message: line.message ?? '', at: line.at ?? '' }, locale)
+      return renderCodeLine(line, locale)
   }
+}
+
+/**
+ * 054-B-7b fix-delta (§15 Codex R3): the code and the time are drawn whole; only the server's message is shortened so the
+ * sentence fits the top bar (`RUN_ERROR_LINE_MAX_CHARS`). Before, the bar cut the whole sentence at its end, and a
+ * regular message (`REAL_MODE_MONEY_CONFLICT_UNRESOLVED`, about 100 characters) lost the time. The full text is the title.
+ */
+function renderCodeLine(line: Extract<RunErrorLine, { kind: 'code' }>, locale: UiLocale): string {
+  const render = (message: string) => t(line.key, { code: line.code, message, at: line.at ?? '' }, locale)
+  const message = line.message ?? ''
+  const full = render(message)
+  if (full.length <= RUN_ERROR_LINE_MAX_CHARS) return full
+  const budget = RUN_ERROR_LINE_MAX_CHARS - render('').length
+  return render(budget > 1 ? `${message.slice(0, budget - 1)}…` : '…')
 }
 
 export const rawRunErrorLine = (text: string): RunErrorLine => ({ kind: 'raw', text })
 
 /** The server's full text behind a line (the `title` of the error line), when the line keeps one; else null. */
 export function runErrorLineTitle(line: RunErrorLine | null | undefined): string | null {
-  return (line?.kind === 'code' || line?.kind === 'dict') && line.detail ? line.detail : null
+  // 054-B-7b fix-delta (§15 Codex R3): the time of a run's own failure is in its title too.
+  if (line?.kind === 'code' && line.detail) return line.at ? `${line.detail} (${line.at})` : line.detail
+  return line?.kind === 'dict' && line.detail ? line.detail : null
 }
 
 /** 048 S3: the full technical text behind a line, for the console (a failed request's `log`, else its title), else null. */

@@ -120,7 +120,7 @@ describe('054-B-7c: a run stopped by the guards - its line, and a refused resume
       expect(real.lastErrorLine, 'the line of a run ended by an error').toMatchObject({ kind: 'code', key: 'runLine.errorStopped', code })
       expect(real.lastError, 'the sentence on screen').toBe(renderRunErrorLine(real.lastErrorLine!))
       expect(real.lastError, 'the code and the message are in the text').toContain(`${code} — ${code} message`)
-      expect(runErrorLineTitle(real.lastErrorLine), 'and behind the line').toBe(`${code}: ${code} message`)
+      expect(runErrorLineTitle(real.lastErrorLine), 'and behind the line, with its time (054-B-7b fix-delta)').toBe(`${code}: ${code} message (2026-10-30T00:00:00Z)`)
     })
 
     it(`${code}: a resume refused with 409 keeps the run and says the server could not complete it`, async () => {
