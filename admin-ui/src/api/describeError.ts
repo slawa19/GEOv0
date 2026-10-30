@@ -2,7 +2,10 @@ import { t } from '../i18n'
 import { ApiException } from './apiException'
 
 export type DescribedError = {
-  /** What to show: the message, an actionable hint when there is one, and `(ref: <request id>)` when the server gave an id. */
+  /**
+   * What to show: the message, an actionable hint when there is one, the error code as `[CODE]` when there is one,
+   * and `(ref: <request id>)` when the server gave an id.
+   */
   text: string
   /** The server's correlation id of the failed request, when there is one (`ApiException.requestId`). */
   requestId: string | null
@@ -48,7 +51,11 @@ export function describeError(e: unknown, fallbackKey?: string): DescribedError 
   if (e instanceof ApiException) {
     const title = e.message || `HTTP ${e.status}`
     const hint = hintOf(e)
-    const body = hint ? `${title} — ${hint}` : title
+    const described = hint ? `${title} — ${hint}` : title
+    // 054-D-16: the error code (`ErrorEnvelope.code`, or the client's own when there was no answer) is what the API
+    // reference and the log are indexed by; it is shown next to the ref. A code is a token, not a sentence: no i18n.
+    const code = safeString(e.code).trim()
+    const body = code ? `${described} [${code}]` : described
     const requestId = e.requestId
     return { text: requestId ? `${body} ${t('error.ref', { id: requestId })}` : body, requestId }
   }
