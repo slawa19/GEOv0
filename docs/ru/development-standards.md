@@ -6,7 +6,7 @@
 > [`scripts/verify_local.ps1`](../../scripts/verify_local.ps1). Раздел 3 ниже
 > сохраняет общие принципы, но его прямые `pytest`/package-команды не заменяют
 > verifier. Пиннутый Ruff для `app migrations` блокирует CI; Black остаётся
-> non-blocking diagnostic, mypy не настроен как gate.
+> blocking gate для `app` (с 2026-10-30), mypy не настроен как gate.
 
 ## Введение
 
@@ -600,7 +600,7 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 Подробные правила: [`docs/ru/06-contributing.md`](06-contributing.md)
 
 **Краткая выжимка:**
-- Formatter: **Black**, `line-length = 100` (пока non-blocking diagnostic)
+- Formatter: **Black**, `line-length = 88`, область `app` (blocking с 2026-10-30; применённые миграции исключены)
 - Linter: **Ruff** (пиннутая версия и `app migrations` — blocking CI gate)
 - Типы: mypy не настроен как repository gate
 - Именование: snake_case для функций/переменных, PascalCase для классов

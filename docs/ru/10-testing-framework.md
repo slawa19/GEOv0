@@ -129,7 +129,7 @@ API/event payload, DOM/a11y или visual contract — а не только су
 «операция не падает»; no-op steps удаляются.
 
 Пиннутый Ruff для `app migrations` является блокирующим CI-гейтом; Black остаётся
-non-blocking diagnostic с известным repository-wide debt, mypy не настроен как gate.
+blocking gate для `app` с 2026-10-30 (054 T5411; миграции вне области), mypy не настроен как gate.
 Локальный `verify_local.ps1 -StaticDiagnostics` только выводит результаты обоих
 инструментов и не меняет exit code; это не отменяет блокирующую семантику Ruff в CI.
 

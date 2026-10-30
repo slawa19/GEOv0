@@ -155,7 +155,7 @@ jobs:
           -UiOnly
 
   static-diagnostics:
-    name: Python static diagnostics (Ruff blocking, Black non-blocking)
+    name: Python static diagnostics (Ruff and Black blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -180,8 +180,8 @@ jobs:
 
       # THE PORTABLE PARTITION OF THE TOOLING TIER (025 T2502.2, 2026-10-03): the CI-form, document,
       # recipe and generator checks that need no database, moved out of the backend tier. It is a
-      # BLOCKING step - the continue-on-error below belongs to the Black step alone and must never
-      # be copied here (tooling-tests/conftest.py, tooling_ci_binding_violations).
+      # BLOCKING step, like every step of this job since 2026-10-30 (054 T5411: Black blocks too); no step
+      # may carry continue-on-error or if: (tooling-tests/conftest.py, tooling_ci_binding_violations).
       - name: Run the tooling tier, portable partition
         shell: pwsh
         run: >-
