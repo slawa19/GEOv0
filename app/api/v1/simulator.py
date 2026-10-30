@@ -827,10 +827,17 @@ async def _resolve_participant_or_error(
     return row, None
 
 
+def _norm_equivalent(code: object) -> str:
+    """054-E-13: an equivalent code as the ledger stores it and events carry it (`EquivalentCode`), whatever the case it
+    was typed in. Every route that takes `equivalent` applies it on the way in; passed on as typed, `uah` was echoed in
+    bodies and an SSE subscription for it never matched an event (they carry `UAH`)."""
+    return str(code or "").strip().upper()
+
+
 async def _resolve_equivalent_or_error(
     *, session, code: str, reason: Optional[str] = None
 ) -> tuple[Optional[Equivalent], Optional[JSONResponse]]:
-    eq_code = str(code or "").strip().upper()
+    eq_code = _norm_equivalent(code)
     not_found = {"equivalent": eq_code, **({"reason": reason} if reason else {})}
     if not eq_code:
         return None, _action_error(
@@ -2707,6 +2714,7 @@ async def graph_snapshot_active_run(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
@@ -2728,6 +2736,7 @@ async def ego_snapshot_active_run(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
@@ -2754,6 +2763,7 @@ async def events_stream_active_run(
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
 
     # If there is no actual run (or mapping is stale), answer a FINITE stream: when to reconnect, then the end.
@@ -2914,7 +2924,8 @@ async def scenario_graph_preview(
 ):
     """Preview the scenario graph topology without starting a run (the template's picture; 044: no database read)."""
     runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin)
-    return await runtime.build_scenario_preview(scenario_id=scenario_id, equivalent=equivalent, mode=mode, session=db)
+    return await runtime.build_scenario_preview(
+        scenario_id=scenario_id, equivalent=_norm_equivalent(equivalent), mode=mode, session=db)
 
 
 @router.post("/runs", response_model=RunCreateResponse)
@@ -3053,6 +3064,7 @@ async def run_events_stream(
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    equivalent = _norm_equivalent(equivalent)
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     try:
         sub, status_event_id = await runtime.subscribe_with_status(
@@ -3083,7 +3095,7 @@ async def graph_snapshot_for_run(
     db=Depends(deps.get_db),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
+    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=_norm_equivalent(equivalent), session=db)
 
 
 @router.get(
@@ -3102,7 +3114,7 @@ async def metrics_for_run(
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_metrics(
         run_id=run_id,
-        equivalent=equivalent,
+        equivalent=_norm_equivalent(equivalent),
         from_ms=from_ms,
         to_ms=to_ms,
         step_ms=step_ms,
@@ -3124,7 +3136,7 @@ async def bottlenecks_for_run(
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_bottlenecks(
         run_id=run_id,
-        equivalent=equivalent,
+        equivalent=_norm_equivalent(equivalent),
         limit=limit,
         min_score=min_score,
     )
