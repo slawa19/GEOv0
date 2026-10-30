@@ -510,8 +510,6 @@ class RunLifecycle:
                 run_id,
             )
 
-        self._publish_run_status(run_id)
-
         # Best-effort: make sure background tasks are stopped even if persistence fails.
         if heartbeat_task is not None:
             heartbeat_task.cancel()
@@ -525,6 +523,13 @@ class RunLifecycle:
                 with self._lock:
                     if run._heartbeat_task is heartbeat_task:
                         run._heartbeat_task = None
+
+        # 054-A-1: the terminal `stopped` is published only AFTER the heartbeat is drained. A cancelled tick whose
+        # money COMMIT already landed still publishes its `tx.updated`/`clearing.done` and settles its counters on the
+        # way out; published before the drain, `stopped` got an older event id than those events, the live SSE stream
+        # (which returns on `stopped`) never delivered them and `stopped` carried the counters of before the commit.
+        # The state and the owner slot above are still released early - only the publication waits.
+        self._publish_run_status(run_id)
 
         # Always attempt to stop artifacts writer (idempotent).
         try:
