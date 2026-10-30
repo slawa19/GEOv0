@@ -1702,6 +1702,11 @@ def test_run_local_refuses_reload_at_parameter_binding_before_any_lifecycle_muta
     The script runs from a copy under `tmp_path` (its repository root is `$PSScriptRoot/..`), with
     the read-only `status` action, so a regression that re-admits the switch cannot touch the
     checkout. The error is matched by its FullyQualifiedErrorId: the message is localized.
+
+    Unlike the dot-sourced cases above, this one INVOKES a `.ps1` file, so the host's execution
+    policy applies: Windows PowerShell with every scope `Undefined` is `Restricted` and answers
+    `UnauthorizedAccess` before binding. `-ExecutionPolicy Bypass` (process scope) states the
+    policy instead of inheriting it from `PSExecutionPolicyPreference` of whoever runs the tier.
     """
     source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
 
@@ -1724,8 +1729,21 @@ def test_run_local_refuses_reload_at_parameter_binding_before_any_lifecycle_muta
         "catch { [Console]::Out.Write($_.FullyQualifiedErrorId + '|' + "
         "$_.Exception.GetType().FullName) }"
     )
-    result = _run_powershell(powershell, command)
+    result = subprocess.run(
+        [
+            str(powershell), "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-Command", command,
+        ],
+        cwd=_ROOT,
+        env=os.environ.copy(),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
+    assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("NamedParameterNotFound,"), result.stdout
     assert result.stdout.endswith(
         "|System.Management.Automation.ParameterBindingException"
