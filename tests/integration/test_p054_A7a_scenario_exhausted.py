@@ -209,4 +209,3 @@ async def test_control_a_run_whose_payments_go_through_does_not_pause(client, db
         assert (run.state, run.pause_reason, passes) == ("running", None, [])
     finally:
         await runtime.stop(run_id)
-
