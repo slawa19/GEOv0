@@ -642,9 +642,9 @@ produced, printing one line per acceptance check. The symbolic `ref -> PID` tabl
 written to `.local-run/seed-recipe/<community>/participants.json`; the private keys are not written
 anywhere, which is why a second run is refused rather than replayed.
 
-Two refusals are deliberate: a database that is not empty (the earlier run's keys are gone, so its
-participants cannot be addressed again), and `greenfield-village-100`, whose description declares
-nine `frozen` trust lines that no product operation can write (`specs/BACKLOG.md`, 2026-09-22).
+One refusal is deliberate: a database that is not empty (the earlier run's keys are gone, so its
+participants cannot be addressed again). Both communities seed; `greenfield-village-100` has seeded since
+2026-10-04 (028 `F-028-29`, see `-SeedCommunity` above).
 
 Note: the Admin UI has no role selector and no read-only mode (the `admin/operator/auditor` selector was mock-only and
 was removed on 2026-10-07, 032 S4). Access is the admin token: the backend enforces it, and RBAC is not implemented.
