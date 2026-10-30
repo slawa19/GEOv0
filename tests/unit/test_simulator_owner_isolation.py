@@ -572,21 +572,15 @@ def test_restart_conflict_with_another_active_run() -> None:
     assert exc_info.value.details["active_run_id"] == run2_id
 
 
-# ─── TODO: Тесты _get_run_checked helper ─────────────────────────────────────
+# ─── _get_run_checked: покрыт HTTP-тестами (054-C-7, 2026-10-30) ─────────────
 #
-# _get_run_checked зависит от глобального `runtime` объекта (см. _get_runtime()),
-# который требует полной инициализации _SimulatorRuntime (сценарии, БД и т.д.).
-# Unit-тестирование без патчинга глобального runtime нецелесообразно.
-#
-# _check_run_access уже покрыт тестами:
-#   - test_check_run_access_empty_owner_denies_non_admin
-#   - test_check_run_access_empty_owner_allows_admin
-#
-# def test_get_run_checked_returns_run_for_owner():
-#     """_get_run_checked returns run for matching owner."""
-#
-# def test_get_run_checked_raises_403_for_wrong_owner():
-#     """_get_run_checked raises 403 for non-owner non-admin."""
-#
-# def test_get_run_checked_raises_409_for_stopped_run():
-#     """_get_run_checked raises 409 if run is stopped."""
+# Прежний TODO-блок с тремя закомментированными тестами удалён: поведение `_get_run_checked`
+# (app/api/v1/simulator.py) проверяется сквозь `_get_run_checked_or_error` на настоящих маршрутах:
+#   - 403 чужому владельцу: tests/integration/test_p044_s0_two_visitors_runs_are_isolated.py
+#     ::test_one_visitor_cannot_reach_the_other_visitors_run (payment-real, clearing-real,
+#     trustline-create/update/close) и tests/integration/test_p037_manual_payment_idempotency_postgres.py
+#     ::test_two_real_owners_pay_twice_and_a_foreign_run_answers_the_same_403_for_any_key;
+#   - 409 RUN_TERMINAL на остановленном run: test_p037_manual_payment_idempotency_postgres.py
+#     ::test_a_stopped_run_answers_run_terminal_without_the_pre_read_even_for_a_stored_key
+#     и ::test_a_real_stop_and_restart_of_the_run_keep_the_key;
+#   - владелец проходит: test_p044_s0 (payment-real владельца отвечает 200).
