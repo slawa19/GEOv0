@@ -15,11 +15,12 @@ const { t } = useUiLocale()
 /**
  * 043 S1: `detailsOpen` is the one "Подробнее" toggle (owned and remembered by the root). Off: the first row only -
  * the network's name and state as text, the protocol actions (slot `actions`) and the toggle itself. On: the row of
- * service controls below it (theme, language, statuses; 048 S2: the run controls with an admin token). The capacity-stall alert
- * is not behind it since 048 S1 (below).
+ * service controls below it (theme, language, statuses; 048 S2: the run controls with an admin token).
  * Hidden means NOT RENDERED (`v-if`), never hidden by CSS: a hidden control must not stay in the tab order.
  *
- * 048 S1 (decisions 1, 2, 4, 5): three addressees, three existing entries. The capacity-stall alert is on the first view.
+ * 048 S1 (decisions 1, 2, 4, 5): three addressees, three existing entries. 054-B-7a (the owner's decision of 2026-10-30):
+ * the capacity-stall alert is gone - the system tries the clearing itself; a run whose scenario payments are used up says
+ * so on the run's line (`runStatusErrorLine`, `pause_reason`).
  *
  * 048 S2 (amendments 8-12, the owner's rule of 2026-10-19 "крайние случаи в интерфейсе не обрабатывать"): the visitor's
  * "Подробнее" is the theme, the language, the stop reason (when there is one) and the network figures (slot). The run
@@ -60,8 +61,6 @@ const emit = defineEmits<{
   (e: 'stop'): void
   (e: 'apply-intensity'): void
 }>()
-
-const STALL_THRESHOLD_TICKS = 3
 
 /** 043 S2: one screen - the scenario and run controls (behind "Подробнее") exist wherever the source is the server. */
 const showRunControls = computed(() => ctx.apiMode.value === 'real')
@@ -190,11 +189,6 @@ const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
 const canStop = computed(() => {
   const s = ctx.runStatus.value?.state
   return s === 'running' || s === 'paused' || s === 'created'
-})
-
-const isCapacityStall = computed(() => {
-  const ticks = Number(ctx.runStatus.value?.consec_all_rejected_ticks ?? 0)
-  return ticks >= STALL_THRESHOLD_TICKS
 })
 
 const isRunActive = computed(() => {
@@ -593,13 +587,6 @@ function onApplyIntensity() {
         </button>
       </div>
 
-      <!-- 048 S1 (decision 2): the one diagnosis a visitor gets - on the first view, not behind "Подробнее"; 046 wave 1: the
-           words of §G, one sentence with its action. Shown only while payments stall: `consec_all_rejected_ticks` >= threshold. -->
-      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn tb-edge-alert" :aria-label="t('topBar.stallAria')" data-testid="capacity-stall">
-        <span class="ds-alert__icon">!</span>
-        <span class="ds-value tb-fade-92">{{ t('topBar.stall') }}</span>
-      </div>
-
       <!-- Slot for HUD elements that stack below the TopBar rows (043 S1: the full metrics, while Details is on). -->
       <slot />
 
@@ -788,12 +775,11 @@ function onApplyIntensity() {
 }
 
 /*
-  049 S1 (decision 2): the run's error line and the stall plaque stand in the horizontal grid of the controls - their
-  outer edges are the control line (safe-area + `--ds-ov-inset` + the HudBar's padding `--ds-hud-bar-px`), not the edges
-  of the stack. Until S1 they were direct children of the stack outside any HudBar, wider than the controls by that
-  padding on each side (owner frame 17, 2026-10-20). They stay children of the stack (their readers: the stack's row rule,
-  `.ds-ov-top [data-testid="capacity-stall"]`): the same padding is their margin. The stand holds it
-  (`e2e/qa/edge-line.qa.ts`, reproducer (б)).
+  049 S1 (decision 2): the run's error line stands in the horizontal grid of the controls - its outer edges are the
+  control line (safe-area + `--ds-ov-inset` + the HudBar's padding `--ds-hud-bar-px`), not the edges of the stack. Until S1
+  it was a direct child of the stack outside any HudBar, wider than the controls by that padding on each side (owner frame
+  17, 2026-10-20). It stays a child of the stack (its reader: the stack's row rule): the same padding is its margin. The
+  stand holds it (`e2e/qa/edge-line.qa.ts`, reproducer (б)). 054-B-7a: the stall plaque that stood beside it is gone.
 */
 .tb-edge-alert {
   margin-inline: var(--ds-hud-bar-px, var(--ds-space-3, 12px));
@@ -809,12 +795,6 @@ function onApplyIntensity() {
 [data-theme='saas'] .tb-edge-alert.ds-alert--err {
   background:
     linear-gradient(color-mix(in srgb, var(--ds-err) 5%, transparent), color-mix(in srgb, var(--ds-err) 5%, transparent)),
-    var(--ds-page-bg);
-}
-
-[data-theme='saas'] .tb-edge-alert.ds-alert--warn {
-  background:
-    linear-gradient(color-mix(in srgb, var(--ds-warn) 5%, transparent), color-mix(in srgb, var(--ds-warn) 5%, transparent)),
     var(--ds-page-bg);
 }
 

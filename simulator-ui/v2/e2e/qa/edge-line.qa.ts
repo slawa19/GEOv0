@@ -9,8 +9,10 @@
  * plan item 4). Counter-check of the rule: the top and the bottom bars give the same line (one line for every edge group,
  * decision 1).
  *
- * Both alerts are shown by one run status the product reads from its own SSE pipeline: a run the server ended with an
- * error (`state: error`, `last_error`) whose payments stalled (`consec_all_rejected_ticks` 3). Both languages (one boot
+ * The line is shown by a run status the product reads from its own SSE pipeline: a run the server ended with an error
+ * (`state: error`, `last_error`) whose payments stalled (`consec_all_rejected_ticks` 3). 054-B-7a (the owner's decision of
+ * 2026-10-30): the capacity-stall plaque that stood beside the error line is gone - the stall of 3 ticks shows none (held
+ * below); the run's status lines (the error, a scenario whose payments are used up) are the one error line measured here. Both languages (one boot
  * each), both themes (the product's own switcher), "Подробнее" off and on (its service row sits between the first row
  * and the alerts), at 1366x768 and 1024x640. Geometry is measured once the layout is settled (`settledBoxes`: the same
  * boxes on three reads in a row).
@@ -23,7 +25,7 @@ import { t } from '../../src/i18n/t'
 import { DETAILS_TOGGLE, RUN_ID, SCENARIO_ID, boot, fixtureSnapshot100, pushEvent, renderedProblems, ringSnapshot } from './stand.js'
 import { VIEWPORT_MAIN, VIEWPORT_RESIZED } from './surfaceMatrix.js'
 
-const ALERTS = ['top-error', 'capacity-stall'] as const
+const ALERTS = ['top-error'] as const
 
 /** The control lines of both bars (content edges of their HudBar rows) and the boxes of the two alerts, rounded to 0.5 px. */
 const boxes = (page: Page) => page.evaluate((alerts) => {
@@ -61,7 +63,7 @@ async function settledBoxes(page: Page): Promise<Awaited<ReturnType<typeof boxes
 }
 
 for (const lang of ['ru', 'en'] as const) {
-  test(`049 S1 (б) [${lang}] [saas|hud, details off|on, 1366x768|1024x640] - the run error line and the stall plaque stand on the control line`, async ({ page }) => {
+  test(`049 S1 (б) [${lang}] [saas|hud, details off|on, 1366x768|1024x640] - the run error line stands on the control line`, async ({ page }) => {
     await page.setViewportSize(VIEWPORT_MAIN)
     await boot(page, { snapshot: ringSnapshot(), clock: false, query: `&lang=${lang}&theme=saas` })
     await pushEvent(page, {
@@ -69,6 +71,7 @@ for (const lang of ['ru', 'en'] as const) {
       ops_sec: 0, queue_depth: 0, consec_all_rejected_ticks: 3, last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-02-01T00:00:01.000Z' },
     })
     for (const id of ALERTS) await expect(page.getByTestId(id), `counter-check: ${id} is shown`).toBeVisible()
+    await expect(page.getByTestId('capacity-stall'), '054-B-7a: no stall plaque after a stall of 3 ticks').toHaveCount(0)
 
     const toggle = page.locator(DETAILS_TOGGLE)
     const setDetails = async (on: boolean) => {

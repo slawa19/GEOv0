@@ -291,13 +291,15 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
     const stopSource = optionalString(raw, 'stop_source')
     const stopReason = optionalString(raw, 'stop_reason')
     const stopClient = optionalString(raw, 'stop_client')
+    const pauseReason = optionalString(raw, 'pause_reason')
     if (
       !lastEventType.ok ||
       !currentPhase.ok ||
       !stopRequestedAt.ok ||
       !stopSource.ok ||
       !stopReason.ok ||
-      !stopClient.ok
+      !stopClient.ok ||
+      !pauseReason.ok
     ) {
       return ignored('malformed', 'invalid_run_status_optional_field', type)
     }
@@ -325,6 +327,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
     if (stopSource.value != null) evt.stop_source = stopSource.value
     if (stopReason.value != null) evt.stop_reason = stopReason.value
     if (stopClient.value != null) evt.stop_client = stopClient.value
+    if (pauseReason.value != null) evt.pause_reason = pauseReason.value
 
     for (const key of [
       'attempts_total',

@@ -5,8 +5,8 @@
  *  (в) a visitor (no admin token) with "Подробнее" on has no Analytics toggle and no run files ("Artifacts"). 048 S2
  *      removed "Admin ▾" altogether: the administrator's half of (в) - "Admin ▾ holds the Analytics toggle and the run
  *      files" - is gone with it (a removed contract); what each addressee has now is `p048-s2-edge-cases-out.spec.ts`;
- *  (г) the capacity-stall alert is on the first view ("Подробнее" off) once `consec_all_rejected_ticks` reaches the
- *      threshold - and, first, the anti-vacuum: no alert without a stall;
+ *  (г) turned over by 054-B-7a (the owner's decision of 2026-10-30: the system tries the clearing itself): there is no
+ *      capacity-stall alert at any `consec_all_rejected_ticks` - the anti-vacuum: the first view is on screen;
  *  (д) the source switch carries `?debug=1` into the new address, and the offline source with it shows the playlist
  *      workbench (its absence without `debug`: `p042-t4205-playlist-workbench.spec.ts`, last test).
  *
@@ -56,19 +56,15 @@ test.describe('048 S1 (в): a visitor has none of the administrator\'s tools', (
   })
 })
 
-test.describe('048 S1 (г): the capacity stall is on the first view', () => {
-  test('no stall: no alert (anti-vacuum); a stall of 3 ticks: the alert, with "Подробнее" off', async ({ page }) => {
-    await open(page, { run: { consec_all_rejected_ticks: 0 } })
-    await expect(page.locator(DETAILS)).toHaveAttribute('aria-expanded', 'false')
-    await expect(page.getByTestId('capacity-stall'), 'no stall, no alert').toHaveCount(0)
-
-    await page.unrouteAll({ behavior: 'ignoreErrors' })
-    await open(page, { run: { consec_all_rejected_ticks: 3 } })
-    await expect(page.locator(DETAILS), 'the first view').toHaveAttribute('aria-expanded', 'false')
-    await expect(page.getByTestId('capacity-stall')).toBeVisible()
-    // It is in the top stack, above the canvas, and not a control: the first view keeps its stops (043: <= 7).
-    await expect(page.locator('.ds-ov-top [data-testid="capacity-stall"]')).toHaveCount(1)
-    await expect(page.getByTestId('capacity-stall').locator('button, a, input, select, [tabindex]')).toHaveCount(0)
+test.describe('048 S1 (г), turned over by 054-B-7a: no capacity-stall alert', () => {
+  test('no alert without a stall, and none after a stall of 3 ticks, with "Подробнее" off', async ({ page }) => {
+    for (const ticks of [0, 3]) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await open(page, { run: { consec_all_rejected_ticks: ticks } })
+      await expect(page.locator(DETAILS), `${ticks} ticks: the first view`).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByTestId('network-state'), `${ticks} ticks: the bar is on screen`).toBeVisible()
+      await expect(page.getByTestId('capacity-stall'), `${ticks} ticks: no alert`).toHaveCount(0)
+    }
   })
 })
 

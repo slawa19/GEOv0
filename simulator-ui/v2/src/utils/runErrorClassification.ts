@@ -146,10 +146,13 @@ export function writeRunErrorLine(
  * (its code, not the server's English prose: 046 decision 3). Who stopped it is the stop reason behind "Details".
  */
 export function runStatusErrorLine(
-  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null },
+  status: { state?: string | null; last_error?: RunError | null; stop_reason?: string | null; pause_reason?: string | null },
   isUserFacing: (code: string) => boolean,
 ): RunErrorLine | null {
   const state = String(status.state ?? '').trim().toLowerCase()
+  // 054-B-7a (the owner's decision of 2026-10-30): a run the server paused because the scenario's automatic payments are
+  // used up says so - the person pays by hand, resumes or restarts. Only this value: an unknown reason has no text.
+  if (state === 'paused' && status.pause_reason === SCENARIO_EXHAUSTED_PAUSE_REASON) return SCENARIO_EXHAUSTED_LINE
   // 044 stage 2 (decision 2): a run the server stopped because nobody watched it says so, in the interface language.
   if (state === 'stopped' && status.stop_reason === IDLE_STOP_REASON) return IDLE_STOP_LINE
   if (state === 'stopped' && status.stop_reason !== OWN_STOP_REASON) return STOPPED_LINE
@@ -158,6 +161,11 @@ export function runStatusErrorLine(
   if (state === 'error') return runEndedByErrorLine(error)
   return isUserFacing(error.code) ? runErrorLine(error) : null
 }
+
+/** 054-B-7a: `pause_reason` of a run whose scenario's automatic payments are used up (stream A, 2026-10-30). */
+export const SCENARIO_EXHAUSTED_PAUSE_REASON = 'scenario_exhausted'
+
+const SCENARIO_EXHAUSTED_LINE: RunErrorLine = Object.freeze({ kind: 'dict', key: 'runLine.scenarioExhausted' })
 
 /** The reason Stop of this screen's run row sends (`useSimulatorRealMode.ts` `stop`) - the one stop that writes no line. */
 export const OWN_STOP_REASON = 'user_stop'

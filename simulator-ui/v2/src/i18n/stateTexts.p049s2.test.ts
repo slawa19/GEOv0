@@ -15,9 +15,11 @@ const SPEC: ReadonlyArray<[string, MessageKey, string, string]> = [
   ['the stream is lost', 'failure.streamFailed',
     'Обновления сети прервались; показанные данные могут быть устаревшими. Перезагрузите страницу.',
     'Network updates stopped; the displayed data may be outdated. Reload the page.'],
-  ['the payments stall', 'topBar.stall',
-    'Последние платежи не проходят. Попробуйте клиринг или увеличьте лимит нужной линии.',
-    "Recent payments are not going through. Try clearing or increase the relevant trustline's limit."],
+  // 054-B-7a (the owner's decision of 2026-10-30): the stall alert is gone (the system tries the clearing itself); a run the
+  // server paused because its scenario's automatic payments are used up says so, in the owner's words.
+  ['the scenario payments are used up', 'runLine.scenarioExhausted',
+    'Автоматические платежи сценария исчерпаны; платите вручную или перезапустите.',
+    "The scenario's automatic payments are used up; pay by hand or restart."],
   ['the limit', 'refusal.insufficientCapacityMax',
     'Платёж не прошёл: сейчас доступно не больше {max} {eq}. Уменьшите сумму.',
     'Payment declined: at most {max} {eq} is available now. Reduce the amount.'],
@@ -33,11 +35,12 @@ describe('049 S2 (ж): the texts of the five states and «Свободно по 
     expect(raw('en')).toBe(en)
   })
 
-  it('the run failure and the stall claim no more than they know: no code in brackets, no «limits are exhausted»', () => {
+  it('the run failure claims no more than it knows: no code in brackets; the stall alert is gone (054-B-7a)', () => {
     for (const locale of ['ru', 'en'] as const) {
       expect(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, locale)).not.toContain('REAL_MODE_TICK_FAILED')
       expect(t('runLine.runningError', { code: 'INTERNAL_ERROR' }, locale)).not.toContain('INTERNAL_ERROR')
-      expect(t('topBar.stall', undefined, locale)).not.toMatch(/исчерпаны|exhausted/)
+      // A missing key renders as itself.
+      expect(t('topBar.stall' as MessageKey, undefined, locale)).toBe('topBar.stall')
     }
   })
 })

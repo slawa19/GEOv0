@@ -526,9 +526,6 @@ export const en = {
     paymentsAria: 'Payments',
     payments: 'Payments: {ok} of {total} went through',
     paymentsNone: 'No payments yet',
-    stallAria: 'Payments stalled',
-    /** 048 decision 2: the one diagnosis a visitor gets; it claims no more than the mechanism (`consec_all_rejected_ticks`). */
-    stall: "Recent payments are not going through. Try clearing or increase the relevant trustline's limit.",
   },
 
   /**
@@ -758,6 +755,8 @@ export const en = {
     errorStopped: 'The demo stopped because of an error. Reload the page to start a new run.',
     /** 048 S3: a user-facing code of a run that goes on - the code correlates; the server's `CODE: message` is the title. */
     runningError: 'Something failed during the run; the run goes on.',
+    /** 054-B-7a: a run the server paused because its scenario's automatic payments are used up (`pause_reason`). */
+    scenarioExhausted: "The scenario's automatic payments are used up; pay by hand or restart.",
   },
 
   /**

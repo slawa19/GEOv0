@@ -1,7 +1,7 @@
 /**
  * 046 wave 1, full (T4602, after 048 S2): the first screen speaks ONE language. Mounted as the root mounts them: the top
  * bar (first row, "Подробнее" for a visitor and for the administrator, the error line with "Try again", the stop reason,
- * the stall alert, "No scenarios…"), the action bar in each of its states, the bottom bar with its "Подробнее" row, the
+ * "No scenarios…"; 054-B-7a: the stall alert is gone), the action bar in each of its states, the bottom bar with its "Подробнее" row, the
  * network figures, the legend, "Find on graph", the recent actions, the line tooltip and the two notifications.
  *
  * The rule is structural (AGENTS.md §9: no list of words to look for): everything the screen SAYS - visible text and the
@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunStatus } from '../api/simulatorTypes'
 import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 import { setUiLocale, UI_LOCALE_ENDONYMS, type UiLocale } from '../i18n/locale'
-import { t } from '../i18n/t'
+import { t, type MessageKey } from '../i18n/t'
 import ActionBar from './ActionBar.vue'
 import BottomBar from './BottomBar.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
@@ -175,7 +175,7 @@ describe('046 wave 1, full - the first screen in one language', () => {
     await mountFirstScreen()
     for (const id of [
       'network-state', 'flow-toggle', 'details-toggle', 'top-details-row', 'own-run-row', 'run-payments', 'stop-reason', 'top-error',
-      'start-retry', 'capacity-stall', 'no-scenarios', 'action-bar', 'actionbar-busy-hint', 'actionbar-locked-hint', 'bottom-details-row',
+      'start-retry', 'no-scenarios', 'action-bar', 'actionbar-busy-hint', 'actionbar-locked-hint', 'bottom-details-row',
       'layout-select', 'reset-view', 'system-balance', 'legend', 'graph-navigator', 'recent-actions', 'edge-tooltip',
       // 048 S3: the error toast is gone (a window's failure is its block). 049 S2: the success toast and the drawn request
       // id are gone; the visitor's tempo steps and the switch of the network's events are on «Подробнее».
@@ -256,18 +256,20 @@ describe('046 wave 1, full - the words of 048 §G and item 13 (a)', () => {
     expect(zero.querySelector('[data-testid="run-payments"]')!.textContent).not.toContain('%')
   })
 
-  it('the stall alert is the one sentence of §G, with its action', async () => {
+  it('054-B-7a: no stall alert (decision of the owner, 2026-10-30) - not on screen, not in the dictionaries', async () => {
     for (const locale of ['en', 'ru'] as const) {
       setUiLocale(locale)
+      // The context's run has stalled for 5 ticks (`consec_all_rejected_ticks: 5`): the alert's old condition holds.
       const host = mount(TopBar, { detailsOpen: false }, context())
       await settle()
-      const stall = host.querySelector('[data-testid="capacity-stall"]')!
-      expect(stall.querySelector('.ds-value')!.textContent?.trim(), locale).toBe(t('topBar.stall'))
-      expect(stall.getAttribute('aria-label'), locale).toBe(t('topBar.stallAria'))
+      expect(host.querySelector('[data-testid="network-state"]'), 'stand: the bar is mounted').not.toBeNull()
+      expect(host.querySelector('[data-testid="capacity-stall"]'), locale).toBeNull()
       document.body.innerHTML = ''
     }
-    // 049 S2 (decision 8): the spec's words - softer than «limits are exhausted», which the detector does not prove.
-    expect(t('topBar.stall', undefined, 'ru')).toBe('Последние платежи не проходят. Попробуйте клиринг или увеличьте лимит нужной линии.')
-    expect(t('topBar.stall', undefined, 'en')).toBe("Recent payments are not going through. Try clearing or increase the relevant trustline's limit.")
+    // A missing key renders as itself: the stall's words are gone from both dictionaries.
+    for (const key of ['topBar.stall', 'topBar.stallAria'] as const) {
+      expect(t(key as MessageKey, undefined, 'ru')).toBe(key)
+      expect(t(key as MessageKey, undefined, 'en')).toBe(key)
+    }
   })
 })
