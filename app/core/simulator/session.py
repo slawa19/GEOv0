@@ -47,6 +47,12 @@ def validate_session(
     clock_skew_sec: int = 300,
 ) -> Optional[SessionInfo]:
     """Validate cookie and return SessionInfo or None if invalid/expired."""
+    # Every part we issue is ASCII (version, base64url sid/sig, decimal iat). Starlette decodes headers as
+    # latin-1, so a cookie byte >= 0x80 arrives here as a non-ASCII str: reject it as "no session" before
+    # `int()` (which accepts non-ASCII Unicode digits) and `hmac.compare_digest` (which raises TypeError on
+    # non-ASCII str and turned such a cookie into a 500, finding 054-C-1).
+    if not cookie_value.isascii():
+        return None
     parts = cookie_value.split(".")
     if len(parts) != 4:
         return None

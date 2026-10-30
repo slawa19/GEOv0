@@ -184,6 +184,25 @@ def test_cookie_name_constant() -> None:
     assert COOKIE_NAME == "geo_sim_sid"
 
 
+@pytest.mark.parametrize("part_index", [1, 2, 3], ids=["sid", "iat", "sig"])
+@pytest.mark.parametrize("non_ascii", ["é", "١"], ids=["latin1-e-acute", "arabic-indic-digit-one"])
+def test_validate_session_non_ascii_part_is_none_not_error(part_index: int, non_ascii: str) -> None:
+    """054-C-1: не-ASCII символ в sid, iat или sig → None, без исключения.
+
+    Заголовки Starlette декодирует как latin-1, поэтому байт >= 0x80 в cookie приходит не-ASCII строкой.
+    До правки не-ASCII в sig ронял `hmac.compare_digest(str, str)` TypeError'ом (500 вместо «нет сессии»);
+    арабско-индийская цифра в iat проходила `int()`. Валидная cookie — `test_validate_session_valid`.
+    """
+    cookie_value, _ = create_session(SECRET)
+    parts = cookie_value.split(".")
+    parts[part_index] = parts[part_index] + non_ascii
+    tampered = ".".join(parts)
+
+    assert validate_session(tampered, SECRET, TTL_SEC, CLOCK_SKEW) is None
+    # Контрпроверка anti-vacuum: та же cookie без вставки по-прежнему валидна.
+    assert validate_session(cookie_value, SECRET, TTL_SEC, CLOCK_SKEW) is not None
+
+
 # ─── Тесты: Session TTL boundary ─────────────────────────────────────────────
 
 def test_session_expired_exactly_at_ttl_boundary() -> None:
