@@ -461,6 +461,22 @@ export function useSimulatorRealMode(opts: {
     return { latest: () => runControlSeq === seq && sameRun(), sameRun }
   }
 
+  /**
+   * 054-B-4 fix-delta (§15 Codex R2): the answer of the latest command is applied - but it never turns a run whose ENDED
+   * status (`error`, `stopped`) is already known back into a living one. A Resume answered `running` after the stream
+   * and the status read said `error` would bring back "Поток" and hide "Перезапустить" over a run the server ended (and
+   * whose stream is closed). An ended status comes from the stream, the status read, or the answer of a stop.
+   */
+  function applyRunControlAnswer(control: { latest: () => boolean }, st: RunStatus): void {
+    if (!control.latest()) return
+    const ended = (state: unknown) => {
+      const s = toLower(state)
+      return s === 'error' || s === 'stopped'
+    }
+    if (ended(real.runStatus?.state) && !ended(st?.state)) return
+    real.runStatus = st
+  }
+
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
 
   async function refreshRunStatusForCurrentContext(o: { opening?: boolean } = {}): Promise<RunStatusRefreshOutcome> {
@@ -1293,7 +1309,7 @@ export function useSimulatorRealMode(opts: {
           try {
             const control = issueRunControl()
             const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-            if (control.latest()) real.runStatus = st
+            applyRunControlAnswer(control, st)
             paused = true
             break
           } catch (e: unknown) {
@@ -1335,7 +1351,7 @@ export function useSimulatorRealMode(opts: {
     const control = issueRunControl()
     try {
       const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      if (control.latest()) real.runStatus = st
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
       if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
@@ -1389,7 +1405,7 @@ export function useSimulatorRealMode(opts: {
     const control = issueRunControl()
     try {
       const st = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      if (control.latest()) real.runStatus = st
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
       if (control.latest()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
@@ -1407,7 +1423,7 @@ export function useSimulatorRealMode(opts: {
         source: 'ui',
         reason: 'user_stop',
       })
-      if (control.latest()) real.runStatus = st
+      applyRunControlAnswer(control, st)
       await refreshRunStatus()
     } catch (e: unknown) {
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
@@ -1479,7 +1495,7 @@ export function useSimulatorRealMode(opts: {
         real.runId,
         real.intensityPercent,
       )
-      if (control.latest()) real.runStatus = st
+      applyRunControlAnswer(control, st)
     } catch (e: unknown) {
       // 054-B-4: only for the run this tempo was sent for - a late 404 of another run does not reset the current one.
       if (e instanceof ApiError && e.status === 404) {
