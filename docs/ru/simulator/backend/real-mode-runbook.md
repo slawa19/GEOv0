@@ -293,7 +293,7 @@ Real Mode: тюнинг дисковой нагрузки (артефакты) �
 | `simulator.real.tick_failed run_id=… tick=… error_id=… error_type=…` | WARNING | тик упал исключением (трейсбек здесь); `error_id` — тот же, что в `last_error.message` |
 | `simulator.real.payment_internal_error error_id=… error_type=…` | WARNING | внутренний сбой платежа тика (трейсбек здесь); `error_id` — тот же, что в `tx.failed` и `last_error` |
 | `simulator.real.payment_integrity_violation run_id=… tick=… tx_id=… invariant=…` | ERROR | ядро отказало в платеже из-за нарушенного инварианта |
-| `simulator.real.money_phase_no_progress run_id=… conflict=… consec=…` | WARNING | денежная фаза тика проиграла конкуренции и не закоммитилась |
+| `simulator.real.money_phase_no_progress run_id=… conflict=… consec=… error_type=…` | WARNING | денежная фаза тика проиграла конкуренции и не закоммитилась |
 | `simulator.real.run_refused code=… run_id=…` | WARNING | засев сценария отказал (`SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`) |
 | `simulator.real.clearing_failed run_id=… eq=…` | WARNING | проход клиринга упал (трейсбек здесь); прогон продолжает работу |
 | `simulator.heartbeat.failed run_id=… error_type=…` | ERROR | упала сама итерация heartbeat (трейсбек здесь) |

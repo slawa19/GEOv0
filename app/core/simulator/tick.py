@@ -923,18 +923,20 @@ class RealTick:
                 run.last_error = {
                     "code": "REAL_MODE_MONEY_CONFLICT_UNRESOLVED",
                     "message": (
-                        f"The tick's money phase did not commit: {conflict} ({type(error).__name__}). "
+                        # 054-A review FD6: the conflict's name, not the exception's class (the log line below has it).
+                        f"The tick's money phase did not commit: {conflict}. "
                         f"Consecutive ticks without money progress: {no_progress}."
                     ),
                     "at": rr._utc_now().isoformat(),
                 }
 
         rr._logger.warning(
-            "simulator.real.money_phase_no_progress run_id=%s tick=%s conflict=%s consec=%s",
+            "simulator.real.money_phase_no_progress run_id=%s tick=%s conflict=%s consec=%s error_type=%s",
             str(run.run_id),
             int(run.tick_index or 0),
             conflict,
             no_progress,
+            type(error).__name__,
         )
 
         limit = int(rr._real_max_consec_money_no_progress_limit)
@@ -1423,7 +1425,9 @@ class RealTick:
                     # Progress is durable: publish it below, then let the cause take its classification.
                     execution_error = failed.cause
                     if outcomes is not None:
-                        outcomes[eq] = f"pass_error:{type(failed.cause).__name__}"
+                        # 054-A review FD6: a public reason (`episode_progress[].reason`) names the ending, not the
+                        # class; the cause is raised below and logged with the run (`simulator.real.clearing_failed`).
+                        outcomes[eq] = "pass_error"
                 else:
                     # 036 B1: the OUTCOME of the pass goes to the caller that asked for it (a scripted clearing), who must
                     # not infer success from the fact that this method returned: it swallows every ending below.
@@ -1514,7 +1518,7 @@ class RealTick:
                 if outcomes is not None and eq not in outcomes:
                     outcomes[eq] = (
                         f"equivalent_stopped:{refusal_reason}" if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS
-                        else f"clearing_error:{type(exc).__name__}"
+                        else "clearing_error"  # 054-A review FD6: the class is logged below, not published
                     )
                 if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a failure of the run.
