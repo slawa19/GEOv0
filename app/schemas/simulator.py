@@ -613,7 +613,8 @@ class RunStatus(BaseModel):
     stop_client: Optional[str] = None
 
     # 054-A-7a: why a `paused` run is paused when the run paused itself - "scenario_exhausted": every automatic payment
-    # was refused, and the clearing run for that did not help. Null for a user's pause and in every other state.
+    # was refused by routing, capacity or a trust line (a money stop does not count), and the clearing run for that did
+    # not help. Null for a user's pause and in every other state.
     pause_reason: Optional[PauseReason] = None
 
     sim_time_ms: Optional[int] = Field(default=None, ge=0)
@@ -628,7 +629,8 @@ class RunStatus(BaseModel):
     timeouts_total: Optional[int] = Field(default=None, ge=0)
     errors_last_1m: Optional[int] = Field(default=None, ge=0)
 
-    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    # Diagnostic: consecutive ticks where all planned payments were refused by the scenario (routing, capacity, a trust
+    # line); a tick refused by a money stop holds it (054-A-7a review).
     consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_error: Optional[SimulatorLastError] = None

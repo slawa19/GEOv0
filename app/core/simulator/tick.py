@@ -29,8 +29,12 @@ A REFUSED PAYMENT IS AN OUTCOME, NOT AN ERROR (054-A-7a, owner's decision 2026-1
 tick runs the clearing pass at once, out of the cadence (`maybe_run_clearing`, `CLEARING_ENABLED` respected). If the next
 attempted tick is refused whole again, the scenario has nothing left to do on its own: the run pauses itself with
 `pause_reason = "scenario_exhausted"` (`_stall_step`, `_pause_scenario_exhausted`). Manual Interact actions still work on
-the paused run; `resume` clears the counter and the reason. The counter is the executor's and is not changed by 054-A-7a:
-a scripted `payment` event due on the tick is planned with the automatic payments, so its refusal counts like theirs.
+the paused run; `resume` clears the counter and the reason. The counter is the executor's: since the 054-A-7a review
+(owner, 2026-10-30) it counts only a tick whose every refusal is the scenario's own - routing, capacity, a trust line
+(`rejection_codes.is_scenario_refusal`); a tick with a money stop (`MoneyBoundary.MONEY_STOP_REASONS`: the operator's
+stop, an integrity hold) or another refusal is neutral and holds it. A scripted `payment` event due on the tick is
+planned with the automatic payments and is counted by the same rule (its refusal for a sender the story has not
+introduced yet is the story's own and counts, as before).
 
 THE RUNNER. `RealTick` is the tick of `RealRunnerImpl` and reads the runner's collaborators and limits at CALL
 time, as the orchestrator did, so a test or an operator that rebinds one on the runner is seen by the next tick.
@@ -1029,7 +1033,8 @@ class RealTick:
         """054-A-7a: "clear", "exhausted" or None - what the run of all-refused attempted ticks asks of this tick.
 
         Read from the counter the committed money phase left (`TickPaymentsPhase.stall_ticks`: +1 for an attempted tick
-        with nothing committed and no error, 0 after any other attempted tick, held by an empty share). A counter below
+        with nothing committed, no error and every refusal the scenario's own, 0 after a commit or an error, held by an
+        empty share and by a neutral tick - a money stop, 054-A-7a review). A counter below
         the mark of a stall clearing means a payment went through since: the mark is dropped. An empty share is no
         evidence (049 S2a) and decides nothing. Otherwise: at `STALL_CLEARING_AFTER_TICKS` or more with no mark - "clear"
         (the tick sets the mark once the pass has returned, with clearing disabled too: the pass is then skipped and the

@@ -130,8 +130,8 @@ class TrustDriftConfig:
         )
 
 
-#: 054-A-7a: the one value of `RunRecord.pause_reason` - the run paused itself because its payments are all refused
-#: and the clearing run for that did not help (`tick.py`, `RealTick._stall_step`).
+#: 054-A-7a: the one value of `RunRecord.pause_reason` - the run paused itself because its payments are all refused by
+#: routing, capacity or a trust line (a money stop does not count) and the clearing run for that did not help (`tick.py`, `RealTick._stall_step`).
 PAUSE_REASON_SCENARIO_EXHAUSTED = "scenario_exhausted"
 
 

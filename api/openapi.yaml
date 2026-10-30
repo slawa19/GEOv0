@@ -7373,8 +7373,10 @@ components:
         pause_reason:
           description: >-
             054-A-7a: why a `paused` run is paused when the run paused itself. `scenario_exhausted` - every automatic
-            payment of three attempted ticks in a row was refused, the clearing pass run for it at once did not help,
-            and the next attempted tick was refused whole again. Null for a pause the user asked for and in every
+            payment of three attempted ticks in a row was refused by routing, capacity or a trust line (a tick with a
+            refusal of another kind - an equivalent the operator stopped or held for integrity - neither counts nor
+            resets), the clearing pass run for it at once did not help, and the next counted tick was refused whole
+            again. Null for a pause the user asked for and in every
             state other than `paused`. Manual Interact actions still work on such a run; `resume` clears the reason
             and the counter `consec_all_rejected_ticks`.
           type: string

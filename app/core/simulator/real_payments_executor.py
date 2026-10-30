@@ -16,7 +16,11 @@ from app.core.payments.service import (
     PaymentTransactionUnusable,
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
-from app.core.simulator.rejection_codes import map_rejection_code
+from app.core.simulator.rejection_codes import (
+    SCRIPTED_SENDER_NOT_FOUND_REASON,
+    is_scenario_refusal,
+    map_rejection_code,
+)
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, schedule_closed_trustlines_publication
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
@@ -479,6 +483,8 @@ class RealPaymentsExecutor:
         rejected = 0
         errors = 0
         timeouts = 0
+        # 054-A-7a review: the refusals of this tick that are the scenario's own (`is_scenario_refusal`).
+        scenario_refusals = 0
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
         deferred_effects = DeferredRealPaymentEffects(
@@ -555,7 +561,7 @@ class RealPaymentsExecutor:
                     str(action.amount),
                     "REJECTED",
                     None,
-                    {"reason": "SENDER_NOT_FOUND"},
+                    {"reason": SCRIPTED_SENDER_NOT_FOUND_REASON},
                     0.0,
                     [],
                     None,
@@ -748,7 +754,7 @@ class RealPaymentsExecutor:
             d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
         def _record_if_ready() -> None:
-            nonlocal next_seq, committed, rejected, errors, timeouts, integrity_violation
+            nonlocal next_seq, committed, rejected, errors, timeouts, integrity_violation, scenario_refusals
             while True:
                 item = ready.get(next_seq)
                 if item is None:
@@ -850,6 +856,8 @@ class RealPaymentsExecutor:
                                     exc_info=True,
                                 )
                             rejection_code = "PAYMENT_REJECTED"
+                        if is_scenario_refusal(rejection_code, err_details):
+                            scenario_refusals += 1
 
                         deferred_effects.items.append(
                             _PaymentObservation(
@@ -977,12 +985,17 @@ class RealPaymentsExecutor:
             # all-rejected ATTEMPTED ticks. At the slow step the attempted ticks are 2-3 ticks apart; a reset on the
             # empty ticks between them would keep the Stall plaque (threshold 3) from ever appearing. At intensity 0
             # nothing is being attempted, so an empty tick clears it as before (no stale plaque on a stopped tempo).
+            # 054-A-7a review (owner, 2026-10-30): the run counts only a tick whose every payment the SCENARIO refused -
+            # routing, capacity, a trust line's limit or policy (`is_scenario_refusal`). A tick with any other refusal
+            # (an equivalent the operator stopped or held for integrity, `MoneyBoundary.MONEY_STOP_REASONS`; a
+            # participant out of circulation; an invalid input), or one cut short by a stop, is NEUTRAL like an empty
+            # share: the counter neither grows nor resets, so a restarted equivalent continues the run where it was.
             empty_share = is_empty_share(run, len(planned))
             if len(planned) > 0:
-                if committed == 0 and errors == 0:
-                    run._real_consec_all_rejected_ticks += 1
-                else:
+                if committed > 0 or errors > 0:
                     run._real_consec_all_rejected_ticks = 0
+                elif rejected > 0 and scenario_refusals == rejected and not stop_requested:
+                    run._real_consec_all_rejected_ticks += 1
             elif not empty_share:
                 run._real_consec_all_rejected_ticks = 0
 

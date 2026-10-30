@@ -194,7 +194,9 @@ async def test_step5c_a_held_staged_payment_is_rejected_and_the_tick_continues(
     assert refused == outcomes, outcomes
     assert run.rejected_total == len(refused), (run.rejected_total, outcomes)
     assert run.committed_total == 0
-    _assert_the_run_was_not_charged(run, paused_as_exhausted=True)  # 4 all-refused ticks
+    _assert_the_run_was_not_charged(run)
+    # 054-A-7a review: a money-stop tick is neutral - the stall counter did not move, so no clearing or pause followed.
+    assert run._real_consec_all_rejected_ticks == 0, run._real_consec_all_rejected_ticks
     assert await _debts(factory, eq) == []
     async with factory() as s:
         assert await s.scalar(select(func.count(Transaction.id))) == 0
