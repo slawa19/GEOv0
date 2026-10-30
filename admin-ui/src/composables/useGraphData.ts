@@ -111,6 +111,8 @@ export function useGraphData(opts: {
   })
 
   let fullSnapshot: GraphSnapshotPayload | null = null
+  // 054-D-4. The equivalent `fullSnapshot` was requested for: its `viz_*` keys are computed for that equivalent only.
+  let fullSnapshotEq = ''
   const viewRequests = useLatestRequest()
 
   function invalidateDataOwnership() {
@@ -144,6 +146,7 @@ export function useGraphData(opts: {
       const payload = toPayload(snap)
       applySnapshotPayload(payload)
       fullSnapshot = payload
+      fullSnapshotEq = snapEq
 
       // Auto-select primary equivalent if not set or invalid
       const currentEq = normalizeEquivalentCode(opts.eq.value)
@@ -173,6 +176,7 @@ export function useGraphData(opts: {
       const payload = toPayload(snap)
       applySnapshotPayload(payload)
       fullSnapshot = payload
+      fullSnapshotEq = snapEq
       return true
     } catch (e: unknown) {
       if (!request.isCurrent()) return false
@@ -201,6 +205,9 @@ export function useGraphData(opts: {
         applySnapshotPayload({ participants: [], trustlines: [], equivalents: [] })
         return await loadData()
       }
+      // 054-D-4. The equivalent was switched while in focus: the kept snapshot belongs to the old one (its edges
+      // would be filtered to the new equivalent, its node colours stay the old one's), so it is read again.
+      if (fullSnapshotEq !== normalizeEquivalentCode(opts.eq.value)) return await loadData()
       applySnapshotPayload(fullSnapshot)
       loading.value = false
       return true

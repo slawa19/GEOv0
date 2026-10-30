@@ -1,7 +1,7 @@
 import { ElMessage } from 'element-plus'
 import cytoscape, { type Core, type EdgeSingular, type LayoutOptions, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { computed, onBeforeUnmount, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS, GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
@@ -152,7 +152,15 @@ export function useGraphVisualization(options: {
   syncZoomFromControl: (level: number) => void
 } {
   let cy: Core | null = null
-  const getCy = () => cy
+  // 054-D-3. The Core is not reactive: a computed that reads it through `getCy()` (the drawer's Connections rows)
+  // would keep the edges of the graph it first saw. Every change of the Core's elements - `initCy`, `rebuildGraph`,
+  // `destroyCy`, the only places that create, fill or drop it - bumps this version, and `getCy()` reads it, so any
+  // reactive reader of the Core follows each rebuild.
+  const coreVersion = ref(0)
+  const getCy = () => {
+    void coreVersion.value
+    return cy
+  }
   let zoomUpdatingFromCy = false
 
   let lastNodeTapAt = 0
@@ -521,6 +529,80 @@ export function useGraphVisualization(options: {
   // place until a rebuild without `keepPositions` lays the graph out anew).
   const placedNodes = new Map<string, { x: number; y: number }>()
 
+  /**
+   * 054-D-5. The drawer card is a copy of the selected element taken when it was picked; after a rebuild (Refresh, a
+   * filter, an equivalent switch, focus) it is taken again from the rebuilt Core, by the same identity:
+   * - a node by its pid; a node the view no longer draws (filtered out) keeps the selection with the participant's
+   *   data and no edges in view; a participant gone from the data clears the selection and closes the drawer;
+   * - an edge by its line (`from`, `to`, equivalent; edge ids carry their index, which a rebuild renumbers). Two
+   *   drawn lines of one triple (a closed incarnation beside the live one) are told apart by status. An edge that is
+   *   no longer drawn clears the selection and closes the drawer: its amounts have no source in the view.
+   */
+  function refreshSelectedFromCore(core: Core) {
+    const current = options.selected.value
+    if (!current) return
+    if (current.kind === 'node') {
+      const n = core.getElementById(current.pid)
+      if (n && !n.empty() && n.isNode()) {
+        const displayName = String(n.data('display_name') || '').trim()
+        options.selected.value = {
+          kind: 'node',
+          pid: current.pid,
+          display_name: displayName || undefined,
+          status: String(n.data('status') || '') || undefined,
+          type: String(n.data('type') || '') || undefined,
+          degree: n.degree(false),
+          inDegree: n.indegree(false),
+          outDegree: n.outdegree(false),
+        }
+        return
+      }
+      const p = (options.participants.value || []).find((candidate) => candidate?.pid === current.pid)
+      if (p) {
+        const displayName = String(p.display_name || '').trim()
+        options.selected.value = {
+          kind: 'node',
+          pid: current.pid,
+          display_name: displayName || undefined,
+          status: String(p.status || '').toLowerCase() || undefined,
+          type: String(p.type || '').toLowerCase() || undefined,
+          degree: 0,
+          inDegree: 0,
+          outDegree: 0,
+        }
+        return
+      }
+      options.selected.value = null
+      options.drawerOpen.value = false
+      return
+    }
+
+    const sameLine = core.edges().filter((e) =>
+      String(e.data('source') || '') === current.from
+      && String(e.data('target') || '') === current.to
+      && String(e.data('equivalent') || '') === current.equivalent)
+    const sameStatus = sameLine.filter((e) => String(e.data('status') || '') === current.status)
+    const e = sameLine.length === 1 ? sameLine.first() : sameStatus.length === 1 ? sameStatus.first() : null
+    if (!e) {
+      options.selected.value = null
+      options.drawerOpen.value = false
+      return
+    }
+    options.selected.value = {
+      kind: 'edge',
+      id: e.id(),
+      equivalent: String(e.data('equivalent') || ''),
+      from: String(e.data('source') || ''),
+      to: String(e.data('target') || ''),
+      status: String(e.data('status') || ''),
+      limit: String(e.data('limit') || ''),
+      used: String(e.data('used') || ''),
+      available: String(e.data('available') || ''),
+      created_at: String(e.data('created_at') || ''),
+      close_requested_at: e.data('close_requested_at') ?? null,
+    }
+  }
+
   function rebuildGraph(opts?: GraphRebuildOptions) {
     const cy = getCy()
     if (!cy) return
@@ -550,6 +632,9 @@ export function useGraphVisualization(options: {
         else hasUnplacedNode = true
       })
     }
+
+    refreshSelectedFromCore(cy)
+    coreVersion.value += 1
 
     applyStyle()
     updateZoomStyles()
@@ -1003,6 +1088,7 @@ export function useGraphVisualization(options: {
       current.destroy()
     }
     cy = null
+    coreVersion.value += 1
     if (import.meta.env.DEV) installGraphDevHooks(null, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
   }
 

@@ -411,14 +411,16 @@ export const EN: Record<string, string> = {
   'graph.navigate.useSelected': 'Use selected',
   'graph.navigate.clear': 'Clear',
 
-  'graph.common.incomingOwedToYou': 'Incoming (owed to you)',
-  'graph.common.outgoingYouOwe': 'Outgoing (you owe)',
+  // 054-D-2. from -> to = creditor -> debtor: on a node's outgoing line the counterparty owes, on an incoming one the node.
+  'graph.common.incomingYouOwe': 'Incoming (you owe)',
+  'graph.common.outgoingOwedToYou': 'Outgoing (owed to you)',
 
   'graph.hint.connectionsDerivedFromEdges': 'Derived from visible graph edges (incoming/outgoing trustlines).',
 
   'graph.drawer.detailsTitle': 'Details',
   'graph.drawer.degree': 'Degree',
   'graph.drawer.inOut': 'In/out',
+  'graph.drawer.allEquivalents': 'All equivalents',
   'graph.drawer.tabs.summary': 'Summary',
   'graph.drawer.tabs.connections': 'Connections',
   'graph.drawer.tabs.balance': 'Balance',

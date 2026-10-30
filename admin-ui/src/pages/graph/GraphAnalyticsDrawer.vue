@@ -3,7 +3,8 @@ import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphConnectionsTable from './GraphConnectionsTable.vue'
 import { t } from '../../i18n'
-import { labelTrustlineStatus } from '../../i18n/labels'
+import { labelParticipantType, labelTrustlineStatus } from '../../i18n/labels'
+import { labelParticipantStatus } from '../../ui/participantStatus'
 import { formatTs } from '../../utils/datetime'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
@@ -71,10 +72,10 @@ const emit = defineEmits<{
             {{ selected.display_name || t('common.na') }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('common.status')">
-            {{ selected.status || t('common.na') }}
+            {{ labelParticipantStatus(selected.status) || t('common.na') }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('participant.columns.type')">
-            {{ selected.type || t('common.na') }}
+            {{ labelParticipantType(selected.type || '') || t('common.na') }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('graph.drawer.degree')">
             {{ selected.degree }}
@@ -99,6 +100,12 @@ const emit = defineEmits<{
                 class="ctl__field"
                 :placeholder="t('graph.filters.equivalent')"
               >
+                <!-- 054-D-19: ALL (the default) stays selectable after an equivalent was picked. -->
+                <el-option
+                  key="ALL"
+                  :label="t('graph.drawer.allEquivalents')"
+                  value="ALL"
+                />
                 <el-option
                   v-for="o in availableEquivalents"
                   :key="o"
@@ -193,7 +200,7 @@ const emit = defineEmits<{
               :description="t('graph.analytics.connections.noneInView')"
             />
             <div v-else>
-              <el-divider>{{ t('graph.common.incomingOwedToYou') }}</el-divider>
+              <el-divider>{{ t('graph.common.incomingYouOwe') }}</el-divider>
               <GraphConnectionsTable
                 v-model:page="connectionsIncomingPage"
                 class="mb"
@@ -204,7 +211,7 @@ const emit = defineEmits<{
                 @row-click="(row) => emit('connectionRowClick', row)"
               />
 
-              <el-divider>{{ t('graph.common.outgoingYouOwe') }}</el-divider>
+              <el-divider>{{ t('graph.common.outgoingOwedToYou') }}</el-divider>
               <GraphConnectionsTable
                 v-model:page="connectionsOutgoingPage"
                 :rows="selectedConnectionsOutgoing"

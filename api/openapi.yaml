@@ -4541,6 +4541,8 @@ components:
         symbol:
           type: string
           nullable: true
+          # `equivalents.symbol` is `String(16)` (054-D-8): longer is a 422, not a 500.
+          maxLength: 16
         description:
           type: string
           nullable: true
@@ -4572,6 +4574,8 @@ components:
         symbol:
           type: string
           nullable: true
+          # `equivalents.symbol` is `String(16)` (054-D-8): longer is a 422, not a 500.
+          maxLength: 16
         description:
           type: string
           nullable: true

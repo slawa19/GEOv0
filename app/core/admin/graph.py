@@ -24,7 +24,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, and_, case, desc, func, select
+from sqlalchemy import Select, and_, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -390,16 +390,21 @@ async def _attach_net_viz(
     """
     precision = int(equivalent.precision)
 
-    def _totals(column) -> Select:
-        stmt = select(column, func.coalesce(func.sum(Debt.amount), 0)).where(
-            Debt.equivalent_id == equivalent.id, Debt.amount > 0
-        )
-        if scope_ids is not None:
-            stmt = stmt.where(column.in_(list(scope_ids)))
-        return stmt.group_by(column)
+    # 054-D-1: both roles from ONE statement snapshot under READ COMMITTED (as OMR-2 in
+    # `app/core/balance/service.py`): a payment can reverse a pair's debt between two separate SELECTs, and the
+    # node would then net the old debt against the new credit.
+    role_stmt = select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+        Debt.equivalent_id == equivalent.id, Debt.amount > 0
+    )
+    if scope_ids is not None:
+        scope = list(scope_ids)
+        role_stmt = role_stmt.where(or_(Debt.debtor_id.in_(scope), Debt.creditor_id.in_(scope)))
 
-    debt_by_id = {i: s for i, s in (await db.execute(_totals(Debt.debtor_id))).all()}
-    credit_by_id = {i: s for i, s in (await db.execute(_totals(Debt.creditor_id))).all()}
+    debt_by_id: dict[Any, Decimal] = {}
+    credit_by_id: dict[Any, Decimal] = {}
+    for debtor_id, creditor_id, amount in (await db.execute(role_stmt)).all():
+        debt_by_id[debtor_id] = debt_by_id.get(debtor_id, Decimal(0)) + amount
+        credit_by_id[creditor_id] = credit_by_id.get(creditor_id, Decimal(0)) + amount
 
     atoms_by_pid: dict[str, int] = {}
     for p in participants:

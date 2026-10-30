@@ -103,6 +103,16 @@ async function reloadShowingAll() {
   else includeInactive.value = true
 }
 
+// 054-D-12: a cleared number field holds `null`, and `Number(null)` is 0 - a step of one whole unit nobody chose.
+// An empty field is "not given": create takes the canon's default (`AdminEquivalentCreateRequest.precision`, 2),
+// edit leaves the key out of the PATCH so the step is not changed (`AdminEquivalentUpdateRequest.precision`).
+const CANON_DEFAULT_PRECISION = 2
+function givenPrecision(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
 function openCreate() {
   createForm.code = ''
   createForm.precision = 2
@@ -125,7 +135,7 @@ async function createEq() {
     const created = (
       await api.createEquivalent({
         code: createForm.code,
-        precision: Number(createForm.precision),
+        precision: givenPrecision(createForm.precision) ?? CANON_DEFAULT_PRECISION,
         description: createForm.description,
         is_active: Boolean(createForm.is_active),
       })
@@ -147,9 +157,10 @@ async function saveEdit() {
   if (!editing.value || saving.value) return
   saving.value = true
   try {
+    const precision = givenPrecision(editForm.precision)
     const updated = (
       await api.updateEquivalent(editing.value.code, {
-        precision: Number(editForm.precision),
+        ...(precision === null ? {} : { precision }),
         description: editForm.description,
       })
     ).updated
@@ -197,6 +208,8 @@ async function runSetActive(row: Equivalent, next: boolean) {
   } catch (e: unknown) {
     if (!pageActive) return
     ElMessage.error(describeError(e, 'equivalents.updateFailed').text)
+    // 054-D-13: a refusal (409) may mean the row changed under the operator; show what the server holds.
+    await load()
   }
 }
 
@@ -257,6 +270,8 @@ async function runDelete(row: Equivalent) {
           })
         : msg,
     )
+    // 054-D-13: as above - a refused delete re-reads the list.
+    await load()
   }
 }
 

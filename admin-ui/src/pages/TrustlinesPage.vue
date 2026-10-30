@@ -19,6 +19,7 @@ import { toLocationQueryRaw } from '../router/query'
 import { usePagedList } from '../composables/usePagedList'
 import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
 import { isTrustlineBottleneck } from '../utils/bottleneck'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,10 +37,12 @@ const { page, perPage, total, items, loading, error, reload, reloadFromFirstPage
     api.listTrustlines({
       page: requestPage,
       per_page: requestPerPage,
-      equivalent: equivalent.value || undefined,
-      creditor: creditor.value || undefined,
-      debtor: debtor.value || undefined,
-      status: status.value || undefined,
+      // 054-D-14: the server compares these exactly (`trustline_page_statements`); the fields keep what was typed,
+      // the request carries the canonical code (trimmed, upper case) and trimmed PIDs (base58: case is kept).
+      equivalent: normalizeEquivalentCode(equivalent.value) || undefined,
+      creditor: creditor.value.trim() || undefined,
+      debtor: debtor.value.trim() || undefined,
+      status: status.value.trim() || undefined,
     }),
   { errorKey: 'trustlines.loadFailed' },
 )

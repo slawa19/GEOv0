@@ -144,8 +144,15 @@ TRANSPORT_HEADER_DRIFT_COUNT = 56
 # decision of 2026-10-07 (032 F-1, F-2, F-4, A-4): `POST /admin/transactions/{tx_id}/abort`. Measured with a per-entry dump of
 # every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
 # the removed keys equals the new one entry by entry, so no other entry changed.
+# 2026-10-30 / programme 054 D-8, D-9 (054-E-11): count HOLDS at 13, digest moves. No entry enters or leaves;
+# three existing entries change content and none got worse. `POST /admin/equivalents` and
+# `PATCH /admin/equivalents/{code}` gain `symbol.maxLength: 16` on BOTH sides (the column is `String(16)`; a longer
+# symbol was a 500 from the database, now a declared 422) and keep only the differences they already had.
+# `PATCH /admin/config`: the generated side gains `required: [updates]`, which the canon has always declared, so the
+# entry moves towards the canon and keeps only its `additionalProperties` difference. Measured with a per-entry dump of
+# this ledger on `66f29397` and on this tree (not committed): those three leaf changes are the whole difference.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "e703c754c81bfcf565ac1136d5a7fccc758567e919e6781d161522286acc28bc"
+    "1ed65736ad3f289e048455648792042f08b04c2391445a6e3f5a8bc229724724"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides

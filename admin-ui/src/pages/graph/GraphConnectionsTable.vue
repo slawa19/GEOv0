@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { t } from '../../i18n'
+import { labelTrustlineStatus } from '../../i18n/labels'
 import type { ConnectionRow } from './useGraphConnections'
 
 // One direction of a participant's connections in the graph drawer: the pager, then the page of rows. The drawer shows
@@ -61,7 +62,11 @@ const emit = defineEmits<{ rowClick: [row: ConnectionRow] }>()
         prop="status"
         :label="t('common.status')"
         width="90"
-      />
+      >
+        <template #default="{ row }">
+          {{ labelTrustlineStatus(row.status) }}
+        </template>
+      </el-table-column>
       <el-table-column
         :label="t('trustlines.available')"
         width="120"

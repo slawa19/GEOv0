@@ -469,7 +469,7 @@ onMounted(() => {
         >
           <template #default="{ row }">
             <el-tag :type="tagTypeForIntegrityStatus(row.eq.status)">
-              {{ row.eq.status }}
+              {{ t(`integrity.status.${row.eq.status}`) }}
             </el-tag>
           </template>
         </el-table-column>

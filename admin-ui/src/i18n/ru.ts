@@ -411,14 +411,16 @@ export const RU: Record<string, string> = {
   'graph.navigate.useSelected': 'Использовать выбранное',
   'graph.navigate.clear': 'Очистить',
 
-  'graph.common.incomingOwedToYou': 'Входящие (вам должны)',
-  'graph.common.outgoingYouOwe': 'Исходящие (вы должны)',
+  // 054-D-2. from -> to = кредитор -> должник: по исходящей линии узла должен контрагент, по входящей — узел.
+  'graph.common.incomingYouOwe': 'Входящие (вы должны)',
+  'graph.common.outgoingOwedToYou': 'Исходящие (вам должны)',
 
   'graph.hint.connectionsDerivedFromEdges': 'Вычисляется из видимых рёбер графа (incoming/outgoing trustlines).',
 
   'graph.drawer.detailsTitle': 'Детали',
   'graph.drawer.degree': 'Степень',
   'graph.drawer.inOut': 'Вход/выход',
+  'graph.drawer.allEquivalents': 'Все эквиваленты',
   'graph.drawer.tabs.summary': 'Сводка',
   'graph.drawer.tabs.connections': 'Связи',
   'graph.drawer.tabs.balance': 'Баланс',
@@ -442,10 +444,10 @@ export const RU: Record<string, string> = {
   // F-013-R2. См. комментарий в en.ts.
 
 
-  'graph.analytics.balance.columns.outLimit': 'Out limit',
-  'graph.analytics.balance.columns.outUsed': 'Out used',
-  'graph.analytics.balance.columns.inLimit': 'In limit',
-  'graph.analytics.balance.columns.inUsed': 'In used',
+  'graph.analytics.balance.columns.outLimit': 'Лимит исходящих',
+  'graph.analytics.balance.columns.outUsed': 'Использовано исходящих',
+  'graph.analytics.balance.columns.inLimit': 'Лимит входящих',
+  'graph.analytics.balance.columns.inUsed': 'Использовано входящих',
   'graph.analytics.balance.columns.debt': 'Долг',
   'graph.analytics.balance.columns.credit': 'Кредит',
   'graph.analytics.balance.columns.net': 'Нетто',
