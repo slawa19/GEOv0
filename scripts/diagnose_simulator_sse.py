@@ -2,14 +2,17 @@
 
 Runs against a locally running backend (default http://127.0.0.1:18000).
 It:
-- registers a temporary participant,
+- registers a participant ("Diag User"),
 - logs in,
 - starts a real-mode simulator run,
 - reads SSE events for a short window,
 - prints event rate + approximate payload sizes,
 - stops the run.
 
-Usage (PowerShell):
+WARNING: the participant it registers stays in the database - no API removes a participant. Run it only
+against a disposable database (one created for the run, or a launcher database you will reset).
+
+Usage (PowerShell, from the repository root; no PYTHONPATH needed):
   .venv\\Scripts\\python.exe scripts\\diagnose_simulator_sse.py
 
 Optional env vars:
@@ -27,15 +30,22 @@ import base64
 import json
 import os
 import statistics
+import sys
 import time
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import httpx
 from nacl.signing import SigningKey
 
-from app.core.auth.canonical import canonical_json
-from app.core.auth.crypto import generate_keypair
+REPO_ROOT = Path(__file__).resolve().parents[1]
+# Ensure `import app...` works regardless of current working directory.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.core.auth.canonical import canonical_json  # noqa: E402
+from app.core.auth.crypto import generate_keypair  # noqa: E402
 
 
 def _env_int(name: str, default: int) -> int:
@@ -71,6 +81,11 @@ async def _auth_headers(client: httpx.AsyncClient) -> dict[str, str]:
     )
     resp.raise_for_status()
     pid = resp.json()["pid"]
+    print(
+        f"WARNING: registered participant 'Diag User' pid={pid}; it stays in this database "
+        "(no API removes a participant) - use a disposable database",
+        file=sys.stderr,
+    )
 
     resp = await client.post("/api/v1/auth/challenge", json={"pid": pid})
     resp.raise_for_status()
