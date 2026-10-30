@@ -2479,6 +2479,7 @@ async def action_trustlines_list(
         409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        504: {"model": ErrorEnvelope, "description": "The reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)"},
     },
 )
 async def payment_targets(

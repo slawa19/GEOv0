@@ -378,7 +378,9 @@ def declare_internal_error_status(app: FastAPI, document: dict) -> None:
 
     Derived, not listed: the declaration is made only while the application really installs a handler for
     `Exception` - without one, Starlette's `ServerErrorMiddleware` answers a plain-text body and this envelope would
-    be a false statement. `setdefault` on the status, as with 429/401/403: a route that declares its own 500 keeps
+    be a false statement. Not covered: with `DEBUG=true` (dev/test only, 054-C-8) `ServerErrorMiddleware` answers a
+    plain-text traceback even though the handler is installed (054-E review R-E-2); the canon's `InternalError` says
+    so rather than this derivation reading `app.debug`. `setdefault` on the status, as with 429/401/403: a route that declares its own 500 keeps
     it, and that is observable - `clearing-real` and `payment-real` declare the union of their own flat
     `SimulatorActionError` and this envelope. `api/openapi.yaml` states the same body at
     `components/responses/InternalError`, so the two documents converge.

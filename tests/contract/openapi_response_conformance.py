@@ -51,8 +51,12 @@ before it was committed (558 non-2xx; 536 valid, 10 undeclared, 12 unrouted, 0 b
 * a response-level `$ref` (`#/components/responses/NotFound`) is followed - see
   `resolve_declared_response`; without it 457 of the 558 read as `declared-without-a-body`;
 * a non-2xx whose request resolves to no canonical path (starlette's 404/405 on an unknown route)
-  is counted in `unrouted` and is not a finding; a canonical path never lands there, including a
-  405 for a METHOD the canon does not declare on it, which is an undeclared-status finding;
+  is counted in `unrouted` and is not a finding; a path the canon spells never lands there, including a
+  405 for a METHOD the canon does not declare on it, which is an undeclared-status finding. "Canonical"
+  is decided by `match_path` on the canon's TEMPLATES, segment by segment, not by the app's route table:
+  a route with a `{x:path}` converter (`GET /participants/{pid:path}`) answers `/participants/a/b`,
+  and that response is filed as `unrouted` and unchecked although the app routed it to a canonical
+  operation (054-E review R-E-1; no tier traffic has that shape today);
 * a status matched only by a `default` entry is allowed and listed in `matched_by_default`;
 * non-2xx responses are counted in `non_2xx_seen` / `non_2xx_checked` and never in `observed`,
   `bodies_checked` or `two_xx_seen`, so coverage, the vacuity skip and the ledger quorum keep
@@ -521,7 +525,8 @@ class Harness:
         self.non_2xx_undeclared = 0
         # Non-2xx responses to a request that resolved to NO canonical path - starlette's 404/405
         # on an unknown route. Counted, never a finding: there is no operation whose declaration
-        # they could contradict. A non-2xx on a canonical path never lands here.
+        # they could contradict. A non-2xx on a path the canon's templates match never lands here
+        # (a multi-segment value for a `{x:path}` converter does - see the module docstring).
         self.unrouted: list[str] = []
         # `METHOD /path STATUS` matched only by a `default` entry of the canon. Allowed, marked.
         self.matched_by_default: set[str] = set()

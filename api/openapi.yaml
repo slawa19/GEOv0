@@ -3618,6 +3618,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '504':
+          description: >-
+            054-E (review R-E-4): the reachability search ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007); no
+            partial answer is given.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3783,7 +3791,8 @@ components:
     InternalError:
       description: >-
         Internal error (E010): the message is the code's meaning only, the cause is in the server log under
-        `error.request_id`.
+        `error.request_id`. Not with `DEBUG=true` (allowed only in dev/test): starlette then answers an
+        unhandled exception with a plain-text traceback instead of this envelope.
       content:
         application/json:
           schema:
