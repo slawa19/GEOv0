@@ -263,7 +263,11 @@ class RealTick:
             task = run._heartbeat_task
             clearing_task = run._real_clearing_task
             run._real_clearing_task = None
+            errors_total = int(run.errors_total)
 
+        # 054-A-7d: the one log line of a run's stop as failed - the run, the code and the count; never the message, which
+        # is public and already sanitised, nor the exception (logged where it was caught, under its own id).
+        rr._logger.error("simulator.run.failed run_id=%s code=%s errors_total=%d", str(run_id), code, errors_total)
         rr._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
 

@@ -277,7 +277,49 @@ Real Mode: тюнинг дисковой нагрузки (артефакты) �
 
 ### 6.7 Где и что смотреть: прогоны, файлы прогона, аналитика (048 S2, 2026-10-19)
 
-В интерфейсе демо этого нет — меню «Admin ▾» упразднено (слово владельца 2026-10-19: крайние случаи интерфейс не обслуживает, файлы и разбор прогонов админ поручает ИИ), и всё ниже читается через API; админский токен — в заголовке `X-Admin-Token` (значение `ADMIN_TOKEN` бэкенда; dev-сборка Simulator UI на localhost подставляет свой). **Все прогоны процесса** — `GET /api/v1/simulator/admin/runs` (фильтры `state`, `owner_id`, `limit`, `offset`; на прогон — `run_id`, `scenario_id`, `state`, владелец, темп, время старта и остановки, счётчики `attempts_total` / `committed_total` / `rejected_total` / `errors_total`); **остановить все активные** — `POST /api/v1/simulator/admin/runs/stop-all` (причина по умолчанию `admin_stop_all`), один прогон — `POST /api/v1/simulator/runs/{run_id}/stop`. **Файлы прогона** лежат в `<SIMULATOR_STATE_DIR>/runs/<run_id>/artifacts/` (по умолчанию `.local-run/simulator/runs/<run_id>/artifacts/`): `status.json` — паспорт прогона при создании (`run_id`, `scenario_id`, `mode`, `created_at`, `seed`), после остановки — его итоговый статус; `last_tick.json` — состояние последнего такта (пишется раз в `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS`); `events.ndjson` — события потока прогона, по одному JSON в строке; `summary.json` (итог: сценарий, состояние, статус) и `bundle.zip` (все файлы одним архивом) — появляются после остановки. Инструментам их отдаёт API, пока прогон известен процессу: индекс с типом, размером и sha256 (sha256 — только для файлов не больше `SIMULATOR_ARTIFACT_SHA_MAX_BYTES`) — `GET /api/v1/simulator/runs/{run_id}/artifacts`, файл — `GET …/runs/{run_id}/artifacts/{name}`; после перезапуска процесса API прогон не знает (404), а файлы остаются на диске. **Метрики и узкие места** прогона (их показывает док аналитики, который в интерфейсе есть только с `?debug=1`) — `GET …/runs/{run_id}/metrics?equivalent=…&from_ms=…&to_ms=…&step_ms=…` и `GET …/runs/{run_id}/bottlenecks?equivalent=…`. Эндпоинты одного прогона доступны и его владельцу без админского токена (своя сессия); примеры запросов к эндпоинтам прогона — `api-examples.md`, раздел 5.
+В интерфейсе демо этого нет — меню «Admin ▾» упразднено (слово владельца 2026-10-19: крайние случаи интерфейс не обслуживает, файлы и разбор прогонов админ поручает ИИ), и всё ниже читается через API; админский токен — в заголовке `X-Admin-Token` (значение `ADMIN_TOKEN` бэкенда; dev-сборка Simulator UI на localhost подставляет свой). **Все прогоны процесса** — `GET /api/v1/simulator/admin/runs` (фильтры `state`, `owner_id`, `limit`, `offset`; на прогон — `run_id`, `scenario_id`, `state`, владелец, темп, время старта и остановки, счётчики `attempts_total` / `committed_total` / `rejected_total` / `errors_total`, а с 2026-10-30 (054-A-7d) и `last_error` с `pause_reason` — почему прогон остановился или встал на паузу сам, см. 6.8); **остановить все активные** — `POST /api/v1/simulator/admin/runs/stop-all` (причина по умолчанию `admin_stop_all`), один прогон — `POST /api/v1/simulator/runs/{run_id}/stop`. **Файлы прогона** лежат в `<SIMULATOR_STATE_DIR>/runs/<run_id>/artifacts/` (по умолчанию `.local-run/simulator/runs/<run_id>/artifacts/`): `status.json` — паспорт прогона при создании (`run_id`, `scenario_id`, `mode`, `created_at`, `seed`), после остановки — его итоговый статус; `last_tick.json` — состояние последнего такта (пишется раз в `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS`); `events.ndjson` — события потока прогона, по одному JSON в строке; `summary.json` (итог: сценарий, состояние, статус) и `bundle.zip` (все файлы одним архивом) — появляются после остановки. Инструментам их отдаёт API, пока прогон известен процессу: индекс с типом, размером и sha256 (sha256 — только для файлов не больше `SIMULATOR_ARTIFACT_SHA_MAX_BYTES`) — `GET /api/v1/simulator/runs/{run_id}/artifacts`, файл — `GET …/runs/{run_id}/artifacts/{name}`; после перезапуска процесса API прогон не знает (404), а файлы остаются на диске. **Метрики и узкие места** прогона (их показывает док аналитики, который в интерфейсе есть только с `?debug=1`) — `GET …/runs/{run_id}/metrics?equivalent=…&from_ms=…&to_ms=…&step_ms=…` и `GET …/runs/{run_id}/bottlenecks?equivalent=…`. Эндпоинты одного прогона доступны и его владельцу без админского токена (своя сессия); примеры запросов к эндпоинтам прогона — `api-examples.md`, раздел 5.
+
+### 6.8 Где смотреть при сбое прогона (054-A-7d, 2026-10-30)
+
+Отказ платежа — штатный исход сюжета (`tx.failed`, счётчик `rejected_total`), а не сбой. Сбой прогона — это `state = "error"`; отдельно от него прогон может сам встать на паузу (`state = "paused"`, `pause_reason = "scenario_exhausted"`).
+
+**Статус.** `state`, `last_error` (`code`, `message`, `at`) и `pause_reason` одинаковы в трёх местах: событие SSE `run_status` (`GET /api/v1/simulator/runs/{run_id}/events`), `GET /api/v1/simulator/runs/{run_id}` и строка прогона в `GET /api/v1/simulator/admin/runs` (все прогоны процесса, админский токен). `last_error.message` публичный и без сырого текста исключения: у внутренних сбоев в нём идентификатор ошибки (`error id …`), по которому строка лога находится поиском.
+
+**Строки лога** (ищите по `run_id=`; у `simulator.real.payment_internal_error` прогона в строке нет — её находят по `error_id` из `last_error.message` или `tx.failed`):
+
+| Событие | Уровень | Что значит |
+|---|---|---|
+| `simulator.run.failed run_id=… code=… errors_total=…` | ERROR | прогон остановлен как аварийный; `code` = `last_error.code`. Одна строка на остановку |
+| `simulator.real.tick_failed run_id=… tick=… error_id=… error_type=…` | WARNING | тик упал исключением (трейсбек здесь); `error_id` — тот же, что в `last_error.message` |
+| `simulator.real.payment_internal_error error_id=… error_type=…` | WARNING | внутренний сбой платежа тика (трейсбек здесь); `error_id` — тот же, что в `tx.failed` и `last_error` |
+| `simulator.real.payment_integrity_violation run_id=… tick=… tx_id=… invariant=…` | ERROR | ядро отказало в платеже из-за нарушенного инварианта |
+| `simulator.real.money_phase_no_progress run_id=… conflict=… consec=…` | WARNING | денежная фаза тика проиграла конкуренции и не закоммитилась |
+| `simulator.real.run_refused code=… run_id=…` | WARNING | засев сценария отказал (`SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`) |
+| `simulator.real.clearing_failed run_id=… eq=…` | WARNING | проход клиринга упал (трейсбек здесь); прогон продолжает работу |
+| `simulator.heartbeat.failed run_id=… error_type=…` | ERROR | упала сама итерация heartbeat (трейсбек здесь) |
+| `simulator.real.stall_clearing run_id=… consec_stall_ticks=…` | INFO | три тика подряд все платежи отвергнуты — запущен клиринг вне расписания |
+| `simulator.run.scenario_exhausted run_id=… ticks=…` | WARNING | после этого клиринга снова всё отвергнуто — прогон встал на паузу |
+
+**Файлы прогона.** `<SIMULATOR_STATE_DIR>/runs/<run_id>/artifacts/` (по умолчанию `.local-run/simulator/runs/<run_id>/artifacts/`, раздел 6.7): в `events.ndjson` — все события потока, в том числе каждый `tx.failed` с `error.code` и `error.details` и каждый `run_status`; после остановки — `status.json` с итоговым статусом и `last_error`.
+
+**Коды `last_error`.** «Терминальный» — `resume` отвечает `409` (`details.reason = run_failed_terminal`), вернуть в работу только `restart`.
+
+| Код | Состояние | Откуда | Терминальный для `resume` |
+|---|---|---|---|
+| `REAL_MODE_TOO_MANY_ERRORS` | `error` | бюджет ошибок прогона (`SIMULATOR_REAL_MAX_ERRORS_TOTAL`) | да |
+| `REAL_MODE_TOO_MANY_TIMEOUTS` | `error` | таймауты платежей одного тика (`SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK`) | да |
+| `REAL_MODE_TICK_FAILED_REPEATED` | `error` | тики падали подряд (`SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES`) | да |
+| `REAL_MODE_MONEY_NO_PROGRESS` | `error` | денежная фаза не продвигалась подряд (`SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS`) | да |
+| `INTEGRITY_VIOLATION` | `error` | ядро отказало в платеже тика из-за нарушенного инварианта | да |
+| `HEARTBEAT_FAILED` | `error` | упала итерация heartbeat | нет |
+| `SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED` | `error` | засев сценария отказал по названной причине | нет (`resume` засевает заново) |
+| `REAL_MODE_TICK_FAILED` | `running` | один тик упал; при повторе подряд — `REAL_MODE_TICK_FAILED_REPEATED` | — |
+| `REAL_MODE_MONEY_CONFLICT_UNRESOLVED` | `running` | одна денежная фаза проиграла конкуренции | — |
+| `CLEARING_ERROR`, `CLEARING_REFUSED` | `running` | сбой или отказ прохода клиринга | — |
+| `INTERNAL_ERROR`, `PAYMENT_TIMEOUT`, `SENDER_NOT_FOUND` | `running` | ошибка одного платежа тика (тот же код — в его `tx.failed`) | — |
+
+Подробнее о кодах `tx.failed` и о стопоре — `docs/ru/simulator/scenarios-and-engine.md`, раздел 2.12.3 и «Стопор» в 2.4. Список терминальных кодов в коде — `RESUME_REFUSED_ERROR_CODES` (`app/core/simulator/run_lifecycle.py`).
+
 
 ---
 

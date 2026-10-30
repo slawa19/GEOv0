@@ -478,8 +478,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # the convention of this canon), FastAPI emits the value alone beside the collapsed null branch. Nothing else differs on
 # those paths (measured with a per-entry path dump, `.local-run` scratch, not committed): `type`, `nullable` and the
 # value compare equal.
+# Seventh move, same day, `054-A-7d`: count HOLDS at 61, digest moves, NO difference added or removed. The items of
+# `GET /simulator/admin/runs` gain `last_error` and `pause_reason` in the canon. The route builds its answer by hand and
+# declares no response model, so the generated half has no schema and the entry already differed as a whole
+# (`properties`, `required`, `type` canonical-only); the canonical half it hashes changed, the paths that differ did not
+# (measured with the same per-entry path dump).
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "4f1e1f6139769d4fbc734ef382b56ae8ae20026d6d2c0c743e5a75dd20e6aee0"
+    "d3d0f14ba3777ad948975bee083be0477441ff9dbbea6496b7cf421dde08135b"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;

@@ -674,6 +674,7 @@ class _SimulatorRuntimeBase:
         # that failed (the usual way to get here: it is what failed the heartbeat too), the run is `error` in
         # memory and NOTHING of that was stored - the `simulator_runs` row would keep saying `running`. So the
         # state is made sure of here (for the case where `fail_run` could not even start) and the row is written.
+        failed_here = False
         with self._lock:
             run = self._runs.get(run_id)
             if run is not None and run.state == "running":
@@ -683,6 +684,13 @@ class _SimulatorRuntimeBase:
                 run.current_phase = None
                 run.errors_total += 1
                 run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+                failed_here = True
+        if failed_here:
+            # 054-A-7d: the same line `fail_run` writes - this branch stops the run without it.
+            logger.error(
+                "simulator.run.failed run_id=%s code=%s errors_total=%d", str(run_id), "HEARTBEAT_FAILED",
+                int(run.errors_total),
+            )
         if run is None:
             return  # the registry no longer has the run: there is nothing left to mark or to store
         try:

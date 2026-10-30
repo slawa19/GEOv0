@@ -1300,6 +1300,28 @@ paths:
                           type: integer
                         attempts_total:
                           type: integer
+                        last_error:
+                          description: >-
+                            054-A-7d: the run's `last_error` as `RunStatus` gives it - for a run in `error`, the
+                            code it was stopped with.
+                          type: object
+                          nullable: true
+                          required: [code, message, at]
+                          properties:
+                            code:
+                              type: string
+                            message:
+                              type: string
+                            at:
+                              type: string
+                              format: date-time
+                          additionalProperties: false
+                        pause_reason:
+                          description: >-
+                            054-A-7d: `RunStatus.pause_reason` - why a `paused` run paused itself; null otherwise.
+                          type: string
+                          nullable: true
+                          enum: [scenario_exhausted, null]
                   total:
                     type: integer
                   limit:

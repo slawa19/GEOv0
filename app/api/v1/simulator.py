@@ -53,6 +53,7 @@ from app.core.simulator.real_scenario_seeder import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription, bump_topology_epoch
+from app.core.simulator.runtime_utils import run_to_status
 from app.core.simulator.sse_broadcast import (
     SSE_SUBSCRIPTION_CLOSED_TYPE,
     SseEventEmitter,
@@ -3200,6 +3201,7 @@ async def admin_list_runs(
 
     items = []
     for run in page:
+        status = run_to_status(run)
         items.append({
             "run_id": run.run_id,
             "scenario_id": run.scenario_id,
@@ -3216,6 +3218,9 @@ async def admin_list_runs(
             "committed_total": run.committed_total,
             "rejected_total": run.rejected_total,
             "attempts_total": run.attempts_total,
+            # 054-A-7d: why a run stopped or paused itself, as `GET /runs/{id}` says it (same serialisation).
+            "last_error": status.last_error.model_dump(mode="json") if status.last_error is not None else None,
+            "pause_reason": status.pause_reason,
         })
 
     return {"items": items, "total": total, "limit": limit, "offset": offset}
