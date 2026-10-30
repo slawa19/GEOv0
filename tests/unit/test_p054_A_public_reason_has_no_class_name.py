@@ -1,4 +1,4 @@
-"""054-A review FD6 (brothers of 054-C-5): no exception class name in a public field of the run.
+r"""054-A review FD6 (brothers of 054-C-5): no exception class name in a public field of the run.
 
 Defect (2026-10-30): the `last_error.message` of `REAL_MODE_MONEY_CONFLICT_UNRESOLVED` ended with
 `({type(error).__name__})`, and the reason of a scripted clearing's progress (`RunStatus.episode_progress[].reason`)
