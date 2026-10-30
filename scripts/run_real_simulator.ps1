@@ -526,13 +526,45 @@ function Seed-DbIfRequested() {
   Invoke-Docker (@('exec','geov0-app') + $args) | Out-Host
 }
 
+# 054-G-1: Get-NetTCPConnection is the primary probe, but some hosts (agent sandboxes) answer it with no
+# socket at all while netstat lists the listeners. When it returns 0 objects or throws, the listener is
+# looked up in `netstat -ano` by COLUMNS, not by the state word (localized on non-English Windows): TCP,
+# a local address ending in :<port> (IPv4 or [IPv6]), the unspecified foreign address 0.0.0.0:0 / [::]:0
+# that only a listening socket has, and a numeric PID. $script:ListenerProbeNote records what the last
+# probe saw, so a refusal can name it. The same lookup is copied in run_local.ps1, run_full_stack.ps1,
+# run_real_simulator.ps1 and run_simulator_ui.ps1 (the launchers share no module).
 function Get-ListeningPid {
   param([int]$Port)
+  $primary = $null
   try {
-    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1
-    if ($connection -and $connection.OwningProcess) { return [int]$connection.OwningProcess }
-  } catch {}
-  return $null
+    $conn = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) |
+      Where-Object { $_ -and $_.OwningProcess } | Select-Object -First 1
+    if ($conn) {
+      $script:ListenerProbeNote = "Get-NetTCPConnection found listener PID $($conn.OwningProcess) on port $Port"
+      return [int]$conn.OwningProcess
+    }
+    $primary = 'Get-NetTCPConnection returned 0 objects'
+  } catch {
+    $primary = "Get-NetTCPConnection threw $($_.Exception.GetType().FullName)"
+  }
+  $fallbackPid = $null
+  try {
+    foreach ($line in @(& netstat.exe -ano 2>$null)) {
+      $columns = @(([string]$line).Trim() -split '\s+')
+      if ($columns.Count -ne 5 -or $columns[0] -ne 'TCP') { continue }
+      if ($columns[2] -ne '0.0.0.0:0' -and $columns[2] -ne '[::]:0') { continue }
+      if ($columns[1] -notmatch ':(\d{1,5})$' -or [int]$Matches[1] -ne $Port) { continue }
+      if ($columns[4] -notmatch '^\d+$' -or [int]$columns[4] -le 0) { continue }
+      $fallbackPid = [int]$columns[4]
+      break
+    }
+    $fallback = if ($fallbackPid) { "netstat fallback found LISTENING PID $fallbackPid" } else { 'netstat fallback found no LISTENING socket' }
+  } catch {
+    $fallback = "netstat fallback threw $($_.Exception.GetType().FullName)"
+  }
+  $script:ListenerProbeNote = "$primary; $fallback"
+  Write-Verbose "Port ${Port}: $($script:ListenerProbeNote)"
+  return $fallbackPid
 }
 
 function Get-RunRealRepositoryIdentity {
@@ -706,7 +738,7 @@ function Wait-ForRunRealSimulatorOwnership {
       Start-Sleep -Milliseconds 500
     }
     if (-not $persisted) {
-      throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
+      throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds ($($script:ListenerProbeNote))."
     }
   } catch {
     $primaryFailure = $_.Exception

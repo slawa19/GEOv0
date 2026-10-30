@@ -59,6 +59,47 @@ function Test-TcpOpen([string]$h, [int]$p, [int]$timeoutMs = 250) {
   }
 }
 
+# 054-G-1: Get-NetTCPConnection is the primary probe, but some hosts (agent sandboxes) answer it with no
+# socket at all while netstat lists the listeners. When it returns 0 objects or throws, the listener is
+# looked up in `netstat -ano` by COLUMNS, not by the state word (localized on non-English Windows): TCP,
+# a local address ending in :<port> (IPv4 or [IPv6]), the unspecified foreign address 0.0.0.0:0 / [::]:0
+# that only a listening socket has, and a numeric PID. $script:ListenerProbeNote records what the last
+# probe saw, so a refusal can name it. The same lookup is copied in run_local.ps1, run_full_stack.ps1,
+# run_real_simulator.ps1 and run_simulator_ui.ps1 (the launchers share no module).
+function Get-ListeningPid {
+  param([int]$Port)
+  $primary = $null
+  try {
+    $conn = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) |
+      Where-Object { $_ -and $_.OwningProcess } | Select-Object -First 1
+    if ($conn) {
+      $script:ListenerProbeNote = "Get-NetTCPConnection found listener PID $($conn.OwningProcess) on port $Port"
+      return [int]$conn.OwningProcess
+    }
+    $primary = 'Get-NetTCPConnection returned 0 objects'
+  } catch {
+    $primary = "Get-NetTCPConnection threw $($_.Exception.GetType().FullName)"
+  }
+  $fallbackPid = $null
+  try {
+    foreach ($line in @(& netstat.exe -ano 2>$null)) {
+      $columns = @(([string]$line).Trim() -split '\s+')
+      if ($columns.Count -ne 5 -or $columns[0] -ne 'TCP') { continue }
+      if ($columns[2] -ne '0.0.0.0:0' -and $columns[2] -ne '[::]:0') { continue }
+      if ($columns[1] -notmatch ':(\d{1,5})$' -or [int]$Matches[1] -ne $Port) { continue }
+      if ($columns[4] -notmatch '^\d+$' -or [int]$columns[4] -le 0) { continue }
+      $fallbackPid = [int]$columns[4]
+      break
+    }
+    $fallback = if ($fallbackPid) { "netstat fallback found LISTENING PID $fallbackPid" } else { 'netstat fallback found no LISTENING socket' }
+  } catch {
+    $fallback = "netstat fallback threw $($_.Exception.GetType().FullName)"
+  }
+  $script:ListenerProbeNote = "$primary; $fallback"
+  Write-Verbose "Port ${Port}: $($script:ListenerProbeNote)"
+  return $fallbackPid
+}
+
 function Test-SimulatorUiServing([string]$url) {
   # "Already running" only for OUR page: any other HTTP server on the port must not be mistaken
   # for the Simulator UI (054-G-2: `python -m http.server` was reported as "already running").
@@ -233,14 +274,10 @@ if (Test-TcpOpen $HostName $selectedPort) {
     Write-Host ''
     Write-Host "GEO Simulator UI already running on $url; restarting..." -ForegroundColor Yellow
 
-    $listenerPid = $null
-    try {
-      $conn = Get-NetTCPConnection -LocalPort $selectedPort -State Listen -ErrorAction Stop | Select-Object -First 1
-      if ($conn) { $listenerPid = $conn.OwningProcess }
-    } catch {}
+    $listenerPid = Get-ListeningPid -Port $selectedPort
 
     if (-not $listenerPid) {
-      throw "Cannot determine PID listening on port $selectedPort."
+      throw "Cannot determine PID listening on port $selectedPort ($($script:ListenerProbeNote))."
     }
 
     $proc = $null
