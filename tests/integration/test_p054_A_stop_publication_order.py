@@ -27,6 +27,7 @@ from app.core.simulator.runtime import runtime
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.main import app
 from tests.conftest import MODE_B, sessionmaker_of
 
 pytestmark = MODE_B
@@ -46,6 +47,47 @@ async def _create(client) -> str:
     )
     assert r.status_code == 200, r.text
     return str(r.json()["run_id"])
+
+
+async def _read_run_stream(run_id: str, leave: asyncio.Event) -> str:
+    """The run's live HTTP SSE stream, read through the ASGI app until the stream returns by itself.
+
+    Driven through the app directly rather than the recording `client`: the session-wide conformance check
+    (`tests/contract/test_p011_responses_conform_to_the_canon.py`) has no allowance for a `text/event-stream` body,
+    and this test asserts the stream's frames itself. `leave` only answers a disconnect once the test is done.
+    """
+
+    path = f"/api/v1/simulator/runs/{run_id}/events"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"equivalent=UAH",
+        "root_path": "",
+        "headers": [(b"x-admin-token", settings.ADMIN_TOKEN.encode()), (b"accept", b"text/event-stream")],
+        "client": ("127.0.0.1", 50003),
+        "server": ("test", 80),
+    }
+    body = bytearray()
+    status: list[int] = []
+
+    async def receive() -> dict:
+        await leave.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.start":
+            status.append(int(message["status"]))
+        elif message["type"] == "http.response.body":
+            body.extend(message.get("body") or b"")
+
+    await app(scope, receive, send)
+    assert status == [200], status
+    return body.decode("utf-8")
 
 
 def _seq(event_id: str) -> int:
@@ -105,15 +147,14 @@ async def test_stopped_is_published_after_the_committed_tick_payments(client, db
     run_id = await _create(client)
     run = runtime.get_run(run_id)
     stopped_published_while_held: list[dict] = []
+    leave = asyncio.Event()
     try:
         await asyncio.wait_for(inside.wait(), timeout=120)
         if not hold:  # control: the opening tick has published its payments before the stop
             async with asyncio.timeout(60):
                 while not any(entry[3].get("type") == "tx.updated" for entry in run._event_buffer):
                     await asyncio.sleep(0.02)
-        stream = asyncio.create_task(
-            client.get(f"/api/v1/simulator/runs/{run_id}/events", headers=_admin(), params={"equivalent": "UAH"})
-        )
+        stream = asyncio.create_task(_read_run_stream(run_id, leave))
         async with asyncio.timeout(30):
             while not run._subs:
                 await asyncio.sleep(0.01)
@@ -132,12 +173,13 @@ async def test_stopped_is_published_after_the_committed_tick_payments(client, db
         assert stop_resp.status_code == 200, stop_resp.text
     finally:
         release.set()
+        leave.set()
         try:
             await runtime.stop(run_id)
         except Exception:
             pass
 
-    streamed = _parse_sse(streamed_resp.text)
+    streamed = _parse_sse(streamed_resp)
     buffered = [entry[3] for entry in run._event_buffer]
     stopped = [e for e in buffered if _is_stopped(e)]
     assert stopped, "no run_status(stopped) was published"
