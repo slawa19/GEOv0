@@ -368,6 +368,11 @@ class RealTick:
                         skip_equivalents=scripted_attempted,
                         stall_clearing=stall_step == "clear",
                     )
+                    if stall_step == "clear":
+                        # 054-A-7a: marked once the pass has run (or was skipped by `CLEARING_ENABLED`), not before - a
+                        # tick that fails before it leaves no mark, and the next counted tick runs the pass again.
+                        with rr._lock:
+                            run._real_stall_clearing_at = int(payments_phase.stall_ticks)
                     for eq_code, amount in scripted_volume.items():
                         clearing_volume_by_eq[eq_code] = clearing_volume_by_eq.get(eq_code, Decimal("0")) + amount
 
@@ -1002,9 +1007,10 @@ class RealTick:
         Read from the counter the committed money phase left (`TickPaymentsPhase.stall_ticks`: +1 for an attempted tick
         with nothing committed and no error, 0 after any other attempted tick, held by an empty share). A counter below
         the mark of a stall clearing means a payment went through since: the mark is dropped. An empty share is no
-        evidence (049 S2a) and decides nothing. Otherwise: at `STALL_CLEARING_AFTER_TICKS` with no mark - "clear" (the
-        mark is set, with clearing disabled too: the pass is then skipped and the next attempted tick answers all the
-        same); above the mark - the tick after the clearing was refused whole again: "exhausted".
+        evidence (049 S2a) and decides nothing. Otherwise: at `STALL_CLEARING_AFTER_TICKS` or more with no mark - "clear"
+        (the tick sets the mark once the pass has returned, with clearing disabled too: the pass is then skipped and the
+        next attempted tick answers all the same); above the mark - the tick after the clearing was refused whole again:
+        "exhausted".
         """
 
         rr = self._runner
@@ -1019,7 +1025,6 @@ class RealTick:
                 return "exhausted"
             if mark is not None or stall < STALL_CLEARING_AFTER_TICKS:
                 return None
-            run._real_stall_clearing_at = stall
         rr._logger.info(
             "simulator.real.stall_clearing run_id=%s tick=%s consec_stall_ticks=%d clearing_enabled=%s",
             str(run_id),
