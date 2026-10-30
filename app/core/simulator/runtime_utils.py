@@ -99,6 +99,15 @@ def episode_progress_of(run: RunRecord) -> list[EpisodeProgress] | None:
     return out or None
 
 
+def published_state(run: RunRecord) -> str:
+    """The state every `run_status` (SSE and HTTP) gives: `stopping` while a stop drains the heartbeat (054-A review
+    FD2), although `run.state` is `stopped` already so that the active-run limits release the run promptly."""
+
+    if run._stop_draining and run.state == "stopped":
+        return "stopping"
+    return run.state
+
+
 def run_to_status(run: RunRecord) -> RunStatus:
     cutoff = time.time() - 60.0
     # Best-effort: timestamps are pruned on write; we only count here.
@@ -109,7 +118,7 @@ def run_to_status(run: RunRecord) -> RunStatus:
         run_id=run.run_id,
         scenario_id=run.scenario_id,
         mode=run.mode,
-        state=run.state,
+        state=published_state(run),
         started_at=run.started_at,
         stopped_at=run.stopped_at,
         stop_requested_at=getattr(run, "stop_requested_at", None),

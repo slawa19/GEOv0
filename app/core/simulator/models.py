@@ -191,6 +191,10 @@ class RunRecord:
     # close, shutdown); read by the heartbeat's idle stop.
     _no_subscribers_since: Optional[float] = None
     _heartbeat_task: Optional[asyncio.Task[None]] = None
+    # 054-A review FD2: True while a `stop()` drains the heartbeat. The state is already `stopped` (the owner slot is
+    # released early), but every `run_status` says `stopping` (`published_state`) until the stop that drained publishes
+    # the terminal `stopped` - a live stream returns on `stopped` and would miss the drained tick's events.
+    _stop_draining: bool = False
 
     # Best-effort in-memory replay buffer for SSE reconnects.
     # Stores recent emitted events (both run_status and domain events).

@@ -209,3 +209,83 @@ async def test_stopped_is_published_after_the_committed_tick_payments(client, db
         # Every payment the held tick committed reached the live stream before `stopped`, and `stopped` counts them.
         assert tx_streamed == [e["event_id"] for e in tx_buffered]
         assert stopped[0].get("committed_total") == len(tx_buffered)
+
+
+@pytest.mark.asyncio
+async def test_no_other_status_publisher_says_stopped_while_the_stop_drains(client, db_session, monkeypatch):
+    """054-A review FD2: the state is `stopped` early (the owner slot is released), but while the stop drains the held
+    tick, NO builder of `run_status` may say `stopped`: a second `POST .../stop`, a new SSE subscription's initial
+    status and `GET /runs/{id}` saw `run.state` and said `stopped` at once, so every live stream returned before the
+    held tick's `tx.updated`. They say `stopping` until the stop that drained publishes the terminal `stopped`."""
+
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
+    inside, release = asyncio.Event(), asyncio.Event()
+    original = money_replay.resolve_commit_under_cancellation
+    calls = {"n": 0}
+
+    async def held_resolution(*, commit, **kw):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            return await original(commit=commit, **kw)
+
+        async def commit_then_hold():
+            await commit()
+            inside.set()
+            await release.wait()
+
+        return await original(commit=commit_then_hold, **kw)
+
+    monkeypatch.setattr(money_replay, "resolve_commit_under_cancellation", held_resolution)
+    run_id = await _create(client)
+    run = runtime.get_run(run_id)
+    leave = asyncio.Event()
+    try:
+        await asyncio.wait_for(inside.wait(), timeout=120)
+        first_stream = asyncio.create_task(_read_run_stream(run_id, leave))
+        async with asyncio.timeout(30):
+            while not run._subs:
+                await asyncio.sleep(0.01)
+        first_stop = asyncio.create_task(client.post(f"/api/v1/simulator/runs/{run_id}/stop", headers=_admin()))
+        async with asyncio.timeout(30):
+            while run.state != "stopped":
+                await asyncio.sleep(0.01)
+        # (a) a second stop - a retry, stop-all or shutdown - while the first one drains the held tick
+        second_stop = asyncio.create_task(client.post(f"/api/v1/simulator/runs/{run_id}/stop", headers=_admin()))
+        await asyncio.sleep(0.2)
+        # (b) a second live subscription opened inside the drain window
+        subs_before = len(run._subs)
+        second_stream = asyncio.create_task(_read_run_stream(run_id, leave))
+        async with asyncio.timeout(30):
+            while len(run._subs) <= subs_before and not second_stream.done():
+                await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)
+        # (c) the HTTP status read inside the same window
+        polled = await client.get(f"/api/v1/simulator/runs/{run_id}", headers=_admin())
+        stopped_while_held = [entry[3] for entry in run._event_buffer if _is_stopped(entry[3])]
+        streams_done_while_held = [first_stream.done(), second_stream.done()]
+        release.set()
+        bodies = [await asyncio.wait_for(s, timeout=60) for s in (first_stream, second_stream)]
+        responses = [await asyncio.wait_for(s, timeout=60) for s in (first_stop, second_stop)]
+    finally:
+        release.set()
+        leave.set()
+        try:
+            await runtime.stop(run_id)
+        except Exception:
+            pass
+
+    print("054-A FD2 stopped while held:", [e["event_id"] for e in stopped_while_held],
+          "streams done while held:", streams_done_while_held, "polled state:", polled.json().get("state"))
+    assert not stopped_while_held, f"run_status(stopped) published while the stop drained: {stopped_while_held}"
+    assert streams_done_while_held == [False, False], "a live stream returned while the committed tick was held"
+    assert polled.status_code == 200 and polled.json()["state"] == "stopping", polled.text
+    assert [r.status_code for r in responses] == [200, 200], [r.text for r in responses]
+    assert [r.json()["state"] for r in responses] == ["stopped", "stopped"]
+    tx_buffered = [e["event_id"] for e in (entry[3] for entry in run._event_buffer) if e.get("type") == "tx.updated"]
+    assert tx_buffered, "premise: the held tick committed a payment"
+    for body in bodies:
+        streamed = _parse_sse(body)
+        assert streamed and _is_stopped(streamed[-1]), "every live stream ends on run_status(stopped)"
+        first_stopped = min(_seq(e["event_id"]) for e in streamed if _is_stopped(e))
+        assert all(_seq(t) < first_stopped for t in tx_buffered), (tx_buffered, first_stopped)
+        assert [e["event_id"] for e in streamed if e.get("type") == "tx.updated"][-1:] == tx_buffered[-1:], streamed

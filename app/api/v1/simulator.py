@@ -53,7 +53,7 @@ from app.core.simulator.real_scenario_seeder import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription, bump_topology_epoch
-from app.core.simulator.runtime_utils import run_to_status
+from app.core.simulator.runtime_utils import published_state, run_to_status
 from app.core.simulator.sse_broadcast import (
     SSE_SUBSCRIPTION_CLOSED_TYPE,
     SseEventEmitter,
@@ -2596,7 +2596,7 @@ async def _run_events_stream(
                 type="run_status",
                 run_id=run.run_id,
                 scenario_id=run.scenario_id,
-                state=run.state,
+                state=published_state(run),  # 054-A review FD2: `stopping` while a stop drains
                 sim_time_ms=run.sim_time_ms,
                 intensity_percent=run.intensity_percent,
                 ops_sec=run.ops_sec,

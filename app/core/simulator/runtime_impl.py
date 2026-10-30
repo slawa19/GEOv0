@@ -33,6 +33,7 @@ from app.core.simulator.runtime_utils import (
     edges_by_equivalent as _edges_by_equivalent,
     local_state_dir as _local_state_dir,
     new_run_id as _new_run_id,
+    published_state as _published_state,
     run_to_status as _run_to_status,
     utc_now as _utc_now,
 )
@@ -456,7 +457,7 @@ class _SimulatorRuntimeBase:
             type="run_status",
             run_id=run.run_id,
             scenario_id=run.scenario_id,
-            state=run.state,
+            state=_published_state(run),
             sim_time_ms=run.sim_time_ms,
             intensity_percent=run.intensity_percent,
             ops_sec=run.ops_sec,
