@@ -31,7 +31,7 @@ param(
   # Only 'none' is accepted: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3)
   # deleted the direct import of fixture packs; the recipe (scripts/seed_db.py --source recipe) seeds only an
   # EMPTY, disposable database by name (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database
-  # `geov0` (docker-compose.yml DATABASE_URL), so a community here and -Action seed are refused below, before
+  # `geov0` (docker-compose.yml DATABASE_URL), so -Action seed and start with a community are refused below, before
   # any Docker or lifecycle mutation (054-G-9: they used to fail only after `docker compose up -d --build`).
   [ValidateSet('greenfield-village-100', 'riverside-town-50', 'none')]
   [string]$Community = 'none',
@@ -51,7 +51,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($Action -eq 'seed' -or $Community -ne 'none') {
+# -Community matters only to start (stop and doctor never read it, so they keep ignoring it).
+if ($Action -eq 'seed' -or ($Action -eq 'start' -and $Community -ne 'none')) {
   throw ("Seeding is not available here: scripts/seed_db.py --source recipe seeds only an empty disposable " +
     "database (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database 'geov0'. Seed a launcher " +
     "database instead: ./scripts/run_local.ps1 reset-db -SeedCommunity <community>, or scripts/seed_db.py " +
