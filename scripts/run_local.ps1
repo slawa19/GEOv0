@@ -52,7 +52,6 @@ param(
     [switch]$AutoPorts,
     [switch]$ShowWindows,
     [switch]$NoInstall,
-    [switch]$ReloadBackend,
 
     # The launcher's own PostgreSQL database is geov0_dev_<DbSlug>. Parallel agents each take their
     # own slug so they do not share a mutable database (`AGENTS.md` §7).
@@ -73,13 +72,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-
-# Uvicorn reload delegates the listener to a child process, so it cannot satisfy
-# this launcher's exact launched-PID/listener ownership contract. Reject before
-# acquiring the lifecycle lock or stopping any healthy service.
-if ($ReloadBackend) {
-    throw '-ReloadBackend is not supported by exact single-process ownership. Run without this switch.'
-}
 
 # The slug is refused here as well as in scripts/dev_database.py, because here it is still a NAME
 # and the message can say so; there it is already part of a URL. The pattern is the one AGENTS.md §5

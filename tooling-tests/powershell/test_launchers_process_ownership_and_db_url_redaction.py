@@ -1689,19 +1689,49 @@ def test_run_local_status_branch_is_filesystem_read_only() -> None:
     assert "Get-RunLocalOwnershipPlan" in status_branch
 
 
-def test_run_local_rejects_reload_before_any_lifecycle_mutation() -> None:
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_refuses_reload_at_parameter_binding_before_any_lifecycle_mutation(
+    powershell: Path, tmp_path: Path
+) -> None:
+    """Uvicorn reload delegates the listener to a child process, so it cannot satisfy exact
+    launched-PID/listener ownership. Since 054-G-10 the launcher has no reload switch at all:
+    PowerShell refuses `-ReloadBackend` while binding parameters, before any statement of the
+    script body runs - so before the lifecycle lock and before any service is stopped.
+
+    The script runs from a copy under `tmp_path` (its repository root is `$PSScriptRoot/..`), with
+    the read-only `status` action, so a regression that re-admits the switch cannot touch the
+    checkout. The error is matched by its FullyQualifiedErrorId: the message is localized.
+    """
     source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
 
-    rejection = source.index("if ($ReloadBackend) {")
-    lock = source.index("Enter-LauncherLifecycleLock", rejection)
+    assert "ReloadBackend" not in source
+    assert "--reload" not in source.split("#>", 1)[1]
+    lock = source.index("Enter-LauncherLifecycleLock")
     restart_stop = source.index("Invoke-RunLocalOwnershipStopPlan -Services", lock)
     action_switch = source.index("switch ($Action)", restart_stop)
-
-    assert rejection < lock < restart_stop < action_switch
-    assert "restart-backend -ReloadBackend" not in source[:rejection]
+    assert lock < restart_stop < action_switch
     assert "$PSCommandPath" not in source
     assert "AllowInherited" not in source
     assert "GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN" not in source
+
+    copy = tmp_path / "scripts" / "run_local.ps1"
+    copy.parent.mkdir()
+    shutil.copyfile(_RUN_LOCAL, copy)
+    literal = str(copy).replace("'", "''")
+    command = (
+        f"try {{ & '{literal}' status -ReloadBackend; [Console]::Out.Write('NOT-REFUSED') }} "
+        "catch { [Console]::Out.Write($_.FullyQualifiedErrorId + '|' + "
+        "$_.Exception.GetType().FullName) }"
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout.startswith("NamedParameterNotFound,"), result.stdout
+    assert result.stdout.endswith(
+        "|System.Management.Automation.ParameterBindingException"
+    ), result.stdout
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["scripts"]
+    assert [path.name for path in copy.parent.iterdir()] == ["run_local.ps1"]
 
 
 def test_replacement_paths_wait_for_owned_ports_to_be_released() -> None:

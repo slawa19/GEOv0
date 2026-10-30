@@ -42,8 +42,7 @@
 
 - `./scripts/run_local.ps1 status`
 - `./scripts/run_local.ps1 stop`
-- `./scripts/run_local.ps1 restart-backend` (exact single-process ownership;
-  `-ReloadBackend` намеренно отклоняется до остановки сервисов)
+- `./scripts/run_local.ps1 restart-backend` (exact single-process ownership, без `--reload`)
 
 Проверка, что backend жив:
 
