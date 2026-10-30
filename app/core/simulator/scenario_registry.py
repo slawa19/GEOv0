@@ -7,6 +7,7 @@ import re
 import shutil
 from collections.abc import Iterator
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Optional
 
@@ -157,6 +158,40 @@ def _validate_scenario_equivalent_codes(raw: dict[str, Any]) -> None:
         )
 
 
+def _validate_scenario_trustline_limits(raw: dict[str, Any]) -> None:
+    """054-A review FD1: a line's limit must parse as a finite decimal.
+
+    The schema types `limit` as any string or number, and Python's `json` parses a bare `NaN`/`Infinity`; the scenario
+    picture renders the limit through `to_money_str`, which RAISES on a non-finite value - an accepted `"NaN"` made the
+    preview, the run snapshot and `trustlines-list` of the scenario answer 500. Refused here, where every scenario
+    enters the registry (upload, stored upload, shipped fixture), as the other scenario errors. Only the finiteness is
+    judged: sign, step and storability stay the seeder's named doors (054-A-13, 012)."""
+
+    errors = []
+    trustlines = raw.get("trustlines")
+    for index, trustline in enumerate(trustlines if isinstance(trustlines, list) else []):
+        if not isinstance(trustline, dict) or "limit" not in trustline:
+            continue
+        value = trustline["limit"]
+        try:
+            finite = not isinstance(value, bool) and Decimal(str(value)).is_finite()
+        except (InvalidOperation, ValueError):
+            finite = False
+        if not finite:
+            errors.append({"path": f"trustlines/{index}/limit", "message": "limit must be a finite decimal number"})
+            if len(errors) == 50:
+                break
+
+    if errors:
+        raise BadRequestException(
+            "Scenario invalid",
+            details={
+                "simulator_error": "SCENARIO_INVALID",
+                "errors": errors,
+            },
+        )
+
+
 def scenario_to_record(
     raw: dict[str, Any],
     *,
@@ -167,6 +202,7 @@ def scenario_to_record(
     # In memory only: the source file of a stored or shipped scenario is not rewritten.
     normalize_integral_numbers(raw)
     _validate_scenario_equivalent_codes(raw)
+    _validate_scenario_trustline_limits(raw)
 
     scenario_id = str(raw.get("scenario_id") or raw.get("id") or "").strip()
     if not scenario_id:
