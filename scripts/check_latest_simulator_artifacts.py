@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -94,16 +93,6 @@ def _load_run_artifacts(run_dir: Path) -> RunArtifacts:
     )
 
 
-def _iso(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        # backend uses utc_now().isoformat() -> usually includes timezone
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
 def main() -> None:
     run_dir = _latest_run_dir()
     ra = _load_run_artifacts(run_dir)
@@ -116,23 +105,11 @@ def main() -> None:
     counts = Counter(str(e.get("type") or "<missing.type>") for e in events)
     counts_eq = Counter(str(e.get("equivalent") or "<missing.eq>") for e in events)
 
-    plans: dict[str, dict[str, Any]] = {}
-    dones: dict[str, dict[str, Any]] = {}
-
     missing_patches = Counter()
     label_worthy_tx = 0
 
     for e in events:
         t = str(e.get("type") or "")
-        if t == "clearing.plan":
-            pid = str(e.get("plan_id") or "")
-            if pid:
-                plans[pid] = e
-        if t == "clearing.done":
-            pid = str(e.get("plan_id") or "")
-            if pid:
-                dones[pid] = e
-
         if t == "tx.updated":
             # floating labels in real-mode depend on balance patches being present
             node_patch = e.get("node_patch")
@@ -149,25 +126,16 @@ def main() -> None:
             if not isinstance(edge_patch, list):
                 missing_patches["tx.updated.edge_patch"] += 1
 
-    missing_done = sorted(set(plans.keys()) - set(dones.keys()))
-    orphan_done = sorted(set(dones.keys()) - set(plans.keys()))
-
-    durations_ms: list[int] = []
-    for pid, plan in plans.items():
-        done = dones.get(pid)
-        if not done:
-            continue
-        t0 = _iso(str(plan.get("ts") or ""))
-        t1 = _iso(str(done.get("ts") or ""))
-        if t0 and t1:
-            durations_ms.append(int((t1 - t0).total_seconds() * 1000))
-
     print("=== Latest simulator run artifacts ===")
     print(f"run_dir:      {run_dir}")
     print(f"run_id:       {ra.run_id}")
     print(f"scenario_id:  {status.get('scenario_id')}")
     print(f"mode:         {status.get('mode')}")
-    print(f"created_at:   {status.get('created_at')}")
+    # The status.json of a stopped run is its RunStatus (`started_at`, `stopped_at`); the one written when the run is
+    # created and still there while it runs carries `created_at` instead (`app/core/simulator/artifacts.py`).
+    print(f"started_at:   {status.get('started_at')}")
+    if "started_at" not in status and status.get("created_at"):
+        print(f"created_at:   {status.get('created_at')}")
     print(f"events:       {len(events)} lines")
     print()
 
@@ -181,24 +149,10 @@ def main() -> None:
         print(f"{k:10s} {v}")
     print()
 
-    print("-- Clearing plan/done integrity --")
-    print(f"clearing.plan: {len(plans)}")
-    print(f"clearing.done: {len(dones)}")
-    if missing_done:
-        print(f"WARNING missing clearing.done for {len(missing_done)} plan_id(s)")
-        print("  sample:")
-        for pid in missing_done[:5]:
-            print(f"  - {pid}")
-    if orphan_done:
-        print(f"WARNING orphan clearing.done without plan for {len(orphan_done)} plan_id(s)")
-        print("  sample:")
-        for pid in orphan_done[:5]:
-            print(f"  - {pid}")
-    if durations_ms:
-        durations_ms.sort()
-        p50 = durations_ms[len(durations_ms) // 2]
-        p90 = durations_ms[int(len(durations_ms) * 0.9)]
-        print(f"plan→done duration ms: p50={p50}, p90={p90}, max={max(durations_ms)}")
+    # 054-G-7: no plan/done pairing - `clearing.plan` events were removed on 2026-02-13 (`d1302e51`), so every
+    # `clearing.done` came out as an "orphan without plan". A clearing is one `clearing.done` event.
+    print("-- Clearing --")
+    print(f"clearing.done: {counts.get('clearing.done', 0)}")
     print()
 
     print("-- Patch presence (affects viz + floating labels) --")
