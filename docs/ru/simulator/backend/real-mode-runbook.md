@@ -223,7 +223,7 @@ Real Mode guardrails:
   объёмом и диагностикой без выдуманного изменения долга. Полный результат нельзя заключать из такого summary.
 
 Clearing policy:
-- фиксированный cadence `SIMULATOR_CLEARING_EVERY_N_TICKS`; другой политики нет. `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` не читаются с 2026-09-28 (адаптивный режим удалён программой 021, стадия 3).
+- фиксированный cadence `SIMULATOR_CLEARING_EVERY_N_TICKS`; других расписаний нет. Кроме расписания есть один внеочередной проход — по стопору (054-A-7a): на третьем подряд тике, все платежи которого отвергнуты, тик сразу запускает обычный проход клиринга; его отключает только `CLEARING_ENABLED=false`, а `SIMULATOR_CLEARING_EVERY_N_TICKS=0` — нет. Подробно — `docs/ru/simulator/scenarios-and-engine.md`, «Стопор: все автоплатежи отвергнуты». `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` не читаются с 2026-09-28 (адаптивный режим удалён программой 021, стадия 3).
 
 Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
 - `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).
