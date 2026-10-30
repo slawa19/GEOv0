@@ -288,18 +288,23 @@ _ENSURE_URL = "/api/v1/simulator/session/ensure"
 
 @pytest.fixture
 def lifespan_on_the_test_database(monkeypatch):
-    """`with TestClient(app)` runs the REAL lifespan, whose SQLite startup probes read `app.main.engine`.
+    """`with TestClient(app)` runs the REAL lifespan against the tier's database.
 
-    That engine used to be bound to the application's default `DATABASE_URL` - the developer's local
-    SQLite file - so these tests passed or failed on whatever that file happened to be (programme 015
-    step 5b, review round 3). Since 017 T1704 there is no default and `tests/conftest.py` hands the app
-    the tier's URL; the startup is still pointed at the suite's own test engine explicitly.
+    The application's `DATABASE_URL` used to default to the developer's local SQLite file, so these
+    tests passed or failed on whatever that file happened to be (programme 015 step 5b, review round 3).
+    Since 017 T1704 there is no default and `tests/conftest.py` hands the app the tier's URL.
+
+    `app.main.engine` is NOT replaced any more (2026-10-30). The lifespan reads it only to dispose it at
+    shutdown, while its startup (`reconcile_stale_runs`) writes through `app.db.session.AsyncSessionLocal`,
+    i.e. the pooled application engine. Pointing the dispose at the suite's NullPool engine left that
+    pooled connection bound to the TestClient's loop after the loop closed, and the next checkout in
+    another loop dropped an unawaited `Connection._cancel` (`tests/conftest.py`,
+    `_close_app_engine_pool_on_this_loop`, has the mechanism).
     """
     import app.main as main_module
-    from tests.conftest import TEST_DATABASE_URL, engine as test_engine
+    from tests.conftest import TEST_DATABASE_URL
 
     monkeypatch.setattr(main_module.settings, "DATABASE_URL", TEST_DATABASE_URL)
-    monkeypatch.setattr(main_module, "engine", test_engine)
 
 
 @pytest.mark.usefixtures("lifespan_on_the_test_database")
