@@ -493,6 +493,9 @@ export const en = {
     flow: 'Flow',
     flowPause: 'Pause automatic payments',
     flowResume: 'Resume automatic payments',
+    /** 054-B-7c: a run ended by an error is restarted (a new run of the scenario), not resumed. */
+    restart: 'Restart',
+    restartTitle: 'A new run of this scenario',
     details: 'Details',
     /** §G "Network <name>": the label of the full name behind "Details". */
     network: 'Network',

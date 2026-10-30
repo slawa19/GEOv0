@@ -84,6 +84,14 @@ function onFlowToggle() {
 }
 
 /**
+ * 054-B-7c (the owner's decision of 2026-10-30): a run the server ended with an error is not resumed (there is no "Поток"
+ * for it - `flowState`; the server refuses such a resume with 409) - it is RESTARTED: a new run of the scenario, the
+ * existing start (`start-run`, `useSimulatorRealMode.ts` `startRun`: an ended run is reset first). In the first row, for
+ * every addressee - the visitor has no Start (048 S2) - and in the style of "Поток" beside it.
+ */
+const canRestart = computed(() => flowRunState.value === 'error')
+
+/**
  * 043 S2 (review B1): the name of a scenario as the API gives it - `name` (the decoder, `simulatorContracts.ts`); `label`
  * is a UI-only compatibility field the REST decoder never fills. Empty when neither is set: the caller shows the id.
  */
@@ -186,9 +194,10 @@ const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
 
 // 048 S1 (decision 4): no "Run <state>" badge (the state dot of the first row says the same) and no Pause/Resume of the
 // service row ("Поток" pauses and resumes; the `pause`/`resume` events are its).
+// 054-B-7c: a run ended by an error can be stopped too (the server makes it `stopped` and frees its place).
 const canStop = computed(() => {
   const s = ctx.runStatus.value?.state
-  return s === 'running' || s === 'paused' || s === 'created'
+  return s === 'running' || s === 'paused' || s === 'created' || s === 'error'
 })
 
 const isRunActive = computed(() => {
@@ -357,6 +366,16 @@ function onApplyIntensity() {
             @click="onFlowToggle"
           >
             <span aria-hidden="true">{{ flowState === 'running' ? '⏸' : '▶' }}</span> {{ t('topBar.flow') }}
+          </button>
+          <button
+            v-if="canRestart"
+            type="button"
+            class="ds-btn ds-btn--secondary ds-btn--sm tb-flow-toggle"
+            data-testid="run-restart"
+            :title="t('topBar.restartTitle')"
+            @click="onStartRun"
+          >
+            {{ t('topBar.restart') }}
           </button>
         </div>
 

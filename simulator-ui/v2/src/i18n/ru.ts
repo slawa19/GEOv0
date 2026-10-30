@@ -424,6 +424,8 @@ export const ru = {
     flow: 'Поток',
     flowPause: 'Поставить автоматические платежи на паузу',
     flowResume: 'Возобновить автоматические платежи',
+    restart: 'Перезапустить',
+    restartTitle: 'Новый прогон этого сценария',
     details: 'Подробнее',
     network: 'Сеть',
     detailsRowAria: 'Верхняя панель',
