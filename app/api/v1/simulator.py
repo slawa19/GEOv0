@@ -2356,8 +2356,10 @@ async def action_trustlines_list(
         ).all()
         pid_to_id = {str(pid): pid_id for pid, pid_id in rows if pid and pid_id}
 
-    # Bulk fetch reverse debts for all participant pairs that appear in the list.
-    reverse_debt_map: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+    # 054-A-4: BOTH directions of a pair come from this one read - `used` (debtor = to_pid) and `reverse_used`
+    # (debtor = from_pid). Taking `used` from the snapshot and `reverse_used` from this later SELECT let a payment
+    # committed between the two show a positive debt both ways, a state the ledger never holds.
+    debt_map: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
     if pid_to_id:
         ids = sorted(set(pid_to_id.values()))
         debt_rows = (
@@ -2376,7 +2378,7 @@ async def action_trustlines_list(
                 continue
             if amount is None:
                 continue
-            reverse_debt_map[(debtor_id, creditor_id)] = amount
+            debt_map[(debtor_id, creditor_id)] = debt_map.get((debtor_id, creditor_id), Decimal("0")) + amount
 
     items: list[SimulatorActionTrustlineListItem] = []
     for from_pid, to_pid, link in active_links:
@@ -2388,7 +2390,11 @@ async def action_trustlines_list(
         to_id = pid_to_id.get(to_pid)
         reverse_used = Decimal("0")
         if from_id is not None and to_id is not None:
-            reverse_used = reverse_debt_map.get((from_id, to_id), Decimal("0"))
+            used = debt_map.get((to_id, from_id), Decimal("0"))
+            reverse_used = debt_map.get((from_id, to_id), Decimal("0"))
+            used_s = _fmt_decimal_for_api(used, eq.precision)
+            # Signed, never clamped (026 `T2602`), as the snapshot computes it - from the row's own `used`.
+            avail_s = _fmt_decimal_for_api(Decimal(limit_s) - used, eq.precision)
         reverse_used_s = _fmt_num_or_str(reverse_used)
 
         items.append(
