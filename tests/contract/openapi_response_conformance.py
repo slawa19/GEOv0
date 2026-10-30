@@ -34,6 +34,26 @@ T1110 it serves three declared JSON documents and a streamed download of one of 
 worth validating. It is written down because "the gate cannot see this traffic" should not
 have to be rediscovered.
 
+**054-E-H1: every status, not only 2xx (2026-10-30).** Until this change `Harness.record` returned
+on the first line for any non-2xx, so the full tier's 558 error responses were counted in
+`responses_seen` and compared to nothing. The rule now, measured by a prototype over the full tier
+before it was committed (558 non-2xx; 536 valid, 10 undeclared, 12 unrouted, 0 body mismatches):
+
+* a non-2xx on a canonical operation must have its status declared there - an undeclared one is a
+  FINDING (`non_conforming`, node `$`), and the only excuse is a row in `KNOWN_NONCONFORMING`;
+* the body is validated by the same `validate_body` against the schema of the media type that
+  arrived, exactly as a 2xx is, so a body that does not match is a finding too;
+* a response-level `$ref` (`#/components/responses/NotFound`) is followed - see
+  `resolve_declared_response`; without it 457 of the 558 read as `declared-without-a-body`;
+* a non-2xx whose request resolves to no canonical path (starlette's 404/405 on an unknown route)
+  is counted in `unrouted` and is not a finding; a canonical path never lands there, including a
+  405 for a METHOD the canon does not declare on it, which is an undeclared-status finding;
+* a status matched only by a `default` entry is allowed and listed in `matched_by_default`;
+* non-2xx responses are counted in `non_2xx_seen` / `non_2xx_checked` and never in `observed`,
+  `bodies_checked` or `two_xx_seen`, so coverage, the vacuity skip and the ledger quorum keep
+  their 2xx meaning. A non-2xx that cannot be validated (not JSON, empty, unparseable) lands in
+  the same named categories as a 2xx and fails the aggregate the same way.
+
 **T1109 rewrote the bookkeeping, and that is the important part of this file now.** External
 review found the gate failing open in several independent ways. Four of them shared one cause:
 an operation was credited as `observed` the moment its PATH resolved, and every subsequent way
@@ -434,7 +454,8 @@ UNVALIDATED_CATEGORIES = (
 
 
 class Harness:
-    """Accumulates every 2xx body the suite produces, and what the canon says of it.
+    """Accumulates every response the suite produces (2xx and, since 054-E-H1, non-2xx), and what
+    the canon says of it.
 
     **Coverage means validation.** An operation enters `observed` only when a response of its was
     actually compared to the canon - either a JSON body validated against a declared schema, or a
@@ -461,6 +482,22 @@ class Harness:
         # clean". Both used to look like the same green.
         self.responses_seen = 0
         self.two_xx_seen = 0
+        # 054-E-H1: every non-2xx is now checked too, and counted apart, so that the 2xx counters
+        # and `observed` keep meaning what the vacuity skip and the ledger quorum read them as.
+        self.non_2xx_seen = 0
+        # Non-2xx responses really compared to the canon (a body validated, or a declared-bodyless
+        # status confirmed empty). Never added to `observed` or `bodies_checked`.
+        self.non_2xx_checked = 0
+        # Non-2xx responses whose status the canon does not declare for a canonical operation.
+        # Each is ALSO a finding; the count is here so the report can be compared with the
+        # prototype's measurement without re-deriving it from the finding list.
+        self.non_2xx_undeclared = 0
+        # Non-2xx responses to a request that resolved to NO canonical path - starlette's 404/405
+        # on an unknown route. Counted, never a finding: there is no operation whose declaration
+        # they could contradict. A non-2xx on a canonical path never lands here.
+        self.unrouted: list[str] = []
+        # `METHOD /path STATUS` matched only by a `default` entry of the canon. Allowed, marked.
+        self.matched_by_default: set[str] = set()
 
         # Coverage. Only operations a response of which was really checked.
         self.observed: set[tuple[str, str]] = set()
@@ -552,15 +589,22 @@ class Harness:
         assert self._document is not None
         self.responses_seen += 1
         status = response.status_code
-        if not (200 <= status < 300):
-            return
-        self.two_xx_seen += 1
+        # 054-E-H1: there used to be `if not 2xx: return` here, so 558 non-2xx responses of the
+        # full tier were counted in `responses_seen` and compared to nothing.
+        success = 200 <= status < 300
+        if success:
+            self.two_xx_seen += 1
+        else:
+            self.non_2xx_seen += 1
         method = response.request.method.upper()
         raw_path = response.request.url.path
 
         content_type = response.headers.get("content-type", "")
 
         path = match_path(raw_path, self._paths)
+        if path is None and not success:
+            self.unrouted.append(f"{method} {raw_path} {status}")
+            return
         if path is None:
             self._skip(
                 UNVALIDATED_NO_CANONICAL_PATH,
@@ -579,6 +623,30 @@ class Harness:
         verdict, pointer = classify_response_declaration(
             self._document, method, path, status, content_type
         )
+        declared = resolve_declared_response(self._document, method, path, status)
+        if declared is not None and declared[0] == "default":
+            self.matched_by_default.add(f"{method} {path} {status}")
+
+        if verdict == DECL_UNDECLARED and not success:
+            # 054-E-H1 (c): a FINDING, not a category. A category can be written into the
+            # allowance; an error status the canon does not declare is the document describing a
+            # different service, and the only excuse is a dated KNOWN_NONCONFORMING row.
+            self.non_2xx_undeclared += 1
+            operation_declared = isinstance(
+                ((self._document.get("paths") or {}).get(path) or {}).get(method.lower()), dict
+            )
+            self._finding(
+                f"{method} {path} {status}",
+                "$",
+                f"the service answered {status} and the canon does not declare that status for "
+                "this operation"
+                + ("" if operation_declared else " (the canon does not declare this METHOD on "
+                   "this path at all)")
+                + ". Declare it in api/openapi.yaml (with the schema of the body that really "
+                "arrives) or stop the handler from producing it",
+                status,
+            )
+            return
 
         if verdict == DECL_UNDECLARED:
             self._skip(
@@ -660,8 +728,11 @@ class Harness:
                     summarize(content[:200].decode("utf-8", "replace")),
                 )
                 return
-            self.observed.add((method, path))
-            self.empty_bodies_confirmed += 1
+            if success:
+                self.observed.add((method, path))
+                self.empty_bodies_confirmed += 1
+            else:
+                self.non_2xx_checked += 1
             return
 
         assert pointer is not None
@@ -698,8 +769,11 @@ class Harness:
             )
             return
 
-        self.observed.add((method, path))
-        self.bodies_checked += 1
+        if success:
+            self.observed.add((method, path))
+            self.bodies_checked += 1
+        else:
+            self.non_2xx_checked += 1
         for node, message, value in validate_body(
             self._document, pointer, body, registry=self._registry
         ):
@@ -722,7 +796,10 @@ class Harness:
         )
 
     def unvalidated_keys(self) -> list[str]:
-        """`"<category> METHOD /path STATUS"` for every 2xx whose body was not validated.
+        """`"<category> METHOD /path STATUS"` for every response whose body was not validated.
+
+        Since 054-E-H1 that includes non-2xx responses on a canonical operation; the report key is
+        still `unvalidated_2xx`, kept so existing readers of the JSON report do not break.
 
         This is the shape the allowance in `test_p011_responses_conform_to_the_canon.py` is keyed
         by: one line per (category, operation, status), stable across runs, and readable enough
@@ -766,6 +843,12 @@ class Harness:
             "canon_operations": len(declared),
             "responses_seen": self.responses_seen,
             "two_xx_seen": self.two_xx_seen,
+            "non_2xx_seen": self.non_2xx_seen,
+            "non_2xx_checked": self.non_2xx_checked,
+            "non_2xx_undeclared": self.non_2xx_undeclared,
+            "unrouted": len(self.unrouted),
+            "unrouted_detail": sorted(self.unrouted),
+            "matched_by_default": sorted(self.matched_by_default),
             "observed_operations": sorted(f"{m} {p}" for m, p in self.observed),
             "unobserved_operations": sorted(
                 f"{m} {p}" for m, p in declared if (m, p) not in self.observed

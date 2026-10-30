@@ -155,6 +155,14 @@ from tests.contract.openapi_response_conformance import (
 # An entry here is a claim about the CODE, never a schema loosened to fit a body, and the
 # aggregate test below fails if one stops reproducing over a full session. The list may only
 # shrink; it is at zero, so any entry at all is now a regression.
+#
+# 054-E-H1 (2026-10-30): the harness now checks non-2xx responses too, and a non-2xx status the
+# canon does not declare for its operation is a finding keyed `("METHOD /path STATUS", "$")` -
+# this list is the ONLY way to excuse one. The prototype measured six such pairs over the full
+# tier (`POST /participants 409`, `POST /simulator/runs 404`, `POST /clearing/auto 500`,
+# `POST /integrity/verify 500`, `GET /admin/participants 500`,
+# `POST /simulator/runs/{run_id}/actions/payment-real 500`); all six are declared in
+# `api/openapi.yaml` by the same wave, so none is written here and the list stays empty.
 KNOWN_NONCONFORMING: dict[tuple[str, str], str] = {}
 
 # The stale-entry check - for BOTH fixed lists in this file - is only meaningful over a full
@@ -317,7 +325,12 @@ def _summary(report: dict[str, Any], written: str | None) -> str:
         f"declared operations over {report['two_xx_seen']} 2xx response(s) "
         f"({report['responses_seen']} response(s) in all); {report['bodies_checked']} JSON "
         f"bodies validated, {report['empty_bodies_confirmed']} declared-bodyless responses "
-        f"confirmed empty, {len(report['unvalidated_2xx'])} unvalidated row(s); report written "
+        f"confirmed empty, {len(report['unvalidated_2xx'])} unvalidated row(s); "
+        f"{report.get('non_2xx_seen', 0)} non-2xx response(s), "
+        f"{report.get('non_2xx_checked', 0)} checked against the canon, "
+        f"{report.get('non_2xx_undeclared', 0)} with an undeclared status, "
+        f"{report.get('unrouted', 0)} unrouted; matched only by `default`: "
+        f"{', '.join(report.get('matched_by_default', [])) or 'none'}; report written "
         f"to {written}\nunobserved operations (this check says NOTHING about them):\n  "
         + "\n  ".join(report["unobserved_operations"])
     )
@@ -356,13 +369,13 @@ def _assert_the_session_is_conformant(report: dict[str, Any], written: str | Non
     detail = {row["key"]: row["detail"] for row in report["unvalidated_2xx_detail"]}
     unexpected = [key for key in unvalidated if key not in UNVALIDATED_2XX_ALLOWANCE]
     assert not unexpected, (
-        f"{len(unexpected)} 2xx response(s) were observed but never validated against "
+        f"{len(unexpected)} response(s) were observed but never validated against "
         "api/openapi.yaml, and none of them is in UNVALIDATED_2XX_ALLOWANCE.\n\n"
         "This is not a licence to add rows. Each category means something different:\n"
         "  no-canonical-path                 the request did not resolve to any operation the "
         "canon declares - either the canon is missing the path or match_path is wrong;\n"
         "  status-not-declared               the service returned a 2xx the canon does not "
-        "declare for that operation;\n"
+        "declare for that operation (an undeclared NON-2xx is a finding, not a row - 054-E-H1);\n"
         "  (a status the canon declares with no `content` never reaches this list: an empty "
         "body under it IS a check and counts as coverage, and a non-empty one is a "
         "non-conformance finding instead)\n"
@@ -422,7 +435,9 @@ def _assert_the_session_is_conformant(report: dict[str, Any], written: str | Non
     measured = {(row["operation"], row["node"]): row for row in report["non_conforming"]}
     appeared = sorted(key for key in measured if key not in KNOWN_NONCONFORMING)
     assert not appeared, (
-        f"{len(appeared)} response node(s) do not validate against api/openapi.yaml.\n\n"
+        f"{len(appeared)} response node(s) do not validate against api/openapi.yaml "
+        "(since 054-E-H1 this includes non-2xx bodies, and an error status the canon does not "
+        "declare at all, reported at node `$`).\n\n"
         "Decide each one against the code that writes it, never by loosening the schema: if "
         "the value really occurs, say so in the canon (add `null` to the enum, or give the "
         "property a `oneOf` with a `{nullable: true, enum: [null]}` branch); if it does not, "
