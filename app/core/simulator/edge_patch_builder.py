@@ -78,6 +78,10 @@ class EdgePatchBuilder:
         uuid_to_pid: dict[uuid.UUID, str] = {
             uid: pid for uid, pid in (run._real_participants or []) if pid
         }
+        if not uuid_to_pid:
+            # No participant of the run is known: no line of it can be named (every row was skipped below before).
+            return []
+        run_participant_ids = list(uuid_to_pid)
 
         eq_row = (
             await session.execute(
@@ -92,7 +96,10 @@ class EdgePatchBuilder:
         def _to_money_str(v: Decimal) -> str:
             return to_money_str(v, precision)
 
-        # Load trustlines for this equivalent.
+        # Load the run's trustlines for this equivalent. 054-A-5: only lines between participants of the run - the
+        # width quantiles below are taken over these rows, and the snapshot takes them over the run's own lines
+        # (`snapshot_builder`); over every live line of the equivalent another run's lines moved the patch's
+        # `viz_width_key` away from the snapshot's for the same line, and the read scanned every run's history.
         tl_rows = (
             await session.execute(
                 select(
@@ -106,11 +113,13 @@ class EdgePatchBuilder:
                     # LIVE rows only — see snapshot_builder for the same reason
                     # (migration 019 allows a closed incarnation alongside the live one).
                     TrustLine.status != "closed",
+                    TrustLine.from_participant_id.in_(run_participant_ids),
+                    TrustLine.to_participant_id.in_(run_participant_ids),
                 )
             )
         ).all()
 
-        # Load aggregated debts for this equivalent.
+        # Load aggregated debts between the run's participants for this equivalent.
         debt_rows = (
             await session.execute(
                 select(
@@ -118,7 +127,11 @@ class EdgePatchBuilder:
                     Debt.debtor_id,
                     func.coalesce(func.sum(Debt.amount), 0).label("amount"),
                 )
-                .where(Debt.equivalent_id == eq_id)
+                .where(
+                    Debt.equivalent_id == eq_id,
+                    Debt.creditor_id.in_(run_participant_ids),
+                    Debt.debtor_id.in_(run_participant_ids),
+                )
                 .group_by(Debt.creditor_id, Debt.debtor_id)
             )
         ).all()

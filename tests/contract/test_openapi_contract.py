@@ -471,8 +471,20 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # written with `json.dumps`, so canon-only). `RunMode` keeps the OpenAPI 3.0.3 spelling (an enum of one, not pydantic's
 # `const`), so no entry enters. Measured with the per-entry dump (`.local-run/p042-s1/dump_ledgers.py`, not committed): the
 # base ledger with `fixtures` removed from those enums equals the new one entry by entry.
+# Sixth move, 2026-10-30, programme 054 `054-A-7a`: count HOLDS at 61, digest moves - RECORDED DRIFT GROWTH, not an
+# improvement. `RunStatus` gained the optional `pause_reason` (the run paused itself: `scenario_exhausted`), and the six
+# run-status entries (get, intensity, pause, restart, resume, stop) gain ONE member each: the canon writes `null` as a
+# member of the enum (`[scenario_exhausted, null]` - in OpenAPI 3.0.3 `nullable` does not widen an `enum`, `F-011-10`,
+# the convention of this canon), FastAPI emits the value alone beside the collapsed null branch. Nothing else differs on
+# those paths (measured with a per-entry path dump, `.local-run` scratch, not committed): `type`, `nullable` and the
+# value compare equal.
+# Seventh move, same day, `054-A-7d`: count HOLDS at 61, digest moves, NO difference added or removed. The items of
+# `GET /simulator/admin/runs` gain `last_error` and `pause_reason` in the canon. The route builds its answer by hand and
+# declares no response model, so the generated half has no schema and the entry already differed as a whole
+# (`properties`, `required`, `type` canonical-only); the canonical half it hashes changed, the paths that differ did not
+# (measured with the same per-entry path dump).
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "2c32bd9f6dbefbb92aa495201179f1fe0742feb90aef2cab89a701ec72533774"
+    "d3d0f14ba3777ad948975bee083be0477441ff9dbbea6496b7cf421dde08135b"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -1314,6 +1326,7 @@ def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
             "stop_source",
             "stop_reason",
             "stop_client",
+            "pause_reason",
             "sim_time_ms",
             "intensity_percent",
             "ops_sec",
@@ -1437,6 +1450,7 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
         "last_event_type",
         "current_phase",
         "last_error",
+        "pause_reason",
     }
     assert set(SimulatorRunStatusEvent.model_json_schema()["properties"]) == set(
         schemas["SimulatorRunStatusEvent"]["properties"]

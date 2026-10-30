@@ -988,7 +988,11 @@ paths:
             type: string
       responses:
         '200':
-          description: SSE stream
+          description: |
+            SSE stream. Without an active run of the caller (and without
+            `Last-Event-ID`) the stream is finite: one comment record with
+            `retry: 15000`, then the stream ends; an EventSource reconnects after
+            `retry` and gets the run's events once there is a run.
           content:
             text/event-stream:
               schema:
@@ -1300,6 +1304,28 @@ paths:
                           type: integer
                         attempts_total:
                           type: integer
+                        last_error:
+                          description: >-
+                            054-A-7d: the run's `last_error` as `RunStatus` gives it - for a run in `error`, the
+                            code it was stopped with.
+                          type: object
+                          nullable: true
+                          required: [code, message, at]
+                          properties:
+                            code:
+                              type: string
+                            message:
+                              type: string
+                            at:
+                              type: string
+                              format: date-time
+                          additionalProperties: false
+                        pause_reason:
+                          description: >-
+                            054-A-7d: `RunStatus.pause_reason` - why a `paused` run paused itself; null otherwise.
+                          type: string
+                          nullable: true
+                          enum: [scenario_exhausted, null]
                   total:
                     type: integer
                   limit:
@@ -1487,7 +1513,11 @@ paths:
           description: >-
             E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
             the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
-            limit of active runs is reached (`global_active_limit`).
+            limit of active runs is reached (`global_active_limit`). 054-A-7c: a run in `error` whose
+            `last_error.code` is one of `REAL_MODE_TOO_MANY_ERRORS`, `REAL_MODE_TOO_MANY_TIMEOUTS`,
+            `REAL_MODE_TICK_FAILED_REPEATED`, `REAL_MODE_MONEY_NO_PROGRESS`, `INTEGRITY_VIOLATION` failed
+            terminally and is not resumed (`details.reason = run_failed_terminal`, `details.code` = that code;
+            the run is left as it was) - `restart` it. Any other `error` is resumed.
           content:
             application/json:
               schema:
@@ -6992,6 +7022,12 @@ components:
               type: string
               format: date-time
           additionalProperties: false
+        pause_reason:
+          description: >-
+            054-A-7a: why a `paused` run is paused when the run paused itself (see `RunStatus.pause_reason`).
+          type: string
+          nullable: true
+          enum: [scenario_exhausted, null]
       additionalProperties: true
 
     ScenarioUploadRequest:
@@ -7334,6 +7370,18 @@ components:
         stop_client:
           type: string
           nullable: true
+        pause_reason:
+          description: >-
+            054-A-7a: why a `paused` run is paused when the run paused itself. `scenario_exhausted` - three counted
+            ticks in a row committed nothing (a tick counts when at least one of its payments was refused by routing,
+            capacity or a line's policy; a tick refused only by a money stop - an equivalent the operator stopped or
+            held for integrity - neither counts nor resets), the clearing pass run for it at once did not help, and
+            the next counted tick committed nothing again. Null for a pause the user asked for and in every
+            state other than `paused`. Manual Interact actions still work on such a run; `resume` clears the reason
+            and the counter `consec_all_rejected_ticks`.
+          type: string
+          nullable: true
+          enum: [scenario_exhausted, null]
         sim_time_ms:
           type: integer
           nullable: true

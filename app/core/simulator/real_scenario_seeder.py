@@ -22,6 +22,7 @@ from app.core.trustlines.service import CONCURRENT_TRUSTLINE_CREATE, TrustLineSe
 from app.utils.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.utils.validation import (
     AMOUNT_PRECISION_EXCEEDED,
+    MONEY_FINITENESS,
     MONEY_QUANTIZATION,
     money_storability_violation,
     require_money_step,
@@ -337,6 +338,13 @@ class RealScenarioSeeder:
                     limit = Decimal(str(raw_limit))
                 except (InvalidOperation, ValueError):
                     continue
+                if not limit.is_finite():
+                    # 054-A-13 (brother of 034 S4b): `NaN` and `Infinity` parse, and ordering `NaN` RAISES - the
+                    # comparison below left the seeding with an unnamed `InvalidOperation`. A non-finite limit is
+                    # no limit: the line is refused by name, as the doors below refuse a limit finer than the step.
+                    raise ScenarioTrustLineRefused(
+                        f"{from_pid}->{to_pid} {eq}", MONEY_FINITENESS, "the limit is not a finite number"
+                    )
                 if limit < 0:
                     continue
                 # Storage-capacity door (012 / F-012-1).  A scenario limit that does not fit

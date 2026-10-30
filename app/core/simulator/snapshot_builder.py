@@ -359,6 +359,9 @@ class SnapshotBuilder:
 
 _logger = logging.getLogger(__name__)
 
+# The precision of a scenario line's money before the database is read (`scenario_to_snapshot`, 054-A-15).
+_SCENARIO_MONEY_PRECISION = 2
+
 
 def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> SimulatorGraphSnapshot:
     participants = raw.get("participants") or []
@@ -410,13 +413,18 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         if src not in member_pids or dst not in member_pids:
             orphans += 1
             continue
-        limit = tl.get("limit")
+        # 054-A-15: money leaves as a decimal string (AGENTS.md §8), in the form the database snapshot gives the same
+        # line after the first tick. The scenario carries no precision and this path reads no database, so the
+        # precision is the fallback every database reader uses for a missing one (024 `T2416.1`) - the precision of
+        # every shipped equivalent; `to_money_str` never drops a digit the value needs, whatever the precision.
+        raw_limit = tl.get("limit")
+        limit = None if raw_limit is None else to_money_str(raw_limit, _SCENARIO_MONEY_PRECISION)
         links.append(
             SimulatorGraphLink(
                 source=src,
                 target=dst,
                 trust_limit=limit,
-                used=0,
+                used=to_money_str(Decimal("0"), _SCENARIO_MONEY_PRECISION),
                 available=limit,
                 status="active",
                 viz_width_key="thin",
@@ -442,7 +450,8 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
 
     return SimulatorGraphSnapshot(
         api_version=SIMULATOR_API_VERSION,
-        equivalent=str(equivalent),
+        # 054-E-13: the code this snapshot was filtered by, not the caller's spelling of it (`uah` echoed `uah`).
+        equivalent=eq_norm,
         generated_at=utc_now(),
         nodes=nodes,
         links=links,

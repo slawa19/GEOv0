@@ -71,6 +71,21 @@ class SimulatorGraphLink(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    @field_validator("trust_limit", "used", "available")
+    @classmethod
+    def _money_is_a_decimal_string(cls, value: Optional[NumberOrString]) -> Optional[str]:
+        """054-A-15: money is a decimal string (AGENTS.md §8) - a JSON number is refused, not converted.
+
+        The declared type stays `NumberOrString` because the canon (`api/openapi.yaml`) still admits a number and is
+        narrowed with its consumers in wave E; this refuses at runtime what the canon does not refuse yet. Converting
+        here would hide a producer that builds money from a float - the precision it should have used is not known
+        here. Only `scenario_to_snapshot` constructs a link; the database snapshot assigns rendered strings.
+        """
+
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"money must be a decimal string, not {type(value).__name__}")
+        return value
+
 
 class SimulatorPaletteEntry(BaseModel):
     color: str
@@ -318,13 +333,17 @@ class SimulatorRunStatusEvent(BaseModel):
     errors_total: Optional[int] = Field(default=None, ge=0)
     timeouts_total: Optional[int] = Field(default=None, ge=0)
 
-    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    # Diagnostic: consecutive attempted ticks with nothing committed, no error and at least one refusal of the scenario
+    # (routing, capacity, a line's policy); a tick refused only by a money stop holds it (054-A-7a review).
     consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_event_type: Optional[str] = None
     current_phase: Optional[str] = None
 
     last_error: Optional[SimulatorLastError] = None
+
+    # 054-A-7a: why a `paused` run is paused when the run paused itself; null for a user's pause and in other states.
+    pause_reason: Optional[PauseReason] = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -506,6 +525,8 @@ class _EnumOfOne:
 
 
 RunMode = Annotated[Literal["real"], _EnumOfOne("real")]
+#: 054-A-7a: the one reason a run pauses itself (`RunStatus.pause_reason`).
+PauseReason = Annotated[Literal["scenario_exhausted"], _EnumOfOne("scenario_exhausted")]
 
 
 class RunCreateRequest(BaseModel):
@@ -592,6 +613,11 @@ class RunStatus(BaseModel):
     stop_reason: Optional[str] = None
     stop_client: Optional[str] = None
 
+    # 054-A-7a: why a `paused` run is paused when the run paused itself - "scenario_exhausted": the automatic payments
+    # go nowhere (nothing committed, refusals of the scenario - routing, capacity, a line's policy; a money stop alone does
+    # not count), and the clearing run for that did not help. Null for a user's pause and in every other state.
+    pause_reason: Optional[PauseReason] = None
+
     sim_time_ms: Optional[int] = Field(default=None, ge=0)
     intensity_percent: Optional[int] = Field(default=None, ge=0, le=100)
     ops_sec: Optional[float] = Field(default=None, ge=0)
@@ -604,7 +630,8 @@ class RunStatus(BaseModel):
     timeouts_total: Optional[int] = Field(default=None, ge=0)
     errors_last_1m: Optional[int] = Field(default=None, ge=0)
 
-    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    # Diagnostic: consecutive attempted ticks with nothing committed, no error and at least one refusal of the scenario
+    # (routing, capacity, a line's policy); a tick refused only by a money stop holds it (054-A-7a review).
     consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_error: Optional[SimulatorLastError] = None

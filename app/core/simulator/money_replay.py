@@ -188,7 +188,7 @@ class _AttemptRunState:
 
     * `_real_consec_all_rejected_ticks` is the capacity-stall counter the executor advances on
       every call that planned a payment (`real_payments_executor.py`, 049 S2a); a discarded attempt
-      would inflate it and, at five, make the run log a stall it did not have.
+      would inflate it and make the run clear for, or pause on, a stall it did not have (054-A-7a, `tick.py`).
     * `_real_consec_tick_failures` is the error-budget counter. The executor cleared it on every call until
       049 S2a; the tick now clears it once it has succeeded (`tick.py`), so an attempt no longer moves it,
       and the restore stays as the guard of that rule.

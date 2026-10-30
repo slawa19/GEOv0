@@ -27,6 +27,14 @@ class SseReplayUnavailable(Exception):
 SSE_SUBSCRIPTION_CLOSED_TYPE = "__subscription_closed__"
 
 
+def _equivalent_key(value: Any) -> str:
+    """The one form an equivalent is matched in (054-A-16): a code is case-insensitive at every door
+    (`EquivalentCode`) and every producer here publishes it upper-cased, so a subscription opened with `uah`
+    must see the `UAH` events - before, the subscription kept the caller's spelling and silently lost them."""
+
+    return str(value or "").strip().upper()
+
+
 class SseBroadcast:
     def __init__(
         self,
@@ -125,7 +133,7 @@ class SseBroadcast:
         if now is None:
             now = time.time()
         event_type = str(payload.get("type") or "")
-        event_equivalent = str(payload.get("equivalent") or "")
+        event_equivalent = _equivalent_key(payload.get("equivalent"))
         run._event_buffer.append(
             (
                 now,
@@ -149,6 +157,7 @@ class SseBroadcast:
         )
         if after_seq is None:
             raise SseReplayUnavailable("Last-Event-ID is not a runtime event id")
+        equivalent = _equivalent_key(equivalent)
 
         self.prune_event_buffer_locked(run)
         current_seq = int(run._event_seq)
@@ -203,7 +212,7 @@ class SseBroadcast:
 
     def _dispatch_locked(self, *, run: RunRecord, payload: dict[str, Any]) -> None:
         event_type = str(payload.get("type") or "")
-        event_equivalent = str(payload.get("equivalent") or "")
+        event_equivalent = _equivalent_key(payload.get("equivalent"))
         self._append_to_event_buffer_locked(run=run, payload=payload)
 
         for sub in list(run._subs):
@@ -322,6 +331,7 @@ class SseBroadcast:
         """
         queue_max = max(1, int(self._get_sub_queue_max()))
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_max)
+        equivalent = _equivalent_key(equivalent)
         sub = _Subscription(
             equivalent=equivalent,
             queue=queue,
@@ -793,6 +803,42 @@ async def publish_closed_trustlines(
 
 _PENDING_PUBLICATIONS: set[asyncio.Task] = set()
 
+#: 054-A review FD4: how long `stop()` waits for a run's scheduled closed-line publications before its terminal
+#: `run_status(stopped)`. Each is one SELECT and one event; one still running past the bound is named in a warning
+#: and left to finish - waited for, never cancelled.
+CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC = 5.0
+
+
+def _publication_task_name(run_id: Any) -> str:
+    return f"simulator-closed-trustlines:{run_id}"
+
+
+def pending_closed_trustlines_publications(run_id: str) -> list[asyncio.Task]:
+    """The run's closed-line publications scheduled and not yet done (054-A review FD4)."""
+
+    name = _publication_task_name(run_id)
+    return [task for task in list(_PENDING_PUBLICATIONS) if not task.done() and task.get_name() == name]
+
+
+async def drain_closed_trustlines_publications(run_id: str) -> None:
+    """Wait, at most `CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC`, for the run's pending closed-line publications.
+
+    054-A review FD4: a committed tick payment that completes a requested close schedules its publication from the
+    synchronous post-commit callback, and nothing awaits it - so the heartbeat drain of a `stop()` does not cover it,
+    and `topology.changed` could follow `stopped`, which ends the live stream. `stop()` calls this after the drain."""
+
+    pending = pending_closed_trustlines_publications(run_id)
+    if not pending:
+        return
+    _done, still = await asyncio.wait(pending, timeout=CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC)
+    if still:
+        logging.getLogger(__name__).warning(
+            "simulator.sse.trustline_closed_publication_drain_timeout run_id=%s pending=%d timeout_sec=%s",
+            run_id,
+            len(still),
+            CLOSED_TRUSTLINES_PUBLICATION_DRAIN_SEC,
+        )
+
 
 def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None:
     """`publish_closed_trustlines` from a synchronous post-commit callback: a task on the running loop.
@@ -804,7 +850,9 @@ def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None
     if not kwargs.get("pairs"):
         return None
     try:
-        task = asyncio.get_running_loop().create_task(publish_closed_trustlines(**kwargs))
+        task = asyncio.get_running_loop().create_task(
+            publish_closed_trustlines(**kwargs), name=_publication_task_name(kwargs.get("run_id"))
+        )
     except RuntimeError:
         logging.getLogger(__name__).warning("simulator.sse.trustline_closed_no_loop run_id=%s", kwargs.get("run_id"))
         return None

@@ -16,17 +16,30 @@ from app.core.payments.service import (
     PaymentTransactionUnusable,
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
-from app.core.simulator.rejection_codes import map_rejection_code
+from app.core.simulator.rejection_codes import (
+    SCRIPTED_SENDER_NOT_FOUND_REASON,
+    is_scenario_refusal,
+    map_rejection_code,
+)
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, schedule_closed_trustlines_publication
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.db.models.participant import Participant
+from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import (
     GeoException,
+    IntegrityViolationException,
     RetryablePaymentConflictException,
     TimeoutException,
 )
+from app.utils.request_id import request_id_var
+
+_logger = logging.getLogger(__name__)
+
+#: 054-A-7b: the `tx.failed.error.code` and `last_error.code` of a payment the core refused because a protocol or data
+#: integrity invariant was violated (`IntegrityViolationException`) - an ERROR of the run, never a business refusal.
+INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
 
 
 @dataclass(frozen=True)
@@ -257,15 +270,24 @@ class DeferredRealPaymentEffects:
                     and self.run._error_timestamps[0] < cutoff
                 ):
                     self.run._error_timestamps.popleft()
-                self.run.last_error = {
-                    "code": str(item.error_code or "INTERNAL_ERROR"),
-                    "message": str(
-                        (item.error_details or {}).get("message")
-                        or item.error_code
-                        or "INTERNAL_ERROR"
-                    ),
-                    "at": self.utc_now().isoformat(),
-                }
+                # 054-A-7c: a run the phase has already stopped (`fail_run` - the error budget, the timeouts of a tick, an
+                # integrity violation) keeps the STOP as its `last_error`: these observations are resolved after it (the
+                # stopped phase is rolled back), and until 054-A-7c the last of them overwrote the stop's code with its
+                # own (`INTERNAL_ERROR`, `PAYMENT_TIMEOUT`) - so a run stopped by its budget did not say so, and `resume`
+                # could not tell it from any other error. The payment's own code stays in its `tx.failed`.
+                # 054-A review FD3: the stop's `fail_run` now comes AFTER the stopped phase's observations
+                # (`RealTick.run_payments_phase`) and writes its code last; this guard still keeps it where the stop
+                # was carried out first - a phase that ended by an exception, whose rollback resolves them later.
+                if self.run.state != "error":
+                    self.run.last_error = {
+                        "code": str(item.error_code or "INTERNAL_ERROR"),
+                        "message": str(
+                            (item.error_details or {}).get("message")
+                            or item.error_code
+                            or "INTERNAL_ERROR"
+                        ),
+                        "at": self.utc_now().isoformat(),
+                    }
                 self.run.last_event_type = "tx.failed"
 
         error_code = str(item.error_code or "PAYMENT_REJECTED")
@@ -316,22 +338,65 @@ class RealPaymentsResult:
     unresolved_seqs: frozenset[int] = frozenset()
 
 
-def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
+def _internal_error_details(e: BaseException, *, logger: logging.Logger) -> dict[str, Any]:
+    """The public details of an INTERNAL payment failure (054-C-5) - and the one log line that explains it.
+
+    `err_details` is published as `tx.failed.error.details`/`error.message` and becomes the run's `last_error`, and
+    the simulator stream is not admin-only. An internal failure (not a `GeoException`, or one with the internal code
+    E010) is sanitised as the clearing routes sanitise it (`app/api/v1/clearing.py::_is_internal`): neither its raw
+    text nor its class leaves the process. The public side carries an error id instead, and the same id is in the
+    log line with the class and the traceback (AGENTS.md §12). The id is always fresh: a run's tick loop may inherit
+    the `request_id` of the request that started it, so the request id - when there is one - is logged beside it,
+    not used as it.
+    """
+
+    error_id = uuid.uuid4().hex
+    logger.warning(
+        "simulator.real.payment_internal_error error_id=%s error_type=%s request_id=%s",
+        error_id,
+        type(e).__name__,
+        request_id_var.get(),
+        exc_info=e,
+    )
+    return {
+        "error_id": error_id,
+        "message": f"The real-mode payment failed with an internal error (error id {error_id})",
+    }
+
+
+def _classify_refusal(
+    e: BaseException, *, logger: logging.Logger | None = None
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
     """(status, code, err_details) of a refused staged payment - one rule for a raised refusal and for
     a refusal returned as a structured `ABORTED` result (`StagedPaymentResult.refusal`, 019 `T1905`).
 
-    `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT or
-    INTERNAL_ERROR is an error of the run.
+    `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT,
+    INTEGRITY_VIOLATION or INTERNAL_ERROR is an error of the run. An internal failure gets sanitised details
+    (`_internal_error_details`).
+
+    054-A-7b: an `IntegrityViolationException` answers 409 like a conflict, and until 054-A-7b it was classified by that
+    status - a REJECTED payment with the generic code `PAYMENT_REJECTED`, counted as a refusal of the scenario. A
+    violated invariant is not an outcome of the scenario: it is the error `INTEGRITY_VIOLATION`, and the executor stops
+    the run on it (`execute_planned_payments`). Its details (the invariant and its violations) are the ones the refusal
+    always published.
     """
 
     code: str | None = "INTERNAL_ERROR"
     status: str | None = None
-    err_details: dict[str, Any] | None = {
-        "exc": type(e).__name__,
-        "message": str(e),
-    }
+    err_details: dict[str, Any] | None = None
 
-    if isinstance(e, TimeoutException):
+    if not isinstance(e, GeoException):
+        err_details = _internal_error_details(e, logger=logger or _logger)
+    elif isinstance(e, IntegrityViolationException):
+        code = INTEGRITY_VIOLATION
+        err_details = {
+            "exc": type(e).__name__,
+            "geo_code": getattr(e, "code", None),
+            "message": getattr(e, "message", str(e)),
+            "details": getattr(e, "details", None),
+            "status_code": int(getattr(e, "status_code", 409) or 409),
+        }
+    elif isinstance(e, TimeoutException):
         code = "PAYMENT_TIMEOUT"
         err_details = {
             "exc": type(e).__name__,
@@ -344,13 +409,17 @@ def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[st
         if 400 <= geo_status < 500:
             status = "REJECTED"
             code = None
-        err_details = {
-            "exc": type(e).__name__,
-            "geo_code": getattr(e, "code", None),
-            "message": getattr(e, "message", str(e)),
-            "details": getattr(e, "details", None),
-            "status_code": geo_status,
-        }
+        if getattr(e, "code", None) == ErrorCode.E010.value:
+            # The internal code: its message may carry private detail (`clearing.py::_is_internal`).
+            err_details = _internal_error_details(e, logger=logger or _logger)
+        else:
+            err_details = {
+                "exc": type(e).__name__,
+                "geo_code": getattr(e, "code", None),
+                "message": getattr(e, "message", str(e)),
+                "details": getattr(e, "details", None),
+                "status_code": geo_status,
+            }
     return status, code, err_details
 
 
@@ -383,6 +452,20 @@ class RealPaymentsExecutor:
         self._should_warn_this_tick = should_warn_this_tick
         self._sim_idempotency_key = sim_idempotency_key
 
+    def _log_integrity_violation(self, *, run: RunRecord, tx_id: str, code: str | None, details: Any) -> None:
+        """054-A-7b: one ERROR line per payment refused for a violated invariant - the run, the payment and the invariant."""
+
+        if code != INTEGRITY_VIOLATION:
+            return
+        inner = (details or {}).get("details") if isinstance(details, dict) else None
+        self._logger.error(
+            "simulator.real.payment_integrity_violation run_id=%s tick=%s tx_id=%s invariant=%s",
+            str(run.run_id),
+            int(run.tick_index or 0),
+            tx_id,
+            (inner or {}).get("invariant") if isinstance(inner, dict) else None,
+        )
+
     async def execute_planned_payments(
         self,
         *,
@@ -400,6 +483,8 @@ class RealPaymentsExecutor:
         rejected = 0
         errors = 0
         timeouts = 0
+        # 054-A-7a review: the refusals of this tick that are the scenario's own (`is_scenario_refusal`).
+        scenario_refusals = 0
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
         deferred_effects = DeferredRealPaymentEffects(
@@ -476,7 +561,7 @@ class RealPaymentsExecutor:
                     str(action.amount),
                     "REJECTED",
                     None,
-                    {"reason": "SENDER_NOT_FOUND"},
+                    {"reason": SCRIPTED_SENDER_NOT_FOUND_REASON},
                     0.0,
                     [],
                     None,
@@ -539,7 +624,8 @@ class RealPaymentsExecutor:
                     if staged.refusal is not None:
                         # A definitive refusal recorded ABORTED in this savepoint (019 `T1905`): durable
                         # with the tick, and classified exactly as the same refusal raised used to be.
-                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal)
+                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal, logger=self._logger)
+                        self._log_integrity_violation(run=run, tx_id=tx_id or idem, code=refused_code, details=refused_details)
                         return (
                             int(action.seq),
                             str(action.equivalent),
@@ -611,7 +697,8 @@ class RealPaymentsExecutor:
                     # progress rather than as an error, and it does not spend the error budget.
                     raise
                 except Exception as e:
-                    status, code, err_details = _classify_refusal(e)
+                    status, code, err_details = _classify_refusal(e, logger=self._logger)
+                    self._log_integrity_violation(run=run, tx_id=idem, code=code, details=err_details)
                     if status is None:
                         # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
                         # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
@@ -667,7 +754,7 @@ class RealPaymentsExecutor:
             d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
         def _record_if_ready() -> None:
-            nonlocal next_seq, committed, rejected, errors, timeouts
+            nonlocal next_seq, committed, rejected, errors, timeouts, integrity_violation, scenario_refusals
             while True:
                 item = ready.get(next_seq)
                 if item is None:
@@ -692,6 +779,10 @@ class RealPaymentsExecutor:
                 if err_code is not None:
                     errors += 1
                     _inc(eq, "errors")
+                    if err_code == INTEGRITY_VIOLATION and integrity_violation is None:
+                        inner = (err_details or {}).get("details") if isinstance(err_details, dict) else None
+                        integrity_violation = str((inner or {}).get("invariant") or "unnamed") if isinstance(
+                            inner, dict) else "unnamed"
                     for a, b in edges_pairs:
                         _edge_inc(eq, a, b, "attempts")
                         _edge_inc(eq, a, b, "errors")
@@ -765,6 +856,8 @@ class RealPaymentsExecutor:
                                     exc_info=True,
                                 )
                             rejection_code = "PAYMENT_REJECTED"
+                        if is_scenario_refusal(rejection_code, err_details):
+                            scenario_refusals += 1
 
                         deferred_effects.items.append(
                             _PaymentObservation(
@@ -787,6 +880,10 @@ class RealPaymentsExecutor:
 
         stop_requested = False
         timeout_stop_triggered = False
+        # 054-A-7b: the invariant of the first payment refused for a violated invariant, once it is recorded; the run is
+        # stopped on it (`INTEGRITY_VIOLATION`, terminal for `resume`), and the tick's money phase is rolled back whole.
+        integrity_violation: str | None = None
+        integrity_stop_triggered = False
 
         try:
             if tasks:
@@ -849,6 +946,23 @@ class RealPaymentsExecutor:
                                 exc_info=True,
                             )
                         stop_requested = True
+
+                    if integrity_violation is not None and not integrity_stop_triggered:
+                        integrity_stop_triggered = True
+                        try:
+                            await fail_run(
+                                run_id,
+                                INTEGRITY_VIOLATION,
+                                f"A payment was refused because the integrity invariant {integrity_violation} was "
+                                f"violated; the run is stopped",
+                            )
+                        except Exception:
+                            self._logger.warning(
+                                "simulator.real.fail_run_after_integrity_violation_failed run_id=%s",
+                                str(run_id),
+                                exc_info=True,
+                            )
+                        stop_requested = True
         finally:
             for task in tasks:
                 if not task.done():
@@ -871,12 +985,19 @@ class RealPaymentsExecutor:
             # all-rejected ATTEMPTED ticks. At the slow step the attempted ticks are 2-3 ticks apart; a reset on the
             # empty ticks between them would keep the Stall plaque (threshold 3) from ever appearing. At intensity 0
             # nothing is being attempted, so an empty tick clears it as before (no stale plaque on a stopped tempo).
+            # 054-A-7a review (owner, 2026-10-30): a tick with nothing committed and no error counts when AT LEAST ONE of
+            # its refusals is the SCENARIO's - routing, capacity, the line's policy (`is_scenario_refusal`) - whatever
+            # the others are: in a run of two equivalents the stop of one must not silence the stall of the other
+            # (review P3-1). A tick with no refusal of the scenario at all (only an equivalent the operator stopped or
+            # held for integrity, `MoneyBoundary.MONEY_STOP_REASONS`; a participant out of circulation; an invalid
+            # input), or one cut short by a stop of the run, is NEUTRAL like an empty share: the counter neither grows
+            # nor resets, so a restarted equivalent continues the run where it was.
             empty_share = is_empty_share(run, len(planned))
             if len(planned) > 0:
-                if committed == 0 and errors == 0:
-                    run._real_consec_all_rejected_ticks += 1
-                else:
+                if committed > 0 or errors > 0:
                     run._real_consec_all_rejected_ticks = 0
+                elif scenario_refusals > 0 and not stop_requested:
+                    run._real_consec_all_rejected_ticks += 1
             elif not empty_share:
                 run._real_consec_all_rejected_ticks = 0
 
@@ -1036,7 +1157,7 @@ class RealPaymentsExecutor:
 
     def _refusal_observation(self, *, run_id: str, run: RunRecord, emitter: SseEventEmitter, action: Any,
                              cause: BaseException) -> "DeferredRealPaymentEffects":
-        _status, code, err_details = _classify_refusal(cause)
+        _status, code, err_details = _classify_refusal(cause, logger=self._logger)
         if code is not None:
             outcome: Literal["committed", "rejected", "error"] = "error"
             error_code = str(code)

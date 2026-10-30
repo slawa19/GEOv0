@@ -53,6 +53,7 @@ from app.core.simulator.real_scenario_seeder import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription, bump_topology_epoch
+from app.core.simulator.runtime_utils import published_state, run_to_status
 from app.core.simulator.sse_broadcast import (
     SSE_SUBSCRIPTION_CLOSED_TYPE,
     SseEventEmitter,
@@ -478,6 +479,10 @@ def _action_error(
 #: 028 `T2864`: `resume` and `restart` re-enter `running` under the limits of create (`F-028-5`).
 _ENTRY_LIMIT_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
                          "limit of active runs is reached (E008, `details.conflict_kind`)"}
+#: 054-A-7c: `resume` also refuses a run that failed terminally (`details.reason = run_failed_terminal`).
+_RESUME_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
+                    "limit of active runs is reached (E008, `details.conflict_kind`); or the run failed terminally "
+                    "(E008, `details.reason = run_failed_terminal`, `details.code` = its `last_error.code`) - restart it"}
 
 
 def _flat_trustline_conflict(exc: ConflictException, details: dict, reasons: tuple[str, ...]) -> JSONResponse:
@@ -827,10 +832,17 @@ async def _resolve_participant_or_error(
     return row, None
 
 
+def _norm_equivalent(code: object) -> str:
+    """054-E-13: an equivalent code as the ledger stores it and events carry it (`EquivalentCode`), whatever the case it
+    was typed in. Every route that takes `equivalent` applies it on the way in; passed on as typed, `uah` was echoed in
+    bodies and an SSE subscription for it never matched an event (they carry `UAH`)."""
+    return str(code or "").strip().upper()
+
+
 async def _resolve_equivalent_or_error(
     *, session, code: str, reason: Optional[str] = None
 ) -> tuple[Optional[Equivalent], Optional[JSONResponse]]:
-    eq_code = str(code or "").strip().upper()
+    eq_code = _norm_equivalent(code)
     not_found = {"equivalent": eq_code, **({"reason": reason} if reason else {})}
     if not eq_code:
         return None, _action_error(
@@ -1194,8 +1206,9 @@ async def _publish_trustline_change_best_effort(
     """After a committed trust-line action: the run's in-memory topology, the router cache, `topology.changed`.
 
     All of it is best effort and never raises: the mutation is durable already, and nothing here may report it
-    as failed. `op` is `create` (the added edge with its limit and an edge patch), `update` (published only when
-    an edge patch could be built) or `close` (the removed edge, no patch - the UI needs the explicit removal).
+    as failed. `op` is `create` (the added edge with its limit and an edge patch), `update` (published with its edge
+    patch; when the patch could not be BUILT, without one - a patch-less event asks the UI to refresh its snapshot,
+    054-A-18) or `close` (the removed edge, no patch - the UI needs the explicit removal).
     """
 
     eq_code, from_pid, to_pid = parties.eq.code, parties.from_p.pid, parties.to_p.pid
@@ -1206,12 +1219,16 @@ async def _publish_trustline_change_best_effort(
     try:
         PaymentRouter.invalidate_cache(eq_code)
     except Exception:
-        pass
+        logger.warning(
+            "Router cache invalidation failed: interact.trustline_%s run_id=%s equivalent=%s",
+            op, run_id, eq_code, exc_info=True,
+        )
 
     try:
         run = runtime.get_run(run_id)
         emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
         edge_patch: list[dict[str, Any]] | None = None
+        patch_failed = False
         if op in ("create", "update"):
             try:
                 edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
@@ -1222,7 +1239,13 @@ async def _publish_trustline_change_best_effort(
                     include_width_keys=True,
                 )
             except Exception:
+                # 054-A-18: the change is committed; the event still goes out (below), only without the patch.
+                patch_failed = True
                 edge_patch = None
+                logger.warning(
+                    "Edge patch build failed: interact.trustline_%s run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+                    op, run_id, eq_code, from_pid, to_pid, exc_info=True,
+                )
 
         if op == "create":
             assert limit_dec is not None
@@ -1239,9 +1262,10 @@ async def _publish_trustline_change_best_effort(
                 edge_patch=(edge_patch or None),
             )
         elif op == "update":
-            if not edge_patch:
+            if not edge_patch and not patch_failed:
                 return
-            payload = TopologyChangedPayload(node_patch=None, edge_patch=edge_patch)
+            # A failed build publishes the change without a patch: the UI answers it with a snapshot refresh.
+            payload = TopologyChangedPayload(node_patch=None, edge_patch=(edge_patch or None))
         else:
             payload = TopologyChangedPayload(
                 removed_edges=[TopologyChangedEdgeRef(from_pid=from_pid, to_pid=to_pid, equivalent_code=eq_code)],
@@ -1787,6 +1811,8 @@ async def action_payment_real(
         )
     if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
         return err
+    # 054-A-17: the answer and `tx.updated` carry the moved value in the equivalent's form, not the request's spelling.
+    amount_s = _fmt_decimal_for_api(amount_dec, eq.precision)
 
     # 037 A1: with a client key the core is handed the DERIVED identity (`manual_payment_tx_id`), never the raw key.
     tx_id_hint: str | None = None
@@ -1907,7 +1933,7 @@ async def action_payment_real(
                 equivalent=eq_code,
                 from_pid=from_pid,
                 to_pid=to_pid,
-                amount=req.amount,
+                amount=amount_s,
                 amount_flyout=True,
                 ttl_ms=1200,
                 edges=edges,
@@ -1930,7 +1956,7 @@ async def action_payment_real(
         from_pid=from_pid,
         to_pid=to_pid,
         equivalent=eq_code,
-        amount=str(req.amount),
+        amount=amount_s,
         status=str(res.status),
         routes=_payment_routes_of(res),
         client_action_id=req.client_action_id,
@@ -2356,8 +2382,10 @@ async def action_trustlines_list(
         ).all()
         pid_to_id = {str(pid): pid_id for pid, pid_id in rows if pid and pid_id}
 
-    # Bulk fetch reverse debts for all participant pairs that appear in the list.
-    reverse_debt_map: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+    # 054-A-4: BOTH directions of a pair come from this one read - `used` (debtor = to_pid) and `reverse_used`
+    # (debtor = from_pid). Taking `used` from the snapshot and `reverse_used` from this later SELECT let a payment
+    # committed between the two show a positive debt both ways, a state the ledger never holds.
+    debt_map: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
     if pid_to_id:
         ids = sorted(set(pid_to_id.values()))
         debt_rows = (
@@ -2376,7 +2404,7 @@ async def action_trustlines_list(
                 continue
             if amount is None:
                 continue
-            reverse_debt_map[(debtor_id, creditor_id)] = amount
+            debt_map[(debtor_id, creditor_id)] = debt_map.get((debtor_id, creditor_id), Decimal("0")) + amount
 
     items: list[SimulatorActionTrustlineListItem] = []
     for from_pid, to_pid, link in active_links:
@@ -2388,7 +2416,11 @@ async def action_trustlines_list(
         to_id = pid_to_id.get(to_pid)
         reverse_used = Decimal("0")
         if from_id is not None and to_id is not None:
-            reverse_used = reverse_debt_map.get((from_id, to_id), Decimal("0"))
+            used = debt_map.get((to_id, from_id), Decimal("0"))
+            reverse_used = debt_map.get((from_id, to_id), Decimal("0"))
+            used_s = _fmt_decimal_for_api(used, eq.precision)
+            # Signed, never clamped (026 `T2602`), as the snapshot computes it - from the row's own `used`.
+            avail_s = _fmt_decimal_for_api(Decimal(limit_s) - used, eq.precision)
         reverse_used_s = _fmt_num_or_str(reverse_used)
 
         items.append(
@@ -2564,7 +2596,7 @@ async def _run_events_stream(
                 type="run_status",
                 run_id=run.run_id,
                 scenario_id=run.scenario_id,
-                state=run.state,
+                state=published_state(run),  # 054-A review FD2: `stopping` while a stop drains
                 sim_time_ms=run.sim_time_ms,
                 intensity_percent=run.intensity_percent,
                 ops_sec=run.ops_sec,
@@ -2572,6 +2604,7 @@ async def _run_events_stream(
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
+                pause_reason=run.pause_reason,
             ).model_dump(mode="json", by_alias=True)
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
             bootstrap_tail = (
@@ -2687,6 +2720,7 @@ async def graph_snapshot_active_run(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
@@ -2708,6 +2742,7 @@ async def ego_snapshot_active_run(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
@@ -2734,9 +2769,10 @@ async def events_stream_active_run(
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    equivalent = _norm_equivalent(equivalent)
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
 
-    # If there is no actual run (or mapping is stale), serve a stream with keep-alives only.
+    # If there is no actual run (or mapping is stale), answer a FINITE stream: when to reconnect, then the end.
     if run_id is not None:
         try:
             run = runtime.get_run(run_id)
@@ -2751,9 +2787,10 @@ async def events_stream_active_run(
             )
 
         async def idle_stream() -> AsyncIterator[str]:
-            while True:
-                yield ": keep-alive\n\n"
-                await asyncio.sleep(15)
+            # 054-C-3: this answer registers no subscription, so `SIMULATOR_SSE_MAX_CONNECTIONS` cannot count it; an
+            # endless keep-alive here let any number of streams be held open past the limit. One record, then EOF:
+            # an EventSource reconnects after `retry` and finds the run once there is one.
+            yield ": no active run\nretry: 15000\n\n"
 
         return StreamingResponse(
             idle_stream(),
@@ -2893,7 +2930,8 @@ async def scenario_graph_preview(
 ):
     """Preview the scenario graph topology without starting a run (the template's picture; 044: no database read)."""
     runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin)
-    return await runtime.build_scenario_preview(scenario_id=scenario_id, equivalent=equivalent, mode=mode, session=db)
+    return await runtime.build_scenario_preview(
+        scenario_id=scenario_id, equivalent=_norm_equivalent(equivalent), mode=mode, session=db)
 
 
 @router.post("/runs", response_model=RunCreateResponse)
@@ -2958,7 +2996,7 @@ async def pause_run(
     return await runtime.pause(run_id)
 
 
-@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _ENTRY_LIMIT_CONFLICT})
+@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _RESUME_CONFLICT})
 async def resume_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
@@ -3032,6 +3070,7 @@ async def run_events_stream(
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    equivalent = _norm_equivalent(equivalent)
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     try:
         sub, status_event_id = await runtime.subscribe_with_status(
@@ -3062,7 +3101,7 @@ async def graph_snapshot_for_run(
     db=Depends(deps.get_db),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
+    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=_norm_equivalent(equivalent), session=db)
 
 
 @router.get(
@@ -3081,7 +3120,7 @@ async def metrics_for_run(
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_metrics(
         run_id=run_id,
-        equivalent=equivalent,
+        equivalent=_norm_equivalent(equivalent),
         from_ms=from_ms,
         to_ms=to_ms,
         step_ms=step_ms,
@@ -3103,7 +3142,7 @@ async def bottlenecks_for_run(
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_bottlenecks(
         run_id=run_id,
-        equivalent=equivalent,
+        equivalent=_norm_equivalent(equivalent),
         limit=limit,
         min_score=min_score,
     )
@@ -3162,6 +3201,7 @@ async def admin_list_runs(
 
     items = []
     for run in page:
+        status = run_to_status(run)
         items.append({
             "run_id": run.run_id,
             "scenario_id": run.scenario_id,
@@ -3178,6 +3218,9 @@ async def admin_list_runs(
             "committed_total": run.committed_total,
             "rejected_total": run.rejected_total,
             "attempts_total": run.attempts_total,
+            # 054-A-7d: why a run stopped or paused itself, as `GET /runs/{id}` says it (same serialisation).
+            "last_error": status.last_error.model_dump(mode="json") if status.last_error is not None else None,
+            "pause_reason": status.pause_reason,
         })
 
     return {"items": items, "total": total, "limit": limit, "offset": offset}

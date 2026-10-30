@@ -33,6 +33,7 @@ from app.core.simulator.runtime_utils import (
     edges_by_equivalent as _edges_by_equivalent,
     local_state_dir as _local_state_dir,
     new_run_id as _new_run_id,
+    published_state as _published_state,
     run_to_status as _run_to_status,
     utc_now as _utc_now,
 )
@@ -456,7 +457,7 @@ class _SimulatorRuntimeBase:
             type="run_status",
             run_id=run.run_id,
             scenario_id=run.scenario_id,
-            state=run.state,
+            state=_published_state(run),
             sim_time_ms=run.sim_time_ms,
             intensity_percent=run.intensity_percent,
             ops_sec=run.ops_sec,
@@ -470,6 +471,7 @@ class _SimulatorRuntimeBase:
             current_phase=run.current_phase,
             last_error=_dict_to_last_error(run.last_error),
             consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
+            pause_reason=run.pause_reason,
         ).model_dump(mode="json", by_alias=True)
 
     def publish_run_status(self, run_id: str) -> str:
@@ -673,14 +675,23 @@ class _SimulatorRuntimeBase:
         # that failed (the usual way to get here: it is what failed the heartbeat too), the run is `error` in
         # memory and NOTHING of that was stored - the `simulator_runs` row would keep saying `running`. So the
         # state is made sure of here (for the case where `fail_run` could not even start) and the row is written.
+        failed_here = False
         with self._lock:
             run = self._runs.get(run_id)
             if run is not None and run.state == "running":
                 run.state = "error"
+                run.pause_reason = None
                 run.stopped_at = _utc_now()
                 run.current_phase = None
                 run.errors_total += 1
                 run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+                failed_here = True
+        if failed_here:
+            # 054-A-7d: the same line `fail_run` writes - this branch stops the run without it.
+            logger.error(
+                "simulator.run.failed run_id=%s code=%s errors_total=%d", str(run_id), "HEARTBEAT_FAILED",
+                int(run.errors_total),
+            )
         if run is None:
             return  # the registry no longer has the run: there is nothing left to mark or to store
         try:
