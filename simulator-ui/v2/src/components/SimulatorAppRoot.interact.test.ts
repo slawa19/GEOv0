@@ -6157,7 +6157,8 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       real.lastError = renderRunErrorLine(line, 'en')
       await nextTick()
       const value = host.querySelector('[data-testid="top-error"] .ds-value')!
-      expect(value.textContent, 'the sentence with the code').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }))
+      // 054-B-7b (the owner's decision of 2026-10-30): the code, the server's message and its time are in the sentence.
+      expect(value.textContent, 'the sentence with the code and the message').toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed at step 12', at: 't' }))
       expect(value.getAttribute('title'), 'the server full text').toBe('REAL_MODE_TICK_FAILED: tick failed at step 12')
       // Counter-check: a line without a server text (the idle stop) keeps its own text as the title.
       real.lastErrorLine = { kind: 'dict', key: 'runLine.idleStopped' }

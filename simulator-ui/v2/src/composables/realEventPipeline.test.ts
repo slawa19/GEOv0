@@ -491,14 +491,16 @@ describe('031 item 17: the tick step refusal reaches the run error line', () => 
     return draft.real.lastError
   }
 
-  it('CLEARING_REFUSED is shown as the human text; the sanitised CLEARING_ERROR is still not shown', () => {
+  // 054-B-7b (the owner's decision of 2026-10-30): every real failure of a run that goes on is on its line with its code,
+  // message and time - the step refusal (its own human text is gone) and the sanitised CLEARING_ERROR too (it was the
+  // «still not shown» half until 054).
+  it('CLEARING_REFUSED and the sanitised CLEARING_ERROR are shown with their code and message', () => {
     document.documentElement.lang = 'en'
     expect(apply(statusWith({ code: 'CLEARING_REFUSED', message: 'server hint', at: TS })))
-      .toBe('Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.')
-    expect(apply(statusWith({ code: 'CLEARING_ERROR', message: 'Internal error', at: TS }))).toBe('')
-    // 048 S3 (decision 3): a user-facing code of a run that goes on is a sentence (was `CODE: message`); 049 S2 (decision 7):
-    // without the code in brackets - the code is the line's title and console line.
-    expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe('Something failed during the run; the run goes on.')
+      .toBe(`Something failed during the run: CLEARING_REFUSED — server hint (${TS}); the run goes on.`)
+    expect(apply(statusWith({ code: 'CLEARING_ERROR', message: 'Internal error', at: TS })))
+      .toBe(`Something failed during the run: CLEARING_ERROR — Internal error (${TS}); the run goes on.`)
+    expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe(`Something failed during the run: INTERNAL_ERROR — boom (${TS}); the run goes on.`)
   })
 
   it('BACKLOG 037-5 (a): the error a run STOPPED with is shown whatever its code; the same code on a live run is not', () => {
@@ -506,8 +508,9 @@ describe('031 item 17: the tick step refusal reaches the run error line', () => 
     // 046 wave 1, full (2026-10-19; 048 S2 hand-over P2-2, 046 decision 3): the line of a run ENDED by an error is the
     // interface's sentence with the code and the way back (reload); the server's English prose is not shown (was
     // `CODE: message`). The code is still on the line - the correlation of AGENTS.md section 12.
-    expect(apply(statusWith(stoppedBy, 'error'))).toBe(t('runLine.errorStopped', { code: 'SCENARIO_TRUSTLINE_REFUSED' }, 'en'))
-    expect(apply(statusWith(stoppedBy, 'error'))).not.toContain(stoppedBy.message)
+    // 054-B-7b (the owner's decision of 2026-10-30): the server's message and its time are drawn too; a restart, not a reload.
+    expect(apply(statusWith(stoppedBy, 'error'))).toBe(t('runLine.errorStopped', { code: 'SCENARIO_TRUSTLINE_REFUSED', message: stoppedBy.message, at: TS }, 'en'))
+    expect(apply(statusWith(stoppedBy, 'error'))).toContain(stoppedBy.message)
     // anti-vacuum: the list of user-facing codes still decides for a run that goes on
     expect(apply(statusWith(stoppedBy))).toBe('')
     // a stopped run without an error has nothing to show

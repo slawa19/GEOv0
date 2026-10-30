@@ -2162,7 +2162,10 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
 
 describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1)', () => {
-  it('a CLEARING_REFUSED run error read by REST status is the human step text, not the raw server message', async () => {
+  // 054-B-7b (the owner's decision of 2026-10-30) turns this over: the step refusal is told like every real failure - its
+  // code, the server's message and its time in the text (its own human text is gone); a real failure of a running run
+  // (REAL_MODE_*) is shown too. The anti-vacuum is now a refusal of a payment: not a failure of the run, not shown.
+  it('a CLEARING_REFUSED run error read by REST status shows its code and the server message', async () => {
     const real = createRealState()
     const getRunMock = vi.mocked(getRun)
     const prevGetRunImpl = getRunMock.getMockImplementation()
@@ -2198,8 +2201,9 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
 
       // attach is one of the three REST status paths (reconnect, stop, attach) sharing one refresh
       await h.attachToRun('r1')
-      expect(real.lastError).toBe(runErrorText(refused))
-      expect(real.lastError).not.toContain(refused.message)
+      expect(real.lastError).toBe(t('runLine.errorStopped', { code: refused.code, message: refused.message, at: refused.at }))
+      expect(real.lastError).toContain(refused.message)
+      expect(runErrorText(refused)).toContain(refused.message)
 
       // anti-vacuum: another user-facing code still keeps CODE: message on the same path. 046 wave 1, full (2026-10-19):
       // on a run that goes on - a run ENDED by an error has its own sentence since (below). 048 S3: a run that goes on
@@ -2210,7 +2214,7 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         last_error: { code: 'INTERNAL_ERROR', message: 'boom', at: 't' },
       }))
       await h.refreshRunStatus()
-      expect(real.lastError).toBe(t('runLine.runningError', { code: 'INTERNAL_ERROR' }))
+      expect(real.lastError).toBe(t('runLine.runningError', { code: 'INTERNAL_ERROR', message: 'boom', at: 't' }))
       expect(runErrorLineLog(real.lastErrorLine)).toBe('INTERNAL_ERROR: boom')
 
       // BACKLOG 037-5 (a): a run in `error` shows the error it stopped with, whatever its code (page reload / attach path)
@@ -2222,12 +2226,20 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       await h.refreshRunStatus()
       // 046 wave 1, full (2026-10-19; 048 S2 hand-over P2-2, 046 decision 3): the code and the way back, in the language of
       // the interface - not the server's prose.
-      expect(real.lastError).toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED' }, 'en'))
-      // anti-vacuum: the same code on a run that is not stopped stays hidden
+      expect(real.lastError).toBe(t('runLine.errorStopped', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }, 'en'))
+      // 054-B-7b: the same real failure on a run that goes on is shown too
       getRunMock.mockImplementation(async () => ({
         ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
         state: 'running',
         last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' },
+      }))
+      await h.refreshRunStatus()
+      expect(real.lastError).toBe(t('runLine.runningError', { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' }, 'en'))
+      // anti-vacuum: a refusal of a payment on a run that goes on is not a failure of the run - no line
+      getRunMock.mockImplementation(async () => ({
+        ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
+        state: 'running',
+        last_error: { code: 'ROUTING_NO_CAPACITY', message: 'no capacity', at: 't' },
       }))
       await h.refreshRunStatus()
       expect(real.lastError).toBe('')

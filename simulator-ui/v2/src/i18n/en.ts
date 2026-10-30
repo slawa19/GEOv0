@@ -752,9 +752,10 @@ export const en = {
      * not shown; the code correlates).
      */
     stopped: 'The run was stopped. To start again, reload the page.',
-    errorStopped: 'The demo stopped because of an error. Reload the page to start a new run.',
-    /** 048 S3: a user-facing code of a run that goes on - the code correlates; the server's `CODE: message` is the title. */
-    runningError: 'Something failed during the run; the run goes on.',
+    /** 054-B-7b (the owner's decision of 2026-10-30): the code, the server's message and its time are in the text. */
+    errorStopped: 'The run stopped: {code} — {message} ({at}). Restart the run.',
+    /** 054-B-7b: a real failure of a run that goes on - its code, message and time; the `CODE: message` is the title too. */
+    runningError: 'Something failed during the run: {code} — {message} ({at}); the run goes on.',
     /** 054-B-7a: a run the server paused because its scenario's automatic payments are used up (`pause_reason`). */
     scenarioExhausted: "The scenario's automatic payments are used up; pay by hand or restart.",
   },
