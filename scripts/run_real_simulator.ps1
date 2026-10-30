@@ -5,16 +5,13 @@
 .DESCRIPTION
   Brings up everything needed to test the real simulator via simulator-ui/v2:
   - Postgres + Redis + API (Docker Compose)
-  - Optional DB seeding (a community's recipe run through the domain services; off by default)
+  - No DB seeding: the Compose database `geov0` is not a disposable seed target (see -Community)
   - Simulator UI v2 in Real Mode (Vite dev server with /api/v1 proxy)
 
   Designed for Windows PowerShell 5.1+ / PowerShell 7+.
 
 .EXAMPLE
   ./scripts/run_real_simulator.ps1
-
-.EXAMPLE
-  ./scripts/run_real_simulator.ps1 -Community riverside-town-50
 
 .EXAMPLE
   ./scripts/run_real_simulator.ps1 -Action doctor
@@ -31,10 +28,11 @@ param(
   [int]$ApiPort = 8000,
   [int]$SimulatorUiPort = 5176,
 
-  # Community whose recipe seeds the DB (scripts/seed_db.py --source recipe). 'none' (the default) disables
-  # seeding: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3) deleted the
-  # direct import of fixture packs; the recipe seeds only an EMPTY, disposable database by name
-  # (geov0_dev_<slug> / geov0_test_<slug> on a loopback host) and refuses the Compose database `geov0`.
+  # Only 'none' is accepted: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3)
+  # deleted the direct import of fixture packs; the recipe (scripts/seed_db.py --source recipe) seeds only an
+  # EMPTY, disposable database by name (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database
+  # `geov0` (docker-compose.yml DATABASE_URL), so -Action seed and start with a community are refused below, before
+  # any Docker or lifecycle mutation (054-G-9: they used to fail only after `docker compose up -d --build`).
   [ValidateSet('greenfield-village-100', 'riverside-town-50', 'none')]
   [string]$Community = 'none',
 
@@ -52,6 +50,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# -Community matters only to start (stop and doctor never read it, so they keep ignoring it).
+if ($Action -eq 'seed' -or ($Action -eq 'start' -and $Community -ne 'none')) {
+  throw ("Seeding is not available here: scripts/seed_db.py --source recipe seeds only an empty disposable " +
+    "database (geov0_dev_<slug> / geov0_test_<slug>) and refuses the Compose database 'geov0'. Seed a launcher " +
+    "database instead: ./scripts/run_local.ps1 reset-db -SeedCommunity <community>, or scripts/seed_db.py " +
+    "--source recipe --community <community> with DATABASE_URL on a geov0_dev_<slug> database. " +
+    "The real simulator seeds its own scenario at run start; run this script without -Community / -Action seed.")
+}
 
 $script:UserSpecifiedApiPort = $PSBoundParameters.ContainsKey('ApiPort')
 $script:UserSpecifiedRedisPort = $PSBoundParameters.ContainsKey('RedisPort')
@@ -519,13 +526,45 @@ function Seed-DbIfRequested() {
   Invoke-Docker (@('exec','geov0-app') + $args) | Out-Host
 }
 
+# 054-G-1: Get-NetTCPConnection is the primary probe, but some hosts (agent sandboxes) answer it with no
+# socket at all while netstat lists the listeners. When it returns 0 objects or throws, the listener is
+# looked up in `netstat -ano` by COLUMNS, not by the state word (localized on non-English Windows): TCP,
+# a local address ending in :<port> (IPv4 or [IPv6]), the unspecified foreign address 0.0.0.0:0 / [::]:0
+# that only a listening socket has, and a numeric PID. $script:ListenerProbeNote records what the last
+# probe saw, so a refusal can name it. The same lookup is copied in run_local.ps1, run_full_stack.ps1,
+# run_real_simulator.ps1 and run_simulator_ui.ps1 (the launchers share no module).
 function Get-ListeningPid {
   param([int]$Port)
+  $primary = $null
   try {
-    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1
-    if ($connection -and $connection.OwningProcess) { return [int]$connection.OwningProcess }
-  } catch {}
-  return $null
+    $conn = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop) |
+      Where-Object { $_ -and $_.OwningProcess } | Select-Object -First 1
+    if ($conn) {
+      $script:ListenerProbeNote = "Get-NetTCPConnection found listener PID $($conn.OwningProcess) on port $Port"
+      return [int]$conn.OwningProcess
+    }
+    $primary = 'Get-NetTCPConnection returned 0 objects'
+  } catch {
+    $primary = "Get-NetTCPConnection threw $($_.Exception.GetType().FullName)"
+  }
+  $fallbackPid = $null
+  try {
+    foreach ($line in @(& netstat.exe -ano 2>$null)) {
+      $columns = @(([string]$line).Trim() -split '\s+')
+      if ($columns.Count -ne 5 -or $columns[0] -ne 'TCP') { continue }
+      if ($columns[2] -ne '0.0.0.0:0' -and $columns[2] -ne '[::]:0') { continue }
+      if ($columns[1] -notmatch ':(\d{1,5})$' -or [int]$Matches[1] -ne $Port) { continue }
+      if ($columns[4] -notmatch '^\d+$' -or [int]$columns[4] -le 0) { continue }
+      $fallbackPid = [int]$columns[4]
+      break
+    }
+    $fallback = if ($fallbackPid) { "netstat fallback found LISTENING PID $fallbackPid" } else { 'netstat fallback found no LISTENING socket' }
+  } catch {
+    $fallback = "netstat fallback threw $($_.Exception.GetType().FullName)"
+  }
+  $script:ListenerProbeNote = "$primary; $fallback"
+  Write-Verbose "Port ${Port}: $($script:ListenerProbeNote)"
+  return $fallbackPid
 }
 
 function Get-RunRealRepositoryIdentity {
@@ -699,7 +738,7 @@ function Wait-ForRunRealSimulatorOwnership {
       Start-Sleep -Milliseconds 500
     }
     if (-not $persisted) {
-      throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
+      throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds ($($script:ListenerProbeNote))."
     }
   } catch {
     $primaryFailure = $_.Exception
@@ -847,14 +886,6 @@ if ($Action -eq 'stop') {
   Write-Host 'Stopping all simulator services...'
   Stop-RunRealServices
   Write-Host 'All simulator services stopped.' -ForegroundColor Green
-  exit 0
-}
-
-if ($Action -eq 'seed') {
-  Ensure-ComposeCore
-  Seed-DbIfRequested
-  Write-Host 'OK: seed completed.'
-  Write-UsefulLinks
   exit 0
 }
 

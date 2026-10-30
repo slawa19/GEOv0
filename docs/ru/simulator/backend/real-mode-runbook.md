@@ -42,8 +42,7 @@
 
 - `./scripts/run_local.ps1 status`
 - `./scripts/run_local.ps1 stop`
-- `./scripts/run_local.ps1 restart-backend` (exact single-process ownership;
-  `-ReloadBackend` намеренно отклоняется до остановки сервисов)
+- `./scripts/run_local.ps1 restart-backend` (exact single-process ownership, без `--reload`)
 
 Проверка, что backend жив:
 
@@ -80,16 +79,20 @@
 
 Simulator UI v2 — отдельный Vite‑прототип.
 
-Из корня репозитория:
+Из корня репозитория, против запущенного backend (Real Mode):
 
-- `./scripts/run_simulator_ui.ps1`
+- `./scripts/run_simulator_ui.ps1 -Mode real -BackendOrigin http://127.0.0.1:<порт backend>` (порт `run_local.ps1` по умолчанию — 18000)
+
+Без флагов скрипт стартует в `-Mode fixtures` — офлайн-снимок без backend (печатает `?mode=fixtures&debug=1`).
 
 По умолчанию:
 
-- порт: 5176
-- host: 127.0.0.1
+- порт: 5176 (`-Port`)
+- host: 127.0.0.1 (`-HostName`)
 
 Скрипт аккуратно обходит «зарезервированные» Windows порты (excludedportrange) и подбирает альтернативный, если надо.
+
+Для Interact (действия участников) backend поднимайте через `./scripts/run_full_stack.ps1`, а не через `run_local.ps1`: только он выставляет `SIMULATOR_ACTIONS_ENABLE=1`, а также `SIMULATOR_MAX_ACTIVE_RUNS=10` и `SIMULATOR_REAL_AMOUNT_CAP=500`, если они не заданы в окружении процесса (блок `SIMULATOR_*` в `scripts/run_full_stack.ps1` перед запуском backend; значение из `.env` он при этом перекрывает). `run_local.ps1` их не выставляет: если они не заданы в shell или в `.env` (`app/config.py:128`, `env_file=".env"`), backend работает на умолчаниях `app/config.py` — действия выключены (`403 ACTIONS_DISABLED`), один активный прогон на процесс, без потолка суммы. `run_full_stack.ps1` сам поднимает и Simulator UI в режиме real на порту `-SimulatorUiPort` (5176 по умолчанию; адрес `http://localhost:5176/?mode=real` скрипт печатает в конце), поэтому `run_simulator_ui.ps1` после него не нужен: на том же порту он ответит «already running».
 
 ---
 

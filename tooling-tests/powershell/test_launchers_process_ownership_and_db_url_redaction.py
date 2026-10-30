@@ -1689,19 +1689,67 @@ def test_run_local_status_branch_is_filesystem_read_only() -> None:
     assert "Get-RunLocalOwnershipPlan" in status_branch
 
 
-def test_run_local_rejects_reload_before_any_lifecycle_mutation() -> None:
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_refuses_reload_at_parameter_binding_before_any_lifecycle_mutation(
+    powershell: Path, tmp_path: Path
+) -> None:
+    """Uvicorn reload delegates the listener to a child process, so it cannot satisfy exact
+    launched-PID/listener ownership. Since 054-G-10 the launcher has no reload switch at all:
+    PowerShell refuses `-ReloadBackend` while binding parameters, before any statement of the
+    script body runs - so before the lifecycle lock and before any service is stopped.
+
+    The script runs from a copy under `tmp_path` (its repository root is `$PSScriptRoot/..`), with
+    the read-only `status` action, so a regression that re-admits the switch cannot touch the
+    checkout. The error is matched by its FullyQualifiedErrorId: the message is localized.
+
+    Unlike the dot-sourced cases above, this one INVOKES a `.ps1` file, so the host's execution
+    policy applies: Windows PowerShell with every scope `Undefined` is `Restricted` and answers
+    `UnauthorizedAccess` before binding. `-ExecutionPolicy Bypass` (process scope) states the
+    policy instead of inheriting it from `PSExecutionPolicyPreference` of whoever runs the tier.
+    """
     source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
 
-    rejection = source.index("if ($ReloadBackend) {")
-    lock = source.index("Enter-LauncherLifecycleLock", rejection)
+    assert "ReloadBackend" not in source
+    assert "--reload" not in source.split("#>", 1)[1]
+    lock = source.index("Enter-LauncherLifecycleLock")
     restart_stop = source.index("Invoke-RunLocalOwnershipStopPlan -Services", lock)
     action_switch = source.index("switch ($Action)", restart_stop)
-
-    assert rejection < lock < restart_stop < action_switch
-    assert "restart-backend -ReloadBackend" not in source[:rejection]
+    assert lock < restart_stop < action_switch
     assert "$PSCommandPath" not in source
     assert "AllowInherited" not in source
     assert "GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN" not in source
+
+    copy = tmp_path / "scripts" / "run_local.ps1"
+    copy.parent.mkdir()
+    shutil.copyfile(_RUN_LOCAL, copy)
+    literal = str(copy).replace("'", "''")
+    command = (
+        f"try {{ & '{literal}' status -ReloadBackend; [Console]::Out.Write('NOT-REFUSED') }} "
+        "catch { [Console]::Out.Write($_.FullyQualifiedErrorId + '|' + "
+        "$_.Exception.GetType().FullName) }"
+    )
+    result = subprocess.run(
+        [
+            str(powershell), "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-Command", command,
+        ],
+        cwd=_ROOT,
+        env=os.environ.copy(),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("NamedParameterNotFound,"), result.stdout
+    assert result.stdout.endswith(
+        "|System.Management.Automation.ParameterBindingException"
+    ), result.stdout
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["scripts"]
+    assert [path.name for path in copy.parent.iterdir()] == ["run_local.ps1"]
 
 
 def test_replacement_paths_wait_for_owned_ports_to_be_released() -> None:
@@ -2732,3 +2780,103 @@ if (($script:RollbackCalls -join ',') -ne 'ui,compose') { throw 'Rollback order 
 _STOP_SUMMARY_WARNING = (
     "One or more services were not stopped because ownership was not proven."
 )
+
+
+# 054-G-1 (owner's decision 2026-10-30): in some hosts Get-NetTCPConnection sees no socket at all
+# while netstat lists the listeners, so every launcher fell back to "no listener" and rolled back a
+# healthy process. `Get-ListeningPid` now falls back to `netstat -ano`, parsed by columns. The four
+# launchers share no module, so each carries the function; each copy is exercised here. Both probes
+# are replaced by functions (a function named `netstat.exe` wins over the application), and the
+# netstat sample is LOCALIZED (ru-RU state words), so a parser keyed on `LISTENING` fails.
+_RUN_SIMULATOR_UI = _ROOT / "scripts" / "run_simulator_ui.ps1"
+_NETSTAT_FALLBACK_BODY = r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-ListeningPid')
+$script:Primary = 'throw'
+$script:NetstatCalls = 0
+function Get-NetTCPConnection {
+    param([int]$LocalPort, [string]$State, $ErrorAction)
+    if ($script:Primary -eq 'throw') { throw [System.InvalidOperationException]::new('blind') }
+    if ($script:Primary -eq 'empty') { return }
+    return [pscustomobject]@{ OwningProcess = 555 }
+}
+function netstat.exe {
+    $script:NetstatCalls += 1
+    @(
+        '',
+        'Активные подключения',
+        '',
+        '  Имя    Локальный адрес        Внешний адрес          Состояние       PID',
+        '  TCP    0.0.0.0:30334          0.0.0.0:0              ПРОСЛУШИВАНИЕ   777',
+        '  TCP    0.0.0.0:30335          0.0.0.0:0              ПРОСЛУШИВАНИЕ   0',
+        '  TCP    0.0.0.0:3033           0.0.0.0:0              ПРОСЛУШИВАНИЕ   111',
+        '  TCP    127.0.0.1:30330        127.0.0.1:50000        ESTABLISHED     222',
+        '  TCP    [::1]:30330            [::]:0                 ПРОСЛУШИВАНИЕ   333',
+        '  TCP    [::]:30332             [::]:0                 ПРОСЛУШИВАНИЕ   444',
+        '  TCP    0.0.0.0:30332          0.0.0.0:0              ПРОСЛУШИВАНИЕ   445',
+        '  UDP    0.0.0.0:30331          *:*                                    666'
+    )
+}
+$results = @()
+$results += "30330=$(Get-ListeningPid -Port 30330)|$script:ListenerProbeNote"
+$results += "3033=$(Get-ListeningPid -Port 3033)"
+$results += "30332=$(Get-ListeningPid -Port 30332)"
+$results += "30331=$(Get-ListeningPid -Port 30331)|$script:ListenerProbeNote"
+$results += "30335=$(Get-ListeningPid -Port 30335)"
+$script:Primary = 'empty'
+$results += "empty=$(Get-ListeningPid -Port 30333)|$script:ListenerProbeNote"
+$script:Primary = 'object'
+$before = $script:NetstatCalls
+$results += "object=$(Get-ListeningPid -Port 30330)|netstat-calls=$($script:NetstatCalls - $before)"
+[Console]::Out.Write($results -join "`n")
+"""
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "launcher",
+    (_RUN_LOCAL, _RUN_FULL_STACK, _RUN_REAL_SIMULATOR, _RUN_SIMULATOR_UI),
+    ids=("run_local", "run_full_stack", "run_real_simulator", "run_simulator_ui"),
+)
+def test_listener_probe_falls_back_to_netstat_by_columns(
+    powershell: Path, launcher: Path
+) -> None:
+    result = _run_powershell(
+        powershell,
+        _AST_SETUP + _NETSTAT_FALLBACK_BODY,
+        extra_env={"PHASE7_SCRIPT_PATH": str(launcher)},
+    )
+    lines = result.stdout.split("\n")
+
+    assert lines[0] == (
+        "30330=333|Get-NetTCPConnection threw System.InvalidOperationException; "
+        "netstat fallback found LISTENING PID 333"
+    )
+    assert lines[1] == "3033=111"
+    assert lines[2] == "30332=444"
+    assert lines[3] == (
+        "30331=|Get-NetTCPConnection threw System.InvalidOperationException; "
+        "netstat fallback found no LISTENING socket"
+    )
+    # A port that is a PREFIX of a listed one (3033 vs 30334, listed first) and the first of two
+    # listeners on one port (444 before 445) pin the anchored, first-match parse; PID 0 is no owner.
+    assert lines[4] == "30335="
+    assert lines[5] == (
+        "empty=|Get-NetTCPConnection returned 0 objects; "
+        "netstat fallback found no LISTENING socket"
+    )
+    assert lines[6] == "object=555|netstat-calls=0"
+    assert len(lines) == 7
+
+
+def test_every_launcher_listener_lookup_goes_through_the_fallback_probe() -> None:
+    """Source guard, not a behavioural proof: the one `Get-NetTCPConnection` call of each launcher is
+    the one inside `Get-ListeningPid`, so no `Get-NetTCPConnection -LocalPort` lookup bypasses the
+    netstat fallback. It does not see a lookup written with another API or without `-LocalPort`, and
+    `run_simulator_ui.ps1` decides that a port is busy (and searches a free one) by a TCP connect
+    (`Test-TcpOpen`), not by this lookup."""
+    for launcher in (_RUN_LOCAL, _RUN_FULL_STACK, _RUN_REAL_SIMULATOR, _RUN_SIMULATOR_UI):
+        source = launcher.read_text(encoding="utf-8-sig")
+        function = source.split("function Get-ListeningPid {", 1)[1]
+        assert source.count("Get-NetTCPConnection -LocalPort") == 1, launcher.name
+        assert "Get-NetTCPConnection -LocalPort" in function.split("\nfunction ", 1)[0], launcher.name
