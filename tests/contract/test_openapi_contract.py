@@ -151,8 +151,12 @@ TRANSPORT_HEADER_DRIFT_COUNT = 56
 # `PATCH /admin/config`: the generated side gains `required: [updates]`, which the canon has always declared, so the
 # entry moves towards the canon and keeps only its `additionalProperties` difference. Measured with a per-entry dump of
 # this ledger on `66f29397` and on this tree (not committed): those three leaf changes are the whole difference.
+# 2026-10-30 / programme 054 E-16 (`/admin/config` part): count HOLDS at 13, digest moves. `PATCH /admin/config`
+# gains `updates.minProperties: 1` on BOTH sides (canon and `Field(min_length=1)`); an empty `updates` was a 200 with
+# an audit row about nothing, now a declared 422. The entry keeps only its `additionalProperties` difference; no other
+# request schema is touched (the only other canon edit, 054-E-14, is an SSE event schema no request body references).
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "1ed65736ad3f289e048455648792042f08b04c2391445a6e3f5a8bc229724724"
+    "52a9d58560faa9df97a1ae974af64beed6957c5d42b3c819320d6b3c5e4c5af2"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides

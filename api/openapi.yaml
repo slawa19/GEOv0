@@ -4340,6 +4340,7 @@ components:
       properties:
         updates:
           type: object
+          minProperties: 1
           additionalProperties: true
         reason:
           type: string
