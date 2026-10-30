@@ -1787,6 +1787,8 @@ async def action_payment_real(
         )
     if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
         return err
+    # 054-A-17: the answer and `tx.updated` carry the moved value in the equivalent's form, not the request's spelling.
+    amount_s = _fmt_decimal_for_api(amount_dec, eq.precision)
 
     # 037 A1: with a client key the core is handed the DERIVED identity (`manual_payment_tx_id`), never the raw key.
     tx_id_hint: str | None = None
@@ -1907,7 +1909,7 @@ async def action_payment_real(
                 equivalent=eq_code,
                 from_pid=from_pid,
                 to_pid=to_pid,
-                amount=req.amount,
+                amount=amount_s,
                 amount_flyout=True,
                 ttl_ms=1200,
                 edges=edges,
@@ -1930,7 +1932,7 @@ async def action_payment_real(
         from_pid=from_pid,
         to_pid=to_pid,
         equivalent=eq_code,
-        amount=str(req.amount),
+        amount=amount_s,
         status=str(res.status),
         routes=_payment_routes_of(res),
         client_action_id=req.client_action_id,
