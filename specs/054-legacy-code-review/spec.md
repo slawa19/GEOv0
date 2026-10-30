@@ -42,11 +42,24 @@
 
 | ID | Severity / класс | Где (`path:line` на `66f29397`) | Суть | Кто нашёл | Воспроизведено | Влияние на другие части | Приоритет / волна | Статус |
 |---|---|---|---|---|---|---|---|---|
-| — | — | — | срезы запущены 2026-10-30 | — | — | — | — | — |
+| 054-C-1 | P3 / класс 2 | `app/core/simulator/session.py:61-64`; входы `app/api/v1/simulator.py:157-166`, `app/api/deps.py:316-325` | Не-ASCII подпись в cookie `geo_sim_sid` → `TypeError` в `hmac.compare_digest(str, str)` → 500 E010 вместо «нет сессии»; cookie HttpOnly, посетитель не восстановится до TTL; `/session/ensure` вне rate limit | Opus R1a | да, W1 ×2 RED (`assert 500 == 200`, `assert 500 == 401`) | два вызывающих `validate_session`; OpenAPI не задет | волна C, узко: сравнение bytes / `None` при не-ASCII | `[ ]` |
+| 054-C-2 | P2 / класс 2 | `app/api/deps.py:43-49`, `app/config.py:234`, `app/core/simulator/run_lifecycle.py:113-128`, `runtime_impl.py:707-714` | Один клиент занимает все N мест публичного демо: свежие cookie выдаются без лимита, лимит «1 run на владельца» обходится; живая SSE-подписка держит run от остановки по простою | Opus R1b (P2), R1a | захват мест — да, W2 RED (третий посетитель 409 `global_active_limit`); удержание SSE — чтением | 044 Non-goals (без очереди и аутентификации посетителей); правка зависит от 054-C-4 (ключ клиента за прокси) | **решение владельца**: принять как потолок демо или ограничить выдачу сессий/run на клиента | `[?]` |
+| 054-C-3 | P3 / класс 2 (Codex: P2) | `app/api/v1/simulator.py:2753-2762`; `sse_broadcast.py:336-345`; `docs/ru/simulator/real-mode-runbook.md:259` | `GET /simulator/events` без активного run отдаёт бесконечный keep-alive, не учитываемый `SIMULATOR_SSE_MAX_CONNECTIONS`; runbook обещает 429 | Codex R2 (P2), Opus R1b | да, W3 RED (3 потока при лимите 2, `registered_subs=0`) | UI маршрут не использует (044-1); ответ описан в OpenAPI §8 | волна C: конечный ответ без run или учёт в лимите, одной правкой с 044-1 | `[ ]` |
+| 054-C-4 | P3 / класс 2, кандидат | `app/api/deps.py:66,86`, `docker/Dockerfile:38` | Ключ rate limit — `request.client.host`; uvicorn 0.27 доверяет XFF только от 127.0.0.1 (`FORWARDED_ALLOW_IPS` не задан) → за внешним прокси все посетители в одной корзине; при `*` обход подделкой XFF | Opus R1a, R1b | нет (зависит от топологии развёртывания) | тот же `client.host` в `audit.py:54`, `auth.py:33,96`; runbook §6.6 | документация оператора (runbook), без правки кода | `[ ]` |
+| 054-C-5 | P3 / класс 2 | `app/core/simulator/real_payments_executor.py:328-331,347-352`; `sse_broadcast.py:569-574`; `tick.py:492-496` | Сырой `str(e)` и имя класса исключения уходят в SSE `tx.failed.error.message/details` и `last_error.message` в обход очистки E010 | Opus R1a | нет (нужен реальный внутренний сбой; инъекция не принимается) | форма SSE `tx.failed` — §8; UI-нормализация; код блока A | согласованный §8-набор в волне A | `[ ]` |
+| 054-C-6 | P3 / класс 2 | `app/api/v1/auth.py:41-63`, `app/schemas/auth.py:8,16-17,21`, `app/api/v1/simulator.py:2973-2991` | Инъекция в plain-text лог: `pid`/`device_info` без `max_length`, `source`/`reason` остановки через `%s` | Opus R1a, R1b | нет | центральный логгер (§12) | BACKLOG либо одна общая правка (max_length в схемах) | `[ ]` |
+| 054-C-7 | P3 / класс 2 (тесты) | `app/api/v1/admin.py:68`, `simulator.py:3155,3196`; `tests/unit/test_simulator_owner_isolation.py:585-592` | Защита стоит на всех 19 admin-маршрутах структурно, но тест «без токена → 403» отсутствует у 9 и у двух `/simulator/admin/*`; нет 401 без учётных данных для balance/payments/clearing/equivalents/me; закомментированные 403/409 | Opus R1b, Codex R2 | — (код корректен) | 025 п. 1 (формулировка «14 из 28» устарела) | волна C: один параметризованный HTTP-тест по `app.routes` | `[ ]` |
+| 054-C-8 | P3 / класс 2 | `app/config.py:170`, `app/main.py:133` | `DEBUG=true` при `ENV=prod` не отвергается валидаторами, Starlette в debug отдаёт трассировку клиенту | Opus R1a, Codex R2 (условно) | нет | валидаторы `config.py:479-605` | волна C: одна строка fail-close валидатора | `[ ]` |
 
 ## Current / Intended / Optimal
 
 Пишется на каждую принятую находку при внесении в таблицу (AGENTS §1); до этого правка не назначается.
+
+**054-C-1.** *Current:* `validate_session` проверяет версию и `int(iat)`, затем `hmac.compare_digest(sig, expected_sig)` на `str`; Starlette декодирует заголовки latin-1, не-ASCII подпись даёт `TypeError`, `main.py:204-218` отвечает 500 E010 с двойной трассировкой в лог. *Intended:* невалидная cookie = «нет сессии»: новая cookie на ensure (`simulator.py:152`), 401 на защищённых маршрутах (`deps.py:333-334`). *Optimal:* сравнивать bytes или возвращать `None` при не-ASCII; одно место, без новых сущностей.
+
+**054-C-2.** *Current:* cookie без лимита (`deps.py:43-49`), лимит «1 на владельца» (`config.py:234`) обходится; один клиент выбирает весь N (`run_lifecycle.py:113-128`; в compose N = 10) в пределах 120 запросов в минуту; простой не срабатывает, пока есть SSE (`runtime_impl.py:707-714`). *Intended:* 044 — «свой прогон каждому» в пределах N, текст и повтор при исчерпании, без аутентификации посетителей; захват мест одним клиентом нигде не принят и не отвергнут. *Optimal:* продуктовая развилка — потолок демо либо ограничение сессий/run на клиента (требует верного ключа клиента за прокси, 054-C-4). Без решения владельца не чинить.
+
+**054-C-3.** *Current:* без run и без `Last-Event-ID` маршрут отдаёт `StreamingResponse(idle_stream())` с `while True` keep-alive каждые 15 с (`simulator.py:2753-2762`); подписка не регистрируется, лимит `sse_broadcast.py:336-345` поток не видит; uvicorn без `--limit-concurrency` (`Dockerfile:38`). *Intended:* runbook: «50 на процесс, сверх — 429». *Optimal:* конечный ответ без run (или учёт в лимите), одной правкой контракта вместе с 044-1. Severity P3: новой категории отказа ветка не открывает, нарушает документированное обещание.
 
 ## Non-goals
 
@@ -69,7 +82,7 @@
 | ID | Задача | Статус |
 |---|---|---|
 | T5400 | Спека, регистрация в `specs/README.md`, синхронизация статусов OMR/BTR в BACKLOG/README | `[x]` 2026-10-30 |
-| T5401 | Срез C — периметр: два ревьюера, сведение, witnesses | `[ ]` запущен 2026-10-30 на `66f29397` |
+| T5401 | Срез C — периметр: два ревьюера, сведение, witnesses | `[x]` 2026-10-30: R1 Opus ×2 (подсрезы auth/сессия и маршруты/ownership), R2 Codex `gpt-6-astra` VERIFIED (`REVIEW-COMPLETE: YES`, `FINDINGS-COUNT: 1`); класс 1 — 0, класс 2 — 8 (`054-C-1…8`), три witness RED; инвентаризация всех маршрутов `/api/v1` → auth → доступ → тест отказа в `.local-run/codex-review/054-C-20261030/REPORT.md` (локально). Проверено, дефекта нет: `_check_run_access` не обходится ни через run-маршруты, ни через SSE/артефакты; cookie HttpOnly/Lax/HMAC-SHA256/TTL; CSRF anon закрыт Origin; E010 очищается; токены не логируются |
 | T5402 | Срез F — `router.py` | `[ ]` запущен 2026-10-30 |
 | T5403 | Срез A — backend симулятора (подсрезы A1 lifecycle/runtime/storage, A2 executor/planner/payments, A3 sse/snapshot/artifacts/api) | `[ ]` запущен 2026-10-30 |
 | T5404 | Срез B — Simulator UI v2 (B1 composables ядра, B2 windowing/overlay/camera, B3 render/layout, B4 components/api/demo) | `[ ]` запущен 2026-10-30 |
@@ -83,4 +96,5 @@
 
 ## Changelog
 
+- **2026-10-30 — срез C сведён.** Класс 1 — 0; восемь находок класса 2 внесены в `## Findings`; 054-C-2 — продуктовая развилка владельцу (пакетом после остальных срезов). Хвост hand-off № 1 (async `Connection._cancel`) закрыт в тестовом harness: PR #368 (`4b5587b6`), внешнее ревью Codex — в PR.
 - **2026-10-30 — заведена и авторизована.** Измерение возраста кода; семь блоков; срезы C, F, A, B запущены параллельно на `66f29397` (четыре нижних оркестратора — непересекающиеся поверхности; E ждёт C/F из-за общего харнеса контракта и ядра маршрутизации, D ждёт B из-за общих форм денежного форматирования, G — прогон после A, чтобы не держать порты и базу параллельно с witnesses).
