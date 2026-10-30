@@ -308,6 +308,8 @@ export function useSimulatorRealMode(opts: {
   
   // Block watchers from calling refreshSnapshot during startRun to prevent double load.
   let startRunInProgress = false
+  // 054-B-2: the attach by id owns its change of run (snapshot, then stream) like a start does.
+  let attachRunInProgress = false
 
   // Block the scenario-change watcher from calling refreshSnapshot during the initial
   // boot sequence (immediate watcher). refreshScenarios() may update selectedScenarioId,
@@ -1082,7 +1084,7 @@ export function useSimulatorRealMode(opts: {
 
   watch(
     () => [real.runId, real.accessToken, effectiveEq.value, real.apiBase] as const,
-    () => {
+    ([runId], previous) => {
       if (sceneContextRefresh) {
         if (!isSceneContextCurrent(sceneContextRefresh)) void replaceSceneSnapshotBeforeSse()
         return
@@ -1095,6 +1097,12 @@ export function useSimulatorRealMode(opts: {
         stopSse()
         return
       }
+      // 054-B-2 (§8, ws-protocol §2.1): a NEW run gets its snapshot before its stream. Opening the stream here, the
+      // moment the id changed, applied its events to the old scene and moved the cursor past them before the snapshot
+      // replaced that scene - the reconnect did not replay them. The owners of a change of run - a start (incl. its
+      // attach on 409), the attach by id, the opening's discovery - read the status and the snapshot and open the
+      // stream themselves, after the snapshot; they are the only code that sets a run id (a reset sets none).
+      if (runId && runId !== previous?.[0] && (startRunInProgress || attachRunInProgress || initialBootInProgress)) return
       runSseLoop()
     },
     { flush: 'post' },
@@ -1382,6 +1390,7 @@ export function useSimulatorRealMode(opts: {
     const rid = runId.trim()
     if (!rid) return
 
+    attachRunInProgress = true
     try {
       teardownRefreshSnapshot()
       stopSse()
@@ -1400,6 +1409,8 @@ export function useSimulatorRealMode(opts: {
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       writeRunErrorLine(real, failureRunErrorLine(e))
+    } finally {
+      attachRunInProgress = false
     }
   }
 
