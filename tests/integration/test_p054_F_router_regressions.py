@@ -103,3 +103,28 @@ async def test_f1_a_payment_one_wide_path_carries_is_not_split_over_thin_short_p
     assert _routes(body) == [[path, "10.00"]], body
     assert await _tx_state(factory, tx_id) == ["COMMITTED"]
     assert await _debts(factory, code, p) == {"P->C": "10.00", "C->D": "10.00", "D->Q": "10.00"}
+
+
+# 054-F-3: max-flow searched augmenting paths with a node-level `visited`, while `blocked_participants` depends on the
+# whole route: the first path to M (via X) was refused at M->Q (Q's line blocks X), the path via Y, Z never tried, and
+# max-flow said 0 - the refusal text of a payment (`max_available`) and the simulator's targets with it.
+@MODE_B
+@pytest.mark.asyncio
+async def test_f3_max_flow_finds_the_path_a_route_dependent_policy_leaves(client, db_session):
+    code, p, factory = await _world(client, db_session, "PXYMZQ", "F3")
+    for cred, debt in (("X", "P"), ("Y", "P"), ("M", "X"), ("Z", "Y"), ("M", "Z")):
+        await _line(client, p[cred], p[debt], code, "10")
+    await _line(client, p["Q"], p["M"], code, "10", policy={"blocked_participants": [p["X"]["pid"]]})
+
+    mf = await client.get("/api/v1/payments/max-flow", headers=p["P"]["headers"],
+                          params={"to": p["Q"]["pid"], "equivalent": code})
+    assert mf.status_code == 200 and Decimal(mf.json()["max_amount"]) == Decimal("10"), mf.text
+
+    # The refusal of 10.01 states what can be sent now (`service.py`, `max_available`): 10, not "no route".
+    _, status, body = await _http_pay(client, p["P"], p["Q"], code, "10.01")
+    assert status == 400 and body["error"]["code"] == "E002", body
+    assert Decimal(body["error"]["details"]["max_available"]) == Decimal("10"), body
+
+    tx_id, status, body = await _http_pay(client, p["P"], p["Q"], code, "10.00")
+    assert status == 200 and body["status"] == "COMMITTED", body
+    assert await _debts(factory, code, p) == {"P->Y": "10.00", "Y->Z": "10.00", "Z->M": "10.00", "M->Q": "10.00"}

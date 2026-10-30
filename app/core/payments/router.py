@@ -649,9 +649,18 @@ class PaymentRouter:
 
         return to_money_str(value, self.precision or 0)
 
-    def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:
+    def calculate_max_flow(self, from_pid: str, to_pid: str, *, timeout_ms: int | None = None) -> MaxFlowResponse:
         """
-        Edmonds-Karp or similar to find max flow.
+        Edmonds-Karp or similar to find max flow - an ESTIMATE, not a proof: the policy is checked per augmenting
+        path, and an augmenting path over a residual reverse hop may still overstate (BACKLOG).
+
+        054-F-3: each augmenting path is first searched with a node-level `visited` (`_bfs_by_node`), as before. When
+        that finds none but a route-dependent rule (`blocked_participants`) refused a candidate on the way, the node
+        `visited` may have hidden a path, and the exhaustive `_bfs_single_path` searches again, bounded by
+        `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`) for the whole call. When that bound runs out the
+        flow found so far is returned - a LOWER bound, logged (`event=routing.max_flow_truncated`), never an error:
+        a payment's refusal reads this value for its text. So the answer is never below the one before 054, and
+        without such a refusal the work is exactly the one before.
         """
         # T1545, 2026-09-13: with from == to the BFS finds a zero-length path at once, the residual
         # update does nothing, and `while True` finds it again forever - synchronously, inside an
@@ -662,38 +671,32 @@ class PaymentRouter:
 
         # Create a working copy of the graph since we modify residuals
         residual_graph = {u: d.copy() for u, d in self.graph.items()}
-        
+        residual_graph.setdefault(to_pid, {})  # the searches answer only for a payee that is a key of the graph
+
         max_flow = Decimal('0')
         paths = []
-        
-        while True:
-            # BFS for augmenting path
-            queue = [(from_pid, [from_pid], Decimal('Infinity'))]
-            visited = {from_pid}
-            path_found = None
-            
-            while queue:
-                u, path, flow = queue.pop(0)
-                if u == to_pid:
-                    path_found = (path, flow)
-                    break
-                
-                if len(path) > settings.MAX_FLOW_MAX_HOPS: # Limit hops for performance
-                    continue
+        effective_timeout_ms = max(1, int(
+            timeout_ms if timeout_ms is not None else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)))
+        deadline = time.perf_counter() + effective_timeout_ms / 1000.0
+        # The hop limit is the one before 054: a path of at most MAX_FLOW_MAX_HOPS hops (for performance).
+        search = dict(max_hops=int(settings.MAX_FLOW_MAX_HOPS), graph=residual_graph)
 
-                for v, cap in residual_graph.get(u, {}).items():
-                    # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
-                    if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
-                        continue
-                    if v not in visited and cap > 0:
-                        visited.add(v)
-                        new_flow = min(flow, cap)
-                        queue.append((v, path + [v], new_flow))
-            
-            if not path_found:
+        while True:
+            # BFS for augmenting path. Policy per augmenting path only: residual re-routing may still overstate.
+            path, exact = self._bfs_by_node(from_pid, to_pid, Decimal('0'), **search)
+            if path is None and not exact:
+                try:
+                    path = self._bfs_single_path(
+                        from_pid, to_pid, Decimal('0'), max_hops=search["max_hops"], graph_override=residual_graph,
+                        deadline=deadline)
+                except TimeoutException:
+                    logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s max_amount=%s",
+                                from_pid, to_pid, effective_timeout_ms, max_flow)
+                    break
+            if not path:
                 break
-                
-            path, flow = path_found
+
+            flow = self._path_bottleneck(path, graph=residual_graph)
             max_flow += flow
             paths.append(MaxFlowPath(path=path, capacity=self._money(flow)))
             

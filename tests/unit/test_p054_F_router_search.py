@@ -106,3 +106,77 @@ def test_the_linear_search_answers_exactly_as_the_exhaustive_one():
         else:
             fallbacks += 1
     assert exact_answers > 1000 and fallbacks > 30, (exact_answers, fallbacks)
+
+
+def _random_policy_graph(rng, *, blocked: bool) -> PaymentRouter:
+    nodes = [f"N{i}" for i in range(rng.randint(3, 8))]
+    router = PaymentRouter(None)
+    router.graph = {x: {} for x in nodes}
+    for u in nodes:
+        for v in nodes:
+            if u != v and rng.random() < 0.45:
+                router.graph[u][v] = Decimal(rng.choice([1, 2, 3, 5, 8]))
+                if rng.random() < 0.2:
+                    router.edge_no_transit.setdefault(u, {})[v] = frozenset(rng.sample([u, v], 1))
+                if blocked and rng.random() < 0.15:
+                    router.edge_blocked_participants.setdefault(u, {})[v] = set(rng.sample(nodes, 1))
+    return router
+
+
+def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
+    """W2 on the graph alone: P->X->M is first to M and refused at M->Q (Q's line blocks X); P->Y->Z->M->Q carries 10."""
+
+    router = _router([("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"), ("Z", "M", "10"),
+                      ("M", "Q", "10")])
+    router.edge_blocked_participants = {"M": {"Q": {"X"}}}
+    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("10")
+
+
+def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_same_without_route_rules(monkeypatch):
+    """The two invariants of 054-F-3 on seeded random graphs. With only local rules (no `blocked_participants`) the
+    exhaustive search is never called - the work is the one before 054. With them, the answer is >= the one of the
+    node-visited search alone (the algorithm before 054: the exhaustive search answering None), and above it on some
+    graphs (counter-check: the fallback is not vacuous)."""
+
+    import random
+
+    rng = random.Random(543)
+    for _ in range(400):
+        router = _random_policy_graph(rng, blocked=False)
+        s, t = rng.sample(sorted(router.graph), 2)
+
+        def _never(*a, **k):
+            raise AssertionError("the exhaustive search ran without a route-dependent refusal")
+
+        monkeypatch.setattr(router, "_bfs_single_path", _never)
+        router.calculate_max_flow(s, t)
+
+    higher = 0
+    for _ in range(600):
+        router = _random_policy_graph(rng, blocked=True)
+        s, t = rng.sample(sorted(router.graph), 2)
+        new = Decimal(router.calculate_max_flow(s, t).max_amount)
+        monkeypatch.setattr(router, "_bfs_single_path", lambda *a, **k: None)
+        old = Decimal(router.calculate_max_flow(s, t).max_amount)
+        assert new >= old, (new, old)
+        higher += new > old
+    assert higher > 0
+
+
+def test_f3_max_flow_out_of_time_returns_the_flow_found_so_far(monkeypatch):
+    """The exhaustive search under its deadline: max-flow stops adding and returns what it has - no error, since a
+    payment's refusal reads this value for its text (`service.py`, `max_available`)."""
+
+    from app.utils.exceptions import TimeoutException
+
+    # P->Q carries 3 directly; to M the first path is via X, refused at M->Q, so the path via Y needs the fallback.
+    router = _router([("P", "Q", "3"), ("P", "X", "10"), ("P", "Y", "10"), ("X", "M", "10"), ("Y", "Z", "10"),
+                      ("Z", "M", "10"), ("M", "Q", "10")])
+    router.edge_blocked_participants = {"M": {"Q": {"X"}}}
+    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("13")
+
+    def _out_of_time(*a, **k):
+        raise TimeoutException("Routing timed out")
+
+    monkeypatch.setattr(router, "_bfs_single_path", _out_of_time)
+    assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("3")
