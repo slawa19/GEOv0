@@ -21,7 +21,11 @@ def static_policy_violations(workflow: dict) -> list[str]:
     AGENTS.md §3 and excluded in pyproject. A step is blocking only if it is present, carries no `if:` and no
     `continue-on-error` AT ALL (an expression such as `${{ true }}` loads as a string, so `is not True` would
     pass it - Codex review of PR #378) and runs exactly the pinned command. This guard checks the workflow's
-    shape, not that the tree is clean - the job does."""
+    shape, not that the tree is clean - the job does. WHAT IT DOES NOT SEE (Codex fix-delta review, class 2,
+    AGENTS.md §19.2 p.3 - an in-process adversary rewriting the workflow is stopped by review, not by a shape
+    guard): a custom `shell:` or an `env:` that shadows `python` on the step, and a same-named or unnamed
+    `black app` step inserted BEFORE the check that formats the tree first; `_static_steps` keeps the last step
+    of each name."""
     steps = _static_steps(workflow)
     expected = {
         "Ruff diagnostics": "python -m ruff check app migrations --no-cache",
