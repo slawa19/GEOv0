@@ -988,7 +988,11 @@ paths:
             type: string
       responses:
         '200':
-          description: SSE stream
+          description: |
+            SSE stream. Without an active run of the caller (and without
+            `Last-Event-ID`) the stream is finite: one comment record with
+            `retry: 15000`, then the stream ends; an EventSource reconnects after
+            `retry` and gets the run's events once there is a run.
           content:
             text/event-stream:
               schema:
