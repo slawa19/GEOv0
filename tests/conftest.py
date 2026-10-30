@@ -106,6 +106,7 @@ from app.config import settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair  # noqa: E402
 from app.db.base import Base  # noqa: E402
+from app.db.session import engine as _APP_ENGINE  # noqa: E402 - captured before any test can monkeypatch the module attribute
 from app.main import app  # noqa: E402
 
 # Tests should not start background jobs or best-effort throttling.
@@ -684,6 +685,23 @@ async def _stop_test_simulator_runs(simulator_runtime, runs, tasks) -> None:
         raise asyncio.CancelledError("simulator test cleanup was interrupted")
 
 
+async def _close_app_engine_pool_on_this_loop() -> None:
+    """Close the application engine's pooled connections on the loop that opened them (2026-10-30).
+
+    `app/db/session.py` pools (QueuePool, pre-ping) and every async test runs on a loop of its own, so
+    a connection the test - or the simulator stop above - returned to that pool stays bound to a loop
+    about to be closed. The next test's checkout pre-pings it, the ping fails, and SQLAlchemy 2.0.25's
+    asyncpg `terminate()` awaits `close()` in the NEW loop; asyncpg asks for a cancel on the DEAD loop
+    (`Connection._cancel_current_command`, `loop.create_task` -> "Event loop is closed") and the
+    `Connection._cancel` coroutine is dropped unawaited - the `RuntimeWarning` of the backend tier,
+    surfacing at whatever later GC. Closing here, while the owning loop is alive, is the graceful close
+    production gets at lifespan shutdown (`app/main.py`). Checked-out connections are not touched.
+    """
+
+    if _APP_ENGINE.pool.checkedin():
+        await _APP_ENGINE.dispose()
+
+
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_runtest_teardown(item):
     """Clean test-owned singleton runs before fixture teardown; retire after finalizers.
@@ -702,9 +720,9 @@ def pytest_runtest_teardown(item):
     failure = None
     private_loop = None
     try:
+        loop = item.funcargs.get("event_loop")
         if runs:
             loops = {t.get_loop() for t in tasks if not t.done()}
-            loop = item.funcargs.get("event_loop")
             if len(loops) > 1 or (loops and loop is not None and loop not in loops):
                 raise RuntimeError("simulator test tasks belong to a different event loop")
             if loops:
@@ -713,6 +731,9 @@ def pytest_runtest_teardown(item):
                 # Synchronous tests may register taskless records; never move a live task here.
                 loop = private_loop = asyncio.new_event_loop()
             loop.run_until_complete(_stop_test_simulator_runs(simulator_runtime, runs, tasks))
+        # After the stop, which itself writes through the application engine (artifact sync).
+        if loop is not None and not loop.is_closed():
+            loop.run_until_complete(_close_app_engine_pool_on_this_loop())
     except BaseException as exc:
         failure = exc
     finally:
