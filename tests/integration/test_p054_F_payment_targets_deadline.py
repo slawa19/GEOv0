@@ -57,18 +57,13 @@ async def _greenfield_world(db_session, *, blocked_by_source_lines: bool):
     adjacency: dict[str, set[str]] = {}
     for a, b, _ in lines:
         adjacency.setdefault(pid_of[b], set()).add(pid_of[a])
-    hops = {source: 0}
-    queue = deque([source])
-    while queue:
-        node = queue.popleft()
-        if hops[node] < MAX_HOPS:
-            for nxt in adjacency.get(node, ()):
-                if nxt not in hops:
-                    hops[nxt] = hops[node] + 1
-                    queue.append(nxt)
-    # A participant two hops from the source, blocked by every line of the source's pairs: refused only as an
-    # intermediary FURTHER on - a route-dependent rule, which the linear search hands to the per-target one.
+    hops = _hops(adjacency, source)
+    # A participant two hops from the source, blocked by every line of the source's pairs: every route starts on such
+    # a line, so it is never an intermediary - refused only FURTHER on, a route-dependent rule, which the linear search
+    # hands to the exact one. It may still be paid.
     far = sorted(pid for pid, h in hops.items() if h == 2)[0]
+    if blocked_by_source_lines:
+        hops = _hops(adjacency, source, not_through=far)
     source_key = next(k for k, v in pid_of.items() if v == source)
     policy_open = {"can_be_intermediate": True}
     policy_blocking = {"can_be_intermediate": True, "blocked_participants": [far]}
@@ -82,6 +77,19 @@ async def _greenfield_world(db_session, *, blocked_by_source_lines: bool):
     scenario = {"equivalents": [eq.code], "participants": [{"id": pid, "type": "person"} for pid in pid_of.values()],
                 "trustlines": []}
     return eq.code, source, u_pid, {pid: h for pid, h in hops.items() if pid != source}, scenario
+
+
+def _hops(adjacency: dict[str, set[str]], source: str, *, not_through: str | None = None) -> dict[str, int]:
+    hops = {source: 0}
+    queue = deque([source])
+    while queue:
+        node = queue.popleft()
+        if hops[node] < MAX_HOPS and node != not_through:
+            for nxt in adjacency.get(node, ()):
+                if nxt not in hops:
+                    hops[nxt] = hops[node] + 1
+                    queue.append(nxt)
+    return hops
 
 
 async def _get_while_watching_the_loop(client, url, params):
@@ -124,16 +132,33 @@ async def test_h2_payment_targets_at_depth_8_answers_every_target_without_holdin
 
 
 @pytest.mark.asyncio
-async def test_h2_payment_targets_out_of_its_deadline_answers_504_and_releases_the_loop(
+async def test_h2_a_route_dependent_rule_is_searched_exactly_without_holding_the_loop(
     client, db_session, run_world  # noqa: F811
+) -> None:
+    code, source, u_pid, expected_hops, scenario = await _greenfield_world(db_session, blocked_by_source_lines=True)
+    run_id = run_world(await _anonymous_owner(client), scenario)
+    response, longest = await _get_while_watching_the_loop(
+        client, f"/api/v1/simulator/runs/{run_id}/payment-targets",
+        {"equivalent": code, "from_pid": source, "max_hops": MAX_HOPS, "limit": 1000})
+
+    assert response.status_code == 200, response.text
+    assert {i["to_pid"]: i["hops"] for i in response.json()["items"]} == expected_hops
+    assert u_pid not in expected_hops and len(expected_hops) > 50
+    assert longest < settings.ROUTING_PATH_FINDING_TIMEOUT_MS / 1000.0, longest
+
+
+@pytest.mark.asyncio
+async def test_h2_payment_targets_out_of_its_deadline_answers_504_and_releases_the_loop(
+    client, db_session, run_world, monkeypatch  # noqa: F811
 ) -> None:
     code, source, _, _, scenario = await _greenfield_world(db_session, blocked_by_source_lines=True)
     run_id = run_world(await _anonymous_owner(client), scenario)
+    monkeypatch.setattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 1)  # a budget the search cannot meet
     response, longest = await _get_while_watching_the_loop(
         client, f"/api/v1/simulator/runs/{run_id}/payment-targets",
         {"equivalent": code, "from_pid": source, "max_hops": MAX_HOPS, "limit": 1000})
 
     assert response.status_code == 504, response.text
     assert response.json()["error"]["code"] == "E007", response.text
-    # The deadline plus the request's own work; before 054 the same GET held the loop for many seconds.
-    assert longest < settings.ROUTING_PATH_FINDING_TIMEOUT_MS / 1000.0 + 0.5, longest
+    # The budget plus the request's own work; before 054 the same GET held the loop for seconds and answered 200.
+    assert longest < 0.5, longest

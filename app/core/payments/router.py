@@ -399,15 +399,17 @@ class PaymentRouter:
         graph: Dict[str, Dict[str, Decimal]],
         forbidden_nodes: Set[str] | None = None,
         deadline: float | None = None,
+        local_only: bool = False,
     ) -> Tuple[Optional[List[str]], bool]:
         """`_bfs_single_path` with a node-level `visited`: linear in the graph, not in its simple paths. Returns
-        `(path, exact)`.
+        `(path, exact)`. `local_only`: the local rules alone (`_hop_refuses`) - a relaxation, exact for itself: its
+        None proves there is no path, its path may break a route-dependent rule.
 
         054-F: `exact` is True when no candidate hop was refused by a rule that depends on the rest of the route
         (a `blocked_participants` naming a node elsewhere on it; the other rules are local, `_hop_refuses`). Then a
         node's first BFS prefix is as good as any other for every continuation, and the answer - path or None - is the
         one `_bfs_single_path` gives, the same path included (same FIFO order). Otherwise it is only a candidate and the
-        caller runs `_bfs_single_path`.
+        caller searches exactly (`_exact_path`).
         """
 
         if from_pid not in graph or to_pid not in graph:
@@ -431,13 +433,39 @@ class PaymentRouter:
                 if neighbor in seen or neighbor in static_forbidden_nodes or capacity <= 0 or capacity < amount:
                     continue
                 candidate = path + [neighbor]
-                if route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
+                if local_only:
+                    if self._hop_refuses(current, neighbor, payer=from_pid, payee=to_pid):
+                        continue
+                elif route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
                     if not self._hop_refuses(current, neighbor, payer=from_pid, payee=to_pid):
                         exact = False
                     continue
                 seen.add(neighbor)
                 queue.append((neighbor, candidate))
         return None, exact
+
+    def _exact_path(
+        self,
+        from_pid: str,
+        to_pid: str,
+        amount: Decimal,
+        *,
+        max_hops: int,
+        graph: Dict[str, Dict[str, Decimal]],
+        forbidden_nodes: Set[str] | None = None,
+        deadline: float | None = None,
+    ) -> Optional[List[str]]:
+        """`_bfs_single_path`'s answer, the same path included, without its search over every simple path where the
+        local rules alone already leave none (`_bfs_by_node(local_only=True)`, linear) - the search's costly case is
+        the one that finds nothing. Otherwise `_bfs_single_path` itself, under `deadline`: a route that must avoid
+        pairs (a hop, a participant its line blocks) is a hard problem, and no exact search is linear there."""
+
+        relaxed, _ = self._bfs_by_node(from_pid, to_pid, amount, max_hops=max_hops, graph=graph,
+                                       forbidden_nodes=forbidden_nodes, deadline=deadline, local_only=True)
+        if relaxed is None:
+            return None
+        return self._bfs_single_path(from_pid, to_pid, amount, max_hops=max_hops, graph_override=graph,
+                                     forbidden_nodes=forbidden_nodes, deadline=deadline)
 
     def _find_path(
         self,
@@ -457,8 +485,8 @@ class PaymentRouter:
                                         forbidden_nodes=forbidden_nodes, deadline=deadline)
         if exact:
             return path
-        return self._bfs_single_path(from_pid, to_pid, amount, max_hops=max_hops, graph_override=graph,
-                                     forbidden_nodes=forbidden_nodes, deadline=deadline)
+        return self._exact_path(from_pid, to_pid, amount, max_hops=max_hops, graph=graph,
+                                forbidden_nodes=forbidden_nodes, deadline=deadline)
 
     def _widest_path(
         self,
@@ -541,9 +569,9 @@ class PaymentRouter:
         054-F-H2: one breadth-first search from `from_pid` with a node-level `visited` answers for every target at
         once - linear, not one search per target over every simple path (that held the simulator's event loop for
         seconds). It is the answer of the per-target search, paths included, unless a route-dependent rule (a
-        `blocked_participants` naming a node elsewhere on the route) refused a candidate; then the per-target search
-        runs as before. Both are bounded by
-        `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`): out of time, `TimeoutException` (HTTP 504, E007) -
+        `blocked_participants` naming a node elsewhere on the route) refused a candidate; then each target is searched
+        exactly (`_bfs_single_path`, only for those the local rules alone let through). All of it is bounded
+        by `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`): out of time, `TimeoutException` (HTTP 504, E007) -
         never a partial list, which would drop reachable targets silently.
         """
 
@@ -554,11 +582,14 @@ class PaymentRouter:
         deadline = time.perf_counter() + effective_timeout_ms / 1000.0
         found, exact = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline)
         if not exact:
+            # Who is reachable under the local rules alone (a superset, `_exact_path`); only they are searched.
+            relaxed, _ = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline, local_only=True)
             found = {}
             for to_pid in self.graph:
-                if not to_pid or to_pid == from_pid:
+                if not to_pid or to_pid == from_pid or to_pid not in relaxed:
                     continue
-                path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops), deadline=deadline)
+                path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops),
+                                             deadline=deadline)
                 if path and len(path) >= 2:
                     found[to_pid] = path
         targets = [PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path))
@@ -567,12 +598,12 @@ class PaymentRouter:
         return targets if limit is None else targets[: int(limit)]
 
     def _reach_by_node(
-        self, from_pid: str, *, max_hops: int, deadline: float
+        self, from_pid: str, *, max_hops: int, deadline: float, local_only: bool = False
     ) -> Tuple[Dict[str, List[str]], bool]:
         """Every participant `from_pid` can pay within `max_hops` hops of positive capacity, with its first shortest
         path: `({to_pid: path}, exact)`. A hop ends a route (its head is the payee) or continues one (its head is an
         intermediary); the policy (`route_breaks_policy`) is checked for each role separately. `exact` as in
-        `_bfs_by_node`: no route-dependent rule refused a candidate."""
+        `_bfs_by_node`: no route-dependent rule refused a candidate; `local_only` as there."""
 
         intermediary = object()  # a payee no route contains: every node of a prefix is an intermediary
         exact = True
@@ -592,8 +623,9 @@ class PaymentRouter:
                 for payee, done in ((neighbor, neighbor in found), (intermediary, neighbor in seen)):
                     if done:
                         continue
-                    if route_breaks_policy(candidate, self._hop_rules, payee=payee):  # type: ignore[arg-type]
-                        local = self._hop_refuses(current, neighbor, payer=from_pid, payee=payee)  # type: ignore
+                    local = self._hop_refuses(current, neighbor, payer=from_pid, payee=payee)  # type: ignore
+                    if local or (not local_only and route_breaks_policy(
+                            candidate, self._hop_rules, payee=payee)):  # type: ignore[arg-type]
                         exact = exact and local
                     elif payee is intermediary:
                         seen.add(neighbor)
@@ -726,9 +758,9 @@ class PaymentRouter:
 
         054-F-3: each augmenting path is first searched with a node-level `visited` (`_bfs_by_node`), as before. When
         that finds none but a route-dependent rule (a `blocked_participants` naming a node elsewhere on the route,
-        `_hop_refuses`) refused a candidate on the way, the node `visited` may have hidden a path, and the exhaustive
-        `_bfs_single_path` searches again, bounded by
-        `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`) for the whole call. When that bound runs out the
+        `_hop_refuses`) refused a candidate on the way, the node `visited` may have hidden a path, and the exact
+        `_exact_path` searches again, bounded by `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`) for the
+        whole call. When that bound runs out the
         flow found so far is returned - a LOWER bound, logged (`event=routing.max_flow_truncated`), never an error:
         a payment's refusal reads this value for its text. So the answer is never below the one before 054, and
         without such a refusal the work is exactly the one before.
@@ -757,9 +789,7 @@ class PaymentRouter:
             path, exact = self._bfs_by_node(from_pid, to_pid, Decimal('0'), **search)
             if path is None and not exact:
                 try:
-                    path = self._bfs_single_path(
-                        from_pid, to_pid, Decimal('0'), max_hops=search["max_hops"], graph_override=residual_graph,
-                        deadline=deadline)
+                    path = self._exact_path(from_pid, to_pid, Decimal('0'), deadline=deadline, **search)
                 except TimeoutException:
                     logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s max_amount=%s",
                                 from_pid, to_pid, effective_timeout_ms, max_flow)

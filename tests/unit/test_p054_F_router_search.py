@@ -76,13 +76,15 @@ def test_more_than_the_paths_carry_is_refused_and_max_hops_still_binds():
 
 def test_the_linear_search_answers_exactly_as_the_exhaustive_one():
     """`_find_path` (054-F) against `_bfs_single_path` on seeded random graphs with both policy rules: the same path
-    or the same None every time. Counter-check: both the linear answer and the fallback to the exhaustive search
-    (a `blocked_participants` refusal) occur, so neither branch passes vacuously."""
+    or the same None every time; so is the exact fallback `_exact_path`, and its filter - the local rules alone - finds
+    nothing only where nothing exists. Counter-check: both the linear answer and the fallback (a route-dependent
+    `blocked_participants` refusal) occur, and the filter both answers and lets the search through, so no branch
+    passes vacuously."""
 
     import random
 
     rng = random.Random(54)
-    exact_answers = fallbacks = 0
+    exact_answers = fallbacks = filtered = 0
     for _ in range(1500):
         nodes = [f"N{i}" for i in range(rng.randint(3, 9))]
         router = PaymentRouter(None)
@@ -99,13 +101,17 @@ def test_the_linear_search_answers_exactly_as_the_exhaustive_one():
         amount, hops = Decimal(rng.choice([0, 1, 2, 3, 5])), rng.randint(1, 6)
         expected = router._bfs_single_path(s, t, amount, max_hops=hops, graph_override=router.graph)
         assert router._find_path(s, t, amount, max_hops=hops, graph=router.graph) == expected
+        assert router._exact_path(s, t, amount, max_hops=hops, graph=router.graph) == expected
+        relaxed, _ = router._bfs_by_node(s, t, amount, max_hops=hops, graph=router.graph, local_only=True)
+        assert relaxed is not None or expected is None
+        filtered += relaxed is None
         linear, exact = router._bfs_by_node(s, t, amount, max_hops=hops, graph=router.graph)
         if exact:
             assert linear == expected
             exact_answers += 1
         else:
             fallbacks += 1
-    assert exact_answers > 1000 and fallbacks > 30, (exact_answers, fallbacks)
+    assert exact_answers > 1000 and fallbacks > 30 and 30 < filtered < 1470, (exact_answers, fallbacks, filtered)
 
 
 def _random_policy_graph(rng, *, blocked: bool) -> PaymentRouter:
@@ -135,9 +141,9 @@ def test_f3_max_flow_finds_the_path_a_node_visited_set_hid():
 
 def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_same_without_route_rules(monkeypatch):
     """The two invariants of 054-F-3 on seeded random graphs. With only local rules (no `blocked_participants`) the
-    exhaustive search is never called - the work is the one before 054. With them, the answer is >= the one of the
-    node-visited search alone (the algorithm before 054: the exhaustive search answering None), and above it on some
-    graphs (counter-check: the fallback is not vacuous)."""
+    exact search (`_exact_path`) is never called - the work is the one before 054. With them, the answer is >= the
+    one of the node-visited search alone (the algorithm before 054: the exact search answering None), and above it on
+    some graphs (counter-check: the fallback is not vacuous)."""
 
     import random
 
@@ -147,9 +153,9 @@ def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_sam
         s, t = rng.sample(sorted(router.graph), 2)
 
         def _never(*a, **k):
-            raise AssertionError("the exhaustive search ran without a route-dependent refusal")
+            raise AssertionError("the exact search ran without a route-dependent refusal")
 
-        monkeypatch.setattr(router, "_bfs_single_path", _never)
+        monkeypatch.setattr(router, "_exact_path", _never)
         router.calculate_max_flow(s, t)
 
     higher = 0
@@ -157,7 +163,7 @@ def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_sam
         router = _random_policy_graph(rng, blocked=True)
         s, t = rng.sample(sorted(router.graph), 2)
         new = Decimal(router.calculate_max_flow(s, t).max_amount)
-        monkeypatch.setattr(router, "_bfs_single_path", lambda *a, **k: None)
+        monkeypatch.setattr(router, "_exact_path", lambda *a, **k: None)
         old = Decimal(router.calculate_max_flow(s, t).max_amount)
         assert new >= old, (new, old)
         higher += new > old
@@ -165,8 +171,8 @@ def test_f3_max_flow_never_falls_below_the_node_visited_search_and_costs_the_sam
 
 
 def test_f3_max_flow_out_of_time_returns_the_flow_found_so_far(monkeypatch):
-    """The exhaustive search under its deadline: max-flow stops adding and returns what it has - no error, since a
-    payment's refusal reads this value for its text (`service.py`, `max_available`)."""
+    """The exact search (`_exact_path`) under its deadline: max-flow stops adding and returns what it has - no
+    error, since a payment's refusal reads this value for its text (`service.py`, `max_available`)."""
 
     from app.utils.exceptions import TimeoutException
 
@@ -179,7 +185,7 @@ def test_f3_max_flow_out_of_time_returns_the_flow_found_so_far(monkeypatch):
     def _out_of_time(*a, **k):
         raise TimeoutException("Routing timed out")
 
-    monkeypatch.setattr(router, "_bfs_single_path", _out_of_time)
+    monkeypatch.setattr(router, "_exact_path", _out_of_time)
     assert Decimal(router.calculate_max_flow("P", "Q").max_amount) == Decimal("3")
 
 
@@ -234,16 +240,19 @@ def test_h2_payment_targets_out_of_time_raises_and_the_fallback_has_the_deadline
                       ("M", "Q", "10")])
     router.edge_blocked_participants = {"M": {"Q": {"X"}}}  # route-dependent: the fallback runs
     deadlines = []
-    exhaustive = router._bfs_single_path
 
-    def _recording(*a, **k):
-        deadlines.append(k.get("deadline"))
-        return exhaustive(*a, **k)
+    def _recording(search):
+        def call(*a, **k):
+            deadlines.append((search.__name__, k.get("deadline")))
+            return search(*a, **k)
+        return call
 
-    monkeypatch.setattr(router, "_bfs_single_path", _recording)
+    for name in ("_reach_by_node", "_bfs_single_path"):
+        monkeypatch.setattr(router, name, _recording(getattr(router, name)))
     assert {t.to_pid: t.hops for t in router.payment_targets("P", max_hops=6)} == {
         "X": 1, "Y": 1, "M": 2, "Z": 2, "Q": 4}
-    assert deadlines and all(d is not None for d in deadlines)
+    assert {name for name, _ in deadlines} == {"_reach_by_node", "_bfs_single_path"}
+    assert all(d is not None for _, d in deadlines)
 
     calls = {"n": 0}
 
