@@ -26,6 +26,7 @@ from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.main import app
 from app.utils.exceptions import TimeoutException
+from tests.conftest import MODE_B
 from tests.contract import openapi_response_conformance as oc
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
@@ -123,6 +124,31 @@ async def test_e4_trustline_to_an_unknown_recipient_is_a_declared_404(client, au
     _assert_declared("POST", "/trustlines", response, 404)
 
 
+# ---- 054-E-5 (declaration half; the 500 -> 404 half is the MODE_B test at the end) ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_e5_clearing_malformed_equivalent_is_a_declared_400(client, auth_headers) -> None:
+    cycles = await client.get("/api/v1/clearing/cycles", headers=auth_headers, params={"equivalent": "uah"})
+    auto = await client.post("/api/v1/clearing/auto", headers=auth_headers, params={"equivalent": "uah"})
+    _assert_declared("GET", "/clearing/cycles", cycles, 400)
+    _assert_declared("POST", "/clearing/auto", auto, 400)
+
+
+@pytest.mark.asyncio
+async def test_e5_clearing_auto_timeout_is_a_declared_504(client, auth_headers, monkeypatch) -> None:
+    """Injection: the pass raises the core's own `TimeoutException` (a clearing lock wait out of budget,
+    `ClearingService`, 55P03), which the route does not catch."""
+
+    async def timed_out(*_a, **_kw):
+        raise TimeoutException("Clearing lock timed out")
+
+    monkeypatch.setattr("app.api.v1.clearing.run_awaited_clearing", timed_out)
+    response = await client.post("/api/v1/clearing/auto", headers=auth_headers, params={"equivalent": "UAH"})
+    _assert_declared("POST", "/clearing/auto", response, 504)
+    assert response.json()["error"]["code"] == "E007"
+
+
 # ---- 054-E-6 ------------------------------------------------------------------------------------------------------
 
 
@@ -214,3 +240,19 @@ def test_e9_e10_both_500_shapes_of_a_money_action_are_declared(action) -> None:
     assert oc.validate_body(_CANON, pointer, envelope) == [], action
     # Anti-vacuum: the schema is not "anything" - a body of neither shape is refused.
     assert oc.validate_body(_CANON, pointer, {"detail": "Internal Server Error"}), action
+
+
+# ---- MODE_B: the clearing pass needs committed rows ------------------------------------------------------------
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_e5_clearing_unknown_equivalent_is_a_declared_404_not_a_500(db_session, client, auth_headers) -> None:
+    """W3/W3b: an unknown equivalent is the client's error - 404/E009, as `/balance/debts` and `/trustlines` answer
+    it - and not the internal 500/E010 the bare `GeoException` of `flow_planner.load_snapshot` produced."""
+
+    cycles = await client.get("/api/v1/clearing/cycles", headers=auth_headers, params={"equivalent": "ZZMISSING"})
+    auto = await client.post("/api/v1/clearing/auto", headers=auth_headers, params={"equivalent": "ZZMISSING"})
+    _assert_declared("GET", "/clearing/cycles", cycles, 404)
+    _assert_declared("POST", "/clearing/auto", auto, 404)
+    assert cycles.json()["error"]["code"] == auto.json()["error"]["code"] == "E009"

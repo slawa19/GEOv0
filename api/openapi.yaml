@@ -2632,6 +2632,12 @@ paths:
                 $ref: '#/components/schemas/ClearingCyclesResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-5: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-5: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2698,6 +2704,20 @@ paths:
                 $ref: '#/components/schemas/ClearingAutoResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '400':
+          # 054-E-5: `equivalent` is not a well-formed equivalent code (E009).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # 054-E-5: no equivalent has this code (E009).
+          $ref: '#/components/responses/NotFound'
+        '504':
+          description: >-
+            054-E-5: before any occurrence committed, a clearing lock wait ran past its budget (E007). Met after
+            progress, the same timeout answers 200 `interrupted` with `reason: error` instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
