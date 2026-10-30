@@ -33,14 +33,16 @@ const q = ref('')
 const status = ref<string>('')
 const type = ref<string>('')
 
+// 054-D-14: the fields keep what the operator typed (`useRouteQueryFilters`); the request carries the trimmed value,
+// as on the audit log. The search stays case-preserving: a PID is base58 (case-sensitive).
 const { page, perPage, total, items, loading, error, reload, reloadFromFirstPage } = usePagedList<Participant>(
   ({ page: requestPage, perPage: requestPerPage }) =>
     api.listParticipants({
       page: requestPage,
       per_page: requestPerPage,
-      status: status.value || undefined,
-      type: type.value || undefined,
-      q: q.value || undefined,
+      status: status.value.trim() || undefined,
+      type: type.value.trim() || undefined,
+      q: q.value.trim() || undefined,
     }),
   { errorKey: 'participant.loadFailed' },
 )
@@ -109,6 +111,13 @@ async function runStatusChange(row: Participant, action: keyof typeof STATUS_ACT
   } catch (e: unknown) {
     if (!pageActive) return
     ElMessage.error(describeError(e, words.failed).text)
+    // 054-D-13: a refusal (409) may mean the participant changed under the operator; show what the server holds,
+    // in the list and in the open drawer (which carries its own freeze/unfreeze buttons).
+    await reload()
+    if (!pageActive) return
+    if (selected.value?.pid === row.pid) {
+      selected.value = items.value.find((item) => item.pid === row.pid) ?? selected.value
+    }
   }
 }
 
