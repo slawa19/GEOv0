@@ -16,6 +16,8 @@ _SECURE_NON_DEV_SETTINGS = {
 def _isolate_legacy_environment(monkeypatch) -> None:
     """Let each Settings instance control whether the legacy alias is present."""
     monkeypatch.delenv("ENVIRONMENT", raising=False)
+    # A shell set up by docs/ru/06-contributing.md carries DEBUG=true, which the non-dev guard refuses (054-C-8).
+    monkeypatch.delenv("DEBUG", raising=False)
 
 
 def test_settings_guardrail_prod_rejects_default_jwt_secret() -> None:
