@@ -169,9 +169,15 @@ async def _seed_money_state(factory, own, code):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("boundary", ["refresh", "eviction-control"])
+@pytest.mark.parametrize("boundary", ["refresh", "eviction", "no-eviction-control"])
 async def test_seed_refresh_waits_for_the_older_read_before_opening_money(factory, monkeypatch, boundary):
-    """Eviction alone still allows the pre-commit in-flight graph to publish afterward."""
+    """The seed's opening money never routes on the graph read before the seed committed.
+
+    `refresh` waits for the older read and accepts only a later one. `eviction`: since 054-F-2 an eviction alone is
+    enough too - the older read, which began before it, is not published (until then it published after the eviction
+    and the opening payment was refused). `no-eviction-control`: neither - the older read publishes and the opening
+    payment is refused, so the stand does see a stale graph when one is served.
+    """
     import app.core.simulator.tick as tick_module
 
     code, own, scenario, run, runner = await _cached_seed_world(factory, monkeypatch)
@@ -195,10 +201,11 @@ async def test_seed_refresh_waits_for_the_older_read_before_opening_money(factor
         async def after_commit(**kwargs):
             assert await _seed_money_state(factory, own, code) == (2, 1, [])
             refresh_entered.set()
-            if boundary == "eviction-control":
-                PaymentRouter.invalidate_cache(code)
+            if boundary in ("eviction", "no-eviction-control"):
+                if boundary == "eviction":
+                    PaymentRouter.invalidate_cache(code)
                 release_read.set()
-                await pending  # the old read publishes AFTER the eviction
+                await pending  # the old read finishes after the commit (and after the eviction, if any)
             else:
                 await original_refresh(**kwargs)
 
@@ -219,11 +226,13 @@ async def test_seed_refresh_waits_for_the_older_read_before_opening_money(factor
                     task.cancel()
             await asyncio.gather(*(t for t in (tick, pending) if t is not None), return_exceptions=True)
     assert set(own).isdisjoint(old_router.uuids), "premise: the held read predates the new topology"
-    expected = [] if boundary == "eviction-control" else [Decimal("3.00")]
+    expected = [] if boundary == "no-eviction-control" else [Decimal("3.00")]
     assert await _seed_money_state(factory, own, code) == (2, 1, expected)
     assert run._real_seeded is True
-    if boundary == "eviction-control":
+    if boundary == "no-eviction-control":
         assert run.rejected_total == 1
+    if boundary == "eviction":
+        assert run.rejected_total == 0
 
 
 @pytest.mark.asyncio

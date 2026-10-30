@@ -183,9 +183,10 @@ class Settings(BaseSettings):
     # Challenge
     AUTH_CHALLENGE_EXPIRE_SECONDS: int = 300
 
-    # Payment Routing (MVP limits)
-    ROUTING_MAX_HOPS: int = 6
-    ROUTING_MAX_PATHS: int = 3
+    # Payment Routing (MVP limits). 054-D-7: a route has at least one edge and a search looks for at least one path;
+    # 0 or a negative value is refused at start and by `PATCH /admin/config`, where it used to be taken silently.
+    ROUTING_MAX_HOPS: int = Field(default=6, ge=1)
+    ROUTING_MAX_PATHS: int = Field(default=3, ge=1)
     # Spec-aligned timeouts
     ROUTING_PATH_FINDING_TIMEOUT_MS: int = 500
     # 027 stage 1: the route graph is a hint cached per equivalent; money commits no longer drop it, so this bounds

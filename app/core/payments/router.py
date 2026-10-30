@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import logging
 import time
+from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import AbstractSet, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
@@ -54,13 +55,23 @@ class PaymentRouter:
     # (`itertools.count`, not a clock: two events in one coarse clock tick would be unordered).
     _read_started: Dict[str, int] = {}
     _ticks = itertools.count(1)
+    # 054-F-2: the tick of the last eviction of each equivalent, and of the last eviction of all of them. A build
+    # whose read began before it may have read the state the eviction was for, and is not published.
+    _invalidated: Dict[str, int] = {}
+    _invalidated_all: int = 0
 
     @classmethod
     def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
         if equivalent_code:
+            cls._invalidated[str(equivalent_code)] = next(cls._ticks)
             cls._graph_cache.pop(str(equivalent_code), None)
         else:
+            cls._invalidated_all = next(cls._ticks)
             cls._graph_cache.clear()
+
+    @classmethod
+    def _evicted_since(cls, equivalent_code: str, read_started: int) -> bool:
+        return max(cls._invalidated.get(equivalent_code, 0), cls._invalidated_all) > read_started
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -265,7 +276,13 @@ class PaymentRouter:
                     self.edge_no_transit.setdefault(payer_pid, {})[payee_pid] = forbid
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
-        if write_shared_cache and ttl > 0:
+        # 054-F-2: a topology edit committed and evicted while this build read; what it read may be the state before
+        # the edit, and publishing it after the eviction would serve that state for the whole TTL (the core then
+        # refuses the route on policy - E001, final). This instance still routes on it: a hint, as ever.
+        if write_shared_cache and ttl > 0 and self._evicted_since(equivalent_code, read_started):
+            logger.info("event=routing.graph_build_not_published equivalent=%s reason=evicted_during_read",
+                        equivalent_code)
+        elif write_shared_cache and ttl > 0:
             self._read_started[equivalent_code] = read_started
             self._graph_cache[equivalent_code] = (
                 time.time(),
@@ -363,6 +380,52 @@ class PaymentRouter:
 
         return None
 
+    def _hop_refuses(self, u: str, v: str, *, payer: str, payee: str) -> bool:
+        """The hop u -> v alone breaks the policy, whatever the rest of the route: an intermediary of the hop is an
+        owner who forbids mediation over the pair, or is blocked by a line of the pair itself (`route_breaks_policy`).
+        Local - it reads only the hop and who pays and is paid. A line's `blocked_participants` naming a node ELSEWHERE
+        on the route is the one rule that is not."""
+
+        forbid, blocked = self._hop_rules(u, v)
+        return bool((forbid | blocked) & {n for n in (u, v) if n != payer and n != payee})
+
+    def _bfs_carrying(
+        self,
+        from_pid: str,
+        to_pid: str,
+        amount: Decimal,
+        *,
+        max_hops: int,
+        forbidden_nodes: Set[str],
+        deadline: float,
+    ) -> Optional[List[str]]:
+        """054-F-1: a shortest path whose every hop carries `amount`, by a BFS with a node-level `visited` - linear in
+        the graph. The policy (`route_breaks_policy`) is checked on every prefix, as max-flow's BFS checks it, so a
+        path it returns respects it; but the policy depends on the route and `visited` keeps one prefix per node, so
+        it may miss a path that exists. A heuristic, not a proof: None says only "not found here"."""
+
+        if from_pid not in self.graph or to_pid not in self.graph or {from_pid, to_pid} & forbidden_nodes:
+            return None
+        seen = {from_pid}
+        queue = deque([(from_pid, [from_pid])])
+        while queue:
+            if time.perf_counter() >= deadline:
+                raise TimeoutException("Routing timed out")
+            current, path = queue.popleft()
+            if current == to_pid:
+                return path
+            if (len(path) - 1) >= max_hops:
+                continue
+            for neighbor, capacity in self.graph.get(current, {}).items():
+                if neighbor in seen or neighbor in forbidden_nodes or capacity <= 0 or capacity < amount:
+                    continue
+                candidate = path + [neighbor]
+                if route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
+                    continue
+                seen.add(neighbor)
+                queue.append((neighbor, candidate))
+        return None
+
     def _path_bottleneck(self, path: List[str], *, graph: Dict[str, Dict[str, Decimal]]) -> Decimal:
         b = Decimal('Infinity')
         for u, v in zip(path[:-1], path[1:]):
@@ -396,7 +459,9 @@ class PaymentRouter:
             if u in allowed
         }
 
-    def payment_targets(self, from_pid: str, *, max_hops: int, limit: Optional[int] = None) -> List[PaymentTarget]:
+    def payment_targets(
+        self, from_pid: str, *, max_hops: int, limit: Optional[int] = None, timeout_ms: int | None = None
+    ) -> List[PaymentTarget]:
         """Whom `from_pid` can pay on the graph of this instance: every other participant a route of at most
         `max_hops` hops reaches, each edge with capacity above zero and the hop policy respected - the same search
         a payment's routing runs (`_bfs_single_path`, amount zero), so the answer cannot disagree with routing.
@@ -407,20 +472,79 @@ class PaymentRouter:
 
         035 A6 (`T3511`): the public form of the loop the simulator's `payment-targets` route ran over the private
         search (034 `F-034-11`).
+
+        054-F-H2: one breadth-first search from `from_pid` with a node-level `visited` answers for every target at
+        once - linear, not one search per target over every simple path (that held the simulator's event loop for
+        seconds). It is the answer of the per-target search, paths included, unless a route-dependent rule (a
+        `blocked_participants` naming a node elsewhere on the route) refused a candidate; then each target is searched
+        exactly (`_bfs_single_path`, only for those the local rules alone let through). All of it is bounded
+        by `timeout_ms` (default `ROUTING_PATH_FINDING_TIMEOUT_MS`): out of time, `TimeoutException` (HTTP 504, E007) -
+        never a partial list, which would drop reachable targets silently.
         """
 
         if from_pid not in self.graph:
             return []
-        targets: List[PaymentTarget] = []
-        for to_pid in self.graph:
-            if not to_pid or to_pid == from_pid:
-                continue
-            path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops))
-            if not path or len(path) < 2:
-                continue
-            targets.append(PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path)))
+        effective_timeout_ms = max(1, int(
+            timeout_ms if timeout_ms is not None else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)))
+        deadline = time.perf_counter() + effective_timeout_ms / 1000.0
+        found, exact = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline)
+        if not exact:
+            # Who is reachable under the local rules alone - a superset; only they are searched.
+            relaxed, _ = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline, local_only=True)
+            found = {}
+            for to_pid in self.graph:
+                if not to_pid or to_pid == from_pid or to_pid not in relaxed:
+                    continue
+                path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops),
+                                             deadline=deadline)
+                if path and len(path) >= 2:
+                    found[to_pid] = path
+        targets = [PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path))
+                   for to_pid, path in found.items() if to_pid and to_pid != from_pid and to_pid in self.graph]
         targets.sort(key=lambda target: (target.hops, target.to_pid))
         return targets if limit is None else targets[: int(limit)]
+
+    def _reach_by_node(
+        self, from_pid: str, *, max_hops: int, deadline: float, local_only: bool = False
+    ) -> Tuple[Dict[str, List[str]], bool]:
+        """Every participant `from_pid` can pay within `max_hops` hops of positive capacity, with its first shortest
+        path: `({to_pid: path}, exact)`. A hop ends a route (its head is the payee) or continues one (its head is an
+        intermediary); the policy (`route_breaks_policy`) is checked for each role separately.
+
+        `exact`: no candidate hop was refused by a rule that depends on the rest of the route (a `blocked_participants`
+        naming a node elsewhere on it; the other rules are local, `_hop_refuses`). Then a node's first BFS prefix is as
+        good as any other for every continuation, and the answer is the per-target `_bfs_single_path`'s, paths
+        included (same FIFO order). `local_only`: the local rules alone - a relaxation, exact for itself: a
+        participant it does not reach is reachable by no route."""
+
+        intermediary = object()  # a payee no route contains: every node of a prefix is an intermediary
+        exact = True
+        found: Dict[str, List[str]] = {}
+        seen = {from_pid}
+        queue = deque([(from_pid, [from_pid])])
+        while queue:
+            if time.perf_counter() >= deadline:
+                raise TimeoutException("Routing timed out")
+            current, path = queue.popleft()
+            if (len(path) - 1) >= max_hops:
+                continue
+            for neighbor, capacity in self.graph.get(current, {}).items():
+                if capacity <= 0 or neighbor in path:
+                    continue
+                candidate = path + [neighbor]
+                for payee, done in ((neighbor, neighbor in found), (intermediary, neighbor in seen)):
+                    if done:
+                        continue
+                    local = self._hop_refuses(current, neighbor, payer=from_pid, payee=payee)  # type: ignore
+                    if local or (not local_only and route_breaks_policy(
+                            candidate, self._hop_rules, payee=payee)):  # type: ignore[arg-type]
+                        exact = exact and local
+                    elif payee is intermediary:
+                        seen.add(neighbor)
+                        queue.append((neighbor, candidate))
+                    else:
+                        found[neighbor] = candidate
+        return found, exact
 
     def find_flow_routes(
         self,
@@ -438,6 +562,14 @@ class PaymentRouter:
         MVP multipath: iterative augmentation on a residual copy of the capacity graph.
         - Respects edge can_be_intermediate constraints.
         - Enforces max_hops.
+
+        054-F-1 (protocol §6.3.2: the first path is the one of the largest capacity). Step 1: one linear BFS for a path
+        that carries ALL of `amount` (`_bfs_carrying`); found - the payment goes on it whole, one route. Step 2, only
+        when step 1 found none: the algorithm before 054, unchanged - the shortest path of any capacity,
+        `min(rest, bottleneck)` on it, up to `max_paths` - on the rest of the same deadline. Until 054 there was only
+        step 2, and thin short paths used up `max_paths` while one wide path carried the payment. So the payments
+        routed are a superset of those before, at the cost of one linear BFS; step 1 is a heuristic (it may miss a
+        path a route-dependent policy hides), and step 2 then answers as before.
         """
         if amount <= 0 or max_paths <= 0:
             return []
@@ -458,6 +590,14 @@ class PaymentRouter:
                 if isinstance(x, str) and x.strip()
             }
 
+        try:
+            whole = self._bfs_carrying(from_pid, to_pid, amount, max_hops=max_hops, forbidden_nodes=forbidden_nodes,
+                                       deadline=deadline)
+        except TimeoutException:
+            self._routing_timed_out(from_pid, to_pid, effective_timeout_ms)
+        if whole:
+            return [(whole, amount)]
+
         # Working copy; subtract allocations to avoid over-committing shared edges.
         residual: Dict[str, Dict[str, Decimal]] = {u: d.copy() for u, d in self.graph.items()}
 
@@ -466,17 +606,7 @@ class PaymentRouter:
 
         while remaining > 0 and len(routes) < max_paths:
             if time.perf_counter() >= deadline:
-                try:
-                    ROUTING_FAILURES_TOTAL.labels(reason="timeout").inc()
-                except Exception:
-                    pass
-                logger.info(
-                    "event=routing.timeout from_pid=%s to_pid=%s timeout_ms=%s",
-                    from_pid,
-                    to_pid,
-                    effective_timeout_ms,
-                )
-                raise TimeoutException("Routing timed out")
+                self._routing_timed_out(from_pid, to_pid, effective_timeout_ms)
 
             path = self._bfs_single_path(
                 from_pid,
@@ -513,6 +643,20 @@ class PaymentRouter:
             return []
         return routes
 
+    @staticmethod
+    def _routing_timed_out(from_pid: str, to_pid: str, timeout_ms: int) -> None:
+        try:
+            ROUTING_FAILURES_TOTAL.labels(reason="timeout").inc()
+        except Exception:
+            pass
+        logger.info(
+            "event=routing.timeout from_pid=%s to_pid=%s timeout_ms=%s",
+            from_pid,
+            to_pid,
+            timeout_ms,
+        )
+        raise TimeoutException("Routing timed out")
+
     def check_capacity(self, from_pid: str, to_pid: str, amount: Decimal) -> CapacityResponse:
         routes = self.find_flow_routes(
             from_pid,
@@ -538,7 +682,16 @@ class PaymentRouter:
 
     def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:
         """
-        Edmonds-Karp or similar to find max flow.
+        Edmonds-Karp or similar to find max flow - an ESTIMATE, not a proof: the policy is checked per augmenting
+        path, and an augmenting path over a residual reverse hop may still overstate (BACKLOG).
+
+        054-F-3: the BFS keeps one prefix per node (`visited`) while the policy depends on the route, so it may miss
+        every path and answer 0 although a payment commits. Only then, and only when it refused a candidate by a
+        route-dependent rule at least once (a `blocked_participants` naming a node elsewhere on the route; without such
+        a refusal - local ones, `_hop_refuses`, included - it is exact and 0 is right), one `_bfs_single_path` - every simple
+        path, under `ROUTING_PATH_FINDING_TIMEOUT_MS` - looks for a path; its bottleneck is returned as a LOWER bound.
+        Out of time: 0, as before, logged (`event=routing.max_flow_truncated`) - never an exception, since a payment's
+        refusal reads this value for its text.
         """
         # T1545, 2026-09-13: with from == to the BFS finds a zero-length path at once, the residual
         # update does nothing, and `while True` finds it again forever - synchronously, inside an
@@ -549,54 +702,74 @@ class PaymentRouter:
 
         # Create a working copy of the graph since we modify residuals
         residual_graph = {u: d.copy() for u, d in self.graph.items()}
-        
+
         max_flow = Decimal('0')
         paths = []
-        
+        refused_by_policy = False
+
         while True:
             # BFS for augmenting path
             queue = [(from_pid, [from_pid], Decimal('Infinity'))]
             visited = {from_pid}
             path_found = None
-            
+
             while queue:
                 u, path, flow = queue.pop(0)
                 if u == to_pid:
                     path_found = (path, flow)
                     break
-                
+
                 if len(path) > settings.MAX_FLOW_MAX_HOPS: # Limit hops for performance
                     continue
 
                 for v, cap in residual_graph.get(u, {}).items():
                     # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
                     if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
+                        # Only a route-dependent refusal of a node not yet reached can hide a path from the
+                        # node-visited BFS; a local one (`_hop_refuses`) refuses this hop on every route, and a visited
+                        # node (the payer included) is not expanded again anyway - 0 stays exact (Codex fix-delta review).
+                        refused_by_policy = refused_by_policy or (
+                            cap > 0 and v not in visited
+                            and not self._hop_refuses(u, v, payer=from_pid, payee=to_pid))
                         continue
                     if v not in visited and cap > 0:
                         visited.add(v)
                         new_flow = min(flow, cap)
                         queue.append((v, path + [v], new_flow))
-            
+
             if not path_found:
                 break
-                
+
             path, flow = path_found
             max_flow += flow
             paths.append(MaxFlowPath(path=path, capacity=self._money(flow)))
-            
+
             # Update residuals
             for i in range(len(path) - 1):
                 u, v = path[i], path[i+1]
                 residual_graph[u][v] -= flow
                 if residual_graph[u][v] == 0:
                     del residual_graph[u][v]
-                
+
                 # Add reverse flow
                 if u not in residual_graph.get(v, {}):
                     if v not in residual_graph:
                         residual_graph[v] = {}
                     residual_graph[v][u] = 0
                 residual_graph[v][u] += flow
+
+        if max_flow == 0 and refused_by_policy:
+            timeout_ms = max(1, int(settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500))
+            try:
+                path = self._bfs_single_path(from_pid, to_pid, Decimal('0'), max_hops=int(settings.MAX_FLOW_MAX_HOPS),
+                                             deadline=time.perf_counter() + timeout_ms / 1000.0)
+            except TimeoutException:
+                path = None
+                logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s",
+                            from_pid, to_pid, timeout_ms)
+            if path:
+                max_flow = self._path_bottleneck(path, graph=self.graph)
+                paths = [MaxFlowPath(path=path, capacity=self._money(max_flow))]
 
         # Identify bottlenecks (min-cut edges roughly, or just full edges on the paths)
         # For MVP, just listing edges on paths that have 0 remaining capacity in original direction?
