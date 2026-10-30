@@ -22,11 +22,15 @@ from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.db.models.participant import Participant
+from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import (
     GeoException,
     RetryablePaymentConflictException,
     TimeoutException,
 )
+from app.utils.request_id import request_id_var
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -316,22 +320,49 @@ class RealPaymentsResult:
     unresolved_seqs: frozenset[int] = frozenset()
 
 
-def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
+def _internal_error_details(e: BaseException, *, logger: logging.Logger) -> dict[str, Any]:
+    """The public details of an INTERNAL payment failure (054-C-5) - and the one log line that explains it.
+
+    `err_details` is published as `tx.failed.error.details`/`error.message` and becomes the run's `last_error`, and
+    the simulator stream is not admin-only. An internal failure (not a `GeoException`, or one with the internal code
+    E010) is sanitised as the clearing routes sanitise it (`app/api/v1/clearing.py::_is_internal`): neither its raw
+    text nor its class leaves the process. The public side carries an error id instead, and the same id is in the
+    log line with the class and the traceback (AGENTS.md §12). The id is always fresh: a run's tick loop may inherit
+    the `request_id` of the request that started it, so the request id - when there is one - is logged beside it,
+    not used as it.
+    """
+
+    error_id = uuid.uuid4().hex
+    logger.warning(
+        "simulator.real.payment_internal_error error_id=%s error_type=%s request_id=%s",
+        error_id,
+        type(e).__name__,
+        request_id_var.get(),
+        exc_info=e,
+    )
+    return {
+        "error_id": error_id,
+        "message": f"The real-mode payment failed with an internal error (error id {error_id})",
+    }
+
+
+def _classify_refusal(
+    e: BaseException, *, logger: logging.Logger | None = None
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
     """(status, code, err_details) of a refused staged payment - one rule for a raised refusal and for
     a refusal returned as a structured `ABORTED` result (`StagedPaymentResult.refusal`, 019 `T1905`).
 
     `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT or
-    INTERNAL_ERROR is an error of the run.
+    INTERNAL_ERROR is an error of the run. An internal failure gets sanitised details (`_internal_error_details`).
     """
 
     code: str | None = "INTERNAL_ERROR"
     status: str | None = None
-    err_details: dict[str, Any] | None = {
-        "exc": type(e).__name__,
-        "message": str(e),
-    }
+    err_details: dict[str, Any] | None = None
 
-    if isinstance(e, TimeoutException):
+    if not isinstance(e, GeoException):
+        err_details = _internal_error_details(e, logger=logger or _logger)
+    elif isinstance(e, TimeoutException):
         code = "PAYMENT_TIMEOUT"
         err_details = {
             "exc": type(e).__name__,
@@ -344,13 +375,17 @@ def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[st
         if 400 <= geo_status < 500:
             status = "REJECTED"
             code = None
-        err_details = {
-            "exc": type(e).__name__,
-            "geo_code": getattr(e, "code", None),
-            "message": getattr(e, "message", str(e)),
-            "details": getattr(e, "details", None),
-            "status_code": geo_status,
-        }
+        if getattr(e, "code", None) == ErrorCode.E010.value:
+            # The internal code: its message may carry private detail (`clearing.py::_is_internal`).
+            err_details = _internal_error_details(e, logger=logger or _logger)
+        else:
+            err_details = {
+                "exc": type(e).__name__,
+                "geo_code": getattr(e, "code", None),
+                "message": getattr(e, "message", str(e)),
+                "details": getattr(e, "details", None),
+                "status_code": geo_status,
+            }
     return status, code, err_details
 
 
@@ -539,7 +574,7 @@ class RealPaymentsExecutor:
                     if staged.refusal is not None:
                         # A definitive refusal recorded ABORTED in this savepoint (019 `T1905`): durable
                         # with the tick, and classified exactly as the same refusal raised used to be.
-                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal)
+                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal, logger=self._logger)
                         return (
                             int(action.seq),
                             str(action.equivalent),
@@ -611,7 +646,7 @@ class RealPaymentsExecutor:
                     # progress rather than as an error, and it does not spend the error budget.
                     raise
                 except Exception as e:
-                    status, code, err_details = _classify_refusal(e)
+                    status, code, err_details = _classify_refusal(e, logger=self._logger)
                     if status is None:
                         # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
                         # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
@@ -1036,7 +1071,7 @@ class RealPaymentsExecutor:
 
     def _refusal_observation(self, *, run_id: str, run: RunRecord, emitter: SseEventEmitter, action: Any,
                              cause: BaseException) -> "DeferredRealPaymentEffects":
-        _status, code, err_details = _classify_refusal(cause)
+        _status, code, err_details = _classify_refusal(cause, logger=self._logger)
         if code is not None:
             outcome: Literal["committed", "rejected", "error"] = "error"
             error_code = str(code)
