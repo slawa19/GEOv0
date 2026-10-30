@@ -341,6 +341,9 @@ class SimulatorRunStatusEvent(BaseModel):
 
     last_error: Optional[SimulatorLastError] = None
 
+    # 054-A-7a: why a `paused` run is paused when the run paused itself; null for a user's pause and in other states.
+    pause_reason: Optional[PauseReason] = None
+
     model_config = ConfigDict(extra="allow")
 
 
@@ -521,6 +524,8 @@ class _EnumOfOne:
 
 
 RunMode = Annotated[Literal["real"], _EnumOfOne("real")]
+#: 054-A-7a: the one reason a run pauses itself (`RunStatus.pause_reason`).
+PauseReason = Annotated[Literal["scenario_exhausted"], _EnumOfOne("scenario_exhausted")]
 
 
 class RunCreateRequest(BaseModel):
@@ -606,6 +611,10 @@ class RunStatus(BaseModel):
     stop_source: Optional[str] = None
     stop_reason: Optional[str] = None
     stop_client: Optional[str] = None
+
+    # 054-A-7a: why a `paused` run is paused when the run paused itself - "scenario_exhausted": every automatic payment
+    # was refused, and the clearing run for that did not help. Null for a user's pause and in every other state.
+    pause_reason: Optional[PauseReason] = None
 
     sim_time_ms: Optional[int] = Field(default=None, ge=0)
     intensity_percent: Optional[int] = Field(default=None, ge=0, le=100)

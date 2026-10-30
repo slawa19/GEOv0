@@ -470,6 +470,7 @@ class _SimulatorRuntimeBase:
             current_phase=run.current_phase,
             last_error=_dict_to_last_error(run.last_error),
             consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
+            pause_reason=run.pause_reason,
         ).model_dump(mode="json", by_alias=True)
 
     def publish_run_status(self, run_id: str) -> str:
@@ -677,6 +678,7 @@ class _SimulatorRuntimeBase:
             run = self._runs.get(run_id)
             if run is not None and run.state == "running":
                 run.state = "error"
+                run.pause_reason = None
                 run.stopped_at = _utc_now()
                 run.current_phase = None
                 run.errors_total += 1

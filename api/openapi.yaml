@@ -6992,6 +6992,12 @@ components:
               type: string
               format: date-time
           additionalProperties: false
+        pause_reason:
+          description: >-
+            054-A-7a: why a `paused` run is paused when the run paused itself (see `RunStatus.pause_reason`).
+          type: string
+          nullable: true
+          enum: [scenario_exhausted, null]
       additionalProperties: true
 
     ScenarioUploadRequest:
@@ -7334,6 +7340,16 @@ components:
         stop_client:
           type: string
           nullable: true
+        pause_reason:
+          description: >-
+            054-A-7a: why a `paused` run is paused when the run paused itself. `scenario_exhausted` - every automatic
+            payment of three attempted ticks in a row was refused, the clearing pass run for it at once did not help,
+            and the next attempted tick was refused whole again. Null for a pause the user asked for and in every
+            state other than `paused`. Manual Interact actions still work on such a run; `resume` clears the reason
+            and the counter `consec_all_rejected_ticks`.
+          type: string
+          nullable: true
+          enum: [scenario_exhausted, null]
         sim_time_ms:
           type: integer
           nullable: true

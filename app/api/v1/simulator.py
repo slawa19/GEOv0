@@ -2599,6 +2599,7 @@ async def _run_events_stream(
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
+                pause_reason=run.pause_reason,
             ).model_dump(mode="json", by_alias=True)
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
             bootstrap_tail = (

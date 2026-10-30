@@ -374,12 +374,15 @@ async def _no_tail(**_kwargs: Any) -> None:
 
 
 async def _drive(
-    monkeypatch, intensity_percent: int, script: list[str], *, tail_fails: bool = False
+    monkeypatch, intensity_percent: int, script: list[str], *, tail_fails: bool = False, publish_run_status: bool = False
 ) -> tuple[RunRecord, _ScriptedRunner, list[int]]:
     logger = logging.getLogger("test.p049_s2a_tick_failures")
     run, _phase, _emitter, _effect = _run_with_phase(logger=logger, run_id=f"p049-s2a-{intensity_percent}")
     run.intensity_percent = intensity_percent
     runner = _ScriptedRunner(run=run, logger=logger, script=script)
+    if publish_run_status:  # 054-A-7a: the pause of an exhausted scenario publishes the run's status
+        runner.published_statuses = []
+        runner._publish_run_status = runner.published_statuses.append
     _bind_session(monkeypatch, _SuccessfulRollbackSession())
     tick = RealTick(runner)  # type: ignore[arg-type]
 
@@ -459,14 +462,26 @@ async def test_a_tick_failing_after_its_payments_ran_is_an_attempted_failure(mon
     assert _stops(runner) == ["REAL_MODE_TICK_FAILED_REPEATED"]
 
 
-async def test_the_stall_warning_logs_once_per_fifth_counted_tick(monkeypatch, caplog) -> None:
-    """Codex §15 P3: the warning is logged by the tick that counted the fifth all-rejected attempt, not by every empty
-    share that holds the counter at five afterwards."""
+async def test_the_stall_steps_are_taken_by_counted_ticks_not_by_the_empty_shares_between(monkeypatch, caplog) -> None:
+    """Codex §15 P3, carried over by 054-A-7a: what the stall triggers is triggered by the tick that COUNTED, not by
+    every empty share that holds the counter afterwards. Until 054-A-7a that was the warning of every fifth all-rejected
+    tick (`simulator.real.all_rejected_stall`, removed); now the third counted tick runs the clearing (logged once) and
+    the next COUNTED tick pauses the run - the empty shares in between neither clear again nor pause."""
 
-    with caplog.at_level(logging.WARNING, logger="test.p049_s2a_tick_failures"):
-        run, _runner, _ = await _drive(monkeypatch, 2, ["ok"] * 5 + ["empty"] * 4)
-    assert run._real_consec_all_rejected_ticks == 5
-    assert sum("simulator.real.all_rejected_stall" in r.getMessage() for r in caplog.records) == 1
+    with caplog.at_level(logging.INFO, logger="test.p049_s2a_tick_failures"):
+        run, runner, _ = await _drive(monkeypatch, 2, ["ok"] * 3 + ["empty"] * 4, publish_run_status=True)
+        assert run._real_consec_all_rejected_ticks == 3
+        assert sum("simulator.real.stall_clearing" in r.getMessage() for r in caplog.records) == 1
+        assert (run.state, run.pause_reason) == ("running", None)
+    assert sum("simulator.run.scenario_exhausted" in r.getMessage() for r in caplog.records) == 0
+
+    with caplog.at_level(logging.INFO, logger="test.p049_s2a_tick_failures"):
+        caplog.clear()
+        run, runner, _ = await _drive(monkeypatch, 2, ["ok"] * 3 + ["empty"] * 2 + ["ok"], publish_run_status=True)
+    assert sum("simulator.real.stall_clearing" in r.getMessage() for r in caplog.records) == 1
+    assert sum("simulator.run.scenario_exhausted" in r.getMessage() for r in caplog.records) == 1
+    assert (run.state, run.pause_reason) == ("paused", "scenario_exhausted")
+    assert runner.published_statuses == [run.run_id]
 
 
 @pytest.mark.parametrize(

@@ -130,6 +130,16 @@ class TrustDriftConfig:
         )
 
 
+#: 054-A-7a: the one value of `RunRecord.pause_reason` - the run paused itself because its automatic payments are all
+#: refused and the clearing run for that did not help (`tick.py`, `RealTick._stall_step`).
+PAUSE_REASON_SCENARIO_EXHAUSTED = "scenario_exhausted"
+
+
+#: 054-A-7a: the one value of `RunRecord.pause_reason` - the run paused itself because its automatic payments are all
+#: refused and the clearing run for that did not help (`tick.py`, `RealTick._stall_step`).
+PAUSE_REASON_SCENARIO_EXHAUSTED = "scenario_exhausted"
+
+
 @dataclass
 class RunRecord:
     run_id: str
@@ -149,6 +159,10 @@ class RunRecord:
     stop_source: Optional[str] = None
     stop_reason: Optional[str] = None
     stop_client: Optional[str] = None
+    # 054-A-7a: why the run is `paused` when it was not the user - `"scenario_exhausted"` (the automatic payments are all
+    # refused and the clearing run for that changed nothing, `tick.py`). None for a user's pause and in every other state.
+    # In memory only, like `stop_reason`: `simulator_runs` has no column for either.
+    pause_reason: Optional[str] = None
 
     sim_time_ms: int = 0
     tick_index: int = 0
@@ -231,6 +245,10 @@ class RunRecord:
 
     # Consecutive ticks where all planned payments were rejected (capacity stall).
     _real_consec_all_rejected_ticks: int = 0
+    # 054-A-7a: the value of that counter at which the tick ran a clearing pass for the stall (`tick.py`,
+    # `STALL_CLEARING_AFTER_TICKS`); None while no such pass is pending an answer. The next attempted all-rejected
+    # tick after it pauses the run (`pause_reason`); a counter below it (a payment went through) clears it.
+    _real_stall_clearing_at: Optional[int] = None
 
     # Programme 015 / P1: diagnostics of the tick money phase's bounded replay.
     #

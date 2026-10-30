@@ -12,7 +12,7 @@ THE TICK, IN ORDER, WITH ITS DURABILITY BOUNDARIES (spec 021, "Решения" i
 2. THE MONEY PHASE - `run_money_phase_with_bounded_replay` (`money_replay.py`, the 019 retry owner): owner locks,
    snapshot, planning and staged payments on a fresh session, committed at its own boundary and replayed as a whole
    on a transient conflict. Called here and nowhere else.
-3. Clearing - on the static cadence only, with the tick's hard timeout; the tail's transaction is committed first
+3. Clearing - on the static cadence, and once out of it for a stall (054-A-7a, below), with the tick's hard timeout; the tail's transaction is committed first
    so clearing (its own sessions, one pass of the common runner `run_clearing_pass` per equivalent - 023 (d); the
    driver `RealClearingEngine` in between was removed by 021 `T2109`) does not queue behind it.
 4. Trust decay - its OWN commit, before its edge patch is published; a failed decay is rolled back HERE by the
@@ -23,6 +23,13 @@ THE TICK, IN ORDER, WITH ITS DURABILITY BOUNDARIES (spec 021, "Решения" i
 
 A failure anywhere after the money boundary costs the tail, never the money: the observation buffer has already
 resolved, so the tail's rollback cannot un-publish a committed payment and nothing in it can replay money.
+
+A REFUSED PAYMENT IS AN OUTCOME, NOT AN ERROR (054-A-7a, owner's decision 2026-10-30). When every automatic payment of
+`STALL_CLEARING_AFTER_TICKS` attempted ticks in a row is refused (`_real_consec_all_rejected_ticks`, the executor), the
+tick runs the clearing pass at once, out of the cadence (`maybe_run_clearing`, `CLEARING_ENABLED` respected). If the next
+attempted tick is refused whole again, the scenario has nothing left to do on its own: the run pauses itself with
+`pause_reason = "scenario_exhausted"` (`_stall_step`, `_pause_scenario_exhausted`). Manual Interact actions still work on
+the paused run; `resume` clears the counter and the reason. A scripted event's own refusal is not counted (it never was).
 
 THE RUNNER. `RealTick` is the tick of `RealRunnerImpl` and reads the runner's collaborators and limits at CALL
 time, as the orchestrator did, so a test or an operator that rebinds one on the runner is seen by the next tick.
@@ -58,7 +65,7 @@ from app.core.simulator.commit_resolution import (
     resolve_commit_under_cancellation,
     resolve_rollback_under_cancellation,
 )
-from app.core.simulator.models import RunRecord
+from app.core.simulator.models import PAUSE_REASON_SCENARIO_EXHAUSTED, RunRecord
 from app.core.simulator.money_replay import (
     money_conflict_name,
     run_money_phase_with_bounded_replay,
@@ -87,6 +94,10 @@ from app.utils.exceptions import ConflictException, GeoException
 
 if TYPE_CHECKING:
     from app.core.simulator.real_runner_impl import RealRunnerImpl
+
+#: 054-A-7a: this many attempted ticks in a row with every automatic payment refused make the tick run the clearing
+#: pass out of its cadence (the threshold the Simulator UI's stall plaque used).
+STALL_CLEARING_AFTER_TICKS = 3
 
 
 def tick_failure_message(error: BaseException, *, error_id: str) -> str:
@@ -234,6 +245,7 @@ class RealTick:
                 return
 
             run.state = "error"
+            run.pause_reason = None  # 054-A-7a: the reason of a pause belongs to the paused state only
             run.stopped_at = rr._utc_now()
             run.current_phase = None
             run.queue_depth = 0
@@ -323,6 +335,10 @@ class RealTick:
                     if money.should_stop:
                         return
 
+                    # 054-A-7a: what the run of all-refused ticks asks of this tick - a clearing pass out of the cadence,
+                    # the pause, or nothing. Decided on the COMMITTED phase's counter, before any clearing of this tick.
+                    stall_step = self._stall_step(run_id, run, payments_phase)
+
                     # 036 B1: the scenario's scripted clearings run FIRST, so the periodic clearing of this tick cannot take
                     # the cycle an episode is about, and the periodic pass of an equivalent that has just had a scripted pass
                     # does not run on this tick. Their committed volume belongs to the tick's `clearing_volume`.
@@ -346,6 +362,7 @@ class RealTick:
                         tick_t0=tick_t0,
                         payments_result=payments_phase,
                         skip_equivalents=scripted_attempted,
+                        stall_clearing=stall_step == "clear",
                     )
                     for eq_code, amount in scripted_volume.items():
                         clearing_volume_by_eq[eq_code] = clearing_volume_by_eq.get(eq_code, Decimal("0")) + amount
@@ -394,6 +411,10 @@ class RealTick:
                     if not is_empty_share(run, len(payments_phase.planned)):
                         with rr._lock:
                             run._real_consec_tick_failures = 0
+
+                    if stall_step == "exhausted":
+                        # After the tail, so the tick that found the scenario exhausted is complete like any other.
+                        await self._pause_scenario_exhausted(run_id, run)
 
                 except Exception as tick_error:
                     # CRITICAL: always attempt rollback on tick failure. Otherwise the pooled connection can be
@@ -756,19 +777,9 @@ class RealTick:
         )
 
         stall_ticks = int(payments_res.stall_ticks)
-        # Stall warning, throttled: every 5 consecutive stall ticks - logged by the tick that COUNTED the fifth (an
-        # attempted, all-rejected tick: one that planned something and left the counter above 0). Since 049 S2a an empty
-        # share holds the counter, and a multiple of 5 held over empty ticks must not log on every heartbeat.
-        if planned and stall_ticks > 0 and stall_ticks % 5 == 0:
-            rr._logger.warning(
-                "simulator.real.all_rejected_stall run_id=%s tick=%s "
-                "consec_stall_ticks=%d planned=%d rejected=%d",
-                str(run.run_id),
-                int(run.tick_index),
-                stall_ticks,
-                len(planned),
-                int(payments_res.rejected),
-            )
+        # 054-A-7a: the stall is no longer only logged every fifth tick (`simulator.real.all_rejected_stall`, removed): at
+        # `STALL_CLEARING_AFTER_TICKS` the tick clears, and one more all-refused tick pauses the run (`_stall_step`), so a
+        # running run does not reach a fifth such tick. The two steps log lines of their own.
 
         should_stop = bool(payments_res.stop_requested)
         # THE ERROR BUDGET DOES NOT SEE TRANSIENT CONFLICTS (programme 015 / P1). `errors` counts terminal
@@ -981,6 +992,64 @@ class RealTick:
                 if run._real_clearing_task is task:
                     run._real_clearing_task = None
 
+    def _stall_step(self, run_id: str, run: RunRecord, phase: TickPaymentsPhase) -> str | None:
+        """054-A-7a: "clear", "exhausted" or None - what the run of all-refused attempted ticks asks of this tick.
+
+        Read from the counter the committed money phase left (`TickPaymentsPhase.stall_ticks`: +1 for an attempted tick
+        with nothing committed and no error, 0 after any other attempted tick, held by an empty share). A counter below
+        the mark of a stall clearing means a payment went through since: the mark is dropped. An empty share is no
+        evidence (049 S2a) and decides nothing. Otherwise: at `STALL_CLEARING_AFTER_TICKS` with no mark - "clear" (the
+        mark is set, with clearing disabled too: the pass is then skipped and the next attempted tick answers all the
+        same); above the mark - the tick after the clearing was refused whole again: "exhausted".
+        """
+
+        rr = self._runner
+        stall = int(phase.stall_ticks)
+        with rr._lock:
+            mark = run._real_stall_clearing_at
+            if mark is not None and stall < mark:
+                run._real_stall_clearing_at = mark = None
+            if not phase.planned:
+                return None
+            if mark is not None and stall > mark:
+                return "exhausted"
+            if mark is not None or stall < STALL_CLEARING_AFTER_TICKS:
+                return None
+            run._real_stall_clearing_at = stall
+        rr._logger.info(
+            "simulator.real.stall_clearing run_id=%s tick=%s consec_stall_ticks=%d clearing_enabled=%s",
+            str(run_id),
+            int(run.tick_index or 0),
+            stall,
+            bool(settings.CLEARING_ENABLED),
+        )
+        return "clear"
+
+    async def _pause_scenario_exhausted(self, run_id: str, run: RunRecord) -> None:
+        """054-A-7a: the run pauses itself - every automatic payment is refused, and the clearing run for it did not help.
+
+        Only a `running` run (a pause, stop or failure that came during the tick wins). The heartbeat stops ticking a
+        paused run; Interact actions still reach it (`_get_run_checked` refuses only `stopped`/`error`); `resume` clears
+        the counter and the reason (`run_lifecycle.py`).
+        """
+
+        rr = self._runner
+        with rr._lock:
+            if run.state != "running":
+                return
+            run.state = "paused"
+            run.pause_reason = PAUSE_REASON_SCENARIO_EXHAUSTED
+            run._real_stall_clearing_at = None
+            ticks = int(run._real_consec_all_rejected_ticks or 0)
+        rr._logger.warning(
+            "simulator.run.scenario_exhausted run_id=%s tick=%s ticks=%d",
+            str(run_id),
+            int(run.tick_index or 0),
+            ticks,
+        )
+        rr._publish_run_status(run_id)
+        await simulator_storage.upsert_run(run)
+
     async def maybe_run_clearing(
         self,
         *,
@@ -992,20 +1061,27 @@ class RealTick:
         tick_t0: float,
         payments_result: Any | None = None,
         skip_equivalents: frozenset[str] = frozenset(),
+        stall_clearing: bool = False,
     ) -> dict[str, Decimal]:
         """The tick's clearing on the static cadence; the committed volume per equivalent, always `Decimal`.
 
         `skip_equivalents` (036 B1): the equivalents a scripted clearing already ran a pass for on this tick - no periodic
         pass of them runs on it.
 
+        `stall_clearing` (054-A-7a): the run's automatic payments were all refused for `STALL_CLEARING_AFTER_TICKS`
+        attempted ticks (`_stall_step`) - the same pass runs on this tick whatever the cadence says. `CLEARING_ENABLED`
+        still decides; a cadence of 0 (no periodic clearing) does not stop this pass, which is not periodic.
+
         2026-08-20 / p007_t715: the cleared volume is money and feeds the `clearing_volume` metric series, so it
         stays Decimal across every branch - including the early returns.
         """
-        if not settings.CLEARING_ENABLED or self._clearing_every_n_ticks <= 0:
+        if not settings.CLEARING_ENABLED:
             return {str(eq): Decimal("0") for eq in equivalents}
 
-        # Static cadence - the only clearing policy since programme 021 stage 3 removed the adaptive mode.
-        if int(run.tick_index) % int(self._clearing_every_n_ticks) != 0:
+        # Static cadence - the only periodic clearing policy since programme 021 stage 3 removed the adaptive mode.
+        every_n = int(self._clearing_every_n_ticks)
+        due_by_cadence = every_n > 0 and int(run.tick_index) % every_n == 0
+        if not (due_by_cadence or stall_clearing):
             return {str(eq): Decimal("0") for eq in equivalents}
 
         target = [eq for eq in equivalents if str(eq).upper() not in skip_equivalents]

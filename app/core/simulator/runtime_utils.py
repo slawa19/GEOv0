@@ -116,6 +116,7 @@ def run_to_status(run: RunRecord) -> RunStatus:
         stop_source=getattr(run, "stop_source", None),
         stop_reason=getattr(run, "stop_reason", None),
         stop_client=getattr(run, "stop_client", None),
+        pause_reason=run.pause_reason,
         sim_time_ms=run.sim_time_ms,
         intensity_percent=run.intensity_percent,
         ops_sec=run.ops_sec,

@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.models import RunRecord, note_subscribers_locked
+from app.core.simulator.models import PAUSE_REASON_SCENARIO_EXHAUSTED, RunRecord, note_subscribers_locked
 from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import SseBroadcast
@@ -416,14 +416,16 @@ class RunLifecycle:
         run = self._get_run(run_id)
         with self._lock:
             if run.state == "paused":
-                pass
+                pass  # 054-A-7a: a pause the run took itself keeps its reason; the user's pause adds nothing to it
             elif run.state == "running":
                 run.state = "paused"
+                run.pause_reason = None  # 054-A-7a: the user's pause has no reason of the run's own
             elif run.state in ("stopping", "stopped", "error"):
                 # Idempotent, but no-op.
                 pass
             else:
                 run.state = "paused"
+                run.pause_reason = None
 
         self._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
@@ -435,6 +437,12 @@ class RunLifecycle:
             if run.state == "running":
                 pass
             elif run.state == "paused":
+                if run.pause_reason == PAUSE_REASON_SCENARIO_EXHAUSTED:
+                    # 054-A-7a: the user takes the run on again - its run of all-refused ticks starts from zero, so the
+                    # stall clearing and the pause come only after the next `STALL_CLEARING_AFTER_TICKS` of them.
+                    run._real_consec_all_rejected_ticks = 0
+                    run._real_stall_clearing_at = None
+                run.pause_reason = None
                 run.state = "running"
                 note_subscribers_locked(run, self._idle_now())  # 044 stage 2: a resume restarts the idle window
             elif run.state in ("stopping", "stopped"):
@@ -484,6 +492,7 @@ class RunLifecycle:
 
             if run.state not in ("stopping", "stopped"):
                 run.state = "stopping"
+            run.pause_reason = None  # 054-A-7a: the reason of a pause belongs to the paused state only
 
         self._publish_run_status(run_id)
 
@@ -612,6 +621,8 @@ class RunLifecycle:
             # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch starts
             # from zero here, like `errors_total` above - the old launch's counts must not greet the new one.
             run._real_consec_all_rejected_ticks = 0
+            run._real_stall_clearing_at = None  # 054-A-7a: with the counter it belongs to
+            run.pause_reason = None
             run._real_consec_tick_failures = 0
             run._real_consec_money_no_progress_ticks = 0
             run.stopped_at = None
