@@ -486,6 +486,7 @@ class Settings(BaseSettings):
         self._guardrail_default_secrets()
         self._guardrail_simulator_session_secret()
         self._guardrail_csrf_allowlist()
+        self._guardrail_debug_mode()
 
     def _resolve_environment_alias(self) -> None:
         canonical_env = self.ENV
@@ -560,6 +561,21 @@ class Settings(BaseSettings):
             if normalized_origin not in normalized_origins:
                 normalized_origins.append(normalized_origin)
         self.SIMULATOR_CSRF_ORIGIN_ALLOWLIST = ",".join(normalized_origins)
+
+    def _guardrail_debug_mode(self) -> None:
+        """Fail-fast when DEBUG is on outside dev/test (054-C-8, 2026-10-30).
+
+        `app/main.py` passes DEBUG to `FastAPI(debug=...)`: Starlette then answers an unhandled
+        exception with its traceback page, sending source lines and locals to the client.
+        """
+        env = (self.ENV or "").strip().lower()
+        if env in self._SAFE_ENVS or not self.DEBUG:
+            return
+        raise RuntimeError(
+            "Refusing to start with DEBUG=true outside dev/test: debug mode sends tracebacks to clients. "
+            f"Got ENV={self.ENV!r}. "
+            "Set DEBUG=false, or run with ENV=dev/test."
+        )
 
     def _guardrail_default_secrets(self) -> None:
         env = (self.ENV or "").strip().lower()

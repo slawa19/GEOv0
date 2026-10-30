@@ -530,3 +530,50 @@ def test_non_dev_accepts_nonrepeating_secret_at_32_character_boundary(field: str
     configured = Settings(_env_file=None, ENV="prod", **values)
 
     assert getattr(configured, field) == boundary_secret
+
+
+# DEBUG OUTSIDE DEV/TEST (programme 054, finding 054-C-8, 2026-10-30).
+#
+# `app/main.py` passes `settings.DEBUG` to `FastAPI(debug=...)`; in debug mode Starlette answers an
+# unhandled exception with the traceback page, i.e. source lines and locals go to the client. The
+# refusal sits with the other start guardrails: every ENV outside dev/test refuses DEBUG=true. The
+# accepting counter-checks keep the refusal from passing vacuously - a Settings that refused every
+# DEBUG value, or DEBUG=true in every environment, fails one of them.
+
+
+@pytest.mark.parametrize("environment", ["prod", "staging"])
+@pytest.mark.parametrize("debug", [True, "true", "1"])
+def test_non_dev_refuses_debug_mode(environment: str, debug: object) -> None:
+    from app.config import Settings
+
+    with pytest.raises(RuntimeError, match=r"DEBUG.*ENV=") as refused:
+        Settings(_env_file=None, ENV=environment, DEBUG=debug, **_SECURE_NON_DEV_SETTINGS)
+
+    assert repr(environment) in str(refused.value)
+
+
+def test_debug_mode_from_the_process_environment_is_refused_too(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("DEBUG", "true")
+
+    with pytest.raises(RuntimeError, match=r"DEBUG"):
+        Settings(_env_file=None, ENV="prod", **_SECURE_NON_DEV_SETTINGS)
+
+
+@pytest.mark.parametrize("environment", ["prod", "staging"])
+def test_non_dev_accepts_debug_off(environment: str) -> None:
+    from app.config import Settings
+
+    configured = Settings(_env_file=None, ENV=environment, DEBUG=False, **_SECURE_NON_DEV_SETTINGS)
+
+    assert configured.DEBUG is False
+
+
+@pytest.mark.parametrize("environment", ["dev", "test"])
+def test_dev_and_test_accept_debug_mode(environment: str) -> None:
+    from app.config import Settings
+
+    configured = Settings(_env_file=None, ENV=environment, DEBUG=True)
+
+    assert configured.DEBUG is True
