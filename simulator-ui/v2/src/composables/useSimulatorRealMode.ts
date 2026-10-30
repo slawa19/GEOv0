@@ -444,6 +444,20 @@ export function useSimulatorRealMode(opts: {
     ensureScenarioSelectionValid()
   }
 
+  /**
+   * 054-B-4: the run's control commands (pause, resume, tempo, stop, the start's own pause) are answered in the order
+   * they were asked. An answer to a command older than the latest one - or to a command for another run - is not
+   * applied, neither its status nor its failure: a late Resume answer would otherwise turn a pause confirmed since
+   * then back into `running`, and the server publishes no status of a paused run that would correct it. The latest
+   * command is set when a command is SENT, so a later command that fails does not let an older answer through.
+   */
+  let runControlSeq = 0
+  function issueRunControl(): () => boolean {
+    const seq = ++runControlSeq
+    const runId = real.runId
+    return () => runControlSeq === seq && real.runId === runId
+  }
+
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
 
   async function refreshRunStatusForCurrentContext(o: { opening?: boolean } = {}): Promise<RunStatusRefreshOutcome> {
@@ -1260,7 +1274,9 @@ export function useSimulatorRealMode(opts: {
         let paused = false
         for (let i = 0; i < delaysMs.length + 1; i++) {
           try {
-            real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+            const isLatestControl = issueRunControl()
+            const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+            if (isLatestControl()) real.runStatus = st
             paused = true
             break
           } catch (e: unknown) {
@@ -1299,10 +1315,12 @@ export function useSimulatorRealMode(opts: {
   async function pause() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const isLatestControl = issueRunControl()
     try {
-      real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      if (isLatestControl()) real.runStatus = st
     } catch (e: unknown) {
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1351,10 +1369,12 @@ export function useSimulatorRealMode(opts: {
     manualPausePending = false
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
+    const isLatestControl = issueRunControl()
     try {
-      real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      if (isLatestControl()) real.runStatus = st
     } catch (e: unknown) {
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
@@ -1365,10 +1385,12 @@ export function useSimulatorRealMode(opts: {
       teardownRefreshSnapshot()
       stopSse()
       cleanupRealRunFxAndTimers()
-      real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
+      const isLatestControl = issueRunControl()
+      const st = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
         source: 'ui',
         reason: 'user_stop',
       })
+      if (isLatestControl()) real.runStatus = st
       await refreshRunStatus()
     } catch (e: unknown) {
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
@@ -1432,18 +1454,20 @@ export function useSimulatorRealMode(opts: {
       writeRunErrorLine(real, ZERO_INTENSITY_LINE)
       return
     }
+    const isLatestControl = issueRunControl()
     try {
-      real.runStatus = await setIntensity(
+      const st = await setIntensity(
         { apiBase: real.apiBase, accessToken: real.accessToken },
         real.runId,
         real.intensityPercent,
       )
+      if (isLatestControl()) real.runStatus = st
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 404) {
         resetStaleRun({ clearError: true })
         return
       }
-      writeRunErrorLine(real, failureRunErrorLine(e))
+      if (isLatestControl()) writeRunErrorLine(real, failureRunErrorLine(e))
     }
   }
 
