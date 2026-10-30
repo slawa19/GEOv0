@@ -21,7 +21,8 @@ class AdminConfigResponse(BaseModel):
 
 
 class AdminConfigPatchRequest(BaseModel):
-    updates: dict[str, Any] = Field(default_factory=dict)
+    # Required, as in `api/openapi.yaml` (054-D-9): an empty body is a 422, not a 200 with an empty audit row.
+    updates: dict[str, Any]
     reason: Optional[str] = None
 
 
@@ -113,7 +114,8 @@ class AdminMigrationsStatus(BaseModel):
 
 class AdminEquivalentCreateRequest(BaseModel):
     code: str = Field(..., pattern=r"^[A-Z0-9_]{1,16}$")
-    symbol: Optional[str] = None
+    # `equivalents.symbol` is `String(16)` (054-D-8): a longer value is a 422 here, not a DataError -> 500.
+    symbol: Optional[str] = Field(default=None, max_length=16)
     description: Optional[str] = None
     # 0..8, not 0..18 (012 / S1, 2026-08-25): `debts.amount` and `trust_lines.limit` are
     # `Numeric(20, 8)`, and the protocol declares `precision` as 0-8
@@ -127,7 +129,8 @@ class AdminEquivalentCreateRequest(BaseModel):
 
 
 class AdminEquivalentUpdateRequest(BaseModel):
-    symbol: Optional[str] = None
+    # See `AdminEquivalentCreateRequest.symbol`: the column is `String(16)`.
+    symbol: Optional[str] = Field(default=None, max_length=16)
     description: Optional[str] = None
     # See `AdminEquivalentCreateRequest.precision` above: 0..8, the storage scale.
     precision: Optional[int] = Field(default=None, ge=0, le=8)
