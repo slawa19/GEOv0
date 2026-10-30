@@ -27,6 +27,14 @@ class SseReplayUnavailable(Exception):
 SSE_SUBSCRIPTION_CLOSED_TYPE = "__subscription_closed__"
 
 
+def _equivalent_key(value: Any) -> str:
+    """The one form an equivalent is matched in (054-A-16): a code is case-insensitive at every door
+    (`EquivalentCode`) and every producer here publishes it upper-cased, so a subscription opened with `uah`
+    must see the `UAH` events - before, the subscription kept the caller's spelling and silently lost them."""
+
+    return str(value or "").strip().upper()
+
+
 class SseBroadcast:
     def __init__(
         self,
@@ -125,7 +133,7 @@ class SseBroadcast:
         if now is None:
             now = time.time()
         event_type = str(payload.get("type") or "")
-        event_equivalent = str(payload.get("equivalent") or "")
+        event_equivalent = _equivalent_key(payload.get("equivalent"))
         run._event_buffer.append(
             (
                 now,
@@ -149,6 +157,7 @@ class SseBroadcast:
         )
         if after_seq is None:
             raise SseReplayUnavailable("Last-Event-ID is not a runtime event id")
+        equivalent = _equivalent_key(equivalent)
 
         self.prune_event_buffer_locked(run)
         current_seq = int(run._event_seq)
@@ -203,7 +212,7 @@ class SseBroadcast:
 
     def _dispatch_locked(self, *, run: RunRecord, payload: dict[str, Any]) -> None:
         event_type = str(payload.get("type") or "")
-        event_equivalent = str(payload.get("equivalent") or "")
+        event_equivalent = _equivalent_key(payload.get("equivalent"))
         self._append_to_event_buffer_locked(run=run, payload=payload)
 
         for sub in list(run._subs):
@@ -322,6 +331,7 @@ class SseBroadcast:
         """
         queue_max = max(1, int(self._get_sub_queue_max()))
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_max)
+        equivalent = _equivalent_key(equivalent)
         sub = _Subscription(
             equivalent=equivalent,
             queue=queue,

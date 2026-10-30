@@ -138,6 +138,8 @@ class MetricsBottlenecks:
         step_ms: int,
     ) -> MetricsResponse:
         self._get_run(run_id)  # an unknown run is a 404
+        # 054-A-16: stored rows carry the upper-cased code (the writers key them by the planned equivalent).
+        equivalent = str(equivalent or "").strip().upper()
 
         if to_ms < from_ms:
             raise BadRequestException("to_ms must be >= from_ms")
@@ -246,6 +248,8 @@ class MetricsBottlenecks:
         min_score: Optional[float],
     ) -> BottlenecksResponse:
         self._get_run(run_id)  # an unknown run is a 404
+        # 054-A-16: as in `build_metrics` - the stored code is upper-cased.
+        equivalent = str(equivalent or "").strip().upper()
 
         # Real mode is DB-only: persisted bottlenecks or an explicit failure (042 S1: there is no other mode).
         if not self._db_enabled():

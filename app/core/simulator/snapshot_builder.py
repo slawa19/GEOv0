@@ -442,7 +442,8 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
 
     return SimulatorGraphSnapshot(
         api_version=SIMULATOR_API_VERSION,
-        equivalent=str(equivalent),
+        # 054-E-13: the code this snapshot was filtered by, not the caller's spelling of it (`uah` echoed `uah`).
+        equivalent=eq_norm,
         generated_at=utc_now(),
         nodes=nodes,
         links=links,
