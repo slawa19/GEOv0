@@ -17,6 +17,22 @@ from app.schemas.simulator import RunMode, RunStatus
 from app.utils.exceptions import ConflictException
 from app.utils.exceptions import NotFoundException
 
+#: 054-A-7c (owner, 2026-10-30): the `last_error.code` of a run in `error` that `resume` refuses - "no second chance".
+#: The run was stopped by its own error budget, by a run of failing ticks, by money that could not progress, or by a
+#: violated integrity invariant; resuming it would run the same thing again. `restart` (and `stop`) stay as they are. Any
+#: other code of `error` (`HEARTBEAT_FAILED`, `SIMULATOR_PID_TAKEN`, `SCENARIO_TRUSTLINE_REFUSED`, a stored run's
+#: `server_restart`, ...) is still resumed. The codes are spelled where they are raised: `tick.py`,
+#: `real_payments_executor.py` (`REAL_MODE_TOO_MANY_TIMEOUTS`, `INTEGRITY_VIOLATION`).
+RESUME_REFUSED_ERROR_CODES = frozenset(
+    {
+        "REAL_MODE_TOO_MANY_ERRORS",
+        "REAL_MODE_TOO_MANY_TIMEOUTS",
+        "REAL_MODE_TICK_FAILED_REPEATED",
+        "REAL_MODE_MONEY_NO_PROGRESS",
+        "INTEGRITY_VIOLATION",
+    }
+)
+
 #: The intensity of a run when neither the request nor the scenario's `settings.playback.intensity_percent` names one (036 B2).
 DEFAULT_RUN_INTENSITY_PERCENT = 30
 
@@ -449,6 +465,13 @@ class RunLifecycle:
                 # Idempotent: keep stopped
                 pass
             else:
+                # 054-A-7c: refused before any mutation, like the entry limits below.
+                failed_code = (run.last_error or {}).get("code") if run.state == "error" else None
+                if failed_code in RESUME_REFUSED_ERROR_CODES:
+                    raise ConflictException(
+                        "The run failed terminally and cannot be resumed; restart it",
+                        details={"reason": "run_failed_terminal", "code": failed_code, "run_id": run_id},
+                    )
                 self._enforce_entry_limits_locked(run)
                 run.state = "running"
                 note_subscribers_locked(run, self._idle_now())

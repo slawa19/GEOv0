@@ -478,6 +478,10 @@ def _action_error(
 #: 028 `T2864`: `resume` and `restart` re-enter `running` under the limits of create (`F-028-5`).
 _ENTRY_LIMIT_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
                          "limit of active runs is reached (E008, `details.conflict_kind`)"}
+#: 054-A-7c: `resume` also refuses a run that failed terminally (`details.reason = run_failed_terminal`).
+_RESUME_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
+                    "limit of active runs is reached (E008, `details.conflict_kind`); or the run failed terminally "
+                    "(E008, `details.reason = run_failed_terminal`, `details.code` = its `last_error.code`) - restart it"}
 
 
 def _flat_trustline_conflict(exc: ConflictException, details: dict, reasons: tuple[str, ...]) -> JSONResponse:
@@ -2991,7 +2995,7 @@ async def pause_run(
     return await runtime.pause(run_id)
 
 
-@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _ENTRY_LIMIT_CONFLICT})
+@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _RESUME_CONFLICT})
 async def resume_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),

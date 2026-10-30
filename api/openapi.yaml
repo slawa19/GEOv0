@@ -1487,7 +1487,11 @@ paths:
           description: >-
             E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
             the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
-            limit of active runs is reached (`global_active_limit`).
+            limit of active runs is reached (`global_active_limit`). 054-A-7c: a run in `error` whose
+            `last_error.code` is one of `REAL_MODE_TOO_MANY_ERRORS`, `REAL_MODE_TOO_MANY_TIMEOUTS`,
+            `REAL_MODE_TICK_FAILED_REPEATED`, `REAL_MODE_MONEY_NO_PROGRESS`, `INTEGRITY_VIOLATION` failed
+            terminally and is not resumed (`details.reason = run_failed_terminal`, `details.code` = that code;
+            the run is left as it was) - `restart` it. Any other `error` is resumed.
           content:
             application/json:
               schema:

@@ -533,15 +533,17 @@ sequenceDiagram
 **F2) `tx.failed.error.code=INTEGRITY_VIOLATION` (с 2026-10-30, 054-A-7b)**
 - Что это: ядро отказало в платеже тика, потому что нарушен инвариант протокола или данных (`IntegrityViolationException`: `TRUST_LIMIT_VIOLATION`, `PAYMENT_DELTA_DRIFT`, `PENDING_CLOSE_PAIR_NOT_REDUCED` и т. п.; имя — в `error.details.details.invariant`). Это **ошибка**, а не отказ сюжета: считается в `errors_total`, не в `rejected_total`, и прогон останавливается сразу — `state="error"`, `last_error.code=INTEGRITY_VIOLATION`; денежная фаза тика откатывается целиком. На каждый такой платёж — строка лога ERROR `simulator.real.payment_integrity_violation run_id=… tick=… tx_id=… invariant=…`.
 - До 054-A-7b такой отказ (ответ 409) считался обычным отказом с кодом `PAYMENT_REJECTED`, и прогон продолжал тикать.
-- Что говорит: дефект писателя денег или повреждённые данные; разбор — по строке лога с тем же `tx_id`.
+- Что говорит: дефект писателя денег или повреждённые данные; разбор — по строке лога с тем же `tx_id`. `resume` такой прогон не возвращает (`409`, см. H) — только `restart`.
 
 **G) `tx.failed.error.code=PAYMENT_REJECTED`**
 - Что это: “обобщённый” отказ, когда детали не удалось стабильно промаппить в более конкретный код.
 - Что говорит:
   - это почти всегда про данные в `error.details` (там обычно есть `exc`, `geo_code`, `status_code`).
 
-**H) `run_status.state="error"` + `last_error.code=REAL_MODE_TOO_MANY_TIMEOUTS|REAL_MODE_TOO_MANY_ERRORS|REAL_MODE_TICK_FAILED_REPEATED|HEARTBEAT_FAILED`**
+**H) `run_status.state="error"` + `last_error.code=REAL_MODE_TOO_MANY_TIMEOUTS|REAL_MODE_TOO_MANY_ERRORS|REAL_MODE_TICK_FAILED_REPEATED|REAL_MODE_MONEY_NO_PROGRESS|INTEGRITY_VIOLATION|HEARTBEAT_FAILED`**
 - Что это: сработали guardrails и run принудительно остановлен как аварийный.
+- **Второго шанса нет (054-A-7c, решение владельца 2026-10-30).** Для `REAL_MODE_TOO_MANY_ERRORS`, `REAL_MODE_TOO_MANY_TIMEOUTS`, `REAL_MODE_TICK_FAILED_REPEATED`, `REAL_MODE_MONEY_NO_PROGRESS` и `INTEGRITY_VIOLATION` `resume` отвечает `409` (`details.reason = run_failed_terminal`, `details.code` — этот код) и прогон не трогает: он снова сделал бы то же самое. Вернуть в работу — `restart` (или новый прогон). Остальные коды `error` — `HEARTBEAT_FAILED`, `SCENARIO_TRUSTLINE_REFUSED`, `SIMULATOR_PID_TAKEN` и прочие — `resume` возвращает, как и раньше. Список — `RESUME_REFUSED_ERROR_CODES` в `app/core/simulator/run_lifecycle.py`.
+- Код остановки — итоговый факт прогона: с 054-A-7c `last_error` остановленного прогона не перезаписывается кодами его платежей, отменённых вместе с остановленной фазой (до этого после остановки по бюджету в `last_error` оказывался `INTERNAL_ERROR` или `PAYMENT_TIMEOUT` последнего платежа). Коды самих платежей — в их `tx.failed`.
 - Что говорит:
   - `REAL_MODE_TOO_MANY_TIMEOUTS`: деградация стека/локи/ресурсная нехватка.
   - `REAL_MODE_TOO_MANY_ERRORS`: систематическая ошибка исполнения (например, постоянные `INTERNAL_ERROR`).

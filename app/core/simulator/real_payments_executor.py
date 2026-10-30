@@ -266,15 +266,21 @@ class DeferredRealPaymentEffects:
                     and self.run._error_timestamps[0] < cutoff
                 ):
                     self.run._error_timestamps.popleft()
-                self.run.last_error = {
-                    "code": str(item.error_code or "INTERNAL_ERROR"),
-                    "message": str(
-                        (item.error_details or {}).get("message")
-                        or item.error_code
-                        or "INTERNAL_ERROR"
-                    ),
-                    "at": self.utc_now().isoformat(),
-                }
+                # 054-A-7c: a run the phase has already stopped (`fail_run` - the error budget, the timeouts of a tick, an
+                # integrity violation) keeps the STOP as its `last_error`: these observations are resolved after it (the
+                # stopped phase is rolled back), and until 054-A-7c the last of them overwrote the stop's code with its
+                # own (`INTERNAL_ERROR`, `PAYMENT_TIMEOUT`) - so a run stopped by its budget did not say so, and `resume`
+                # could not tell it from any other error. The payment's own code stays in its `tx.failed`.
+                if self.run.state != "error":
+                    self.run.last_error = {
+                        "code": str(item.error_code or "INTERNAL_ERROR"),
+                        "message": str(
+                            (item.error_details or {}).get("message")
+                            or item.error_code
+                            or "INTERNAL_ERROR"
+                        ),
+                        "at": self.utc_now().isoformat(),
+                    }
                 self.run.last_event_type = "tx.failed"
 
         error_code = str(item.error_code or "PAYMENT_REJECTED")
