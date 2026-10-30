@@ -23,7 +23,9 @@ from app.core.simulator.models import RunRecord
 __all__ = ["EdgePatchBuilder", "line_pairs_of_payment_hops", "to_money_str"]
 
 
-def line_pairs_of_payment_hops(hops: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+def line_pairs_of_payment_hops(
+    hops: Iterable[tuple[str, str]]
+) -> list[tuple[str, str]]:
     """The trust-line pairs (creditor PID, debtor PID) a payment's hops may have changed, for the edge patch.
 
     034 S1b. A hop goes payer -> payee; the line it draws on goes the other way, payee (creditor) -> payer
@@ -85,13 +87,17 @@ class EdgePatchBuilder:
 
         eq_row = (
             await session.execute(
-                select(Equivalent.id, Equivalent.precision).where(Equivalent.code == eq_upper)
+                select(Equivalent.id, Equivalent.precision).where(
+                    Equivalent.code == eq_upper
+                )
             )
         ).one_or_none()
         if not eq_row:
             return []
         eq_id = eq_row[0]
-        precision = int(2 if eq_row[1] is None else eq_row[1])  # 024 T2416.1: 0 is a precision
+        precision = int(
+            2 if eq_row[1] is None else eq_row[1]
+        )  # 024 T2416.1: 0 is a precision
 
         def _to_money_str(v: Decimal) -> str:
             return to_money_str(v, precision)
@@ -167,13 +173,17 @@ class EdgePatchBuilder:
             except Exception:
                 limit_amt = Decimal("0")
 
-            used_amt = debt_by_pair.get((r.from_participant_id, r.to_participant_id), Decimal("0"))
+            used_amt = debt_by_pair.get(
+                (r.from_participant_id, r.to_participant_id), Decimal("0")
+            )
             try:
                 used_amt = Decimal(str(used_amt or 0))
             except Exception:
                 used_amt = Decimal("0")
 
-            avail_amt = limit_amt - used_amt  # 026 `T2602`: signed, never clamped (see snapshot_builder)
+            avail_amt = (
+                limit_amt - used_amt
+            )  # 026 `T2602`: signed, never clamped (see snapshot_builder)
 
             try:
                 limit_num = float(limit_amt)
@@ -196,13 +206,21 @@ class EdgePatchBuilder:
                 "trust_limit": _to_money_str(limit_amt),
                 "used": _to_money_str(used_amt),
                 "available": _to_money_str(avail_amt),
-                "viz_alpha_key": viz_rules.link_alpha_key(status_key, used=used_num, limit=limit_num),
+                "viz_alpha_key": viz_rules.link_alpha_key(
+                    status_key, used=used_num, limit=limit_num
+                ),
             }
             if include_width_keys:
-                p["viz_width_key"] = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
+                p["viz_width_key"] = viz_rules.link_width_key(
+                    limit_num, q33=q33, q66=q66
+                )
             # 026 `T2603.2`: a requested close is a patch, not a removal. Always carried - null clears an earlier
             # incarnation's request when the pair was re-created (fix-delta P3).
-            p["close_requested_at"] = r.close_requested_at.isoformat() if r.close_requested_at is not None else None
+            p["close_requested_at"] = (
+                r.close_requested_at.isoformat()
+                if r.close_requested_at is not None
+                else None
+            )
 
             patches.append(p)
 
@@ -242,7 +260,9 @@ class EdgePatchBuilder:
             id_pairs.append((src_part.id, dst_part.id))
 
         debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
-        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]] = {}
+        tl_by_pair: dict[
+            tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]
+        ] = {}
 
         if id_pairs:
             debt_cond = or_(
@@ -263,7 +283,8 @@ class EdgePatchBuilder:
                 )
             ).all()
             debt_by_pair = {
-                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0"))
+                for r in debt_rows
             }
 
             tl_cond = or_(
@@ -326,7 +347,9 @@ class EdgePatchBuilder:
                     "used": to_money_str(used_amt, helper.precision),
                     "available": to_money_str(available_amt, helper.precision),
                     **edge_viz,
-                    "close_requested_at": requested.isoformat() if requested is not None else None,  # null clears
+                    "close_requested_at": (
+                        requested.isoformat() if requested is not None else None
+                    ),  # null clears
                 }
             )
 

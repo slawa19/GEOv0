@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Float, Index, Integer, JSON, Numeric, String, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -22,12 +33,18 @@ class SimulatorRun(Base):
     owner_id: Mapped[str] = mapped_column(String(200), nullable=False)
     owner_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    stopped_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stopped_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     sim_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tick_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    seed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # sha256(run_id)[:4]: up to 2**32-1 (034)
+    seed: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )  # sha256(run_id)[:4]: up to 2**32-1 (034)
 
     intensity_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ops_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -38,19 +55,37 @@ class SimulatorRun(Base):
     current_phase: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
-        CheckConstraint("mode = 'real'", name="chk_simulator_runs_mode"),  # 042 S1, migration 037
-        CheckConstraint("state IN ('idle','running','paused','stopping','stopped','error')", name="chk_simulator_runs_state"),
-        CheckConstraint("sim_time_ms IS NULL OR sim_time_ms >= 0", name="chk_simulator_runs_sim_time_ms"),
+        CheckConstraint(
+            "mode = 'real'", name="chk_simulator_runs_mode"
+        ),  # 042 S1, migration 037
+        CheckConstraint(
+            "state IN ('idle','running','paused','stopping','stopped','error')",
+            name="chk_simulator_runs_state",
+        ),
+        CheckConstraint(
+            "sim_time_ms IS NULL OR sim_time_ms >= 0",
+            name="chk_simulator_runs_sim_time_ms",
+        ),
         CheckConstraint(
             "intensity_percent IS NULL OR (intensity_percent >= 0 AND intensity_percent <= 100)",
             name="chk_simulator_runs_intensity",
         ),
-        CheckConstraint("queue_depth IS NULL OR queue_depth >= 0", name="chk_simulator_runs_queue_depth"),
-        CheckConstraint("errors_total IS NULL OR errors_total >= 0", name="chk_simulator_runs_errors_total"),
+        CheckConstraint(
+            "queue_depth IS NULL OR queue_depth >= 0",
+            name="chk_simulator_runs_queue_depth",
+        ),
+        CheckConstraint(
+            "errors_total IS NULL OR errors_total >= 0",
+            name="chk_simulator_runs_errors_total",
+        ),
         Index("ix_simulator_runs_scenario_created_at", "scenario_id", "created_at"),
         Index(
             "ix_simulator_runs_owner_state_created",
@@ -96,7 +131,9 @@ class SimulatorRunBottleneck(Base):
     # TODO: Add FK with ON DELETE CASCADE when runs management becomes DB-first.
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     equivalent_code: Mapped[str] = mapped_column(String(50), primary_key=True)
-    computed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    computed_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), primary_key=True, server_default=func.now()
+    )
 
     target_type: Mapped[str] = mapped_column(String(50), primary_key=True)
     target_id: Mapped[str] = mapped_column(String(200), primary_key=True)
@@ -106,7 +143,9 @@ class SimulatorRunBottleneck(Base):
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
-        CheckConstraint("score >= 0 AND score <= 1", name="chk_simulator_run_bottlenecks_score"),
+        CheckConstraint(
+            "score >= 0 AND score <= 1", name="chk_simulator_run_bottlenecks_score"
+        ),
         Index(
             "ix_simulator_run_bottlenecks_run_equiv_time",
             "run_id",
@@ -129,9 +168,14 @@ class SimulatorRunArtifact(Base):
     sha256: Mapped[str | None] = mapped_column(String(128), nullable=True)
     storage_url: Mapped[str] = mapped_column(String(500), nullable=False)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     __table_args__ = (
-        CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="chk_simulator_run_artifacts_size"),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0",
+            name="chk_simulator_run_artifacts_size",
+        ),
         Index("ix_simulator_run_artifacts_created_at", "created_at"),
     )

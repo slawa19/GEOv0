@@ -97,15 +97,32 @@ class MoneyBoundary:
         self.session = session
 
     #: The columns a writer decides from, in the order `PaymentService._segment` unpacks them.
-    _LINE = (TrustLine.from_participant_id, TrustLine.limit, TrustLine.policy, TrustLine.close_requested_at,
-             TrustLine.id, TrustLine.status, TrustLine.to_participant_id, TrustLine.equivalent_id)
+    _LINE = (
+        TrustLine.from_participant_id,
+        TrustLine.limit,
+        TrustLine.policy,
+        TrustLine.close_requested_at,
+        TrustLine.id,
+        TrustLine.status,
+        TrustLine.to_participant_id,
+        TrustLine.equivalent_id,
+    )
 
     @staticmethod
     def lock_budget_ms() -> int:
         """The bound of a staged, inject or clearing lock wait (as 019's advisory budget): min(total, commit)."""
         from app.config import settings
 
-        return max(1, int(min(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10, settings.COMMIT_TIMEOUT_SECONDS or 5) * 1000))
+        return max(
+            1,
+            int(
+                min(
+                    settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10,
+                    settings.COMMIT_TIMEOUT_SECONDS or 5,
+                )
+                * 1000
+            ),
+        )
 
     async def _locking(self, stmt, timeout_ms: int | None) -> list:
         """Run a locking statement, its wait bounded by `timeout_ms` (`55P03` past it); the caller's own
@@ -125,37 +142,68 @@ class MoneyBoundary:
 
     @classmethod
     def participant_suspended_conflict(cls, pids: list[str]) -> ConflictException:
-        return ConflictException(f"Participant {', '.join(pids)} is not active",
-                                 details={"reason": cls.PARTICIPANT_SUSPENDED_REASON, "participants": pids})
+        return ConflictException(
+            f"Participant {', '.join(pids)} is not active",
+            details={"reason": cls.PARTICIPANT_SUSPENDED_REASON, "participants": pids},
+        )
 
-    async def lock_participants(self, participant_ids: Iterable[UUID], *, exclusive: Iterable[UUID] = (),
-                                timeout_ms: int | None = None) -> dict[UUID, tuple[str, str]]:
+    async def lock_participants(
+        self,
+        participant_ids: Iterable[UUID],
+        *,
+        exclusive: Iterable[UUID] = (),
+        timeout_ms: int | None = None,
+    ) -> dict[UUID, tuple[str, str]]:
         """The FIRST locks of a money writer (028 `F-028-28`): the rows of every participant it touches, `FOR SHARE`
         (`FOR UPDATE` for `exclusive` - the targets of a freeze in the same transaction), in `participants.id` order,
         and RETURN `{id: (status, pid)}` read by the locking statement itself - never from a loaded ORM object.
 
         A freeze takes its row `FOR UPDATE`, so it waits for a writer holding the row and a writer arriving after it
         waits for its commit and reads `suspended` (READ COMMITTED). Writers among themselves do not meet (`FOR SHARE`
-        is shared). Rows of different strengths are taken one statement per row, still in the one order."""
+        is shared). Rows of different strengths are taken one statement per row, still in the one order.
+        """
 
         strong = set(exclusive)
         ids = sorted(set(participant_ids) | strong)
         cols = select(Participant.id, Participant.status, Participant.pid)
         if not strong:
-            stmts = [cols.where(Participant.id.in_(ids)).order_by(Participant.id).with_for_update(read=True)] if ids else []
+            stmts = (
+                [
+                    cols.where(Participant.id.in_(ids))
+                    .order_by(Participant.id)
+                    .with_for_update(read=True)
+                ]
+                if ids
+                else []
+            )
         else:
-            stmts = [cols.where(Participant.id == i).with_for_update(read=i not in strong) for i in ids]
-        return {row[0]: (str(row[1]), str(row[2])) for stmt in stmts for row in await self._locking(stmt, timeout_ms)}
+            stmts = [
+                cols.where(Participant.id == i).with_for_update(read=i not in strong)
+                for i in ids
+            ]
+        return {
+            row[0]: (str(row[1]), str(row[2]))
+            for stmt in stmts
+            for row in await self._locking(stmt, timeout_ms)
+        }
 
-    async def refuse_suspended_participants(self, participant_ids: Iterable[UUID], *,
-                                            timeout_ms: int | None = None) -> None:
+    async def refuse_suspended_participants(
+        self, participant_ids: Iterable[UUID], *, timeout_ms: int | None = None
+    ) -> None:
         """`lock_participants`, then a 409 `participant_suspended` naming every participant that is not active."""
-        out = sorted(pid for status, pid in (await self.lock_participants(participant_ids, timeout_ms=timeout_ms)
-                                             ).values() if status != "active")
+        out = sorted(
+            pid
+            for status, pid in (
+                await self.lock_participants(participant_ids, timeout_ms=timeout_ms)
+            ).values()
+            if status != "active"
+        )
         if out:
             raise self.participant_suspended_conflict(out)
 
-    async def lock_pair_lines(self, pairs: Iterable[tuple[UUID, UUID, UUID]], *, timeout_ms: int | None = None) -> list:
+    async def lock_pair_lines(
+        self, pairs: Iterable[tuple[UUID, UUID, UUID]], *, timeout_ms: int | None = None
+    ) -> list:
         """Lock every non-closed line of each pair `(equivalent_id, a, b)`, both directions, `FOR UPDATE`, in
         `trust_lines.id` order, in ONE statement - before any debt of these pairs is read (027 stage 2) - and
         RETURN the locked rows (`_LINE`). A writer decides ONLY from them: a line not among them does not exist
@@ -163,34 +211,54 @@ class MoneyBoundary:
 
         PostgreSQL locks the rows of `ORDER BY ... FOR UPDATE` in the sorted order, so two writers taking
         overlapping sets this way cannot deadlock each other. Under READ COMMITTED a row that another writer
-        closed while this one waited is re-checked and left out (`status != 'closed'`)."""
+        closed while this one waited is re-checked and left out (`status != 'closed'`).
+        """
 
-        keys = sorted({(e, x, y) for e, a, b in pairs for x, y in ((a, b), (b, a))}, key=str)
+        keys = sorted(
+            {(e, x, y) for e, a, b in pairs for x, y in ((a, b), (b, a))}, key=str
+        )
         if not keys:
             return []
         return await self._locking(
             select(*self._LINE)
-            .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id,
-                          TrustLine.to_participant_id).in_(keys), TrustLine.status != "closed")
+            .where(
+                tuple_(
+                    TrustLine.equivalent_id,
+                    TrustLine.from_participant_id,
+                    TrustLine.to_participant_id,
+                ).in_(keys),
+                TrustLine.status != "closed",
+            )
             .order_by(TrustLine.id)
             .with_for_update(),
             timeout_ms,
         )
 
     async def lock_lines_among(
-        self, equivalent_ids: Iterable[UUID], participant_ids: Iterable[UUID], *, timeout_ms: int | None = None
+        self,
+        equivalent_ids: Iterable[UUID],
+        participant_ids: Iterable[UUID],
+        *,
+        timeout_ms: int | None = None,
     ) -> None:
         """A staged money phase's COMPLETE set, taken before its first payment (027 stage 2): every non-closed line
         between two of `participant_ids` (the run's perimeter, which confines its routes) in `equivalent_ids`,
         `FOR UPDATE`, in `trust_lines.id` order. A line created after it (none in a money phase) is locked by the
-        payment that routes over it, later and out of order - at worst a deadlock the phase's owner replays."""
+        payment that routes over it, later and out of order - at worst a deadlock the phase's owner replays.
+        """
 
-        equivalents, participants = sorted(set(equivalent_ids), key=str), sorted(set(participant_ids), key=str)
+        equivalents, participants = sorted(set(equivalent_ids), key=str), sorted(
+            set(participant_ids), key=str
+        )
         if equivalents and participants:
             await self._locking(
                 select(TrustLine.id)
-                .where(TrustLine.equivalent_id.in_(equivalents), TrustLine.from_participant_id.in_(participants),
-                       TrustLine.to_participant_id.in_(participants), TrustLine.status != "closed")
+                .where(
+                    TrustLine.equivalent_id.in_(equivalents),
+                    TrustLine.from_participant_id.in_(participants),
+                    TrustLine.to_participant_id.in_(participants),
+                    TrustLine.status != "closed",
+                )
                 .order_by(TrustLine.id)
                 .with_for_update(),
                 timeout_ms,
@@ -212,7 +280,11 @@ class MoneyBoundary:
         (callers: spec 027, "Писатели").
         """
 
-        level = str(await session.scalar(text("SHOW transaction_isolation")) or "").strip().lower()
+        level = (
+            str(await session.scalar(text("SHOW transaction_isolation")) or "")
+            .strip()
+            .lower()
+        )
         if level != "read committed":
             logger.error(
                 "event=money.isolation_refused writer=%s isolation=%s", writer, level
@@ -231,7 +303,9 @@ class MoneyBoundary:
 
     #: Every reason this boundary refuses with. The simulator classifies each as a REJECTION of the
     #: one operation, never as an error of the run, and matches on this set (step 5c brief).
-    MONEY_STOP_REASONS = frozenset({EQUIVALENT_INACTIVE_REASON, EQUIVALENT_INTEGRITY_HOLD_REASON})
+    MONEY_STOP_REASONS = frozenset(
+        {EQUIVALENT_INACTIVE_REASON, EQUIVALENT_INTEGRITY_HOLD_REASON}
+    )
 
     @classmethod
     def inactive_equivalent_conflict(cls, codes: list[str]) -> ConflictException:
@@ -244,7 +318,10 @@ class MoneyBoundary:
     def integrity_hold_conflict(cls, codes: list[str]) -> ConflictException:
         return ConflictException(
             f"Equivalent {', '.join(codes)} is under an integrity hold",
-            details={"reason": cls.EQUIVALENT_INTEGRITY_HOLD_REASON, "equivalents": codes},
+            details={
+                "reason": cls.EQUIVALENT_INTEGRITY_HOLD_REASON,
+                "equivalents": codes,
+            },
         )
 
     async def refuse_inactive_equivalents(
@@ -280,26 +357,45 @@ class MoneyBoundary:
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:
             return
-        stmt = select(
-            Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id, Equivalent.id
-        ).where(Equivalent.id.in_(ids)).with_for_update(read=True)
+        stmt = (
+            select(
+                Equivalent.code,
+                Equivalent.is_active,
+                Equivalent.integrity_hold_result_id,
+                Equivalent.id,
+            )
+            .where(Equivalent.id.in_(ids))
+            .with_for_update(read=True)
+        )
         rows = await self._locking(stmt, timeout_ms)
         gone = sorted(str(i) for i in set(ids) - {row.id for row in rows})
-        inactive = sorted(str(code) for code, is_active, _hold, _id in rows if not is_active) + gone
+        inactive = (
+            sorted(str(code) for code, is_active, _hold, _id in rows if not is_active)
+            + gone
+        )
         if inactive:
             raise self.inactive_equivalent_conflict(inactive)
-        held = sorted(str(code) for code, _is_active, hold, _id in rows if hold is not None)
+        held = sorted(
+            str(code) for code, _is_active, hold, _id in rows if hold is not None
+        )
         if held:
             raise self.integrity_hold_conflict(held)
 
-    async def share_equivalent_step(self, equivalent_id: UUID, *, timeout_ms: int | None = None) -> tuple[str, int] | None:
+    async def share_equivalent_step(
+        self, equivalent_id: UUID, *, timeout_ms: int | None = None
+    ) -> tuple[str, int] | None:
         """`(code, precision)` of the equivalent row, read `FOR SHARE` - the accounting step a writer checks (028
         `F-028-25`). The admin PATCH takes the row `FOR NO KEY UPDATE` before it lowers the precision, so a writer
         holding this lock commits before the PATCH reads its usage, and one arriving after it reads the new step.
-        Its place in the one order: after the writer's line locks, before its debt rows. None: the row is gone."""
+        Its place in the one order: after the writer's line locks, before its debt rows. None: the row is gone.
+        """
 
-        rows = await self._locking(select(Equivalent.code, Equivalent.precision).where(
-            Equivalent.id == equivalent_id).with_for_update(read=True), timeout_ms)
+        rows = await self._locking(
+            select(Equivalent.code, Equivalent.precision)
+            .where(Equivalent.id == equivalent_id)
+            .with_for_update(read=True),
+            timeout_ms,
+        )
         return (str(rows[0][0]), int(rows[0][1])) if rows else None
 
     async def _snapshot_net_positions(
@@ -312,10 +408,23 @@ class MoneyBoundary:
         """Net positions (credits - debts) of participants in an equivalent - over the directed debts `pairs`
         (`(debtor, creditor)`) only, when given: the operation's own rows, whose lines its transaction holds (027
         stage 2). `None` reads every debt of the participants: correct only with no concurrent writer, since under
-        READ COMMITTED a neighbour's commit on another pair of a shared participant lands between two reads."""
+        READ COMMITTED a neighbour's commit on another pair of a shared participant lands between two reads.
+        """
         if not participant_ids:
             return {}
-        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c) for d, c in pairs))]
+        scope = (
+            []
+            if pairs is None
+            else [
+                or_(
+                    false(),
+                    *(
+                        and_(Debt.debtor_id == d, Debt.creditor_id == c)
+                        for d, c in pairs
+                    ),
+                )
+            ]
+        )
 
         credits_rows = (
             await self.session.execute(
@@ -365,9 +474,9 @@ class MoneyBoundary:
 
         expected_delta: dict[UUID, Decimal] = {}
         for from_id, to_id, amount in flows:
-            expected_delta[from_id] = expected_delta.get(from_id, Decimal("0")) - Decimal(
-                str(amount)
-            )
+            expected_delta[from_id] = expected_delta.get(
+                from_id, Decimal("0")
+            ) - Decimal(str(amount))
             expected_delta[to_id] = expected_delta.get(to_id, Decimal("0")) + Decimal(
                 str(amount)
             )

@@ -13,7 +13,12 @@ from app.utils.observability import log_duration
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
+from app.core.payments.capacity import (
+    pair_capacity,
+    pair_rules,
+    pending_pair_capacity,
+    route_breaks_policy,
+)
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -71,7 +76,10 @@ class PaymentRouter:
 
     @classmethod
     def _evicted_since(cls, equivalent_code: str, read_started: int) -> bool:
-        return max(cls._invalidated.get(equivalent_code, 0), cls._invalidated_all) > read_started
+        return (
+            max(cls._invalidated.get(equivalent_code, 0), cls._invalidated_all)
+            > read_started
+        )
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -88,11 +96,17 @@ class PaymentRouter:
         # 028 `F-028-23`: the equivalent's precision when the graph was built; every capacity is floored to its step.
         self.precision: Optional[int] = None
         self.from_cache = False  # the last build_graph() was served by the shared cache (027: may be stale)
-        self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
-        self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
+        self.pids: Dict[UUID, str] = {}  # Map UUID to PID string for easier graph keys
+        self.uuids: Dict[str, UUID] = {}  # Map PID string to UUID
 
-    async def build_graph(self, equivalent_code: str, *, use_shared_cache: bool = False, refresh: bool = False,
-                          reader=None):
+    async def build_graph(
+        self,
+        equivalent_code: str,
+        *,
+        use_shared_cache: bool = False,
+        refresh: bool = False,
+        reader=None,
+    ):
         """Load the active lines and debts of the equivalent and build the capacity graph - a HINT, not a proof.
 
         027 stage 1. `use_shared_cache`: a cached graph younger than `ROUTING_GRAPH_CACHE_TTL_SECONDS`, else ONE
@@ -118,7 +132,10 @@ class PaymentRouter:
                 if self._load_cached(equivalent_code, ttl, read_after=asked):
                     return
                 pending = self._inflight.get(equivalent_code)
-                if pending is None or pending.get_loop() is not asyncio.get_running_loop():
+                if (
+                    pending is None
+                    or pending.get_loop() is not asyncio.get_running_loop()
+                ):
                     break
                 await asyncio.shield(pending)
             if not shared:
@@ -133,17 +150,25 @@ class PaymentRouter:
                 if self._inflight.get(equivalent_code) is done:
                     del self._inflight[equivalent_code]
 
-    async def _build_in(self, reader, equivalent_code: str, *, write_shared_cache: bool) -> None:
+    async def _build_in(
+        self, reader, equivalent_code: str, *, write_shared_cache: bool
+    ) -> None:
         if reader is None:
-            return await self._build_graph_impl(equivalent_code, write_shared_cache=write_shared_cache)
+            return await self._build_graph_impl(
+                equivalent_code, write_shared_cache=write_shared_cache
+            )
         own = self.session
         async with reader() as self.session:
             try:
-                await self._build_graph_impl(equivalent_code, write_shared_cache=write_shared_cache)
+                await self._build_graph_impl(
+                    equivalent_code, write_shared_cache=write_shared_cache
+                )
             finally:
                 self.session = own
 
-    def _load_cached(self, equivalent_code: str, ttl: int, *, read_after: int = 0) -> bool:
+    def _load_cached(
+        self, equivalent_code: str, ttl: int, *, read_after: int = 0
+    ) -> bool:
         cached = self._graph_cache.get(equivalent_code)
         if cached is None or self._read_started.get(equivalent_code, 0) < read_after:
             return False
@@ -152,14 +177,17 @@ class PaymentRouter:
             cached_at, graph, edge_policy, pids, uuids = cached  # type: ignore[misc]
             edge_blocked, no_transit = {}, []
         else:
-            cached_at, graph, edge_policy, edge_blocked, pids, uuids, *no_transit = cached
+            cached_at, graph, edge_policy, edge_blocked, pids, uuids, *no_transit = (
+                cached
+            )
         if (time.time() - cached_at) > ttl:
             return False
         # Shallow copies are enough because nested values are Decimals/bools.
         self.graph = {u: dict(v) for u, v in graph.items()}
         self.edge_can_be_intermediate = {u: dict(v) for u, v in edge_policy.items()}
         self.edge_blocked_participants = {
-            u: {v: set(s) for v, s in m.items()} for u, m in (edge_blocked or {}).items()
+            u: {v: set(s) for v, s in m.items()}
+            for u, m in (edge_blocked or {}).items()
         }
         self.pids = dict(pids)
         self.uuids = dict(uuids)
@@ -177,9 +205,13 @@ class PaymentRouter:
     ) -> None:
         read_started = next(self._ticks)
         # 1. Get Equivalent ID. 027 stage 1: columns, not ORM objects, throughout (F-027-4).
-        stmt = select(Equivalent.id, Equivalent.precision).where(Equivalent.code == equivalent_code)
+        stmt = select(Equivalent.id, Equivalent.precision).where(
+            Equivalent.code == equivalent_code
+        )
         row = (await self.session.execute(stmt)).one_or_none()
-        equivalent_id, self.precision = (row[0], int(row[1])) if row is not None else (None, None)
+        equivalent_id, self.precision = (
+            (row[0], int(row[1])) if row is not None else (None, None)
+        )
         if equivalent_id is None:
             logger.warning(f"Equivalent {equivalent_code} not found")
             self.graph = {}
@@ -189,29 +221,41 @@ class PaymentRouter:
         # We need to join with Participant to get PIDs
         # 026 `T2603.1`: a line with a requested close marks its pair pending (В2); since 028 `F-028-29` it is an
         # `active` line with limit 0 (the `frozen` status is gone).
-        stmt = select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit, TrustLine.policy,
-                      TrustLine.status, TrustLine.close_requested_at).where(
-            and_(TrustLine.equivalent_id == equivalent_id, TrustLine.status == 'active'))
+        stmt = select(
+            TrustLine.from_participant_id,
+            TrustLine.to_participant_id,
+            TrustLine.limit,
+            TrustLine.policy,
+            TrustLine.status,
+            TrustLine.close_requested_at,
+        ).where(
+            and_(TrustLine.equivalent_id == equivalent_id, TrustLine.status == "active")
+        )
         trustlines = (await self.session.execute(stmt)).all()
-        requested = {frozenset((tl.from_participant_id, tl.to_participant_id))
-                     for tl in trustlines if tl.close_requested_at is not None}
+        requested = {
+            frozenset((tl.from_participant_id, tl.to_participant_id))
+            for tl in trustlines
+            if tl.close_requested_at is not None
+        }
 
         # 3. Load all Debts for this equivalent
-        stmt = select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(Debt.equivalent_id == equivalent_id)
+        stmt = select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+            Debt.equivalent_id == equivalent_id
+        )
         debts = (await self.session.execute(stmt)).all()
 
         # Helper to map UUID -> PID
         # We can't easily join efficiently without loading participants.
         # Let's collect all needed participant IDs and fetch them in batch or rely on lazy loading (slow).
         # Better: Join in the initial queries.
-        
+
         # Optimization: Fetch IDs and PIDs separately or use join.
         # Let's use a separate query to fetch Participant map.
         all_participant_ids = set()
         for tl in trustlines:
             all_participant_ids.add(tl.from_participant_id)
             all_participant_ids.add(tl.to_participant_id)
-        
+
         # Debts should match trustlines, but let's be safe
         for d in debts:
             all_participant_ids.add(d.debtor_id)
@@ -222,13 +266,16 @@ class PaymentRouter:
             return
 
         from app.db.models.participant import Participant
-        stmt = select(Participant.id, Participant.pid, Participant.status).where(Participant.id.in_(all_participant_ids))
+
+        stmt = select(Participant.id, Participant.pid, Participant.status).where(
+            Participant.id.in_(all_participant_ids)
+        )
         result = await self.session.execute(stmt)
         rows = result.all()
         # 028 `F-028-28` (owner В-1): no hop to or from a participant that is not active - fewer refusals, not the
         # boundary (the core reads the status under its row locks, `MoneyBoundary.lock_participants`).
         out_of_circulation = {row.id for row in rows if row.status != "active"}
-        
+
         self.pids = {row.id: row.pid for row in rows}
         self.uuids = {row.pid: row.id for row in rows}
 
@@ -240,27 +287,35 @@ class PaymentRouter:
         self.pending_pairs = set()
 
         # 4. Process Debts into a lookup: (debtor_id, creditor_id) -> amount
-        debt_map = {} # (debtor_uuid, creditor_uuid) -> amount
+        debt_map = {}  # (debtor_uuid, creditor_uuid) -> amount
         for d in debts:
             debt_map[(d.debtor_id, d.creditor_id)] = d.amount
 
         # 5. Build edges (protocol §6.3.1, `capacity.py`). No reservations are subtracted: REST payments
         # hold none (019 `T1909`). A pair with an active line gets a hop in each direction whose capacity
         # is positive; a pair without one gets none (024 `T2415.2`, owner decision 2026-09-29, GEO).
-        lines = {(tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines}
+        lines = {
+            (tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines
+        }
         step = money_step(self.precision)
-        for x, y in {frozenset(k) for k in lines if k[0] != k[1] and not out_of_circulation & set(k)}:
+        for x, y in {
+            frozenset(k)
+            for k in lines
+            if k[0] != k[1] and not out_of_circulation & set(k)
+        }:
             pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
-            forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
+            forbid, blocked = pair_rules(
+                (self.pids.get(tl.from_participant_id), tl.policy) for tl in pair
+            )
             pending = frozenset((x, y)) in requested  # 026 В2, `capacity.py` addendum
             if pending:
                 self.pending_pairs.add(frozenset((x, y)))
             for payer, payee in ((x, y), (y, x)):
                 payer_pid, payee_pid = self.pids.get(payer), self.pids.get(payee)
-                payee_owes = debt_map.get((payee, payer), Decimal('0'))
+                payee_owes = debt_map.get((payee, payer), Decimal("0"))
                 cap = pair_capacity(
                     line_limit=getattr(lines.get((payee, payer)), "limit", None),
-                    payer_owes=debt_map.get((payer, payee), Decimal('0')),
+                    payer_owes=debt_map.get((payer, payee), Decimal("0")),
                     payee_owes=payee_owes,
                     pair_has_active_line=True,
                 )
@@ -272,23 +327,34 @@ class PaymentRouter:
                 if payer_pid and payee_pid and cap > 0:
                     self._add_capacity(payer_pid, payee_pid, cap)
                     self._set_edge_policy(payer_pid, payee_pid, payee_pid not in forbid)
-                    self._set_edge_blocked_participants(payer_pid, payee_pid, set(blocked))
+                    self._set_edge_blocked_participants(
+                        payer_pid, payee_pid, set(blocked)
+                    )
                     self.edge_no_transit.setdefault(payer_pid, {})[payee_pid] = forbid
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
         # 054-F-2: a topology edit committed and evicted while this build read; what it read may be the state before
         # the edit, and publishing it after the eviction would serve that state for the whole TTL (the core then
         # refuses the route on policy - E001, final). This instance still routes on it: a hint, as ever.
-        if write_shared_cache and ttl > 0 and self._evicted_since(equivalent_code, read_started):
-            logger.info("event=routing.graph_build_not_published equivalent=%s reason=evicted_during_read",
-                        equivalent_code)
+        if (
+            write_shared_cache
+            and ttl > 0
+            and self._evicted_since(equivalent_code, read_started)
+        ):
+            logger.info(
+                "event=routing.graph_build_not_published equivalent=%s reason=evicted_during_read",
+                equivalent_code,
+            )
         elif write_shared_cache and ttl > 0:
             self._read_started[equivalent_code] = read_started
             self._graph_cache[equivalent_code] = (
                 time.time(),
                 {u: dict(v) for u, v in self.graph.items()},
                 {u: dict(v) for u, v in self.edge_can_be_intermediate.items()},
-                {u: {v: set(s) for v, s in m.items()} for u, m in self.edge_blocked_participants.items()},
+                {
+                    u: {v: set(s) for v, s in m.items()}
+                    for u, m in self.edge_blocked_participants.items()
+                },
                 dict(self.pids),
                 dict(self.uuids),
                 {u: dict(v) for u, v in self.edge_no_transit.items()},
@@ -299,7 +365,7 @@ class PaymentRouter:
     def _add_capacity(self, u: str, v: str, amount: Decimal):
         if u not in self.graph:
             self.graph[u] = {}
-        current = self.graph[u].get(v, Decimal('0'))
+        current = self.graph[u].get(v, Decimal("0"))
         self.graph[u][v] = current + amount
 
     def _set_edge_policy(self, u: str, v: str, can_be_intermediate: bool) -> None:
@@ -373,7 +439,9 @@ class PaymentRouter:
                     continue
 
                 # One policy rule for the router and the core (`capacity.route_breaks_policy`).
-                if route_breaks_policy(path + [neighbor], self._hop_rules, payee=to_pid):
+                if route_breaks_policy(
+                    path + [neighbor], self._hop_rules, payee=to_pid
+                ):
                     continue
 
                 queue.append((neighbor, path + [neighbor]))
@@ -387,7 +455,9 @@ class PaymentRouter:
         on the route is the one rule that is not."""
 
         forbid, blocked = self._hop_rules(u, v)
-        return bool((forbid | blocked) & {n for n in (u, v) if n != payer and n != payee})
+        return bool(
+            (forbid | blocked) & {n for n in (u, v) if n != payer and n != payee}
+        )
 
     def _bfs_carrying(
         self,
@@ -402,9 +472,14 @@ class PaymentRouter:
         """054-F-1: a shortest path whose every hop carries `amount`, by a BFS with a node-level `visited` - linear in
         the graph. The policy (`route_breaks_policy`) is checked on every prefix, as max-flow's BFS checks it, so a
         path it returns respects it; but the policy depends on the route and `visited` keeps one prefix per node, so
-        it may miss a path that exists. A heuristic, not a proof: None says only "not found here"."""
+        it may miss a path that exists. A heuristic, not a proof: None says only "not found here".
+        """
 
-        if from_pid not in self.graph or to_pid not in self.graph or {from_pid, to_pid} & forbidden_nodes:
+        if (
+            from_pid not in self.graph
+            or to_pid not in self.graph
+            or {from_pid, to_pid} & forbidden_nodes
+        ):
             return None
         seen = {from_pid}
         queue = deque([(from_pid, [from_pid])])
@@ -417,7 +492,12 @@ class PaymentRouter:
             if (len(path) - 1) >= max_hops:
                 continue
             for neighbor, capacity in self.graph.get(current, {}).items():
-                if neighbor in seen or neighbor in forbidden_nodes or capacity <= 0 or capacity < amount:
+                if (
+                    neighbor in seen
+                    or neighbor in forbidden_nodes
+                    or capacity <= 0
+                    or capacity < amount
+                ):
                     continue
                 candidate = path + [neighbor]
                 if route_breaks_policy(candidate, self._hop_rules, payee=to_pid):
@@ -426,10 +506,12 @@ class PaymentRouter:
                 queue.append((neighbor, candidate))
         return None
 
-    def _path_bottleneck(self, path: List[str], *, graph: Dict[str, Dict[str, Decimal]]) -> Decimal:
-        b = Decimal('Infinity')
+    def _path_bottleneck(
+        self, path: List[str], *, graph: Dict[str, Dict[str, Decimal]]
+    ) -> Decimal:
+        b = Decimal("Infinity")
         for u, v in zip(path[:-1], path[1:]):
-            b = min(b, graph.get(u, {}).get(v, Decimal('0')))
+            b = min(b, graph.get(u, {}).get(v, Decimal("0")))
         return b
 
     def confine_to_participants(self, allowed: AbstractSet[str]) -> None:
@@ -460,7 +542,12 @@ class PaymentRouter:
         }
 
     def payment_targets(
-        self, from_pid: str, *, max_hops: int, limit: Optional[int] = None, timeout_ms: int | None = None
+        self,
+        from_pid: str,
+        *,
+        max_hops: int,
+        limit: Optional[int] = None,
+        timeout_ms: int | None = None,
     ) -> List[PaymentTarget]:
         """Whom `from_pid` can pay on the graph of this instance: every other participant a route of at most
         `max_hops` hops reaches, each edge with capacity above zero and the hop policy respected - the same search
@@ -484,23 +571,41 @@ class PaymentRouter:
 
         if from_pid not in self.graph:
             return []
-        effective_timeout_ms = max(1, int(
-            timeout_ms if timeout_ms is not None else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)))
+        effective_timeout_ms = max(
+            1,
+            int(
+                timeout_ms
+                if timeout_ms is not None
+                else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500)
+            ),
+        )
         deadline = time.perf_counter() + effective_timeout_ms / 1000.0
-        found, exact = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline)
+        found, exact = self._reach_by_node(
+            from_pid, max_hops=int(max_hops), deadline=deadline
+        )
         if not exact:
             # Who is reachable under the local rules alone - a superset; only they are searched.
-            relaxed, _ = self._reach_by_node(from_pid, max_hops=int(max_hops), deadline=deadline, local_only=True)
+            relaxed, _ = self._reach_by_node(
+                from_pid, max_hops=int(max_hops), deadline=deadline, local_only=True
+            )
             found = {}
             for to_pid in self.graph:
                 if not to_pid or to_pid == from_pid or to_pid not in relaxed:
                     continue
-                path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops),
-                                             deadline=deadline)
+                path = self._bfs_single_path(
+                    from_pid,
+                    to_pid,
+                    Decimal("0"),
+                    max_hops=int(max_hops),
+                    deadline=deadline,
+                )
                 if path and len(path) >= 2:
                     found[to_pid] = path
-        targets = [PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path))
-                   for to_pid, path in found.items() if to_pid and to_pid != from_pid and to_pid in self.graph]
+        targets = [
+            PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path))
+            for to_pid, path in found.items()
+            if to_pid and to_pid != from_pid and to_pid in self.graph
+        ]
         targets.sort(key=lambda target: (target.hops, target.to_pid))
         return targets if limit is None else targets[: int(limit)]
 
@@ -517,7 +622,9 @@ class PaymentRouter:
         included (same FIFO order). `local_only`: the local rules alone - a relaxation, exact for itself: a
         participant it does not reach is reachable by no route."""
 
-        intermediary = object()  # a payee no route contains: every node of a prefix is an intermediary
+        intermediary = (
+            object()
+        )  # a payee no route contains: every node of a prefix is an intermediary
         exact = True
         found: Dict[str, List[str]] = {}
         seen = {from_pid}
@@ -532,12 +639,17 @@ class PaymentRouter:
                 if capacity <= 0 or neighbor in path:
                     continue
                 candidate = path + [neighbor]
-                for payee, done in ((neighbor, neighbor in found), (intermediary, neighbor in seen)):
+                for payee, done in (
+                    (neighbor, neighbor in found),
+                    (intermediary, neighbor in seen),
+                ):
                     if done:
                         continue
                     local = self._hop_refuses(current, neighbor, payer=from_pid, payee=payee)  # type: ignore
-                    if local or (not local_only and route_breaks_policy(
-                            candidate, self._hop_rules, payee=payee)):  # type: ignore[arg-type]
+                    if local or (
+                        not local_only
+                        and route_breaks_policy(candidate, self._hop_rules, payee=payee)
+                    ):  # type: ignore[arg-type]
                         exact = exact and local
                     elif payee is intermediary:
                         seen.add(neighbor)
@@ -585,21 +697,27 @@ class PaymentRouter:
         forbidden_nodes: Set[str] = set()
         if avoid_participants:
             forbidden_nodes = {
-                str(x)
-                for x in avoid_participants
-                if isinstance(x, str) and x.strip()
+                str(x) for x in avoid_participants if isinstance(x, str) and x.strip()
             }
 
         try:
-            whole = self._bfs_carrying(from_pid, to_pid, amount, max_hops=max_hops, forbidden_nodes=forbidden_nodes,
-                                       deadline=deadline)
+            whole = self._bfs_carrying(
+                from_pid,
+                to_pid,
+                amount,
+                max_hops=max_hops,
+                forbidden_nodes=forbidden_nodes,
+                deadline=deadline,
+            )
         except TimeoutException:
             self._routing_timed_out(from_pid, to_pid, effective_timeout_ms)
         if whole:
             return [(whole, amount)]
 
         # Working copy; subtract allocations to avoid over-committing shared edges.
-        residual: Dict[str, Dict[str, Decimal]] = {u: d.copy() for u, d in self.graph.items()}
+        residual: Dict[str, Dict[str, Decimal]] = {
+            u: d.copy() for u, d in self.graph.items()
+        }
 
         remaining = amount
         routes: List[Tuple[List[str], Decimal]] = []
@@ -611,7 +729,7 @@ class PaymentRouter:
             path = self._bfs_single_path(
                 from_pid,
                 to_pid,
-                Decimal('0'),
+                Decimal("0"),
                 max_hops=max_hops,
                 graph_override=residual,
                 forbidden_nodes=forbidden_nodes,
@@ -630,7 +748,7 @@ class PaymentRouter:
 
             # Update residual capacities along the path.
             for u, v in zip(path[:-1], path[1:]):
-                new_cap = residual.get(u, {}).get(v, Decimal('0')) - alloc
+                new_cap = residual.get(u, {}).get(v, Decimal("0")) - alloc
                 if new_cap <= 0:
                     residual.get(u, {}).pop(v, None)
                 else:
@@ -657,7 +775,9 @@ class PaymentRouter:
         )
         raise TimeoutException("Routing timed out")
 
-    def check_capacity(self, from_pid: str, to_pid: str, amount: Decimal) -> CapacityResponse:
+    def check_capacity(
+        self, from_pid: str, to_pid: str, amount: Decimal
+    ) -> CapacityResponse:
         routes = self.find_flow_routes(
             from_pid,
             to_pid,
@@ -666,7 +786,7 @@ class PaymentRouter:
             max_paths=settings.ROUTING_MAX_PATHS,
         )
         can_pay = len(routes) > 0
-        
+
         return CapacityResponse(
             can_pay=can_pay,
             # Circular in MVP; use /max-flow for estimate. 029 F-029-5: in the equivalent's step.
@@ -674,7 +794,7 @@ class PaymentRouter:
             routes_count=len(routes),
             estimated_hops=(len(routes[0][0]) - 1) if routes else 0,
         )
-    
+
     def _money(self, value: Decimal) -> str:
         """029 F-029-5: a capacity as the line's `available` is written - the step of the graph's equivalent."""
 
@@ -703,13 +823,13 @@ class PaymentRouter:
         # Create a working copy of the graph since we modify residuals
         residual_graph = {u: d.copy() for u, d in self.graph.items()}
 
-        max_flow = Decimal('0')
+        max_flow = Decimal("0")
         paths = []
         refused_by_policy = False
 
         while True:
             # BFS for augmenting path
-            queue = [(from_pid, [from_pid], Decimal('Infinity'))]
+            queue = [(from_pid, [from_pid], Decimal("Infinity"))]
             visited = {from_pid}
             path_found = None
 
@@ -719,7 +839,7 @@ class PaymentRouter:
                     path_found = (path, flow)
                     break
 
-                if len(path) > settings.MAX_FLOW_MAX_HOPS: # Limit hops for performance
+                if len(path) > settings.MAX_FLOW_MAX_HOPS:  # Limit hops for performance
                     continue
 
                 for v, cap in residual_graph.get(u, {}).items():
@@ -729,8 +849,12 @@ class PaymentRouter:
                         # node-visited BFS; a local one (`_hop_refuses`) refuses this hop on every route, and a visited
                         # node (the payer included) is not expanded again anyway - 0 stays exact (Codex fix-delta review).
                         refused_by_policy = refused_by_policy or (
-                            cap > 0 and v not in visited
-                            and not self._hop_refuses(u, v, payer=from_pid, payee=to_pid))
+                            cap > 0
+                            and v not in visited
+                            and not self._hop_refuses(
+                                u, v, payer=from_pid, payee=to_pid
+                            )
+                        )
                         continue
                     if v not in visited and cap > 0:
                         visited.add(v)
@@ -746,7 +870,7 @@ class PaymentRouter:
 
             # Update residuals
             for i in range(len(path) - 1):
-                u, v = path[i], path[i+1]
+                u, v = path[i], path[i + 1]
                 residual_graph[u][v] -= flow
                 if residual_graph[u][v] == 0:
                     del residual_graph[u][v]
@@ -761,12 +885,21 @@ class PaymentRouter:
         if max_flow == 0 and refused_by_policy:
             timeout_ms = max(1, int(settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500))
             try:
-                path = self._bfs_single_path(from_pid, to_pid, Decimal('0'), max_hops=int(settings.MAX_FLOW_MAX_HOPS),
-                                             deadline=time.perf_counter() + timeout_ms / 1000.0)
+                path = self._bfs_single_path(
+                    from_pid,
+                    to_pid,
+                    Decimal("0"),
+                    max_hops=int(settings.MAX_FLOW_MAX_HOPS),
+                    deadline=time.perf_counter() + timeout_ms / 1000.0,
+                )
             except TimeoutException:
                 path = None
-                logger.info("event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s",
-                            from_pid, to_pid, timeout_ms)
+                logger.info(
+                    "event=routing.max_flow_truncated from_pid=%s to_pid=%s timeout_ms=%s",
+                    from_pid,
+                    to_pid,
+                    timeout_ms,
+                )
             if path:
                 max_flow = self._path_bottleneck(path, graph=self.graph)
                 paths = [MaxFlowPath(path=path, capacity=self._money(max_flow))]
@@ -774,7 +907,7 @@ class PaymentRouter:
         # Identify bottlenecks (min-cut edges roughly, or just full edges on the paths)
         # For MVP, just listing edges on paths that have 0 remaining capacity in original direction?
         # Let's return empty bottlenecks for now or simple heuristic.
-        
+
         include_metadata = settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED
 
         return MaxFlowResponse(

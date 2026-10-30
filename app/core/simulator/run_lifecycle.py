@@ -9,7 +9,11 @@ from typing import Any, Callable, Optional
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.models import PAUSE_REASON_SCENARIO_EXHAUSTED, RunRecord, note_subscribers_locked
+from app.core.simulator.models import (
+    PAUSE_REASON_SCENARIO_EXHAUSTED,
+    RunRecord,
+    note_subscribers_locked,
+)
 from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import (
@@ -51,11 +55,15 @@ class RunLifecycle:
         lock,
         runs: dict[str, RunRecord],
         set_active_run_id: Callable[[str, str], None],
-        clear_active_run_id: Callable[..., None],  # (*, owner_id: str, run_id: str) -> None
+        clear_active_run_id: Callable[
+            ..., None
+        ],  # (*, owner_id: str, run_id: str) -> None
         utc_now,
         new_run_id: Callable[[], str],
         get_scenario_raw: Callable[[str], dict[str, Any]],
-        edges_by_equivalent: Callable[[dict[str, Any]], dict[str, list[tuple[str, str]]]],
+        edges_by_equivalent: Callable[
+            [dict[str, Any]], dict[str, list[tuple[str, str]]]
+        ],
         artifacts: ArtifactsManager,
         sse: SseBroadcast,
         heartbeat_loop,
@@ -99,9 +107,15 @@ class RunLifecycle:
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
-        return sum(1 for r in self._runs.values() if str(getattr(r, "state", "")) in active_states)
+        return sum(
+            1
+            for r in self._runs.values()
+            if str(getattr(r, "state", "")) in active_states
+        )
 
-    def _count_active_runs_for_owner_locked(self, owner_id: str) -> tuple[int, Optional[str]]:
+    def _count_active_runs_for_owner_locked(
+        self, owner_id: str
+    ) -> tuple[int, Optional[str]]:
         """Return (count, most_recent_active_run_id) for a given owner."""
         owner = str(owner_id or "")
         if not owner:
@@ -128,7 +142,9 @@ class RunLifecycle:
             ),
             reverse=True,
         )
-        most_recent_id = str(getattr(active_runs[0], "run_id", "") or "").strip() or None
+        most_recent_id = (
+            str(getattr(active_runs[0], "run_id", "") or "").strip() or None
+        )
         return len(active_runs), most_recent_id
 
     def _enforce_active_run_limit_locked(self) -> None:
@@ -153,11 +169,16 @@ class RunLifecycle:
             return  # already counted as active
         max_per_owner = int(self._get_max_active_runs_per_owner() or 0)
         if run.owner_id and max_per_owner > 0:
-            count, active_run_id = self._count_active_runs_for_owner_locked(run.owner_id)
+            count, active_run_id = self._count_active_runs_for_owner_locked(
+                run.owner_id
+            )
             if count >= max_per_owner:
                 raise ConflictException(
                     "Owner already has an active run",
-                    details={"conflict_kind": "owner_active_exists", "active_run_id": active_run_id},
+                    details={
+                        "conflict_kind": "owner_active_exists",
+                        "active_run_id": active_run_id,
+                    },
                 )
         self._enforce_active_run_limit_locked()
 
@@ -167,7 +188,8 @@ class RunLifecycle:
 
     def _ended_overflow_locked(self) -> list[RunRecord]:
         """The ended records (`stopped` and, 044 stage 2, `error`) to drop for `SIMULATOR_MAX_RUN_RECORDS`, oldest first,
-        as many as the registry is over the limit. A record whose heartbeat still runs is never one of them."""
+        as many as the registry is over the limit. A record whose heartbeat still runs is never one of them.
+        """
 
         max_records = int(self._get_max_run_records() or 0)
         if max_records <= 0 or len(self._runs) <= max_records:
@@ -193,7 +215,10 @@ class RunLifecycle:
         record that no longer exists would answer for a run nobody can reach."""
 
         for r in self._ended_overflow_locked():
-            if self._has_live_task(getattr(r, "_artifact_events_task", None)) or r.run_id in self._cleanup_in_progress:
+            if (
+                self._has_live_task(getattr(r, "_artifact_events_task", None))
+                or r.run_id in self._cleanup_in_progress
+            ):
                 continue  # `prune_ended_runs` ends it first; never dropped with a writer still running or draining
             if self._runs.get(r.run_id) is not r:
                 continue
@@ -221,7 +246,8 @@ class RunLifecycle:
             candidates = [
                 (r, int(r._launch_epoch))
                 for r in self._ended_overflow_locked()
-                if self._has_live_task(getattr(r, "_artifact_events_task", None)) and r.run_id not in self._cleanup_in_progress
+                if self._has_live_task(getattr(r, "_artifact_events_task", None))
+                and r.run_id not in self._cleanup_in_progress
             ]
         for r, epoch in candidates:
             # 044 stage 2 (Codex §15): the list was taken before earlier awaits; a candidate the owner resumed or
@@ -243,7 +269,9 @@ class RunLifecycle:
             except NotFoundException:
                 continue
             except Exception:
-                self._logger.exception("simulator.run.prune_stop_writer_failed run_id=%s", r.run_id)
+                self._logger.exception(
+                    "simulator.run.prune_stop_writer_failed run_id=%s", r.run_id
+                )
             finally:
                 with self._lock:
                     self.unpin_cleanup_locked(r.run_id)
@@ -265,7 +293,9 @@ class RunLifecycle:
         while True:
             with self._lock:
                 task = run._heartbeat_task
-                if run.state != "running" or (task is not None and not task.done() and not task.cancelling()):
+                if run.state != "running" or (
+                    task is not None and not task.done() and not task.cancelling()
+                ):
                     return
                 if task is None or task.done():
                     self._start_heartbeat_locked(run)
@@ -297,16 +327,35 @@ class RunLifecycle:
         # The run's intensity: the request's value (0 included), else the scenario's `settings.playback.intensity_percent`,
         # else 30. The Simulator UI always sends a number, so the scenario's default is not reached from it yet.
         if intensity_percent is None:
-            settings_block = scenario_for_story.get("settings") if isinstance(scenario_for_story, dict) else None
-            playback = settings_block.get("playback") if isinstance(settings_block, dict) else None
-            from_scenario = playback.get("intensity_percent") if isinstance(playback, dict) else None
-            intensity_percent = int(from_scenario) if isinstance(from_scenario, int) and not isinstance(from_scenario, bool) else DEFAULT_RUN_INTENSITY_PERCENT
+            settings_block = (
+                scenario_for_story.get("settings")
+                if isinstance(scenario_for_story, dict)
+                else None
+            )
+            playback = (
+                settings_block.get("playback")
+                if isinstance(settings_block, dict)
+                else None
+            )
+            from_scenario = (
+                playback.get("intensity_percent")
+                if isinstance(playback, dict)
+                else None
+            )
+            intensity_percent = (
+                int(from_scenario)
+                if isinstance(from_scenario, int)
+                and not isinstance(from_scenario, bool)
+                else DEFAULT_RUN_INTENSITY_PERCENT
+            )
 
         run_id = self._new_run_id()
         # 044 `T4405`: the run's private copy of the scenario, its participants under identities of THIS run - bound
         # once, here, before the run exists (a reference to an undeclared participant or an identity that does not fit
         # refuses the run: 409 SCENARIO_INVALID, nothing created). `restart` keeps the copy, so the same participants.
-        bound_scenario = bind_run_identities(self._get_scenario_raw(scenario_id), run_id=run_id)
+        bound_scenario = bind_run_identities(
+            self._get_scenario_raw(scenario_id), run_id=run_id
+        )
         seed_material = hashlib.sha256(run_id.encode("utf-8")).digest()
         seed = int.from_bytes(seed_material[:4], "big")
         run = RunRecord(
@@ -324,7 +373,9 @@ class RunLifecycle:
         )
 
         configured = settings.SIMULATOR_REAL_MAX_IN_FLIGHT
-        run._real_max_in_flight = max(1, self._real_max_in_flight_default if configured is None else configured)
+        run._real_max_in_flight = max(
+            1, self._real_max_in_flight_default if configured is None else configured
+        )
 
         # Precompute per-equivalent edges (the runner's topology cache).
         run._scenario_raw = bound_scenario
@@ -345,7 +396,9 @@ class RunLifecycle:
                     max_per_owner = 1
 
                 if max_per_owner > 0:
-                    count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
+                    count, most_recent_run_id = (
+                        self._count_active_runs_for_owner_locked(owner_id)
+                    )
                     mapped_run_id: Optional[str]
                     try:
                         mapped_run_id = self._get_active_run_id_for_owner(owner_id)
@@ -361,7 +414,8 @@ class RunLifecycle:
                         _terminal_states = ("stopped", "error")
                         _is_stale = (
                             existing_mapped is None
-                            or str(getattr(existing_mapped, "state", "") or "") in _terminal_states
+                            or str(getattr(existing_mapped, "state", "") or "")
+                            in _terminal_states
                         )
                         if _is_stale:
                             self._logger.warning(
@@ -370,10 +424,16 @@ class RunLifecycle:
                                 owner_id,
                                 mapped_run_id,
                                 existing_mapped is not None,
-                                str(getattr(existing_mapped, "state", None)) if existing_mapped else "N/A",
+                                (
+                                    str(getattr(existing_mapped, "state", None))
+                                    if existing_mapped
+                                    else "N/A"
+                                ),
                             )
                             try:
-                                self._clear_active_run_id(owner_id=owner_id, run_id=mapped_run_id)
+                                self._clear_active_run_id(
+                                    owner_id=owner_id, run_id=mapped_run_id
+                                )
                             except Exception:
                                 self._logger.exception(
                                     "simulator.run.stale_mapping_clear_failed owner_id=%s mapped_run_id=%s",
@@ -381,7 +441,9 @@ class RunLifecycle:
                                     mapped_run_id,
                                 )
                             # Recompute count without the now-cleared stale mapping.
-                            count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
+                            count, most_recent_run_id = (
+                                self._count_active_runs_for_owner_locked(owner_id)
+                            )
                         else:
                             # Mapping is valid (the run is in _runs, so the scan above saw it).
                             if most_recent_run_id is None:
@@ -406,7 +468,10 @@ class RunLifecycle:
             # the other's participants. Never expected (`new_run_id` is a second-resolution stamp and 32 random bits);
             # refused rather than assumed.
             if run_id in self._runs:
-                raise ConflictException("Run id already in use", details={"conflict_kind": "run_id_collision"})
+                raise ConflictException(
+                    "Run id already in use",
+                    details={"conflict_kind": "run_id_collision"},
+                )
 
             # Minimal local artifacts (best-effort). Do it before exposing the run.
             self._artifacts.init_run_artifacts(run)
@@ -439,7 +504,9 @@ class RunLifecycle:
                 pass  # 054-A-7a: a pause the run took itself keeps its reason; the user's pause adds nothing to it
             elif run.state == "running":
                 run.state = "paused"
-                run.pause_reason = None  # 054-A-7a: the user's pause has no reason of the run's own
+                run.pause_reason = (
+                    None  # 054-A-7a: the user's pause has no reason of the run's own
+                )
             elif run.state in ("stopping", "stopped", "error"):
                 # Idempotent, but no-op.
                 pass
@@ -464,17 +531,25 @@ class RunLifecycle:
                     run._real_stall_clearing_at = None
                 run.pause_reason = None
                 run.state = "running"
-                note_subscribers_locked(run, self._idle_now())  # 044 stage 2: a resume restarts the idle window
+                note_subscribers_locked(
+                    run, self._idle_now()
+                )  # 044 stage 2: a resume restarts the idle window
             elif run.state in ("stopping", "stopped"):
                 # Idempotent: keep stopped
                 pass
             else:
                 # 054-A-7c: refused before any mutation, like the entry limits below.
-                failed_code = (run.last_error or {}).get("code") if run.state == "error" else None
+                failed_code = (
+                    (run.last_error or {}).get("code") if run.state == "error" else None
+                )
                 if failed_code in RESUME_REFUSED_ERROR_CODES:
                     raise ConflictException(
                         "The run failed terminally and cannot be resumed; restart it",
-                        details={"reason": "run_failed_terminal", "code": failed_code, "run_id": run_id},
+                        details={
+                            "reason": "run_failed_terminal",
+                            "code": failed_code,
+                            "run_id": run_id,
+                        },
                     )
                 self._enforce_entry_limits_locked(run)
                 run.state = "running"
@@ -508,7 +583,9 @@ class RunLifecycle:
                 run.stop_reason = str(reason)
             if client is not None:
                 run.stop_client = str(client)
-            if run.stop_requested_at is None and (source is not None or reason is not None or client is not None):
+            if run.stop_requested_at is None and (
+                source is not None or reason is not None or client is not None
+            ):
                 run.stop_requested_at = self._utc_now()
 
             # Always detach tasks for cancellation (idempotent stop).
@@ -520,14 +597,18 @@ class RunLifecycle:
             # Cancelling the task again is a repeated cancellation: `commit_resolution._drain_task` then cancels the
             # in-flight COMMIT it shields, and the tick ends with its committed money unknown and unpublished.
             joins_drain = run._stop_draining and heartbeat_task is not None
-            if heartbeat_task is not None or pending_closed_trustlines_publications(run_id):
+            if heartbeat_task is not None or pending_closed_trustlines_publications(
+                run_id
+            ):
                 # From here until the drain below is over, every `run_status` says `stopping` - also the one a second
                 # stop (retry, stop-all, shutdown), a new subscription, a pause or an intensity change publishes.
                 run._stop_draining = True
 
             if run.state not in ("stopping", "stopped"):
                 run.state = "stopping"
-            run.pause_reason = None  # 054-A-7a: the reason of a pause belongs to the paused state only
+            run.pause_reason = (
+                None  # 054-A-7a: the reason of a pause belongs to the paused state only
+            )
 
         self._publish_run_status(run_id)
 
@@ -557,12 +638,16 @@ class RunLifecycle:
         # Best-effort: make sure background tasks are stopped even if persistence fails.
         if heartbeat_task is not None and joins_drain:
             try:
-                await asyncio.shield(heartbeat_task)  # this caller's own cancellation must not reach the task
+                await asyncio.shield(
+                    heartbeat_task
+                )  # this caller's own cancellation must not reach the task
             except asyncio.CancelledError:
                 if not heartbeat_task.done():
                     raise  # this caller was cancelled: the drain and its terminal publication stay the owner's
             except Exception:
-                self._logger.exception("simulator.run.stop_heartbeat_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.run.stop_heartbeat_failed run_id=%s", run_id
+                )
         elif heartbeat_task is not None:
             heartbeat_task.cancel()
             try:
@@ -570,7 +655,9 @@ class RunLifecycle:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                self._logger.exception("simulator.run.stop_heartbeat_failed run_id=%s", run_id)
+                self._logger.exception(
+                    "simulator.run.stop_heartbeat_failed run_id=%s", run_id
+                )
             finally:
                 with self._lock:
                     if run._heartbeat_task is heartbeat_task:
@@ -586,14 +673,18 @@ class RunLifecycle:
             await drain_closed_trustlines_publications(run_id)
         finally:
             with self._lock:
-                run._stop_draining = False  # 054-A review FD2: the drain is over; `stopped` may be said
+                run._stop_draining = (
+                    False  # 054-A review FD2: the drain is over; `stopped` may be said
+                )
             self._publish_run_status(run_id)
 
         # Always attempt to stop artifacts writer (idempotent).
         try:
             await self._artifacts.stop_events_writer(run_id)
         except Exception:
-            self._logger.exception("simulator.run.stop_artifacts_writer_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.run.stop_artifacts_writer_failed run_id=%s", run_id
+            )
 
         try:
             await simulator_storage.upsert_run(run)
@@ -611,7 +702,9 @@ class RunLifecycle:
                 status_payload=self._get_run_status_payload_json(run_id),
             )
         except Exception:
-            self._logger.exception("simulator.run.stop_finalize_artifacts_failed run_id=%s", run_id)
+            self._logger.exception(
+                "simulator.run.stop_finalize_artifacts_failed run_id=%s", run_id
+            )
 
         return self._run_to_status(run)
 
@@ -670,7 +763,9 @@ class RunLifecycle:
             # and the failures are cleared only by a tick that succeeds (`tick.py`), so the restarted launch starts
             # from zero here, like `errors_total` above - the old launch's counts must not greet the new one.
             run._real_consec_all_rejected_ticks = 0
-            run._real_stall_clearing_at = None  # 054-A-7a: with the counter it belongs to
+            run._real_stall_clearing_at = (
+                None  # 054-A-7a: with the counter it belongs to
+            )
             run.pause_reason = None
             run._real_consec_tick_failures = 0
             run._real_consec_money_no_progress_ticks = 0
@@ -682,7 +777,9 @@ class RunLifecycle:
 
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)
-            self._artifacts.start_events_writer(run_id)  # stop() ended it (F-028-4); idempotent
+            self._artifacts.start_events_writer(
+                run_id
+            )  # stop() ended it (F-028-4); idempotent
 
         await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)

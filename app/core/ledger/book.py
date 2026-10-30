@@ -101,7 +101,11 @@ from app.db.journal_tables import (
     intent_encoding_version_for,
 )
 from app.db.journal_triggers import GUC_OPERATION_ID
-from app.db.models.audit_log import TRUST_LINE_CLOSE, IntegrityAuditLog, trust_line_close_completed
+from app.db.models.audit_log import (
+    TRUST_LINE_CLOSE,
+    IntegrityAuditLog,
+    trust_line_close_completed,
+)
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -542,7 +546,9 @@ def _declaration(op: Operation) -> tuple[Any, str]:
             reason=Refusal.BAD_ARGUMENT,
         )
     if not op.identity:
-        raise BookError("an operation needs a non-empty identity", reason=Refusal.BAD_ARGUMENT)
+        raise BookError(
+            "an operation needs a non-empty identity", reason=Refusal.BAD_ARGUMENT
+        )
     if (op.tx_id is not None) != (op.kind in OPERATION_KINDS_WITH_TX):
         needs = "requires" if op.kind in OPERATION_KINDS_WITH_TX else "must not carry"
         raise BookError(f"kind {op.kind} {needs} a tx_id", reason=Refusal.BAD_ARGUMENT)
@@ -558,7 +564,9 @@ def _declaration(op: Operation) -> tuple[Any, str]:
         raise BookError(str(exc), reason=Refusal.BAD_ARGUMENT) from exc
     try:
         canonical = canonical_json(op.intent)
-    except Exception as exc:  # noqa: BLE001 - any canonicalisation failure is the same refusal
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - any canonicalisation failure is the same refusal
         raise BookError(
             f"intent cannot be canonicalised, so it cannot be recorded: {exc}",
             reason=Refusal.BAD_ARGUMENT,
@@ -576,7 +584,8 @@ def _money_text(value: Any) -> str:
 
 def _entry_digest(codes: Iterable[tuple[Any, ...]]) -> str:
     """A SUMMARY of entries, stored on completion. NOTHING compares it today: no recount or reconciliation reads
-    `effect_digest` (audit 2026-10-02, `specs/BACKLOG.md` G1). Not a seal either (no chain, no anchor)."""
+    `effect_digest` (audit 2026-10-02, `specs/BACKLOG.md` G1). Not a seal either (no chain, no anchor).
+    """
 
     digest = hashlib.sha256()
     for code in codes:
@@ -614,7 +623,9 @@ def _refuse_unless_the_driver_is_in_a_transaction(async_conn: Any) -> None:
         probe = getattr(driver, "is_in_transaction", None)
         answer = probe() if callable(probe) else None
         why = f"{type(driver).__name__}.is_in_transaction() answered {answer!r}"
-    except Exception as exc:  # noqa: BLE001 - an unanswerable probe is the refusal below
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - an unanswerable probe is the refusal below
         answer, why = None, repr(exc)
     if answer is True:
         return
@@ -631,7 +642,9 @@ def _refuse_unless_the_driver_is_in_a_transaction(async_conn: Any) -> None:
     )
 
 
-async def _settle_requested_closes(session: Any, op: Operation, rows: Sequence[Any]) -> None:
+async def _settle_requested_closes(
+    session: Any, op: Operation, rows: Sequence[Any]
+) -> None:
     """026 `T2603.1` (owner В1/В2): the pairs this operation touched that hold a requested close.
 
     ONE SELECT of the live lines with `close_requested_at` among the touched pairs (both orientations), then:
@@ -659,39 +672,78 @@ async def _settle_requested_closes(session: Any, op: Operation, rows: Sequence[A
         last[edge] = Decimal(row.amount_after or 0)
     keys = {(e, d, c) for e, d, c in first} | {(e, c, d) for e, d, c in first}
     creditor, debtor = aliased(Participant), aliased(Participant)
-    lines = (await session.execute(
-        select(TrustLine.id, TrustLine.equivalent_id, TrustLine.from_participant_id, TrustLine.to_participant_id,
-               creditor.pid.label("from_pid"), debtor.pid.label("to_pid"), Equivalent.code)
-        .join(creditor, creditor.id == TrustLine.from_participant_id)
-        .join(debtor, debtor.id == TrustLine.to_participant_id)
-        .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
-        .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id, TrustLine.to_participant_id).in_(
-            sorted(keys, key=str)), TrustLine.close_requested_at.is_not(None), TrustLine.status != "closed")
-    )).all()
+    lines = (
+        await session.execute(
+            select(
+                TrustLine.id,
+                TrustLine.equivalent_id,
+                TrustLine.from_participant_id,
+                TrustLine.to_participant_id,
+                creditor.pid.label("from_pid"),
+                debtor.pid.label("to_pid"),
+                Equivalent.code,
+            )
+            .join(creditor, creditor.id == TrustLine.from_participant_id)
+            .join(debtor, debtor.id == TrustLine.to_participant_id)
+            .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+            .where(
+                tuple_(
+                    TrustLine.equivalent_id,
+                    TrustLine.from_participant_id,
+                    TrustLine.to_participant_id,
+                ).in_(sorted(keys, key=str)),
+                TrustLine.close_requested_at.is_not(None),
+                TrustLine.status != "closed",
+            )
+        )
+    ).all()
     closing = []
     for line in lines:
-        supported = (line.equivalent_id, line.to_participant_id, line.from_participant_id)
-        pair = (supported, (line.equivalent_id, line.from_participant_id, line.to_participant_id))
+        supported = (
+            line.equivalent_id,
+            line.to_participant_id,
+            line.from_participant_id,
+        )
+        pair = (
+            supported,
+            (line.equivalent_id, line.from_participant_id, line.to_participant_id),
+        )
         change = sum((last[e] - first[e] for e in pair if e in first), Decimal("0"))
         if change >= 0:
             raise IntegrityViolationException(
                 f"a pair with a requested close may only shrink its debt; {op.kind} {op.identity} changed it by "
                 f"{change}",
-                details={"invariant": "PENDING_CLOSE_PAIR_NOT_REDUCED", "trustline_id": str(line.id),
-                         "pair_debt_change": str(change)},
+                details={
+                    "invariant": "PENDING_CLOSE_PAIR_NOT_REDUCED",
+                    "trustline_id": str(line.id),
+                    "pair_debt_change": str(change),
+                },
             )
         if supported in last and last[supported] == 0:
             closing.append(line)
     if not closing:
         return
-    await session.execute(update(TrustLine).where(TrustLine.id.in_([line.id for line in closing]))
-                          .values(status="closed"))
+    await session.execute(
+        update(TrustLine)
+        .where(TrustLine.id.in_([line.id for line in closing]))
+        .values(status="closed")
+    )
     for line in closing:
-        session.add(IntegrityAuditLog(
-            operation_type=TRUST_LINE_CLOSE, tx_id=op.tx_id, equivalent_code=line.code, state_checksum_before="",
-            state_checksum_after="", affected_participants=trust_line_close_completed(
-                line.from_pid, line.to_pid, str(line.id), op.kind),
-            invariants_checked={}, verification_passed=None, error_details=None))
+        session.add(
+            IntegrityAuditLog(
+                operation_type=TRUST_LINE_CLOSE,
+                tx_id=op.tx_id,
+                equivalent_code=line.code,
+                state_checksum_before="",
+                state_checksum_after="",
+                affected_participants=trust_line_close_completed(
+                    line.from_pid, line.to_pid, str(line.id), op.kind
+                ),
+                invariants_checked={},
+                verification_passed=None,
+                error_details=None,
+            )
+        )
     await session.flush()
 
 
@@ -769,10 +821,16 @@ async def _complete(
     # through the commit and reads the baselines after (027 stage 2; until then SERIALIZABLE) - one waits
     # for the other (`tests/integration/test_p015_step5a_reconciliation_postgres.py`).
     if op.kind in _PRE_BASELINE_ONLY_KINDS and touched:
-        await async_conn.execute(select(Equivalent.id).where(Equivalent.id.in_(touched)).with_for_update(read=True))
+        await async_conn.execute(
+            select(Equivalent.id)
+            .where(Equivalent.id.in_(touched))
+            .with_for_update(read=True)
+        )
         column = debt_reconciliation_baselines.c.equivalent_id
         baselined = (
-            (await async_conn.execute(select(column).where(column.in_(touched)))).scalars().all()
+            (await async_conn.execute(select(column).where(column.in_(touched))))
+            .scalars()
+            .all()
         )
         if baselined:
             raise BookError(
@@ -794,7 +852,9 @@ async def _complete(
             "effect_count": len(codes),
             "effect_digest": _entry_digest(codes),
         }
-        for equivalent_id, codes in sorted(per_equivalent.items(), key=lambda kv: kv[0].bytes)
+        for equivalent_id, codes in sorted(
+            per_equivalent.items(), key=lambda kv: kv[0].bytes
+        )
     ]
     if membership:
         await async_conn.execute(insert(debt_operation_equivalents), membership)
@@ -854,11 +914,15 @@ async def _make_unusable(async_conn: Any, original: BaseException) -> None:
     try:
         await async_conn.invalidate()
         return
-    except BaseException as exc:  # noqa: BLE001 - attached to the original, never raised over it
+    except (
+        BaseException
+    ) as exc:  # noqa: BLE001 - attached to the original, never raised over it
         original.add_note(f"Book: invalidating the connection failed as well: {exc!r}")
     try:
         async_conn.sync_connection.connection.driver_connection.terminate()
-    except BaseException as exc:  # noqa: BLE001 - attached to the original, never raised over it
+    except (
+        BaseException
+    ) as exc:  # noqa: BLE001 - attached to the original, never raised over it
         original.add_note(
             f"Book: terminating the driver connection failed too ({exc!r}); the transaction may "
             f"still be open and MUST NOT be committed"
@@ -903,7 +967,9 @@ class Book:
         # 1. The connection first - it autobegins a fresh session's transaction - then the state.
         async_conn = await session.connection()
         if not session.in_transaction():
-            raise BookError("no transaction is open on this session", reason=Refusal.NO_TRANSACTION)
+            raise BookError(
+                "no transaction is open on this session", reason=Refusal.NO_TRANSACTION
+            )
         if _is_autocommit_configured(async_conn):
             raise BookError(
                 "this connection is configured AUTOCOMMIT: every statement commits itself",
@@ -920,7 +986,11 @@ class Book:
                 reason=Refusal.NESTED_OPERATION,
             )
         sync_session = _key(session)
-        pending = list(sync_session.new) + list(sync_session.dirty) + list(sync_session.deleted)
+        pending = (
+            list(sync_session.new)
+            + list(sync_session.dirty)
+            + list(sync_session.deleted)
+        )
         if any(isinstance(obj, Debt) for obj in pending):
             raise BookError(
                 "a Debt is already pending in this session. It was not declared by this operation "
@@ -997,7 +1067,9 @@ class Book:
 
         posting = _OPEN.get(_key(session))
         if posting is None or not posting.is_open:
-            raise BookError("no Book operation is open on this session", reason=Refusal.NO_OPERATION)
+            raise BookError(
+                "no Book operation is open on this session", reason=Refusal.NO_OPERATION
+            )
         return posting
 
 
@@ -1018,9 +1090,9 @@ def operation_for(
         identity=identity,
         intent=intent,
         tx_id=tx_id,
-        scope_equivalent_ids=None
-        if scope_equivalent_ids is None
-        else frozenset(scope_equivalent_ids),
+        scope_equivalent_ids=(
+            None if scope_equivalent_ids is None else frozenset(scope_equivalent_ids)
+        ),
         intent_equivalent_ids=frozenset(intent_equivalent_ids),
         intent_encoding_version=intent_encoding_version,
     )

@@ -44,14 +44,23 @@ _EXECUTION_DEPTH_REMOVED = (
     response_model=ClearingCyclesResponse,
     responses={
         # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
-        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
-        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009, 054-E-5)"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a well-formed equivalent code (E009)",
+        },
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No equivalent has this code (E009, 054-E-5)",
+        },
         409: {
             "model": ErrorEnvelope,
             "description": "Simulator use is detected on this server (044 T4406, the periodic pass's rule of 023 "
             "decision 9): `details.reason = simulator_real_runs_in_database | simulator_persistence_disabled`",
         },
-        500: {"model": ErrorEnvelope, "description": "The planner process could not answer (E010)"},
+        500: {
+            "model": ErrorEnvelope,
+            "description": "The planner process could not answer (E010)",
+        },
         503: {
             "model": ErrorEnvelope,
             "description": "Diagnostics cannot answer now (E007): another diagnostic plan is being computed "
@@ -86,11 +95,19 @@ async def list_cycles(
     try:
         cycles = await planned_cycles_for_diagnostics(db, equivalent)
     except ClearingDiagnosticsUnavailable as unavailable:
-        logger.warning("event=clearing.cycles.unavailable equivalent=%s reason=%s", equivalent, unavailable.reason)
+        logger.warning(
+            "event=clearing.cycles.unavailable equivalent=%s reason=%s",
+            equivalent,
+            unavailable.reason,
+        )
         raise
     except (BrokenProcessPool, PlanIntegrityError) as failed:
         # The bare E010 (500) with the request id; which of the two it was stays in the log.
-        logger.error("event=clearing.cycles.planner_failed equivalent=%s error=%s", equivalent, type(failed).__name__)
+        logger.error(
+            "event=clearing.cycles.planner_failed equivalent=%s error=%s",
+            equivalent,
+            type(failed).__name__,
+        )
         raise GeoException() from failed
     return {"cycles": cycles}
 
@@ -117,7 +134,8 @@ def _refuse_execution_depth(request: Request) -> None:
 
 def _is_internal(cause: BaseException) -> bool:
     """An internal failure: not a GeoException, or a GeoException with the internal code E010 (whose message may
-    carry private detail - the retired `auto_clear` sanitised exactly these, and so does this route)."""
+    carry private detail - the retired `auto_clear` sanitised exactly these, and so does this route).
+    """
 
     return not isinstance(cause, GeoException) or cause.code == ErrorCode.E010.value
 
@@ -126,8 +144,16 @@ def _error_body(cause: BaseException) -> dict:
     """The cause as the error envelope renders it; an internal failure is sanitised to the bare E010."""
 
     if _is_internal(cause):
-        return {"code": ErrorCode.E010.value, "message": ERROR_MESSAGES[ErrorCode.E010], "details": None}
-    return {"code": cause.code, "message": cause.message, "details": dict(cause.details) or None}
+        return {
+            "code": ErrorCode.E010.value,
+            "message": ERROR_MESSAGES[ErrorCode.E010],
+            "details": None,
+        }
+    return {
+        "code": cause.code,
+        "message": cause.message,
+        "details": dict(cause.details) or None,
+    }
 
 
 def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -> dict:
@@ -139,7 +165,11 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
         "v_edge": atoms_text(result.v_edge_atoms),
         "v_cyc": atoms_text(result.v_cyc_atoms),
         "remaining_cycles": result.remaining_cycles,
-        "remaining_v_edge": None if result.remaining_v_edge_atoms is None else atoms_text(result.remaining_v_edge_atoms),
+        "remaining_v_edge": (
+            None
+            if result.remaining_v_edge_atoms is None
+            else atoms_text(result.remaining_v_edge_atoms)
+        ),
         "committed": [
             {
                 "occurrence_id": o.occurrence_id,
@@ -147,7 +177,11 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
                 "ordinal": o.ordinal,
                 "amount": atoms_text(o.amount_atoms),
                 "edges": [
-                    {"debt_id": str(e.debt_id), "debtor_id": str(e.debtor_id), "creditor_id": str(e.creditor_id)}
+                    {
+                        "debt_id": str(e.debt_id),
+                        "debtor_id": str(e.debtor_id),
+                        "creditor_id": str(e.creditor_id),
+                    }
                     for e in o.edges
                 ],
                 "after_cancellation": o.after_cancellation,
@@ -165,8 +199,14 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
         # T1544 / 023 R3: the operator stop (or an integrity hold) met BEFORE the first commit is 409/E008. Met after
         # progress, the pass answers 200 `interrupted` with `error.code = "E008"` instead (the progress is durable).
         # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
-        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a well-formed equivalent code (E009)"},
-        404: {"model": ErrorEnvelope, "description": "No equivalent has this code (E009, 054-E-5)"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "`equivalent` is not a well-formed equivalent code (E009)",
+        },
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No equivalent has this code (E009, 054-E-5)",
+        },
         409: {
             "model": ErrorEnvelope,
             "description": "Equivalent is not active (operator stop or integrity hold) before any occurrence "
@@ -201,7 +241,10 @@ async def auto_clear(
         if not failed.result.committed:
             # Nothing is durable: the original error contract (409/E008 on a stop, the sanitised 500 otherwise).
             if isinstance(failed.cause, GeoException) and _is_internal(failed.cause):
-                logger.error("event=clearing.auto.failed equivalent=%s error=GeoException(E010)", equivalent)
+                logger.error(
+                    "event=clearing.auto.failed equivalent=%s error=GeoException(E010)",
+                    equivalent,
+                )
                 raise GeoException() from failed.cause  # the bare E010: its private message stays in the log
             raise failed.cause
         logger.warning(

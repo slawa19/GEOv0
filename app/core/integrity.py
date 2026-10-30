@@ -36,8 +36,12 @@ async def compute_integrity_checkpoint_for_equivalent(
 
     trustlines = (
         await session.execute(
-            select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit, TrustLine.status)
-            .where(TrustLine.equivalent_id == equivalent_id)
+            select(
+                TrustLine.from_participant_id,
+                TrustLine.to_participant_id,
+                TrustLine.limit,
+                TrustLine.status,
+            ).where(TrustLine.equivalent_id == equivalent_id)
             # `id` is a tie-breaker, not decoration: since migration 019 a closed
             # incarnation may share (from, to) with the live one, and ordering by the pair
             # alone leaves their relative position -- and therefore the checksum -- up to
@@ -158,7 +162,9 @@ async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
     try:
         written = []
         for eq_id in equivalents:
-            cp = await compute_integrity_checkpoint_for_equivalent(session, equivalent_id=eq_id)
+            cp = await compute_integrity_checkpoint_for_equivalent(
+                session, equivalent_id=eq_id
+            )
             session.add(cp)
             written.append(cp)
         await session.flush()
@@ -166,7 +172,8 @@ async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
             async with session.begin_nested():
                 await session.execute(
                     delete(IntegrityCheckpoint).where(
-                        IntegrityCheckpoint.created_at < datetime.now(timezone.utc) - INTEGRITY_CHECKPOINT_TTL,
+                        IntegrityCheckpoint.created_at
+                        < datetime.now(timezone.utc) - INTEGRITY_CHECKPOINT_TTL,
                         IntegrityCheckpoint.id.notin_([cp.id for cp in written]),
                     )
                 )

@@ -59,7 +59,12 @@ from typing import AbstractSet, Awaitable, Callable, Optional
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.clearing.flow_planner import PlannedCycle, load_snapshot, money_of, plan_clearing
+from app.core.clearing.flow_planner import (
+    PlannedCycle,
+    load_snapshot,
+    money_of,
+    plan_clearing,
+)
 from app.core.clearing.service import (
     ClearingOccurrence,
     ClearingService,
@@ -186,7 +191,8 @@ class ClearingPassError(Exception):
 class ClearingPeriodicRefused(Exception):
     """Decision 9, form (b): the periodic runner refuses where simulator use is DETECTED (a real-mode run row, or
     run persistence off). It does not prove the database holds no simulator data: `cleanup-simulator` deletes run
-    rows but not simulator debts. Separate databases are the actual guarantee (spec decision 9)."""
+    rows but not simulator debts. Separate databases are the actual guarantee (spec decision 9).
+    """
 
     def __init__(self, reason: str):
         super().__init__(f"periodic clearing refused: {reason}")
@@ -202,8 +208,15 @@ class _PassState:
     plans: int = 0
     planner_abandoned: bool = False
 
-    def hand_off(self, occurrence: ClearingOccurrence, cycle: PlannedCycle, amount: Decimal, *, after_cancellation: bool,
-                 on_committed) -> CommittedOccurrence:
+    def hand_off(
+        self,
+        occurrence: ClearingOccurrence,
+        cycle: PlannedCycle,
+        amount: Decimal,
+        *,
+        after_cancellation: bool,
+        on_committed,
+    ) -> CommittedOccurrence:
         # No validation may stand between a durable commit and its record: `amount` is `Numeric(20, 8)` money
         # (the declared `c`, or the durable amount of a verified replay), so it is a whole number of atoms.
         amount_atoms = int(Decimal(amount).scaleb(8))
@@ -212,7 +225,10 @@ class _PassState:
             plan_id=occurrence.plan_id,
             ordinal=occurrence.ordinal,
             amount_atoms=amount_atoms,
-            edges=tuple(CommittedEdge(e.debt_id, e.debtor_id, e.creditor_id) for e in cycle.edges),
+            edges=tuple(
+                CommittedEdge(e.debt_id, e.debtor_id, e.creditor_id)
+                for e in cycle.edges
+            ),
             after_cancellation=after_cancellation,
         )
         self.committed.append(done)
@@ -222,7 +238,9 @@ class _PassState:
             on_committed(done)
         return done
 
-    def result(self, status: str, reason: Optional[InterruptReason]) -> ClearingPassResult:
+    def result(
+        self, status: str, reason: Optional[InterruptReason]
+    ) -> ClearingPassResult:
         remaining = self.remaining
         return ClearingPassResult(
             equivalent=self.equivalent,
@@ -230,7 +248,11 @@ class _PassState:
             reason=reason,
             committed=tuple(self.committed),
             remaining_cycles=None if remaining is None else len(remaining),
-            remaining_v_edge_atoms=None if remaining is None else sum(len(c.edges) * c.atoms for c in remaining),
+            remaining_v_edge_atoms=(
+                None
+                if remaining is None
+                else sum(len(c.edges) * c.atoms for c in remaining)
+            ),
             plans=self.plans,
             distributed_exclusive=self.distributed_exclusive,
             planner_abandoned=self.planner_abandoned,
@@ -242,11 +264,14 @@ _planner_executor: Optional[ProcessPoolExecutor] = None
 
 def _default_planner_executor() -> ProcessPoolExecutor:
     """One planner process, created on first use and reused. `spawn` on every platform: forking a process that runs
-    an event loop and threads is not safe, and the child needs only `flow_planner` (sqlalchemy, no settings)."""
+    an event loop and threads is not safe, and the child needs only `flow_planner` (sqlalchemy, no settings).
+    """
 
     global _planner_executor
     if _planner_executor is None:
-        _planner_executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+        _planner_executor = ProcessPoolExecutor(
+            max_workers=1, mp_context=multiprocessing.get_context("spawn")
+        )
     return _planner_executor
 
 
@@ -258,16 +283,24 @@ def _discard_broken_planner_executor(broken: Executor) -> None:
         _planner_executor = None
 
 
-async def _read_snapshot(session_factory, equivalent_code, allowed_participant_pids, snapshot_guard):
+async def _read_snapshot(
+    session_factory, equivalent_code, allowed_participant_pids, snapshot_guard
+):
     async with session_factory() as session:
         if snapshot_guard is not None:
             await snapshot_guard(session)
         equivalent_id = (
-            await session.execute(select(Equivalent.id).where(Equivalent.code == equivalent_code))
+            await session.execute(
+                select(Equivalent.id).where(Equivalent.code == equivalent_code)
+            )
         ).scalar_one_or_none()
-        edges = await load_snapshot(session, equivalent_code, allowed_participant_pids=allowed_participant_pids)
+        edges = await load_snapshot(
+            session, equivalent_code, allowed_participant_pids=allowed_participant_pids
+        )
         await session.rollback()
-    if equivalent_id is None:  # load_snapshot has already refused a missing equivalent; kept explicit
+    if (
+        equivalent_id is None
+    ):  # load_snapshot has already refused a missing equivalent; kept explicit
         raise NotFoundException(f"Equivalent {equivalent_code} not found")
     return equivalent_id, edges
 
@@ -314,13 +347,17 @@ _diagnostic_plan_in_flight = False
 
 class ClearingDiagnosticsUnavailable(GeoException):
     """`GET /clearing/cycles` cannot answer NOW and says so (503, E007): another diagnostic plan is being computed
-    (`diagnostics_busy`), or this one ran past its bound (`diagnostics_timeout`). Never an empty list."""
+    (`diagnostics_busy`), or this one ran past its bound (`diagnostics_timeout`). Never an empty list.
+    """
 
     def __init__(self, reason: str):
         super().__init__(
             "Clearing diagnostics are busy; retry later",
             code=ErrorCode.E007,
-            details={"reason": reason, "retry_after_seconds": DIAGNOSTIC_RETRY_AFTER_SECONDS},
+            details={
+                "reason": reason,
+                "retry_after_seconds": DIAGNOSTIC_RETRY_AFTER_SECONDS,
+            },
             status_code=503,
         )
         self.reason = reason
@@ -328,17 +365,21 @@ class ClearingDiagnosticsUnavailable(GeoException):
 
 def _default_diagnostic_executor() -> ProcessPoolExecutor:
     """The diagnostic planner process: its own one-worker `spawn` pool, created on first use. NOT the pool of the
-    passes - a diagnostic plan never stands in a queue in front of a clearing plan (035 A1, review of `b2a9caea`)."""
+    passes - a diagnostic plan never stands in a queue in front of a clearing plan (035 A1, review of `b2a9caea`).
+    """
 
     global _diagnostic_executor
     if _diagnostic_executor is None:
-        _diagnostic_executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+        _diagnostic_executor = ProcessPoolExecutor(
+            max_workers=1, mp_context=multiprocessing.get_context("spawn")
+        )
     return _diagnostic_executor
 
 
 def _discard_diagnostic_executor(pool: Executor, *, terminate: bool) -> None:
     """Forget `pool`; the next request gets a new one. `terminate`: its worker may still be computing a plan nobody
-    awaits - `Future.cancel()` cannot stop a running task, so the process is ended, or it would hold the one slot."""
+    awaits - `Future.cancel()` cannot stop a running task, so the process is ended, or it would hold the one slot.
+    """
 
     global _diagnostic_executor
     if _diagnostic_executor is pool:
@@ -351,7 +392,8 @@ def _discard_diagnostic_executor(pool: Executor, *, terminate: bool) -> None:
 
 async def _diagnostic_plan(edges, executor: Optional[Executor]):
     """`plan_clearing(edges)` in the diagnostic worker; the wait for its answer is bounded by
-    `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` (the hand-over itself, `submit`, is synchronous and outside that bound)."""
+    `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` (the hand-over itself, `submit`, is synchronous and outside that bound).
+    """
 
     pool = executor or _default_diagnostic_executor()
     try:
@@ -360,7 +402,9 @@ async def _diagnostic_plan(edges, executor: Optional[Executor]):
         _discard_diagnostic_executor(pool, terminate=False)
         raise
     try:
-        return await asyncio.wait_for(asyncio.wrap_future(worker), timeout=DIAGNOSTIC_PLAN_TIMEOUT_SECONDS)
+        return await asyncio.wait_for(
+            asyncio.wrap_future(worker), timeout=DIAGNOSTIC_PLAN_TIMEOUT_SECONDS
+        )
     except BrokenProcessPool:
         _discard_diagnostic_executor(pool, terminate=False)
         raise
@@ -374,7 +418,9 @@ async def _diagnostic_plan(edges, executor: Optional[Executor]):
         raise
 
 
-async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, executor: Optional[Executor] = None):
+async def planned_cycles_for_diagnostics(
+    session, equivalent_code: str, *, executor: Optional[Executor] = None
+):
     """The cycles of the plan a clearing pass would compute now, in plan order, for `GET /clearing/cycles` (035 A1,
     owner decision П1-(а)).
 
@@ -400,16 +446,26 @@ async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, execu
     global _diagnostic_plan_in_flight
     if _diagnostic_plan_in_flight:
         raise ClearingDiagnosticsUnavailable("diagnostics_busy")
-    _diagnostic_plan_in_flight = True  # set before the first await: one event loop, so check-and-set is atomic
+    _diagnostic_plan_in_flight = (
+        True  # set before the first await: one event loop, so check-and-set is atomic
+    )
     try:
         edges = await load_snapshot(session, equivalent_code)
         precision = (
-            await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+            await session.execute(
+                select(Equivalent.precision).where(Equivalent.code == equivalent_code)
+            )
         ).scalar_one()
-        vertices = sorted({v for e in edges for v in (e.debtor_id, e.creditor_id)}, key=str)
+        vertices = sorted(
+            {v for e in edges for v in (e.debtor_id, e.creditor_id)}, key=str
+        )
         pid_of: dict = {}
         if vertices:
-            rows = await session.execute(select(Participant.id, Participant.pid).where(Participant.id.in_(vertices)))
+            rows = await session.execute(
+                select(Participant.id, Participant.pid).where(
+                    Participant.id.in_(vertices)
+                )
+            )
             pid_of = {row.id: row.pid for row in rows}
         await session.rollback()
         plan = await _diagnostic_plan(edges, executor)
@@ -429,7 +485,11 @@ async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, execu
     ]
 
 
-def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], deadline_clock: Callable[[], float]):
+def _stop_reason(
+    lease: Optional[RenewableLease],
+    deadline: Optional[float],
+    deadline_clock: Callable[[], float],
+):
     if lease is not None and lease.lost:
         return InterruptReason.LEASE_LOST
     if deadline is not None and deadline_clock() >= deadline:
@@ -437,7 +497,9 @@ def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], dea
     return None
 
 
-async def _execute_one(session_factory, occurrence, cycle, allowed_participant_pids, state, on_committed):
+async def _execute_one(
+    session_factory, occurrence, cycle, allowed_participant_pids, state, on_committed
+):
     """Run one occurrence; hand it off before any further await. Returns False for a skip."""
 
     from app.core.clearing.service import ClearingCommittedAfterCancellation
@@ -449,14 +511,32 @@ async def _execute_one(session_factory, occurrence, cycle, allowed_participant_p
             )
         except ClearingCommittedAfterCancellation as committed:
             try:
-                state.hand_off(occurrence, cycle, committed.cleared_amount, after_cancellation=True, on_committed=on_committed)
-            except Exception as handoff_error:  # noqa: BLE001 - the cancellation stays the outcome; the error is noted
-                committed.add_note(f"committed-progress handoff failed: {type(handoff_error).__name__}: {handoff_error}")
-                logger.exception("event=clearing.runner.handoff_failed after_cancellation=true")
+                state.hand_off(
+                    occurrence,
+                    cycle,
+                    committed.cleared_amount,
+                    after_cancellation=True,
+                    on_committed=on_committed,
+                )
+            except (
+                Exception
+            ) as handoff_error:  # noqa: BLE001 - the cancellation stays the outcome; the error is noted
+                committed.add_note(
+                    f"committed-progress handoff failed: {type(handoff_error).__name__}: {handoff_error}"
+                )
+                logger.exception(
+                    "event=clearing.runner.handoff_failed after_cancellation=true"
+                )
             raise
         if amount is None:
             return False
-        state.hand_off(occurrence, cycle, amount, after_cancellation=False, on_committed=on_committed)
+        state.hand_off(
+            occurrence,
+            cycle,
+            amount,
+            after_cancellation=False,
+            on_committed=on_committed,
+        )
         return True
 
 
@@ -481,7 +561,9 @@ async def run_clearing_pass(
     """
 
     now = deadline_clock or asyncio.get_running_loop().time
-    state = _PassState(equivalent_code, distributed_exclusive=lease is not None and lease.distributed)
+    state = _PassState(
+        equivalent_code, distributed_exclusive=lease is not None and lease.distributed
+    )
     replans = 0
     # Decision 10: the caller's deadline is checked BETWEEN occurrences - never before the first cycle of the pass.
     # Checked before the snapshot and the first cycle too, a plan slower than the caller's budget (then 250 ms per tick)
@@ -494,7 +576,10 @@ async def run_clearing_pass(
             if stop is not None:
                 return _end(state, INTERRUPTED, stop)
             equivalent_id, edges = await _read_snapshot(
-                session_factory, equivalent_code, allowed_participant_pids, snapshot_guard
+                session_factory,
+                equivalent_code,
+                allowed_participant_pids,
+                snapshot_guard,
             )
             plan = await _plan_off_the_loop(edges, executor, state)
             state.plans += 1
@@ -516,7 +601,12 @@ async def run_clearing_pass(
                     amount_atoms=cycle.atoms,
                 )
                 if not await _execute_one(
-                    session_factory, occurrence, cycle, allowed_participant_pids, state, on_committed
+                    session_factory,
+                    occurrence,
+                    cycle,
+                    allowed_participant_pids,
+                    state,
+                    on_committed,
                 ):
                     skipped = True
                     logger.info(
@@ -536,7 +626,9 @@ async def run_clearing_pass(
         raise ClearingPassCancelled(result) from cancelled
     except RetryableClearingConflictException:
         # Decision 4: an operational limit (the occurrence's retry budget) kept a cycle from executing.
-        logger.warning("event=clearing.runner.operational_limit equivalent=%s", equivalent_code)
+        logger.warning(
+            "event=clearing.runner.operational_limit equivalent=%s", equivalent_code
+        )
         return _end(state, INTERRUPTED, InterruptReason.OPERATIONAL_LIMIT)
     except Exception as error:
         result = _end(state, INTERRUPTED, InterruptReason.ERROR)
@@ -549,7 +641,9 @@ async def run_clearing_pass(
         raise ClearingPassError(result, error) from error
 
 
-def _end(state: _PassState, status: str, reason: Optional[InterruptReason]) -> ClearingPassResult:
+def _end(
+    state: _PassState, status: str, reason: Optional[InterruptReason]
+) -> ClearingPassResult:
     result = state.result(status, reason)
     logger.info(
         "event=clearing.runner.pass_end equivalent=%s status=%s reason=%s committed=%s plans=%s remaining=%s",
@@ -588,10 +682,15 @@ async def run_awaited_clearing(
 
     if not settings.CLEARING_ENABLED:
         # 028 `F-028-20` (decision `T1552`, 2026-09-14): a state of the server, not a bad request.
-        raise ConflictException("Clearing is disabled", details={"reason": "clearing_disabled"})
+        raise ConflictException(
+            "Clearing is disabled", details={"reason": "clearing_disabled"}
+        )
     validate_equivalent_code(equivalent_code)
     async with renewable_lease(
-        redis_client, lease_key(equivalent_code), wait_timeout_seconds=wait_timeout_seconds, **LEASE_TIMINGS
+        redis_client,
+        lease_key(equivalent_code),
+        wait_timeout_seconds=wait_timeout_seconds,
+        **LEASE_TIMINGS,
     ) as lease:
         return await run_clearing_pass(
             session_factory,
@@ -621,7 +720,9 @@ async def check_periodic_isolation(session) -> None:
     # Since migration 037 (042 S1) the CHECK admits `mode = 'real'` only, so the filter selects every row. It stays: it
     # names the evidence this rule stands on (a run that moved money), and it would stay right were a mode ever added.
     real_run = (
-        await session.execute(select(SimulatorRun.run_id).where(SimulatorRun.mode == "real").limit(1))
+        await session.execute(
+            select(SimulatorRun.run_id).where(SimulatorRun.mode == "real").limit(1)
+        )
     ).scalar_one_or_none()
     if real_run is not None:
         raise ClearingPeriodicRefused("simulator_real_runs_in_database")
@@ -647,7 +748,9 @@ async def check_hub_wide_clearing_isolation(session) -> None:
         ) from refused
 
 
-async def run_periodic_clearing_pass(session_factory, redis_client) -> dict[str, ClearingPassResult]:
+async def run_periodic_clearing_pass(
+    session_factory, redis_client
+) -> dict[str, ClearingPassResult]:
     """One periodic pass over the active equivalents, each under its lease (skipped when another owner holds it).
 
     `ClearingPeriodicRefused` is raised, never swallowed: the loop records it. One equivalent's error is logged and
@@ -662,7 +765,9 @@ async def run_periodic_clearing_pass(session_factory, redis_client) -> dict[str,
         codes = list(
             (
                 await session.execute(
-                    select(Equivalent.code).where(Equivalent.is_active.is_(True)).order_by(Equivalent.code)
+                    select(Equivalent.code)
+                    .where(Equivalent.is_active.is_(True))
+                    .order_by(Equivalent.code)
                 )
             ).scalars()
         )
@@ -675,7 +780,10 @@ async def run_periodic_clearing_pass(session_factory, redis_client) -> dict[str,
             ) as lease:
                 try:
                     results[code] = await run_clearing_pass(
-                        session_factory, code, lease=lease, snapshot_guard=check_periodic_isolation
+                        session_factory,
+                        code,
+                        lease=lease,
+                        snapshot_guard=check_periodic_isolation,
                     )
                 except ClearingPassError as failed:
                     if isinstance(failed.cause, ClearingPeriodicRefused):

@@ -66,7 +66,9 @@ def is_run_identity(run_id: str, pid: object) -> bool:
     """Whether `pid` is an identity bound by the run `run_id` (the seeder's adoption rule)."""
 
     prefix = f"{run_id}:p"
-    return isinstance(pid, str) and pid.startswith(prefix) and pid[len(prefix):].isdigit()
+    return (
+        isinstance(pid, str) and pid.startswith(prefix) and pid[len(prefix) :].isdigit()
+    )
 
 
 def _pid_of(value: object) -> str:
@@ -100,8 +102,13 @@ def bind_run_identities(template: dict, *, run_id: str) -> dict:
         if pid not in mapping:
             mapping[pid] = run_identity(run_id, len(mapping) + 1)
             if len(mapping[pid]) > RUN_IDENTITY_MAX_LENGTH:
-                errors.append({"path": path, "message": f"the run identity of participant {pid} is longer than "
-                                                        f"{RUN_IDENTITY_MAX_LENGTH} characters"})
+                errors.append(
+                    {
+                        "path": path,
+                        "message": f"the run identity of participant {pid} is longer than "
+                        f"{RUN_IDENTITY_MAX_LENGTH} characters",
+                    }
+                )
         if not (isinstance(holder.get("name"), str) and holder["name"].strip()):
             holder["name"] = pid
         holder["id"] = mapping[pid]
@@ -114,7 +121,12 @@ def bind_run_identities(template: dict, *, run_id: str) -> dict:
         if not pid:
             return
         if pid not in mapping:
-            errors.append({"path": path, "message": f"participant {pid} is not declared by the scenario"})
+            errors.append(
+                {
+                    "path": path,
+                    "message": f"participant {pid} is not declared by the scenario",
+                }
+            )
             return
         holder[key] = mapping[pid]
 
@@ -135,7 +147,11 @@ def bind_run_identities(template: dict, *, run_id: str) -> dict:
     for i, event in enumerate(events):
         effects = event.get("effects") if isinstance(event, dict) else None
         for j, eff in enumerate(effects if isinstance(effects, list) else []):
-            if isinstance(eff, dict) and eff.get("op") == "add_participant" and isinstance(eff.get("participant"), dict):
+            if (
+                isinstance(eff, dict)
+                and eff.get("op") == "add_participant"
+                and isinstance(eff.get("participant"), dict)
+            ):
                 declare(f"events/{i}/effects/{j}/participant/id", eff["participant"])
 
     trustlines = raw.get("trustlines")
@@ -145,7 +161,11 @@ def bind_run_identities(template: dict, *, run_id: str) -> dict:
         ref_key(f"trustlines/{i}/from", tl, "from")
         ref_key(f"trustlines/{i}/to", tl, "to")
         if isinstance(tl.get("policy"), dict):
-            ref_list(f"trustlines/{i}/policy/blocked_participants", tl["policy"], "blocked_participants")
+            ref_list(
+                f"trustlines/{i}/policy/blocked_participants",
+                tl["policy"],
+                "blocked_participants",
+            )
 
     for i, event in enumerate(events):
         if not isinstance(event, dict):

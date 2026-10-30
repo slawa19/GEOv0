@@ -74,7 +74,9 @@ debt_reconciliation_baselines = Table(
     Base.metadata,
     Column("equivalent_id", Uuid(as_uuid=True), nullable=False),
     # Informational only. A timestamp is not an ordering substitute and nothing reads it as one.
-    Column("taken_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column(
+        "taken_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
     PrimaryKeyConstraint("equivalent_id", name="pk_debt_reconciliation_baselines"),
     ForeignKeyConstraint(
         ["equivalent_id"],
@@ -96,7 +98,10 @@ debt_reconciliation_baseline_offsets = Table(
     # Not named `offset`, which is an SQL keyword.
     Column("offset_amount", MoneyNumeric(20, 8), nullable=False),
     PrimaryKeyConstraint(
-        "equivalent_id", "debtor_id", "creditor_id", name="pk_debt_reconciliation_baseline_offsets"
+        "equivalent_id",
+        "debtor_id",
+        "creditor_id",
+        name="pk_debt_reconciliation_baseline_offsets",
     ),
     ForeignKeyConstraint(
         ["equivalent_id"],
@@ -117,7 +122,8 @@ debt_reconciliation_baseline_offsets = Table(
         ondelete="RESTRICT",
     ),
     CheckConstraint(
-        "debtor_id <> creditor_id", name="chk_debt_reconciliation_baseline_offsets_no_self_loop"
+        "debtor_id <> creditor_id",
+        name="chk_debt_reconciliation_baseline_offsets_no_self_loop",
     ),
     # A zero offset is represented by the ABSENCE of a row, never by a row holding zero: two spellings
     # of one fact are two things a reader has to agree on.
@@ -147,8 +153,15 @@ debt_reconciliation_results = Table(
     Column("fingerprint", String(64), nullable=False),
     Column("detail", JSON, nullable=False),
     # When this verdict was first observed, and when it was last observed unchanged.
-    Column("checked_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column("last_checked_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column(
+        "checked_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "last_checked_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
     Column("is_latest", Boolean, nullable=False),
     PrimaryKeyConstraint("id", name="pk_debt_reconciliation_results"),
     # CASCADE, following `integrity_checkpoints`: a result is a report about an equivalent, not an
@@ -160,8 +173,13 @@ debt_reconciliation_results = Table(
         name="fk_debt_reconciliation_results_equivalent",
         ondelete="CASCADE",
     ),
-    CheckConstraint("status IN (" + _STATUS_LIST + ")", name="chk_debt_reconciliation_results_status"),
-    CheckConstraint("length(fingerprint) = 64", name="chk_debt_reconciliation_results_fingerprint"),
+    CheckConstraint(
+        "status IN (" + _STATUS_LIST + ")",
+        name="chk_debt_reconciliation_results_status",
+    ),
+    CheckConstraint(
+        "length(fingerprint) = 64", name="chk_debt_reconciliation_results_fingerprint"
+    ),
     Index(
         "uq_debt_reconciliation_results_latest",
         "equivalent_id",

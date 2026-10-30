@@ -91,17 +91,23 @@ def episode_progress_of(run: RunRecord) -> list[EpisodeProgress] | None:
     out: list[EpisodeProgress] = []
     for index in sorted(records):
         try:
-            out.append(EpisodeProgress.model_validate({**records[index], "index": int(index)}))
+            out.append(
+                EpisodeProgress.model_validate({**records[index], "index": int(index)})
+            )
         except ValueError:  # pydantic.ValidationError is a ValueError
             logging.getLogger(__name__).warning(
-                "simulator.run_status.episode_progress_record_untyped run_id=%s event_index=%s", run.run_id, index, exc_info=True
+                "simulator.run_status.episode_progress_record_untyped run_id=%s event_index=%s",
+                run.run_id,
+                index,
+                exc_info=True,
             )
     return out or None
 
 
 def published_state(run: RunRecord) -> str:
     """The state every `run_status` (SSE and HTTP) gives: `stopping` while a stop drains the heartbeat (054-A review
-    FD2), although `run.state` is `stopped` already so that the active-run limits release the run promptly."""
+    FD2), although `run.state` is `stopped` already so that the active-run limits release the run promptly.
+    """
 
     if run._stop_draining and run.state == "stopped":
         return "stopping"

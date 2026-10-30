@@ -11,16 +11,18 @@ from app.schemas.common import ErrorEnvelope
 
 router = APIRouter()
 
+
 @router.get("", response_model=BalanceSummary)
 async def get_balance(
     current_participant: Participant = Depends(get_current_participant),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get aggregated balance by equivalents.
     """
     service = BalanceService(db)
     return await service.get_summary(current_participant.id)
+
 
 @router.get(
     "/debts",
@@ -29,9 +31,9 @@ async def get_balance(
 )
 async def get_debts(
     equivalent: str = Query(..., description="Equivalent code"),
-    direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
+    direction: Literal["outgoing", "incoming", "all"] = Query("all"),
     current_participant: Participant = Depends(get_current_participant),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get debts details for a specific equivalent.

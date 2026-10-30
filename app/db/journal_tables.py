@@ -106,8 +106,13 @@ PAYMENT_INTENT_ENCODING_VERSION = 2
 CLEARING_INTENT_ENCODING_VERSION = 2
 
 #: Every intent encoding version the database admits (migration 027 widened the CHECK to these).
-STORABLE_INTENT_ENCODING_VERSIONS = (INTENT_ENCODING_VERSION, PAYMENT_INTENT_ENCODING_VERSION)
-assert CLEARING_INTENT_ENCODING_VERSION in STORABLE_INTENT_ENCODING_VERSIONS, "the CHECK must admit it"
+STORABLE_INTENT_ENCODING_VERSIONS = (
+    INTENT_ENCODING_VERSION,
+    PAYMENT_INTENT_ENCODING_VERSION,
+)
+assert (
+    CLEARING_INTENT_ENCODING_VERSION in STORABLE_INTENT_ENCODING_VERSIONS
+), "the CHECK must admit it"
 
 #: The versions a writer of each kind may DECLARE; the first is what it writes when it declares none.
 _WRITABLE_INTENT_ENCODING_VERSIONS = {
@@ -127,8 +132,11 @@ def intent_encoding_version_for(kind: str, declared: int | None = None) -> int:
     if declared is None:
         return writable[0]
     if isinstance(declared, bool) or declared not in writable:
-        raise ValueError(f"kind {kind} does not write intent encoding version {declared!r}; it writes {writable}")
+        raise ValueError(
+            f"kind {kind} does not write intent encoding version {declared!r}; it writes {writable}"
+        )
     return declared
+
 
 _KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS)
 _TX_KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS_WITH_TX)
@@ -166,16 +174,32 @@ debt_operations = Table(
     Column("intent", JSON, nullable=False),
     Column("intent_digest", String(64), nullable=False),
     Column("schema_version", SmallInteger, nullable=False, default=SCHEMA_VERSION),
-    Column("money_encoding_version", SmallInteger, nullable=False, default=MONEY_ENCODING_VERSION),
-    Column("intent_encoding_version", SmallInteger, nullable=False, default=INTENT_ENCODING_VERSION),
-    Column("opened_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column(
+        "money_encoding_version",
+        SmallInteger,
+        nullable=False,
+        default=MONEY_ENCODING_VERSION,
+    ),
+    Column(
+        "intent_encoding_version",
+        SmallInteger,
+        nullable=False,
+        default=INTENT_ENCODING_VERSION,
+    ),
+    Column(
+        "opened_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
     Column("state", String(16), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
     Column("effect_count", Integer, nullable=True),
     Column("effect_digest", String(64), nullable=True),
     CheckConstraint("kind IN (" + _KIND_LIST + ")", name="chk_debt_operations_kind"),
-    CheckConstraint("length(identity) > 0", name="chk_debt_operations_identity_present"),
-    CheckConstraint("length(intent_digest) = 64", name="chk_debt_operations_intent_digest"),
+    CheckConstraint(
+        "length(identity) > 0", name="chk_debt_operations_identity_present"
+    ),
+    CheckConstraint(
+        "length(intent_digest) = 64", name="chk_debt_operations_intent_digest"
+    ),
     # Widened by migration 029 (018 stage B): version 1 is the listener's history, version 2 the
     # trigger's. Both are read; only version 2 is written.
     CheckConstraint(
@@ -184,7 +208,9 @@ debt_operations = Table(
         + ")",
         name="chk_debt_operations_schema_version",
     ),
-    CheckConstraint("money_encoding_version IN (1)", name="chk_debt_operations_money_version"),
+    CheckConstraint(
+        "money_encoding_version IN (1)", name="chk_debt_operations_money_version"
+    ),
     # Widened by migration 027 (step 5b) for the version-2 PAYMENT intent; the other two stay `IN (1)`.
     CheckConstraint(
         "intent_encoding_version IN ("
@@ -272,10 +298,19 @@ debt_journal_entries = Table(
     Column("amount_before", MoneyNumeric(20, 8), nullable=True),
     Column("amount_after", MoneyNumeric(20, 8), nullable=True),
     Column("delta", MoneyNumeric(20, 8), nullable=False),
-    Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column(
+        "recorded_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
     CheckConstraint("ordinal >= 1", name="chk_debt_journal_entries_ordinal"),
-    CheckConstraint("debtor_id <> creditor_id", name="chk_debt_journal_entries_no_self_loop"),
-    CheckConstraint("effect IN ('I', 'U', 'D')", name="chk_debt_journal_entries_effect"),
+    CheckConstraint(
+        "debtor_id <> creditor_id", name="chk_debt_journal_entries_no_self_loop"
+    ),
+    CheckConstraint(
+        "effect IN ('I', 'U', 'D')", name="chk_debt_journal_entries_effect"
+    ),
     # The three effects have three shapes, and the shape is what makes a row readable without the
     # debt it describes: an insert has no before, a delete has no after, and an update that
     # changed nothing is not an effect at all.
@@ -360,12 +395,18 @@ debt_operation_equivalents = Table(
     Column("effect_count", Integer, nullable=False),
     Column("effect_digest", String(64), nullable=False),
     CheckConstraint("effect_count >= 0", name="chk_debt_operation_equivalents_count"),
-    CheckConstraint("length(effect_digest) = 64", name="chk_debt_operation_equivalents_digest"),
+    CheckConstraint(
+        "length(effect_digest) = 64", name="chk_debt_operation_equivalents_digest"
+    ),
     # A row exists because the operation SAID it would touch this equivalent, or because it DID.
     # A row that is neither is a row nobody can explain.
-    CheckConstraint("effect_count > 0 OR in_intent", name="chk_debt_operation_equivalents_why"),
+    CheckConstraint(
+        "effect_count > 0 OR in_intent", name="chk_debt_operation_equivalents_why"
+    ),
     # And an effect outside the declared scope is not something to record: it is something the
     # book must already have refused (`Refusal.OUT_OF_SCOPE`, `app/core/ledger/book.py`; the ORM
     # flush hook that refused it until 018 stage B is gone).
-    CheckConstraint("in_scope OR effect_count = 0", name="chk_debt_operation_equivalents_scope"),
+    CheckConstraint(
+        "in_scope OR effect_count = 0", name="chk_debt_operation_equivalents_scope"
+    ),
 )

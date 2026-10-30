@@ -49,13 +49,18 @@ def _limit_item(row, before: Optional[Decimal] = None) -> dict:
         "violation_amount": str(row.debt_amount - limit),
     }
     if before is not None:
-        item["debt_before"] = format(before, "f")  # a decimal string: `str` spells a zero of scale 8 `0E-8`
+        item["debt_before"] = format(
+            before, "f"
+        )  # a decimal string: `str` spells a zero of scale 8 `0E-8`
     return item
 
 
-def _trust_limit_violation(message: str, violations: List[dict]) -> IntegrityViolationException:
+def _trust_limit_violation(
+    message: str, violations: List[dict]
+) -> IntegrityViolationException:
     return IntegrityViolationException(
-        message, details={"invariant": "TRUST_LIMIT_VIOLATION", "violations": violations}
+        message,
+        details={"invariant": "TRUST_LIMIT_VIOLATION", "violations": violations},
     )
 
 
@@ -83,11 +88,24 @@ class InvariantChecker:
 
         if not before:
             return []
-        named = [and_(Debt.equivalent_id == e, Debt.debtor_id == d, Debt.creditor_id == c) for e, d, c in before]
-        query = select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id, Debt.amount.label("debt_amount"),
-                       TrustLine.limit.label("trust_limit"))
-        rows = (await self.session.execute(
-            query.select_from(Debt).outerjoin(TrustLine, _supporting_line()).where(or_(*named)))).all()
+        named = [
+            and_(Debt.equivalent_id == e, Debt.debtor_id == d, Debt.creditor_id == c)
+            for e, d, c in before
+        ]
+        query = select(
+            Debt.equivalent_id,
+            Debt.debtor_id,
+            Debt.creditor_id,
+            Debt.amount.label("debt_amount"),
+            TrustLine.limit.label("trust_limit"),
+        )
+        rows = (
+            await self.session.execute(
+                query.select_from(Debt)
+                .outerjoin(TrustLine, _supporting_line())
+                .where(or_(*named))
+            )
+        ).all()
         grown, violations = [], []
         for row in rows:
             was = before[(row.equivalent_id, row.debtor_id, row.creditor_id)]
@@ -98,7 +116,8 @@ class InvariantChecker:
                 grown.append({k: v for k, v in item.items() if k != "violation_amount"})
         if violations:
             raise _trust_limit_violation(
-                f"Trust limit exceeded: {len(violations)} debt(s) grew above the limit", violations
+                f"Trust limit exceeded: {len(violations)} debt(s) grew above the limit",
+                violations,
             )
         return grown
 
@@ -155,7 +174,8 @@ class InvariantChecker:
         if violations:
             # The allowed excess of other pairs stays observable beside the structural violation.
             exc = _trust_limit_violation(
-                f"Debt without a supporting live trust line: {len(violations)} debt(s)", violations
+                f"Debt without a supporting live trust line: {len(violations)} debt(s)",
+                violations,
             )
             exc.over_limit_allowed = allowed
             raise exc
@@ -238,7 +258,10 @@ class InvariantChecker:
         if violations:
             raise IntegrityViolationException(
                 f"Mutual debts found for {len(violations)} pair(s)",
-                details={"invariant": "DEBT_SYMMETRY_VIOLATION", "violations": violations},
+                details={
+                    "invariant": "DEBT_SYMMETRY_VIOLATION",
+                    "violations": violations,
+                },
             )
 
         return []
@@ -247,10 +270,22 @@ class InvariantChecker:
         self, participant_id: UUID, equivalent_id: UUID, pairs: Optional[set] = None
     ) -> Decimal:
         """Compute participant net position = credits - debts; over the directed debts `pairs` (`(debtor,
-        creditor)`) only, when given - an operation's own rows, which its line locks hold (027 stage 2)."""
+        creditor)`) only, when given - an operation's own rows, which its line locks hold (027 stage 2).
+        """
 
-        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c)
-                                                         for d, c in pairs))]
+        scope = (
+            []
+            if pairs is None
+            else [
+                or_(
+                    false(),
+                    *(
+                        and_(Debt.debtor_id == d, Debt.creditor_id == c)
+                        for d, c in pairs
+                    ),
+                )
+            ]
+        )
         credits = (
             await self.session.execute(
                 select(func.coalesce(func.sum(Debt.amount), Decimal("0"))).where(
@@ -274,17 +309,32 @@ class InvariantChecker:
         return (credits or Decimal("0")) - (debts or Decimal("0"))
 
     async def net_positions(
-        self, participant_ids: List[UUID], equivalent_id: UUID, pairs: Optional[set] = None
+        self,
+        participant_ids: List[UUID],
+        equivalent_id: UUID,
+        pairs: Optional[set] = None,
     ) -> Dict[UUID, Decimal]:
         """`_calculate_net_position` for a SET of participants in two statements - one sum of what each is owed, one
         of what each owes - instead of two per participant (035 A4, `F-035-3`). The same rows, the same `pairs`
-        scope and the same arithmetic; a participant with no row on a side counts zero there."""
+        scope and the same arithmetic; a participant with no row on a side counts zero there.
+        """
 
         ids = list(dict.fromkeys(participant_ids))
         if not ids:
             return {}
-        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c)
-                                                         for d, c in pairs))]
+        scope = (
+            []
+            if pairs is None
+            else [
+                or_(
+                    false(),
+                    *(
+                        and_(Debt.debtor_id == d, Debt.creditor_id == c)
+                        for d, c in pairs
+                    ),
+                )
+            ]
+        )
 
         async def _sums(side) -> Dict[UUID, Decimal]:
             rows = await self.session.execute(
@@ -296,7 +346,10 @@ class InvariantChecker:
 
         credits = await _sums(Debt.creditor_id)
         debts = await _sums(Debt.debtor_id)
-        return {pid: (credits.get(pid) or Decimal("0")) - (debts.get(pid) or Decimal("0")) for pid in ids}
+        return {
+            pid: (credits.get(pid) or Decimal("0")) - (debts.get(pid) or Decimal("0"))
+            for pid in ids
+        }
 
     async def verify_clearing_neutrality(
         self,
@@ -308,7 +361,9 @@ class InvariantChecker:
         """Verify that clearing didn't change net positions for cycle participants (over `pairs`, as read before)."""
 
         violations: List[dict] = []
-        positions_after = await self.net_positions(cycle_participant_ids, equivalent_id, pairs)
+        positions_after = await self.net_positions(
+            cycle_participant_ids, equivalent_id, pairs
+        )
         for pid in cycle_participant_ids:
             position_after = positions_after[pid]
             position_before = positions_before.get(pid, Decimal("0"))
@@ -326,7 +381,10 @@ class InvariantChecker:
         if violations:
             raise IntegrityViolationException(
                 f"Clearing changed net positions for {len(violations)} participant(s)",
-                details={"invariant": "CLEARING_NEUTRALITY_VIOLATION", "violations": violations},
+                details={
+                    "invariant": "CLEARING_NEUTRALITY_VIOLATION",
+                    "violations": violations,
+                },
             )
 
         return True

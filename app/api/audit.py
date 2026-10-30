@@ -40,7 +40,9 @@ def add_audit_entry(
 
     rid = validate_request_id(request_id_var.get())
     if rid is None:
-        rid = validate_request_id(request.headers.get("X-Request-ID")) or new_request_id()
+        rid = (
+            validate_request_id(request.headers.get("X-Request-ID")) or new_request_id()
+        )
     entry = AuditLog(
         actor_id=None,
         actor_role=actor_role,

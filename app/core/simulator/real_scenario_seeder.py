@@ -19,7 +19,12 @@ from app.core.simulator.scenario_equivalent import (
     scenario_default_equivalent,
 )
 from app.core.trustlines.service import CONCURRENT_TRUSTLINE_CREATE, TrustLineService
-from app.utils.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
+from app.utils.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
 from app.utils.validation import (
     AMOUNT_PRECISION_EXCEEDED,
     MONEY_FINITENESS,
@@ -57,7 +62,8 @@ def scenario_participant_status(raw: object) -> str:
     Read by both paths that create a participant from a scenario - the seeder (`participants`) and the inject
     executor (`add_participant`); until 034 S4 the executor had its own copy without the two aliases, so `frozen`
     and `banned` were stored `active` there. `frozen` -> `suspended` and `banned` -> `deleted` are the scenario's
-    words for the stored statuses; anything else that is not a stored status is `active`."""
+    words for the stored statuses; anything else that is not a stored status is `active`.
+    """
 
     status = str(raw or "active").strip().lower()
     if status == "frozen":
@@ -97,9 +103,17 @@ class ScenarioTrustLineRefused(ConflictException):
     #: live and skips it (`held`, below). An explicit list; every other NAMED reason is a rule the line breaks.
     CLEARS_BY_ITSELF = frozenset({CONCURRENT_TRUSTLINE_CREATE})
 
-    def __init__(self, line: str, reason: str, message: str, *, named: bool = True) -> None:
-        super().__init__(f"{SCENARIO_TRUSTLINE_REFUSED}: trust line {line}: {message}",
-                         details={"code": SCENARIO_TRUSTLINE_REFUSED, "reason": reason, "line": line})
+    def __init__(
+        self, line: str, reason: str, message: str, *, named: bool = True
+    ) -> None:
+        super().__init__(
+            f"{SCENARIO_TRUSTLINE_REFUSED}: trust line {line}: {message}",
+            details={
+                "code": SCENARIO_TRUSTLINE_REFUSED,
+                "reason": reason,
+                "line": line,
+            },
+        )
         self.line = line
         #: True when retrying cannot help: the refusal NAMES its reason and the reason is not one that clears by
         #: itself. `named=False` is a refusal of the service that carries no `details.reason` (`reason` is then only
@@ -114,7 +128,9 @@ class RunIdentityUnbound(RuntimeError):
     adopting a row another run (or an older, unbound run) owns."""
 
     def __init__(self, run_id: str, pid: str) -> None:
-        super().__init__(f"participant {pid!r} of run {run_id!r} is not an identity bound by the run")
+        super().__init__(
+            f"participant {pid!r} of run {run_id!r} is not an identity bound by the run"
+        )
         self.run_id, self.pid = run_id, pid
 
 
@@ -133,7 +149,9 @@ def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
         raise SimulatorPidTakenError(pid)
 
 
-async def refresh_seeded_routing_after_commit(*, session: Any, scenario: dict[str, Any]) -> None:
+async def refresh_seeded_routing_after_commit(
+    *, session: Any, scenario: dict[str, Any]
+) -> None:
     """Make the committed scenario topology available before its first payment.
 
     Both seeding owners call this only AFTER their commit, before marking the run seeded.
@@ -141,7 +159,10 @@ async def refresh_seeded_routing_after_commit(*, session: Any, scenario: dict[st
     waits for that reader and accepts only a read begun after this request (027 T2704).
     This is a seeding boundary, not a change to general topology/cache consistency.
     """
-    equivalents = {effective_equivalent(scenario, line) for line in scenario.get("trustlines") or []}
+    equivalents = {
+        effective_equivalent(scenario, line)
+        for line in scenario.get("trustlines") or []
+    }
     for code in sorted(equivalents - {""}):
         await PaymentRouter(session).build_graph(code, refresh=True)
 
@@ -189,7 +210,11 @@ class RealScenarioSeeder:
         # Perimeter first (F-024-4b): refuse before anything of this scenario is staged, so a
         # refusal leaves no equivalent, participant or trustline behind on any caller's session.
         scenario_pids = sorted(
-            {str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])} - {""}
+            {
+                str(p.get("id") or "").strip()
+                for p in (scenario.get("participants") or [])
+            }
+            - {""}
         )
         _require_bound(run_id, scenario_pids)
         if scenario_pids:
@@ -218,7 +243,7 @@ class RealScenarioSeeder:
         if default_eq:
             eq_set.add(default_eq)
 
-        for tl in (scenario.get("trustlines") or []):
+        for tl in scenario.get("trustlines") or []:
             eq = effective_equivalent(scenario, tl)
             if eq:
                 eq_set.add(str(eq).strip().upper())
@@ -244,10 +269,14 @@ class RealScenarioSeeder:
             for code in eq_codes:
                 if code in have:
                     continue
-                await create_equivalent(session, code=code, is_active=True, metadata_={})  # with its baseline
+                await create_equivalent(
+                    session, code=code, is_active=True, metadata_={}
+                )  # with its baseline
 
         # Participants
-        later_status: dict[str, str] = {}  # new participants whose scenario status is not active: set after the lines
+        later_status: dict[str, str] = (
+            {}
+        )  # new participants whose scenario status is not active: set after the lines
         participants = scenario.get("participants") or []
         pids = [str(p.get("id") or "").strip() for p in participants]
         pids = [p for p in pids if p]
@@ -272,8 +301,15 @@ class RealScenarioSeeder:
                 # Inserted ACTIVE by the participant service (030 S3b, F-030-19); a scenario status other than
                 # active is set AFTER the lines, because the trust-line service refuses a line to a suspended end.
                 await ParticipantService(session).insert_participant(
-                    pid=pid, display_name=name, public_key=simulated_public_key(pid),
-                    type=p_type if p_type in {"person", "business", "hub"} else "person", profile={}, flush=False)
+                    pid=pid,
+                    display_name=name,
+                    public_key=simulated_public_key(pid),
+                    type=(
+                        p_type if p_type in {"person", "business", "hub"} else "person"
+                    ),
+                    profile={},
+                    flush=False,
+                )
                 if status != "active":
                     later_status[pid] = status
 
@@ -299,7 +335,9 @@ class RealScenarioSeeder:
             eq_rows = (
                 (
                     await session.execute(
-                        select(Equivalent).where(Equivalent.code.in_(eq_codes)).order_by(Equivalent.id)
+                        select(Equivalent)
+                        .where(Equivalent.code.in_(eq_codes))
+                        .order_by(Equivalent.id)
                         .execution_options(populate_existing=True)
                     )
                 )
@@ -319,7 +357,9 @@ class RealScenarioSeeder:
             )
             p_by_pid = {p.pid: p for p in p_rows}
 
-            initial: list[tuple[Participant, Participant, str, Decimal, str, dict, str]] = []
+            initial: list[
+                tuple[Participant, Participant, str, Decimal, str, dict, str]
+            ] = []
             for tl in trustlines:
                 eq = str(effective_equivalent(scenario, tl) or "").strip().upper()
                 if not eq or eq not in eq_by_code:
@@ -343,7 +383,9 @@ class RealScenarioSeeder:
                     # comparison below left the seeding with an unnamed `InvalidOperation`. A non-finite limit is
                     # no limit: the line is refused by name, as the doors below refuse a limit finer than the step.
                     raise ScenarioTrustLineRefused(
-                        f"{from_pid}->{to_pid} {eq}", MONEY_FINITENESS, "the limit is not a finite number"
+                        f"{from_pid}->{to_pid} {eq}",
+                        MONEY_FINITENESS,
+                        "the limit is not a finite number",
                     )
                 if limit < 0:
                     continue
@@ -359,9 +401,14 @@ class RealScenarioSeeder:
 
                 line = f"{from_pid}->{to_pid} {eq}"
                 status = str(tl.get("status") or "active").strip().lower()
-                if status == "frozen":  # 028 `F-028-29` (owner В-2): no such line status; freeze the participant
-                    raise ScenarioTrustLineRefused(line, "trust_line_status_frozen",
-                                                   "a trust line is active or closed; a freeze is the participant's")
+                if (
+                    status == "frozen"
+                ):  # 028 `F-028-29` (owner В-2): no such line status; freeze the participant
+                    raise ScenarioTrustLineRefused(
+                        line,
+                        "trust_line_status_frozen",
+                        "a trust line is active or closed; a freeze is the participant's",
+                    )
                 if status not in {"active", "closed"}:
                     status = "active"
 
@@ -371,11 +418,20 @@ class RealScenarioSeeder:
                 try:
                     validate_trustline_policy(policy)
                 except BadRequestException as exc:
-                    raise ScenarioTrustLineRefused(line, "invalid_policy", exc.message) from exc
+                    raise ScenarioTrustLineRefused(
+                        line, "invalid_policy", exc.message
+                    ) from exc
                 try:
-                    require_money_step(limit, precision=eq_by_code[eq].precision, equivalent=eq, field="limit")
+                    require_money_step(
+                        limit,
+                        precision=eq_by_code[eq].precision,
+                        equivalent=eq,
+                        field="limit",
+                    )
                 except BadRequestException as exc:
-                    raise ScenarioTrustLineRefused(line, AMOUNT_PRECISION_EXCEEDED, exc.message) from exc
+                    raise ScenarioTrustLineRefused(
+                        line, AMOUNT_PRECISION_EXCEEDED, exc.message
+                    ) from exc
 
                 initial.append((p_from, p_to, eq, limit, status, policy, line))
 
@@ -391,27 +447,61 @@ class RealScenarioSeeder:
             initial.sort(key=lambda item: (item[0].pid, item[1].pid, item[2]))
             service = TrustLineService(session)
             batch = service.begin_internal_batch()
-            held = {(row.equivalent_id, row.from_participant_id, row.to_participant_id) for row in await batch.lock(
-                {x.id for item in initial for x in item[:2]},
-                {(eq_by_code[item[2]].id, item[0].id, item[1].id) for item in initial})}
+            held = {
+                (row.equivalent_id, row.from_participant_id, row.to_participant_id)
+                for row in await batch.lock(
+                    {x.id for item in initial for x in item[:2]},
+                    {
+                        (eq_by_code[item[2]].id, item[0].id, item[1].id)
+                        for item in initial
+                    },
+                )
+            }
             for p_from, p_to, eq, limit, status, policy, line in initial:
                 if (eq_by_code[eq].id, p_from.id, p_to.id) in held:
                     continue
                 try:
                     created = await service.execute_create(
-                        batch, p_from.id,
-                        TrustLineCreateRequest(to=p_to.pid, equivalent=eq, limit=format(limit, "f"), policy=policy,
-                                               signature=_UNSIGNED),
-                        require_signature=False)
-                    if status == "closed":  # an initial closed line is a CREATE and a CLOSE (no debt: closed at once)
-                        await service.execute_close(batch, created.id, p_from.id,
-                                                    TrustLineCloseRequest(signature=_UNSIGNED), require_signature=False)
-                except (BadRequestException, ConflictException, ForbiddenException, NotFoundException) as exc:
+                        batch,
+                        p_from.id,
+                        TrustLineCreateRequest(
+                            to=p_to.pid,
+                            equivalent=eq,
+                            limit=format(limit, "f"),
+                            policy=policy,
+                            signature=_UNSIGNED,
+                        ),
+                        require_signature=False,
+                    )
+                    if (
+                        status == "closed"
+                    ):  # an initial closed line is a CREATE and a CLOSE (no debt: closed at once)
+                        await service.execute_close(
+                            batch,
+                            created.id,
+                            p_from.id,
+                            TrustLineCloseRequest(signature=_UNSIGNED),
+                            require_signature=False,
+                        )
+                except (
+                    BadRequestException,
+                    ConflictException,
+                    ForbiddenException,
+                    NotFoundException,
+                ) as exc:
                     named = (exc.details or {}).get("reason")
-                    raise ScenarioTrustLineRefused(line, str(named or type(exc).__name__), exc.message,
-                                                   named=bool(named)) from exc
+                    raise ScenarioTrustLineRefused(
+                        line,
+                        str(named or type(exc).__name__),
+                        exc.message,
+                        named=bool(named),
+                    ) from exc
             # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
             await batch.finish()
 
-        for pid, status in sorted(later_status.items()):  # inserted ACTIVE above, in this transaction (032 A-5)
-            await ParticipantService(session).set_status(pid, status, from_statuses=("active",))
+        for pid, status in sorted(
+            later_status.items()
+        ):  # inserted ACTIVE above, in this transaction (032 A-5)
+            await ParticipantService(session).set_status(
+                pid, status, from_statuses=("active",)
+            )

@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.api.audit import add_audit_entry
 from app.core.auth.service import AuthService
-from app.schemas.auth import ChallengeRequest, ChallengeResponse, LoginRequest, RefreshRequest, TokenPair
+from app.schemas.auth import (
+    ChallengeRequest,
+    ChallengeResponse,
+    LoginRequest,
+    RefreshRequest,
+    TokenPair,
+)
 from app.schemas.common import ErrorEnvelope
 from app.utils.exceptions import GeoException
 
@@ -14,11 +20,17 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+
 @router.post(
     "/challenge",
     response_model=ChallengeResponse,
     # 054-E-1: declared here as in api/openapi.yaml.
-    responses={404: {"model": ErrorEnvelope, "description": "No participant has this pid (E009)"}},
+    responses={
+        404: {
+            "model": ErrorEnvelope,
+            "description": "No participant has this pid (E009)",
+        }
+    },
 )
 async def create_challenge(
     request: ChallengeRequest,
@@ -29,6 +41,7 @@ async def create_challenge(
     logger.info("auth.challenge created for pid=%s", request.pid)
     return result
 
+
 @router.post("/login", response_model=TokenPair)
 async def login(
     request: LoginRequest,
@@ -36,20 +49,30 @@ async def login(
     db: AsyncSession = Depends(deps.get_db),
 ):
     service = AuthService(db)
-    client_host = (http_request.client.host if http_request.client else None) or "unknown"
+    client_host = (
+        http_request.client.host if http_request.client else None
+    ) or "unknown"
     try:
         tokens = await service.login(
             pid=request.pid,
             challenge=request.challenge,
             signature=request.signature,
-            device_info=(request.device_info.model_dump(exclude_none=True) if request.device_info else None),
+            device_info=(
+                request.device_info.model_dump(exclude_none=True)
+                if request.device_info
+                else None
+            ),
         )
     except GeoException:
         logger.warning(
             "auth.login failed pid=%s ip=%s device=%s",
             request.pid,
             client_host,
-            request.device_info.model_dump(exclude_none=True) if request.device_info else None,
+            (
+                request.device_info.model_dump(exclude_none=True)
+                if request.device_info
+                else None
+            ),
         )
         raise
     except Exception:
@@ -57,7 +80,11 @@ async def login(
             "auth.login crashed pid=%s ip=%s device=%s",
             request.pid,
             client_host,
-            request.device_info.model_dump(exclude_none=True) if request.device_info else None,
+            (
+                request.device_info.model_dump(exclude_none=True)
+                if request.device_info
+                else None
+            ),
         )
         raise
 
@@ -65,7 +92,11 @@ async def login(
         "auth.login success pid=%s ip=%s device=%s",
         request.pid,
         client_host,
-        request.device_info.model_dump(exclude_none=True) if request.device_info else None,
+        (
+            request.device_info.model_dump(exclude_none=True)
+            if request.device_info
+            else None
+        ),
     )
 
     # Best-effort audit entry to give device_info minimal semantics; the row is built by the one audit writer
@@ -79,9 +110,11 @@ async def login(
             object_type="participant",
             object_id=request.pid,
             after_state={
-                "device_info": request.device_info.model_dump(exclude_none=True)
-                if request.device_info
-                else None
+                "device_info": (
+                    request.device_info.model_dump(exclude_none=True)
+                    if request.device_info
+                    else None
+                )
             },
         )
         await db.commit()
@@ -99,7 +132,9 @@ async def refresh(
     db: AsyncSession = Depends(deps.get_db),
 ):
     service = AuthService(db)
-    client_host = (http_request.client.host if http_request.client else None) or "unknown"
+    client_host = (
+        http_request.client.host if http_request.client else None
+    ) or "unknown"
     try:
         tokens = await service.refresh_tokens(request.refresh_token)
     except GeoException:

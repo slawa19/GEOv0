@@ -59,7 +59,9 @@ async def upsert_run(run: RunRecord) -> None:
                     sim_time_ms=(
                         int(run.sim_time_ms) if run.sim_time_ms is not None else None
                     ),
-                    tick_index=int(run.tick_index) if run.tick_index is not None else None,
+                    tick_index=(
+                        int(run.tick_index) if run.tick_index is not None else None
+                    ),
                     seed=int(run.seed) if run.seed is not None else None,
                     intensity_percent=(
                         int(run.intensity_percent)
@@ -149,7 +151,13 @@ async def sync_artifacts(run: RunRecord) -> None:
 
                 existing: dict[str, tuple[object, object, object, object]] = {
                     str(name): (content_type, size_bytes, sha256, storage_url)
-                    for (name, content_type, size_bytes, sha256, storage_url) in existing_rows
+                    for (
+                        name,
+                        content_type,
+                        size_bytes,
+                        sha256,
+                        storage_url,
+                    ) in existing_rows
                 }
 
                 names_now: set[str] = set()
@@ -223,18 +231,28 @@ def _measured_value(
     return raw if isinstance(raw, Decimal) else Decimal(str(raw))
 
 
-def _storable(value: Optional[Decimal], *, run_id: str, t_ms: int, key: str) -> Optional[Decimal]:
+def _storable(
+    value: Optional[Decimal], *, run_id: str, t_ms: int, key: str
+) -> Optional[Decimal]:
     """F-028-7: a value the metric column cannot hold is stored as NULL ("not measured"), not left to fail the tick.
 
     The bound is read from the column: rounded to its scale as PostgreSQL rounds, the value keeps
-    `precision - scale` integer digits. One unrepresentable point would otherwise roll back all seven keys."""
+    `precision - scale` integer digits. One unrepresentable point would otherwise roll back all seven keys.
+    """
     if value is None:
         return None
     column = SimulatorRunMetric.__table__.c.value.type
     quantum = Decimal(1).scaleb(-column.scale)
-    if value.is_finite() and abs(value.quantize(quantum, ROUND_HALF_UP)) < Decimal(10) ** (column.precision - column.scale):
+    if value.is_finite() and abs(value.quantize(quantum, ROUND_HALF_UP)) < Decimal(
+        10
+    ) ** (column.precision - column.scale):
         return value
-    logger.warning("simulator.storage.metric_unrepresentable run_id=%s t_ms=%s key=%s", run_id, t_ms, key)
+    logger.warning(
+        "simulator.storage.metric_unrepresentable run_id=%s t_ms=%s key=%s",
+        run_id,
+        t_ms,
+        key,
+    )
     return None
 
 
@@ -243,7 +261,9 @@ async def write_tick_metrics(
     run_id: str,
     t_ms: int,
     per_equivalent: dict[str, dict[str, int]],
-    metric_values_by_eq: Optional[dict[str, dict[str, Optional[Decimal | float]]]] = None,
+    metric_values_by_eq: Optional[
+        dict[str, dict[str, Optional[Decimal | float]]]
+    ] = None,
     session=None,
     commit: bool = True,
 ) -> bool:
@@ -360,7 +380,12 @@ async def write_tick_metrics(
             if not rows:
                 return
             for row in rows:
-                row["value"] = _storable(row["value"], run_id=str(run_id), t_ms=int(t_ms), key=str(row["key"]))
+                row["value"] = _storable(
+                    row["value"],
+                    run_id=str(run_id),
+                    t_ms=int(t_ms),
+                    key=str(row["key"]),
+                )
 
             table = SimulatorRunMetric.__table__
             stmt = insert_fn(table)
@@ -377,6 +402,7 @@ async def write_tick_metrics(
             await s.flush()
 
         if session is None:
+
             async def _do_write():
                 async with db.AsyncSessionLocal() as s:
                     # This session is ours: rolling it back on failure is
@@ -391,6 +417,7 @@ async def write_tick_metrics(
                         except Exception:
                             pass
                         raise
+
             await _do_write()
         else:
             # 2026-08-20 / p007_t715: the session belongs to the caller - the
@@ -613,5 +640,7 @@ async def reconcile_stale_runs() -> int:
             logger.info("simulator.reconcile no stale runs found at startup")
         return count
     except Exception:
-        logger.exception("simulator.reconcile_stale_runs failed (best-effort, server will still start)")
+        logger.exception(
+            "simulator.reconcile_stale_runs failed (best-effort, server will still start)"
+        )
         return 0

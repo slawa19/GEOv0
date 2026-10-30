@@ -158,7 +158,9 @@ class MoneyNumeric(TypeDecorator):
             except (InvalidOperation, ValueError):
                 return
         reason = money_storability_violation(
-            value, max_integer_digits=self._max_integer_digits, max_scale=self._max_scale
+            value,
+            max_integer_digits=self._max_integer_digits,
+            max_scale=self._max_scale,
         )
         if reason is None:
             return

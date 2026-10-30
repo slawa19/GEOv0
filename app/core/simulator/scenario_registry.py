@@ -169,7 +169,9 @@ def _validate_scenario_trustline_limits(raw: dict[str, Any]) -> None:
 
     errors = []
     trustlines = raw.get("trustlines")
-    for index, trustline in enumerate(trustlines if isinstance(trustlines, list) else []):
+    for index, trustline in enumerate(
+        trustlines if isinstance(trustlines, list) else []
+    ):
         if not isinstance(trustline, dict) or "limit" not in trustline:
             continue
         value = trustline["limit"]
@@ -178,7 +180,12 @@ def _validate_scenario_trustline_limits(raw: dict[str, Any]) -> None:
         except (InvalidOperation, ValueError):
             finite = False
         if not finite:
-            errors.append({"path": f"trustlines/{index}/limit", "message": "limit must be a finite decimal number"})
+            errors.append(
+                {
+                    "path": f"trustlines/{index}/limit",
+                    "message": "limit must be a finite decimal number",
+                }
+            )
             if len(errors) == 50:
                 break
 
@@ -211,16 +218,14 @@ def scenario_to_record(
     participants = raw.get("participants") or []
     trustlines = raw.get("trustlines") or []
     equivalents_raw = raw.get("equivalents")
-    eq_set: set[str] = set(
-        str(x).strip().upper() for x in (equivalents_raw or [])
-    )
+    eq_set: set[str] = set(str(x).strip().upper() for x in (equivalents_raw or []))
     eq_set.discard("")
 
     default_eq = scenario_default_equivalent(raw)
     if default_eq:
         eq_set.add(default_eq)
 
-    for tl in (trustlines or []):
+    for tl in trustlines or []:
         eq = effective_equivalent(raw, tl)
         if eq:
             eq_set.add(str(eq).strip().upper())
@@ -314,10 +319,14 @@ class ScenarioRegistry:
         base_existed = base.exists()
         try:
             base.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except OSError as exc:
             self._logger.warning(
-                "simulator.uploaded_scenario_write_failed id=%s errno=%s", scenario_id, exc.errno
+                "simulator.uploaded_scenario_write_failed id=%s errno=%s",
+                scenario_id,
+                exc.errno,
             )
             if base_existed:
                 with contextlib.suppress(OSError):
@@ -334,7 +343,9 @@ class ScenarioRegistry:
 
     def load_fixture_scenarios(self) -> None:
         if not self._fixtures_dir.exists():
-            self._logger.warning("simulator.fixtures_missing path=%s", str(self._fixtures_dir))
+            self._logger.warning(
+                "simulator.fixtures_missing path=%s", str(self._fixtures_dir)
+            )
             return
 
         for child in sorted(self._fixtures_dir.iterdir()):
@@ -349,10 +360,14 @@ class ScenarioRegistry:
                 continue
             try:
                 raw = json.loads(scenario_path.read_text(encoding="utf-8"))
-                rec = scenario_to_record(raw, source_path=scenario_path, created_at=None)
+                rec = scenario_to_record(
+                    raw, source_path=scenario_path, created_at=None
+                )
                 self._scenarios[rec.scenario_id] = rec
             except Exception:
-                self._logger.exception("simulator.fixture_scenario_load_failed path=%s", str(scenario_path))
+                self._logger.exception(
+                    "simulator.fixture_scenario_load_failed path=%s", str(scenario_path)
+                )
                 continue
 
     def load_uploaded_scenarios(self) -> None:
@@ -368,15 +383,24 @@ class ScenarioRegistry:
                 continue
             try:
                 raw = json.loads(scenario_path.read_text(encoding="utf-8"))
-                rec = scenario_to_record(raw, source_path=scenario_path, created_at=None)
+                rec = scenario_to_record(
+                    raw, source_path=scenario_path, created_at=None
+                )
             except Exception:
-                self._logger.exception("simulator.uploaded_scenario_load_failed path=%s", str(scenario_path))
+                self._logger.exception(
+                    "simulator.uploaded_scenario_load_failed path=%s",
+                    str(scenario_path),
+                )
                 continue
             # An upload may neither carry an unsafe id nor replace a bundled preset
             # (programme 024, F-024-4a); a file written before that rule is skipped, not loaded.
-            if not is_safe_scenario_id(rec.scenario_id) or rec.scenario_id != child.name:
+            if (
+                not is_safe_scenario_id(rec.scenario_id)
+                or rec.scenario_id != child.name
+            ):
                 self._logger.warning(
-                    "simulator.uploaded_scenario_skipped reason=id_mismatch dir=%s", child.name
+                    "simulator.uploaded_scenario_skipped reason=id_mismatch dir=%s",
+                    child.name,
                 )
                 continue
             if rec.scenario_id in self._scenarios:

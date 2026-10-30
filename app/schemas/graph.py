@@ -79,4 +79,4 @@ class AdminGraphEgoResponse(AdminGraphSnapshotResponse):
     # Optionally include who the ego root is (not required by UI today)
     root_pid: Optional[str] = None
 
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra="ignore")

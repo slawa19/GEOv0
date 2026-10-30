@@ -16,6 +16,7 @@ from app.schemas.participant import (
 
 router = APIRouter()
 
+
 @router.get("", response_model=ParticipantsList)
 async def list_participants(
     q: Optional[str] = None,
@@ -28,8 +29,14 @@ async def list_participants(
 ):
     service = ParticipantService(db)
     effective_limit = per_page or limit
-    offset = ((page or 1) - 1) * effective_limit if page is not None or per_page is not None else 0
-    items = await service.list_participants(query=q, type_filter=type, limit=effective_limit, offset=offset)
+    offset = (
+        ((page or 1) - 1) * effective_limit
+        if page is not None or per_page is not None
+        else 0
+    )
+    items = await service.list_participants(
+        query=q, type_filter=type, limit=effective_limit, offset=offset
+    )
     return ParticipantsList(items=items)
 
 
@@ -45,16 +52,28 @@ async def search_participants(
 ):
     service = ParticipantService(db)
     effective_limit = per_page or limit
-    offset = ((page or 1) - 1) * effective_limit if page is not None or per_page is not None else 0
-    items = await service.list_participants(query=q, type_filter=type, limit=effective_limit, offset=offset)
+    offset = (
+        ((page or 1) - 1) * effective_limit
+        if page is not None or per_page is not None
+        else 0
+    )
+    items = await service.list_participants(
+        query=q, type_filter=type, limit=effective_limit, offset=offset
+    )
     return ParticipantsList(items=items)
+
 
 @router.post(
     "",
     response_model=Participant,
     status_code=status.HTTP_201_CREATED,
     # 054-E-2: declared here as in api/openapi.yaml.
-    responses={409: {"model": ErrorEnvelope, "description": "A participant with this pid or public key already exists (E008)"}},
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "A participant with this pid or public key already exists (E008)",
+        }
+    },
 )
 async def register_participant(
     request: ParticipantCreateRequest,
@@ -83,6 +102,7 @@ async def update_current_participant(
 ):
     service = ParticipantService(db)
     return await service.update_participant(current_participant.id, data)
+
 
 @router.get("/{pid:path}", response_model=Participant)
 async def get_participant(

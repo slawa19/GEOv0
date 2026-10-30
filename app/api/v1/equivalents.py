@@ -17,11 +17,15 @@ async def list_equivalents(
     _current_participant=Depends(deps.get_current_participant),
 ) -> EquivalentsList:
     items = (
-        await db.execute(
-            select(EquivalentModel)
-            .where(EquivalentModel.is_active.is_(True))
-            .order_by(EquivalentModel.code.asc())
+        (
+            await db.execute(
+                select(EquivalentModel)
+                .where(EquivalentModel.is_active.is_(True))
+                .order_by(EquivalentModel.code.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])

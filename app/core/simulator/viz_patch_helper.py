@@ -37,7 +37,7 @@ class VizPatchHelper:
     _debt_mags_sorted: list[int] = field(default_factory=list)
     _limit_q33: float | None = None
     _limit_q66: float | None = None
-    _last_refresh_tick: int = -10**9
+    _last_refresh_tick: int = -(10**9)
 
     @classmethod
     async def create(
@@ -48,10 +48,14 @@ class VizPatchHelper:
         refresh_every_ticks: int = 10,
     ) -> "VizPatchHelper":
         eq_code = str(equivalent_code or "").strip().upper()
-        eq = (await session.execute(select(Equivalent).where(Equivalent.code == eq_code))).scalar_one_or_none()
+        eq = (
+            await session.execute(select(Equivalent).where(Equivalent.code == eq_code))
+        ).scalar_one_or_none()
         if eq is None:
             raise ValueError(f"Equivalent {eq_code} not found")
-        precision = int(2 if getattr(eq, "precision", None) is None else eq.precision)  # 024 T2416.1
+        precision = int(
+            2 if getattr(eq, "precision", None) is None else eq.precision
+        )  # 024 T2416.1
         r = int(refresh_every_ticks or 0)
         if r <= 0:
             r = 10
@@ -62,7 +66,9 @@ class VizPatchHelper:
             refresh_every_ticks=r,
         )
 
-    async def maybe_refresh_quantiles(self, session, *, tick_index: int, participant_ids: list[uuid.UUID]) -> None:
+    async def maybe_refresh_quantiles(
+        self, session, *, tick_index: int, participant_ids: list[uuid.UUID]
+    ) -> None:
         if not participant_ids:
             return
         if tick_index - self._last_refresh_tick < self.refresh_every_ticks:
@@ -92,7 +98,9 @@ class VizPatchHelper:
             amt = r.amount or Decimal("0")
             if amt <= 0:
                 continue
-            credit_sum[r.creditor_id] = credit_sum.get(r.creditor_id, Decimal("0")) + amt
+            credit_sum[r.creditor_id] = (
+                credit_sum.get(r.creditor_id, Decimal("0")) + amt
+            )
             debit_sum[r.debtor_id] = debit_sum.get(r.debtor_id, Decimal("0")) + amt
 
         mags: list[int] = []
@@ -122,7 +130,9 @@ class VizPatchHelper:
                 .execution_options(populate_existing=True)
             )
         ).all()
-        limits = sorted([float((r[0] or Decimal("0"))) for r in limit_rows if r[0] is not None])
+        limits = sorted(
+            [float((r[0] or Decimal("0"))) for r in limit_rows if r[0] is not None]
+        )
 
         def _quantile(values_sorted: list[float], p: float) -> float | None:
             if not values_sorted:
@@ -148,7 +158,9 @@ class VizPatchHelper:
         i = max(0, min(i, n - 1))
         return i / (n - 1)
 
-    def _scale_from_pct(self, pct: float, *, max_scale: float = 1.90, gamma: float = 0.75) -> float:
+    def _scale_from_pct(
+        self, pct: float, *, max_scale: float = 1.90, gamma: float = 0.75
+    ) -> float:
         if pct <= 0:
             return 1.0
         if pct >= 1:
@@ -166,7 +178,9 @@ class VizPatchHelper:
         b = int(round(pct * (DEBT_BINS - 1)))
         return max(0, min(b, DEBT_BINS - 1))
 
-    def _node_color_key(self, *, atoms: int, status: str | None, type_: str | None) -> str:
+    def _node_color_key(
+        self, *, atoms: int, status: str | None, type_: str | None
+    ) -> str:
         status_key = str(status or "").strip().lower()
         type_key = str(type_ or "").strip().lower()
 
@@ -183,7 +197,11 @@ class VizPatchHelper:
 
     def _node_size(self, *, atoms: int, type_: str | None) -> dict[str, int]:
         type_key = str(type_ or "").strip().lower()
-        pct = self._percentile_rank_int(self._mags_sorted, abs(atoms)) if self._mags_sorted else 0.0
+        pct = (
+            self._percentile_rank_int(self._mags_sorted, abs(atoms))
+            if self._mags_sorted
+            else 0.0
+        )
         s = self._scale_from_pct(pct)
         if type_key == "business":
             w0, h0 = 26, 22
@@ -191,7 +209,9 @@ class VizPatchHelper:
             w0, h0 = 16, 16
         return {"w": int(round(w0 * s)), "h": int(round(h0 * s))}
 
-    def edge_viz(self, *, status: str | None, used: Decimal, limit: Decimal) -> dict[str, str]:
+    def edge_viz(
+        self, *, status: str | None, used: Decimal, limit: Decimal
+    ) -> dict[str, str]:
         status_key = str(status or "").strip().lower() or None
 
         # Mirror SnapshotBuilder._link_alpha_key
@@ -242,7 +262,9 @@ class VizPatchHelper:
         if not pid_list:
             return []
 
-        part_ids = [pid_to_participant[pid].id for pid in pid_list if pid in pid_to_participant]
+        part_ids = [
+            pid_to_participant[pid].id for pid in pid_list if pid in pid_to_participant
+        ]
         if not part_ids:
             return []
 
@@ -264,9 +286,13 @@ class VizPatchHelper:
         for r in debt_rows:
             amount = r.amount or Decimal("0")
             if r.creditor_id in wanted:
-                credit_sum[r.creditor_id] = credit_sum.get(r.creditor_id, Decimal("0")) + amount
+                credit_sum[r.creditor_id] = (
+                    credit_sum.get(r.creditor_id, Decimal("0")) + amount
+                )
             if r.debtor_id in wanted:
-                debit_sum[r.debtor_id] = debit_sum.get(r.debtor_id, Decimal("0")) + amount
+                debit_sum[r.debtor_id] = (
+                    debit_sum.get(r.debtor_id, Decimal("0")) + amount
+                )
 
         precision = int(self.precision)
 
@@ -275,6 +301,7 @@ class VizPatchHelper:
             # and the snapshot report the same `net_balance`, so they must agree byte for
             # byte; `to_money_str` is the single form.
             return to_money_str(v, precision)
+
         out: list[dict[str, Any]] = []
         for pid in pid_list:
             p = pid_to_participant.get(pid)
@@ -302,9 +329,15 @@ class VizPatchHelper:
                     "net_balance_atoms": str(abs(atoms)),
                     "net_sign": net_sign,
                     "net_balance": _to_money_str(net),
-                    "viz_color_key": self._node_color_key(atoms=atoms, status=getattr(p, "status", None), type_=getattr(p, "type", None)),
+                    "viz_color_key": self._node_color_key(
+                        atoms=atoms,
+                        status=getattr(p, "status", None),
+                        type_=getattr(p, "type", None),
+                    ),
                     "viz_shape_key": viz_shape_key,
-                    "viz_size": self._node_size(atoms=atoms, type_=getattr(p, "type", None)),
+                    "viz_size": self._node_size(
+                        atoms=atoms, type_=getattr(p, "type", None)
+                    ),
                 }
             )
 

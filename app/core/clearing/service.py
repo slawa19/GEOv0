@@ -94,10 +94,20 @@ class ClearingOccurrence:
     amount_atoms: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.plan_id, uuid.UUID) or not isinstance(self.equivalent_id, uuid.UUID):
-            raise ValueError("a clearing occurrence needs a plan UUID and an equivalent UUID")
-        if isinstance(self.ordinal, bool) or not isinstance(self.ordinal, int) or self.ordinal < 0:
-            raise ValueError(f"a cycle ordinal is a non-negative int, got {self.ordinal!r}")
+        if not isinstance(self.plan_id, uuid.UUID) or not isinstance(
+            self.equivalent_id, uuid.UUID
+        ):
+            raise ValueError(
+                "a clearing occurrence needs a plan UUID and an equivalent UUID"
+            )
+        if (
+            isinstance(self.ordinal, bool)
+            or not isinstance(self.ordinal, int)
+            or self.ordinal < 0
+        ):
+            raise ValueError(
+                f"a cycle ordinal is a non-negative int, got {self.ordinal!r}"
+            )
         if (
             not isinstance(self.debt_ids, tuple)
             or len(self.debt_ids) < 3
@@ -105,14 +115,21 @@ class ClearingOccurrence:
             or len(set(self.debt_ids)) != len(self.debt_ids)
         ):
             raise ValueError("a cycle is a tuple of three or more unique debt UUIDs")
-        if isinstance(self.amount_atoms, bool) or not isinstance(self.amount_atoms, int) or self.amount_atoms <= 0:
-            raise ValueError(f"the declared amount is a positive int of atoms, got {self.amount_atoms!r}")
+        if (
+            isinstance(self.amount_atoms, bool)
+            or not isinstance(self.amount_atoms, int)
+            or self.amount_atoms <= 0
+        ):
+            raise ValueError(
+                f"the declared amount is a positive int of atoms, got {self.amount_atoms!r}"
+            )
 
     @property
     def occurrence_id(self) -> str:
         return str(
             uuid.uuid5(
-                _CLEARING_OCCURRENCE_V2_NAMESPACE, f"{self.plan_id}:{self.equivalent_id}:{self.ordinal}"
+                _CLEARING_OCCURRENCE_V2_NAMESPACE,
+                f"{self.plan_id}:{self.equivalent_id}:{self.ordinal}",
             )
         )
 
@@ -231,7 +248,9 @@ class ClearingService:
             logger.exception("event=clearing.skip_rollback_failed")
             raise GeoException() from exc
 
-    async def _refuse_if_equivalent_inactive(self, equivalent_ids: Set[uuid.UUID]) -> None:
+    async def _refuse_if_equivalent_inactive(
+        self, equivalent_ids: Set[uuid.UUID]
+    ) -> None:
         """T1544: clearing does not run in an equivalent the operator has deactivated (and, T1546, not
         in one under an integrity hold).
 
@@ -246,10 +265,14 @@ class ClearingService:
         -> this row -> the debt rows, the same as the payment's.
         """
         try:
-            await MoneyBoundary(self.session).refuse_inactive_equivalents(equivalent_ids)
+            await MoneyBoundary(self.session).refuse_inactive_equivalents(
+                equivalent_ids
+            )
         except ConflictException as refusal:
             # Step 5c: the same helper also refuses an integrity hold; the reason names which.
-            logger.info("event=clearing.refused_%s", (refusal.details or {}).get("reason"))
+            logger.info(
+                "event=clearing.refused_%s", (refusal.details or {}).get("reason")
+            )
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
@@ -289,7 +312,9 @@ class ClearingService:
                 return replay_amount
             raise _ClearingAttemptConflict(exc) from exc
         await self._raise_unexpected_execution(exc)
-        raise AssertionError("unreachable")  # pragma: no cover - the call above always raises
+        raise AssertionError(
+            "unreachable"
+        )  # pragma: no cover - the call above always raises
 
     @staticmethod
     async def _drain_task(
@@ -344,9 +369,7 @@ class ClearingService:
             edges = (transaction.payload or {}).get("edges")
             if not isinstance(edges, list) or not edges:
                 # A payload that cannot be checked is not a payload that passes.
-                logger.error(
-                    "event=clearing.replay_scope_unverifiable tx_id=%s", tx_id
-                )
+                logger.error("event=clearing.replay_scope_unverifiable tx_id=%s", tx_id)
                 raise GeoException()
             touched = {
                 str(edge.get(role) or "")
@@ -355,9 +378,7 @@ class ClearingService:
                 for role in ("debtor", "creditor")
             }
             if not touched or not touched <= set(allowed_participant_pids):
-                logger.error(
-                    "event=clearing.replay_escaped_scope tx_id=%s", tx_id
-                )
+                logger.error("event=clearing.replay_escaped_scope tx_id=%s", tx_id)
                 raise GeoException()
         try:
             amount = Decimal(str((transaction.payload or {})["amount"]))
@@ -372,7 +393,9 @@ class ClearingService:
         if (transaction.payload or {}).get("occurrence") != occurrence.descriptor():
             raise ClearingOccurrenceRefused("occurrence_descriptor_mismatch")
         if amount != occurrence.amount:
-            logger.error("event=clearing.replay_amount_differs_from_descriptor tx_id=%s", tx_id)
+            logger.error(
+                "event=clearing.replay_amount_differs_from_descriptor tx_id=%s", tx_id
+            )
             raise ClearingOccurrenceRefused("occurrence_amount_mismatch")
         return amount
 
@@ -499,7 +522,9 @@ class ClearingService:
                         Participant.pid.in_(sorted(allowed_participant_pids))
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     async def _cycle_respects_auto_clearing(self, debts: List[Debt]) -> bool:
@@ -518,11 +543,22 @@ class ClearingService:
 
         from_ids = {p[0] for p in required_pairs}
         to_ids = {p[1] for p in required_pairs}
-        if self._locked_lines is not None:  # inside an attempt: ONLY the locked rows (027 stage 2, §15 P1)
-            tl_by_pair = {(r.from_participant_id, r.to_participant_id): r for r in self._locked_lines
-                          if r.equivalent_id == equivalent_id and r.status in _CLEARABLE_TRUSTLINE_STATUSES}
-            return all(pair in tl_by_pair and self._policy_flag(tl_by_pair[pair].policy, "auto_clearing", default=True)
-                       for pair in required_pairs)
+        if (
+            self._locked_lines is not None
+        ):  # inside an attempt: ONLY the locked rows (027 stage 2, §15 P1)
+            tl_by_pair = {
+                (r.from_participant_id, r.to_participant_id): r
+                for r in self._locked_lines
+                if r.equivalent_id == equivalent_id
+                and r.status in _CLEARABLE_TRUSTLINE_STATUSES
+            }
+            return all(
+                pair in tl_by_pair
+                and self._policy_flag(
+                    tl_by_pair[pair].policy, "auto_clearing", default=True
+                )
+                for pair in required_pairs
+            )
 
         trustlines = (
             (
@@ -583,7 +619,9 @@ class ClearingService:
 
         return bool(value)
 
-    async def _run_attempts(self, cycle: List[Dict], **attempt_kwargs) -> Decimal | None:
+    async def _run_attempts(
+        self, cycle: List[Dict], **attempt_kwargs
+    ) -> Decimal | None:
         """THE RETRY OWNER of one clearing execution (019 stage 5, `T1907`, `FORK-4`).
 
         Runs `_execute_clearing_with_amount` and, when an attempt meets a transaction-level conflict
@@ -625,10 +663,14 @@ class ClearingService:
             delay *= 1.0 + 0.25 * random.random()
             if attempt_no >= attempts or loop.time() + delay >= deadline:
                 logger.warning(
-                    "event=clearing.retry_exhausted attempts=%s pgcode=%s", attempt_no, codes
+                    "event=clearing.retry_exhausted attempts=%s pgcode=%s",
+                    attempt_no,
+                    codes,
                 )
                 try:
-                    CLEARING_EVENTS_TOTAL.labels(event="execute", result="conflict").inc()
+                    CLEARING_EVENTS_TOTAL.labels(
+                        event="execute", result="conflict"
+                    ).inc()
                 except Exception:
                     pass
                 raise RetryableClearingConflictException() from cause
@@ -668,7 +710,9 @@ class ClearingService:
         if not isinstance(occurrence, ClearingOccurrence):
             raise TypeError("execute_occurrence takes a ClearingOccurrence")
         if self._occurrence is not None:
-            raise RuntimeError("a clearing occurrence is already executing on this service")
+            raise RuntimeError(
+                "a clearing occurrence is already executing on this service"
+            )
         self._occurrence = occurrence
         try:
             return await self.execute_clearing_with_amount(
@@ -706,12 +750,16 @@ class ClearingService:
         """
         occurrence = self._occurrence
         if occurrence is None:
-            await self._raise_unexpected_execution(ClearingOccurrenceRefused("occurrence_missing"))
+            await self._raise_unexpected_execution(
+                ClearingOccurrenceRefused("occurrence_missing")
+            )
         allowed_ids = await self._resolve_scope_ids(allowed_participant_pids)
         if allowed_participant_pids is not None and not allowed_ids:
             # An empty perimeter admits nobody; there is nothing this cycle can legally be.
             await self._raise_unexpected_execution(
-                RuntimeError("Clearing cycle escaped participant scope: empty perimeter")
+                RuntimeError(
+                    "Clearing cycle escaped participant scope: empty perimeter"
+                )
             )
         return await self._run_attempts(
             cycle,
@@ -781,26 +829,40 @@ class ClearingService:
         try:
             edges = (
                 await self.session.execute(
-                    select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id).where(Debt.id.in_(debt_ids))
+                    select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id).where(
+                        Debt.id.in_(debt_ids)
+                    )
                 )
             ).all()
             # 028 `F-028-28` (owner В-1): the cycle's participants `FOR SHARE` before its lines (the one order), the
             # status read by that statement; an occurrence through a suspended participant is skipped, by reason.
             statuses = await MoneyBoundary(self.session).lock_participants(
-                {p for row in edges for p in (row.debtor_id, row.creditor_id)}, timeout_ms=MoneyBoundary.lock_budget_ms())
-            if suspended := sorted(pid for status, pid in statuses.values() if status != "active"):
-                logger.info("event=clearing.skip_participant_suspended cycle_len=%s participants=%s",
-                            len(cycle), suspended)
+                {p for row in edges for p in (row.debtor_id, row.creditor_id)},
+                timeout_ms=MoneyBoundary.lock_budget_ms(),
+            )
+            if suspended := sorted(
+                pid for status, pid in statuses.values() if status != "active"
+            ):
+                logger.info(
+                    "event=clearing.skip_participant_suspended cycle_len=%s participants=%s",
+                    len(cycle),
+                    suspended,
+                )
                 try:
-                    CLEARING_EVENTS_TOTAL.labels(event="execute", result="skip_participant_suspended").inc()
+                    CLEARING_EVENTS_TOTAL.labels(
+                        event="execute", result="skip_participant_suspended"
+                    ).inc()
                 except Exception:
                     pass
                 await self._rollback_skipped_execution()
                 return None
             self._locked_lines = await MoneyBoundary(self.session).lock_pair_lines(
-                edges, timeout_ms=MoneyBoundary.lock_budget_ms())
+                edges, timeout_ms=MoneyBoundary.lock_budget_ms()
+            )
         except Exception as exc:
-            if "55P03" in self._postgres_error_codes(exc):  # the bounded wait (019's interlock budget, restored)
+            if "55P03" in self._postgres_error_codes(
+                exc
+            ):  # the bounded wait (019's interlock budget, restored)
                 await self._rollback_skipped_execution()
                 raise TimeoutException("Clearing lock timed out") from exc
             return await self._end_attempt_on_error(
@@ -810,26 +872,35 @@ class ClearingService:
         # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
         # committed-execution shortcut above (an already-durable clearing stays reported), before
         # the Debt rows are locked and before any new execution work.
-        await self._refuse_if_equivalent_inactive({row.equivalent_id for row in edges} or {occurrence.equivalent_id})
+        await self._refuse_if_equivalent_inactive(
+            {row.equivalent_id for row in edges} or {occurrence.equivalent_id}
+        )
 
         # 030 `F-030-1` (owner В-4 of 028, В2 of 030): `c` is a multiple of the equivalent's step, the step read
         # under the row lock just taken - the one the stop and the hold were read under, held to commit, so a PATCH
         # of the precision either waits for this clearing or committed before it. Refused, never rounded: debts
         # finer than the step mean a database to reseed (runbook of S1), and this refusal is what notices it.
         try:
-            step_of = await MoneyBoundary(self.session).share_equivalent_step(occurrence.equivalent_id)
+            step_of = await MoneyBoundary(self.session).share_equivalent_step(
+                occurrence.equivalent_id
+            )
         except Exception as exc:
             return await self._end_attempt_on_error(
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
         if step_of is None or occurrence.amount % money_step(step_of[1]) != 0:
-            await self._raise_unexpected_execution(ClearingOccurrenceRefused(OCCURRENCE_AMOUNT_NOT_IN_STEP))
+            await self._raise_unexpected_execution(
+                ClearingOccurrenceRefused(OCCURRENCE_AMOUNT_NOT_IN_STEP)
+            )
 
         try:
             debts = (
                 (
                     await self.session.execute(
-                        select(Debt).where(Debt.id.in_(debt_ids)).order_by(Debt.id).with_for_update()
+                        select(Debt)
+                        .where(Debt.id.in_(debt_ids))
+                        .order_by(Debt.id)
+                        .with_for_update()
                     )
                 )
                 .scalars()
@@ -850,7 +921,9 @@ class ClearingService:
                 )
             except Exception as exc:
                 return await self._end_attempt_on_error(
-                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+                    exc,
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
             if replay_amount is not None:
                 await self._rollback_skipped_execution()
@@ -893,7 +966,8 @@ class ClearingService:
             )
         debtors = [debt.debtor_id for debt in ordered]
         if len(set(debtors)) != len(debtors) or any(
-            ordered[k].creditor_id != ordered[(k + 1) % len(ordered)].debtor_id for k in range(len(ordered))
+            ordered[k].creditor_id != ordered[(k + 1) % len(ordered)].debtor_id
+            for k in range(len(ordered))
         ):
             await self._raise_unexpected_execution(
                 ClearingOccurrenceRefused("occurrence_is_not_one_simple_directed_cycle")
@@ -944,7 +1018,11 @@ class ClearingService:
             participant_ids.add(d.creditor_id)
         # 027 stage 2: neutrality over the cycle's own pairs - its locked rows - never every debt of a
         # participant, which a neighbour's commit on another pair changes under READ COMMITTED.
-        cycle_pairs = {p for d in debts for p in ((d.debtor_id, d.creditor_id), (d.creditor_id, d.debtor_id))}
+        cycle_pairs = {
+            p
+            for d in debts
+            for p in ((d.debtor_id, d.creditor_id), (d.creditor_id, d.debtor_id))
+        }
 
         # FIX-025: enrich CLEARING transaction payload for traceability.
         try:
@@ -1112,10 +1190,14 @@ class ClearingService:
             ) as posting:
                 for debt in debts:
                     if debt.amount < clear_amount:
-                        raise GeoException(f"Debt {debt.id} amount changed during clearing")
+                        raise GeoException(
+                            f"Debt {debt.id} amount changed during clearing"
+                        )
 
                     # Decrease, and delete at zero: the book's CLEARING semantics (018 stage A).
-                    await posting.apply(ClearingReduction(debt=debt, amount=clear_amount))
+                    await posting.apply(
+                        ClearingReduction(debt=debt, amount=clear_amount)
+                    )
 
                 await self.session.flush()
 
@@ -1129,7 +1211,9 @@ class ClearingService:
                             operation_type="CLEARING",
                             tx_id=tx_id_str,
                             equivalent_code=str(
-                                equivalent.code if equivalent else debts[0].equivalent_id
+                                equivalent.code
+                                if equivalent
+                                else debts[0].equivalent_id
                             ),
                             state_checksum_before="",
                             state_checksum_after="",
@@ -1164,9 +1248,8 @@ class ClearingService:
                 self.session.add(new_tx)
             commit_cancellation, commit_error = await self._commit_to_terminal()
             if commit_error is not None:
-                if (
-                    commit_cancellation is None
-                    and isinstance(commit_error, asyncio.CancelledError)
+                if commit_cancellation is None and isinstance(
+                    commit_error, asyncio.CancelledError
                 ):
                     commit_cancellation = commit_error
                 reconciliation_task = asyncio.create_task(

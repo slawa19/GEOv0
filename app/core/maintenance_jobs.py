@@ -35,7 +35,9 @@ def _emit_integrity_metric(result: str) -> None:
         )
 
 
-async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tuple[bool, str | None]:
+async def _run_debt_reconciliation_once(
+    session_factory, *, reason: str
+) -> tuple[bool, str | None]:
     """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
     around the application, and of a recorded change that disagrees with its recorded intent.
 
@@ -60,7 +62,9 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tupl
 
     try:
         counts = await run_scheduled_reconciliation(session_factory)
-    except Exception:  # noqa: BLE001 - an error is recorded as an error; no result is substituted
+    except (
+        Exception
+    ):  # noqa: BLE001 - an error is recorded as an error; no result is substituted
         logger.exception("integrity.debt_reconciliation_failed reason=%s", reason)
         _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
         return False, None
@@ -114,9 +118,19 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool 
         async with asyncio.timeout(deadline):
             return await _attempt_integrity_checkpoints(app, reason=reason)
     except TimeoutError as error:
-        logger.error("integrity.attempt_timed_out reason=%s deadline_seconds=%s", reason, deadline)
+        logger.error(
+            "integrity.attempt_timed_out reason=%s deadline_seconds=%s",
+            reason,
+            deadline,
+        )
         _emit_integrity_metric(f"{reason}_timed_out")
-        _record_background_job_event(app, name="integrity", status="failed", event=f"{reason}_timed_out", error=error)
+        _record_background_job_event(
+            app,
+            name="integrity",
+            status="failed",
+            event=f"{reason}_timed_out",
+            error=error,
+        )
         return False
 
 
@@ -141,14 +155,20 @@ async def _attempt_integrity_checkpoints(app: FastAPI, *, reason: str) -> bool |
         ):
             try:  # 030 F-030-7: an error of the checkpoints does not cancel the reconciliation; both are recorded
                 async with AsyncSessionLocal() as session:
-                    await bound_the_waits(session)  # 047: a blocked checkpoint fails here, not at the deadline
+                    await bound_the_waits(
+                        session
+                    )  # 047: a blocked checkpoint fails here, not at the deadline
                     await compute_and_store_integrity_checkpoints(session)
-            except Exception as error:  # noqa: BLE001 - recorded below as the job's error, never as a success
+            except (
+                Exception
+            ) as error:  # noqa: BLE001 - recorded below as the job's error, never as a success
                 checkpoint_error = error
                 logger.exception("integrity.checkpoints_failed reason=%s", reason)
                 _emit_integrity_metric(f"{reason}_error")
             # After the checkpoints (committed or failed), and under the same distributed lock.
-            reconciled, errored = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
+            reconciled, errored = await _run_debt_reconciliation_once(
+                AsyncSessionLocal, reason=reason
+            )
     except ConflictException:
         _emit_integrity_metric(f"{reason}_skipped_locked")
         # A skipped run proves nothing: a recorded failure (checkpoints or reconciliation) is kept, with its
@@ -162,7 +182,9 @@ async def _attempt_integrity_checkpoints(app: FastAPI, *, reason: str) -> bool |
             event=f"{reason}_skipped_locked",
         )
         return None
-    except TimeoutError:  # 047: a Redis call past its bound - recorded as timed out by the caller, never a success
+    except (
+        TimeoutError
+    ):  # 047: a Redis call past its bound - recorded as timed out by the caller, never a success
         raise
     except Exception as error:
         logger.exception("integrity.checkpoints_failed reason=%s", reason)
@@ -178,11 +200,21 @@ async def _attempt_integrity_checkpoints(app: FastAPI, *, reason: str) -> bool |
 
     if checkpoint_error is not None or not reconciled:
         failed = "checkpoints" if reconciled else "debt_reconciliation"
-        failed = f"checkpoints_and_{failed}" if checkpoint_error and not reconciled else failed
-        _record_background_job_event(
-            app, name="integrity", status="failed", event=f"{reason}_{failed}_error", error=checkpoint_error
+        failed = (
+            f"checkpoints_and_{failed}"
+            if checkpoint_error and not reconciled
+            else failed
         )
-        if errored:  # 030 T3091: the equivalents whose verdict is unknown; absent - the whole run's
+        _record_background_job_event(
+            app,
+            name="integrity",
+            status="failed",
+            event=f"{reason}_{failed}_error",
+            error=checkpoint_error,
+        )
+        if (
+            errored
+        ):  # 030 T3091: the equivalents whose verdict is unknown; absent - the whole run's
             _background_job_states(app)["integrity"]["errored_equivalents"] = errored
         return False
 
@@ -228,9 +260,7 @@ async def _integrity_loop(app: FastAPI) -> None:
     COST OF THE RULE: a lasting verifier error makes the loop run the whole reconciliation every TTL (300 s by
     default), the cadence and memory peak before 047, until the error is gone."""
 
-    interval = int(
-        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
-    )
+    interval = int(settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300)
     ttl = _integrity_lock_ttl_seconds()
     fast_phase = ttl + RETRY_FAST_MARGIN_SECONDS
     stop = app.state._bg_stop_event
@@ -244,9 +274,16 @@ async def _integrity_loop(app: FastAPI) -> None:
             if waited_since_completed >= fast_phase:
                 state = _background_job_states(app).get("integrity", {})
                 if state.get("status") != "failed":
-                    logger.error("integrity.%s_pending_not_checked waited_seconds=%d", reason, waited_since_completed)
+                    logger.error(
+                        "integrity.%s_pending_not_checked waited_seconds=%d",
+                        reason,
+                        waited_since_completed,
+                    )
                     _record_background_job_event(
-                        app, name="integrity", status="failed", event=f"{reason}_pending_not_checked"
+                        app,
+                        name="integrity",
+                        status="failed",
+                        event=f"{reason}_pending_not_checked",
                     )
             delay = RETRY_FAST_SECONDS if waited_since_completed < fast_phase else ttl
             waited_since_completed += delay
@@ -257,31 +294,50 @@ async def _integrity_loop(app: FastAPI) -> None:
 async def _run_periodic_clearing_once(app: FastAPI) -> None:
     """Programme 023 (decisions 7, 9): one periodic clearing pass. A refusal or an error is recorded, never silent."""
 
-    from app.core.clearing.runner import ClearingPeriodicRefused, run_periodic_clearing_pass
+    from app.core.clearing.runner import (
+        ClearingPeriodicRefused,
+        run_periodic_clearing_pass,
+    )
     from app.db.session import AsyncSessionLocal
 
     try:
-        results = await run_periodic_clearing_pass(AsyncSessionLocal, getattr(app.state, "redis", None))
+        results = await run_periodic_clearing_pass(
+            AsyncSessionLocal, getattr(app.state, "redis", None)
+        )
     except ClearingPeriodicRefused as refusal:
         logger.error("clearing.periodic_refused reason=%s", refusal.reason)
         _record_background_job_event(
-            app, name="clearing", status="failed", event=f"refused_{refusal.reason}", error=refusal
+            app,
+            name="clearing",
+            status="failed",
+            event=f"refused_{refusal.reason}",
+            error=refusal,
         )
         return
     except Exception as error:
         logger.exception("clearing.periodic_failed")
-        _record_background_job_event(app, name="clearing", status="failed", event="error", error=error)
+        _record_background_job_event(
+            app, name="clearing", status="failed", event="error", error=error
+        )
         return
     from app.core.clearing.runner import InterruptReason
 
-    failed = sorted(code for code, result in results.items() if result.reason == InterruptReason.ERROR)
+    failed = sorted(
+        code
+        for code, result in results.items()
+        if result.reason == InterruptReason.ERROR
+    )
     if failed:
         # Review P2-4: a pass stopped by an error (planner, stop/hold, perimeter, unknown commit) degrades health;
         # a budget, lease, re-plan or retry-budget interruption is ordinary and does not.
         logger.error("clearing.periodic_equivalents_failed count=%s", len(failed))
-        _record_background_job_event(app, name="clearing", status="failed", event="pass_error")
+        _record_background_job_event(
+            app, name="clearing", status="failed", event="pass_error"
+        )
         return
-    interrupted = sorted(code for code, result in results.items() if result.status != "complete")
+    interrupted = sorted(
+        code for code, result in results.items() if result.status != "complete"
+    )
     _record_background_job_event(
         app,
         name="clearing",
@@ -309,9 +365,13 @@ def debt_reconciliation_run_problem(app: FastAPI, equivalent_id) -> str | None:
     after the run allowance (`app/api/v1/integrity.py`, `_reconciliation_view`)."""
 
     state = _background_job_states(app).get("integrity", {})
-    if state.get("status") != "failed" or str(state.get("event", "")).endswith("_checkpoints_error"):
+    if state.get("status") != "failed" or str(state.get("event", "")).endswith(
+        "_checkpoints_error"
+    ):
         return None
-    if str(state.get("event", "")).endswith("_pending_not_checked"):  # 047: skipped on a held lock past the fast phase
+    if str(state.get("event", "")).endswith(
+        "_pending_not_checked"
+    ):  # 047: skipped on a held lock past the fast phase
         return "no scheduled run has completed since the lock was found held; the check is pending"
     errored = state.get("errored_equivalents")
     if errored is not None and str(equivalent_id) not in errored.split(","):

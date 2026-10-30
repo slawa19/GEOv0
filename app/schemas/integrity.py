@@ -110,7 +110,9 @@ class EquivalentIntegritySummary(BaseModel):
 
     equivalent: str
     status: Literal["healthy", "warning", "critical"]
-    checked_at: Optional[datetime]  # the last real check; null - none stored yet (then `warning`)
+    checked_at: Optional[
+        datetime
+    ]  # the last real check; null - none stored yet (then `warning`)
     hold: bool
 
 

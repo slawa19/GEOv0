@@ -50,7 +50,9 @@ def deliberate_chain(exc: BaseException | None) -> Iterator[BaseException]:
         current = following if isinstance(following, BaseException) else None
 
 
-def sqlstate(exc: BaseException | None, *, walk: bool = True, bare_code: bool = True) -> str | None:
+def sqlstate(
+    exc: BaseException | None, *, walk: bool = True, bare_code: bool = True
+) -> str | None:
     """The SQLSTATE `exc` carries, or None.
 
     With `walk`, the whole deliberate chain is read, `sqlstate` before `pgcode` before a driver's bare

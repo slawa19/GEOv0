@@ -8,10 +8,15 @@ from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
 from app.utils.security import (
-    claim_jti, decode_token, create_access_token, create_refresh_token, refresh_store_id,
+    claim_jti,
+    decode_token,
+    create_access_token,
+    create_refresh_token,
+    refresh_store_id,
 )
 from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
+
 
 class AuthService:
     def __init__(self, db: AsyncSession):
@@ -20,27 +25,28 @@ class AuthService:
     async def create_challenge(self, pid: str) -> AuthChallenge:
         # Best-effort cleanup of expired challenges to avoid unbounded growth.
         now = datetime.now(timezone.utc)
-        await self.db.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < now))
+        await self.db.execute(
+            delete(AuthChallenge).where(AuthChallenge.expires_at < now)
+        )
 
         # Check if participant exists
         stmt = select(Participant).where(Participant.pid == pid)
         result = await self.db.execute(stmt)
         participant = result.scalar_one_or_none()
-        
+
         if not participant:
             raise NotFoundException(f"Participant {pid} not found")
 
         # Generate random challenge (32 bytes, base64url without padding)
         challenge_bytes = secrets.token_bytes(32)
-        challenge_str = base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("=")
-        
+        challenge_str = (
+            base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("=")
+        )
+
         expires_at = now + timedelta(seconds=settings.AUTH_CHALLENGE_EXPIRE_SECONDS)
-        
+
         auth_challenge = AuthChallenge(
-            pid=pid,
-            challenge=challenge_str,
-            expires_at=expires_at,
-            used=False
+            pid=pid, challenge=challenge_str, expires_at=expires_at, used=False
         )
         self.db.add(auth_challenge)
         # 2026-08-22 / p009_t905 (`F-009-6`): read the server-generated values back INSIDE
@@ -51,21 +57,25 @@ class AuthService:
         await self.db.commit()
         return auth_challenge
 
-    async def login(self, pid: str, challenge: str, signature: str, device_info: dict | None = None) -> dict:
+    async def login(
+        self, pid: str, challenge: str, signature: str, device_info: dict | None = None
+    ) -> dict:
         # Best-effort cleanup of expired challenges.
         now = datetime.now(timezone.utc)
-        await self.db.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < now))
+        await self.db.execute(
+            delete(AuthChallenge).where(AuthChallenge.expires_at < now)
+        )
 
         # 1. Find valid challenge
         stmt = select(AuthChallenge).where(
             AuthChallenge.pid == pid,
             AuthChallenge.challenge == challenge,
             AuthChallenge.used.is_(False),
-            AuthChallenge.expires_at > now
+            AuthChallenge.expires_at > now,
         )
         result = await self.db.execute(stmt)
         auth_challenge = result.scalar_one_or_none()
-        
+
         if not auth_challenge:
             raise UnauthorizedException("Invalid or expired challenge")
 
@@ -73,14 +83,14 @@ class AuthService:
         stmt_p = select(Participant).where(Participant.pid == pid)
         result_p = await self.db.execute(stmt_p)
         participant = result_p.scalar_one_or_none()
-        
+
         if not participant:
             raise UnauthorizedException("Participant not found")
 
         # 3. Verify signature
         try:
             # Message to verify is the challenge string
-            message = challenge.encode('utf-8')
+            message = challenge.encode("utf-8")
             verify_signature(participant.public_key, message, signature)
         except Exception:
             raise UnauthorizedException("Invalid signature")

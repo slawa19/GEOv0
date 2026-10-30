@@ -12,10 +12,12 @@ class ParticipantProfile(BaseModel):
     description: Optional[str] = None
     contacts: Optional[Dict[str, Any]] = None
 
+
 class ParticipantBase(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=255)
     type: str = Field(default="person", pattern="^(person|business|hub)$")
     public_key: str
+
 
 class ParticipantCreateRequest(ParticipantBase):
     signature: str
@@ -33,6 +35,7 @@ class ParticipantPublicStats(BaseModel):
     total_incoming_trust: List[EquivalentAmount]
     member_since: datetime
 
+
 class Participant(ParticipantBase):
     pid: str
     status: str = Field(..., pattern="^(active|suspended|left|deleted)$")
@@ -43,6 +46,7 @@ class Participant(ParticipantBase):
     public_stats: Optional[ParticipantPublicStats] = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class ParticipantsList(BaseModel):
     items: List[Participant]

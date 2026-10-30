@@ -15,13 +15,20 @@ from app.core.payments.service import (
     PaymentService,
     PaymentTransactionUnusable,
 )
-from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
+from app.core.simulator.edge_patch_builder import (
+    EdgePatchBuilder,
+    line_pairs_of_payment_hops,
+)
 from app.core.simulator.rejection_codes import (
     SCRIPTED_SENDER_NOT_FOUND_REASON,
     is_scenario_refusal,
     map_rejection_code,
 )
-from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, schedule_closed_trustlines_publication
+from app.core.simulator.sse_broadcast import (
+    SseBroadcast,
+    SseEventEmitter,
+    schedule_closed_trustlines_publication,
+)
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.core.simulator.run_perimeter import run_perimeter_pids
@@ -84,7 +91,13 @@ class DeferredRealPaymentEffects:
     closed_publications: list[asyncio.Task] = field(default_factory=list)
     # 034 `F-034-2`: builds the visual patches of the committed observations AFTER the commit, on a session of its
     # own (`RealPaymentsExecutor.build_patches_after_commit`). (open_session, committed items) -> patches by seq.
-    patch_builder: Callable[[Callable[[], Any], list[_PaymentObservation]], Awaitable[dict[int, _PaymentPatches]]] | None = None
+    patch_builder: (
+        Callable[
+            [Callable[[], Any], list[_PaymentObservation]],
+            Awaitable[dict[int, _PaymentPatches]],
+        ]
+        | None
+    ) = None
     _resolution: Literal["commit", "rollback", "unknown", "discarded"] | None = field(
         default=None,
         init=False,
@@ -118,14 +131,16 @@ class DeferredRealPaymentEffects:
             )
             return
         self.items = [
-            replace(
-                item,
-                edge_patch=patches[item.seq].edge_patch,
-                node_patch=patches[item.seq].node_patch,
-                closed_edges=patches[item.seq].closed_edges,
+            (
+                replace(
+                    item,
+                    edge_patch=patches[item.seq].edge_patch,
+                    node_patch=patches[item.seq].node_patch,
+                    closed_edges=patches[item.seq].closed_edges,
+                )
+                if item.outcome == "committed" and item.seq in patches
+                else item
             )
-            if item.outcome == "committed" and item.seq in patches
-            else item
             for item in self.items
         ]
 
@@ -241,9 +256,14 @@ class DeferredRealPaymentEffects:
                     exc_info=True,
                 )
             # Only here, on a confirmed commit: a rollback, an unknown outcome or a discarded attempt never removes.
-            task = schedule_closed_trustlines_publication(emitter=self.emitter, lock=self.lock, run_id=self.run_id,
-                                                          run=self.run, equivalent=item.equivalent,
-                                                          pairs=item.closed_edges)
+            task = schedule_closed_trustlines_publication(
+                emitter=self.emitter,
+                lock=self.lock,
+                run_id=self.run_id,
+                run=self.run,
+                equivalent=item.equivalent,
+                pairs=item.closed_edges,
+            )
             if task is not None:
                 self.closed_publications.append(task)
             with self.lock:
@@ -338,7 +358,9 @@ class RealPaymentsResult:
     unresolved_seqs: frozenset[int] = frozenset()
 
 
-def _internal_error_details(e: BaseException, *, logger: logging.Logger) -> dict[str, Any]:
+def _internal_error_details(
+    e: BaseException, *, logger: logging.Logger
+) -> dict[str, Any]:
     """The public details of an INTERNAL payment failure (054-C-5) - and the one log line that explains it.
 
     `err_details` is published as `tx.failed.error.details`/`error.message` and becomes the run's `last_error`, and
@@ -427,7 +449,8 @@ def is_empty_share(run: RunRecord, planned_len: int) -> bool:
     """049 S2a: a tick that planned nothing WHILE THE RUN PLANS PAYMENTS (intensity above 0) - the empty share of a
     fractional action budget (`real_payment_planner._actions_this_tick`) or a plan pruned to nothing. Such a tick
     attempted nothing, so it is evidence neither of failing nor of healthy payments: the run's consecutive counters
-    skip it. At intensity 0 an empty tick is the normal state of a run that attempts nothing and keeps clearing them."""
+    skip it. At intensity 0 an empty tick is the normal state of a run that attempts nothing and keeps clearing them.
+    """
 
     return int(planned_len) == 0 and int(run.intensity_percent or 0) > 0
 
@@ -452,7 +475,9 @@ class RealPaymentsExecutor:
         self._should_warn_this_tick = should_warn_this_tick
         self._sim_idempotency_key = sim_idempotency_key
 
-    def _log_integrity_violation(self, *, run: RunRecord, tx_id: str, code: str | None, details: Any) -> None:
+    def _log_integrity_violation(
+        self, *, run: RunRecord, tx_id: str, code: str | None, details: Any
+    ) -> None:
         """054-A-7b: one ERROR line per payment refused for a violated invariant - the run, the payment and the invariant."""
 
         if code != INTEGRITY_VIOLATION:
@@ -486,7 +511,9 @@ class RealPaymentsExecutor:
         # 054-A-7a review: the refusals of this tick that are the scenario's own (`is_scenario_refusal`).
         scenario_refusals = 0
 
-        emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
+        emitter = SseEventEmitter(
+            sse=self._sse, utc_now=self._utc_now, logger=self._logger
+        )
         deferred_effects = DeferredRealPaymentEffects(
             lock=self._lock,
             emitter=emitter,
@@ -520,6 +547,7 @@ class RealPaymentsExecutor:
         per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]] = {
             str(eq): {} for eq in equivalents
         }
+
         def _edge_inc(eq: str, src: str, dst: str, key: str, n: int = 1) -> None:
             m = per_eq_edge_stats.setdefault(str(eq), {})
             st = m.setdefault(
@@ -549,7 +577,9 @@ class RealPaymentsExecutor:
             """Execute one action under a SAVEPOINT and return its staged result."""
 
             sender_id = sender_id_by_pid.get(str(action.sender_pid))
-            if sender_id is None and isinstance(getattr(action, "idempotency_key", None), str):
+            if sender_id is None and isinstance(
+                getattr(action, "idempotency_key", None), str
+            ):
                 # 036 B1: a scripted payment of a sender the run does not hold is a REFUSAL of the story (the participant
                 # may not be introduced yet), not an error of the run: it is reported as `tx.failed` and does not spend
                 # the error budget. A planned payment keeps the old classification below.
@@ -582,15 +612,19 @@ class RealPaymentsExecutor:
                 )
 
             event_key = getattr(action, "idempotency_key", None)
-            idem = event_key if isinstance(event_key, str) and event_key else self._sim_idempotency_key(
-                run_id=run.run_id,
-                tick_ms=run.tick_index,
-                sender_pid=str(action.sender_pid),
-                receiver_pid=str(action.receiver_pid),
-                equivalent=str(action.equivalent),
-                amount=str(action.amount),
-                seq=int(action.seq),
-                epoch=int(getattr(run, "_launch_epoch", 0) or 0),
+            idem = (
+                event_key
+                if isinstance(event_key, str) and event_key
+                else self._sim_idempotency_key(
+                    run_id=run.run_id,
+                    tick_ms=run.tick_index,
+                    sender_pid=str(action.sender_pid),
+                    receiver_pid=str(action.receiver_pid),
+                    equivalent=str(action.equivalent),
+                    amount=str(action.amount),
+                    seq=int(action.seq),
+                    epoch=int(getattr(run, "_launch_epoch", 0) or 0),
+                )
             )
 
             async with sem:
@@ -624,8 +658,15 @@ class RealPaymentsExecutor:
                     if staged.refusal is not None:
                         # A definitive refusal recorded ABORTED in this savepoint (019 `T1905`): durable
                         # with the tick, and classified exactly as the same refusal raised used to be.
-                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal, logger=self._logger)
-                        self._log_integrity_violation(run=run, tx_id=tx_id or idem, code=refused_code, details=refused_details)
+                        refused_status, refused_code, refused_details = (
+                            _classify_refusal(staged.refusal, logger=self._logger)
+                        )
+                        self._log_integrity_violation(
+                            run=run,
+                            tx_id=tx_id or idem,
+                            code=refused_code,
+                            details=refused_details,
+                        )
                         return (
                             int(action.seq),
                             str(action.equivalent),
@@ -675,7 +716,11 @@ class RealPaymentsExecutor:
                     # the whole phase back, records the refusal on its own transaction, and then - once
                     # its outcome is established - publishes this ONE observation of it.
                     unusable.publish_refusal = self._refusal_publisher(
-                        run_id=run_id, run=run, emitter=emitter, action=action, unusable=unusable
+                        run_id=run_id,
+                        run=run,
+                        emitter=emitter,
+                        action=action,
+                        unusable=unusable,
                     )
                     raise
                 except RetryablePaymentConflictException:
@@ -697,8 +742,12 @@ class RealPaymentsExecutor:
                     # progress rather than as an error, and it does not spend the error budget.
                     raise
                 except Exception as e:
-                    status, code, err_details = _classify_refusal(e, logger=self._logger)
-                    self._log_integrity_violation(run=run, tx_id=idem, code=code, details=err_details)
+                    status, code, err_details = _classify_refusal(
+                        e, logger=self._logger
+                    )
+                    self._log_integrity_violation(
+                        run=run, tx_id=idem, code=code, details=err_details
+                    )
                     if status is None:
                         # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
                         # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
@@ -749,7 +798,9 @@ class RealPaymentsExecutor:
             d[key] = int(d.get(key, 0)) + int(n)
 
         def _route_add(eq: str, route_len: float) -> None:
-            d = per_eq_route.setdefault(str(eq), {"route_len_sum": 0.0, "route_len_n": 0.0})
+            d = per_eq_route.setdefault(
+                str(eq), {"route_len_sum": 0.0, "route_len_n": 0.0}
+            )
             d["route_len_sum"] = float(d.get("route_len_sum", 0.0)) + float(route_len)
             d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
@@ -780,9 +831,16 @@ class RealPaymentsExecutor:
                     errors += 1
                     _inc(eq, "errors")
                     if err_code == INTEGRITY_VIOLATION and integrity_violation is None:
-                        inner = (err_details or {}).get("details") if isinstance(err_details, dict) else None
-                        integrity_violation = str((inner or {}).get("invariant") or "unnamed") if isinstance(
-                            inner, dict) else "unnamed"
+                        inner = (
+                            (err_details or {}).get("details")
+                            if isinstance(err_details, dict)
+                            else None
+                        )
+                        integrity_violation = (
+                            str((inner or {}).get("invariant") or "unnamed")
+                            if isinstance(inner, dict)
+                            else "unnamed"
+                        )
                     for a, b in edges_pairs:
                         _edge_inc(eq, a, b, "attempts")
                         _edge_inc(eq, a, b, "errors")
@@ -832,9 +890,7 @@ class RealPaymentsExecutor:
                                 amount=amount,
                                 # `edge_patch`, `node_patch` and `closed_edges` are read AFTER the commit, on a
                                 # session of their own (034 `F-034-2`): `build_post_commit_patches`.
-                                edges=[
-                                    {"from": a, "to": b} for a, b in edges_pairs
-                                ],
+                                edges=[{"from": a, "to": b} for a, b in edges_pairs],
                             )
                         )
                     else:
@@ -1034,7 +1090,9 @@ class RealPaymentsExecutor:
         """
 
         patches: dict[int, _PaymentPatches] = {}
-        pid_to_participant_by_eq_and_pids: dict[tuple[str, tuple[str, ...]], dict[str, Participant]] = {}
+        pid_to_participant_by_eq_and_pids: dict[
+            tuple[str, tuple[str, ...]], dict[str, Participant]
+        ] = {}
         quantiles_refreshed_by_eq: set[str] = set()
 
         async def _end_failed_read(session, *, eq: str, what: str) -> None:
@@ -1062,7 +1120,9 @@ class RealPaymentsExecutor:
                 helper = await VizPatchHelper.create(
                     session,
                     equivalent_code=eq,
-                    refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
+                    refresh_every_ticks=int(
+                        settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10
+                    ),
                 )
                 with self._lock:
                     run._real_viz_by_eq[eq] = helper
@@ -1082,7 +1142,9 @@ class RealPaymentsExecutor:
             pids_key = (eq, tuple(pids))
             pid_to_participant = pid_to_participant_by_eq_and_pids.get(pids_key)
             if pid_to_participant is None:
-                res = await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                res = await session.execute(
+                    select(Participant).where(Participant.pid.in_(pids))
+                )
                 pid_to_participant = {p.pid: p for p in res.scalars().all()}
                 # Detached, so a rollback after a failed read below does not expire them: they are plain values
                 # for the builders, read once per pass.
@@ -1092,23 +1154,33 @@ class RealPaymentsExecutor:
 
             node_patch: list[dict[str, Any]] | None
             try:
-                node_patch = await helper.compute_node_patches(
-                    session, pid_to_participant=pid_to_participant, pids=pids
-                ) or None
+                node_patch = (
+                    await helper.compute_node_patches(
+                        session, pid_to_participant=pid_to_participant, pids=pids
+                    )
+                    or None
+                )
             except Exception:
                 # The node patch alone is lost; the edge patch below is still read, on a fresh transaction.
                 await _end_failed_read(session, eq=eq, what="node_patch_failed")
                 node_patch = None
 
             closed: set[tuple[str, str]] = set()
-            edge_patch = await self._edge_patch_builder.build_edge_patch_for_pairs(
-                session=session,
-                helper=helper,
-                edges_pairs=line_pairs_of_payment_hops(edges_pairs),
-                pid_to_participant=pid_to_participant,
-                closed=closed,
-            ) or None
-            return _PaymentPatches(edge_patch=edge_patch, node_patch=node_patch, closed_edges=tuple(sorted(closed)))
+            edge_patch = (
+                await self._edge_patch_builder.build_edge_patch_for_pairs(
+                    session=session,
+                    helper=helper,
+                    edges_pairs=line_pairs_of_payment_hops(edges_pairs),
+                    pid_to_participant=pid_to_participant,
+                    closed=closed,
+                )
+                or None
+            )
+            return _PaymentPatches(
+                edge_patch=edge_patch,
+                node_patch=node_patch,
+                closed_edges=tuple(sorted(closed)),
+            )
 
         try:
             async with open_session() as session:
@@ -1116,7 +1188,9 @@ class RealPaymentsExecutor:
                     try:
                         patches[item.seq] = await _one(session, item)
                     except Exception:
-                        await _end_failed_read(session, eq=str(item.equivalent), what="edge_patch_failed")
+                        await _end_failed_read(
+                            session, eq=str(item.equivalent), what="edge_patch_failed"
+                        )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1147,16 +1221,30 @@ class RealPaymentsExecutor:
         """
 
         refusal = unusable.refusal
-        own: BaseException = refusal.public_error if refusal is not None else unusable.cause
+        own: BaseException = (
+            refusal.public_error if refusal is not None else unusable.cause
+        )
 
         def publish(stored: BaseException | None = None) -> bool:
-            return self._refusal_observation(run_id=run_id, run=run, emitter=emitter, action=action,
-                                             cause=stored if stored is not None else own).apply_after_rollback()
+            return self._refusal_observation(
+                run_id=run_id,
+                run=run,
+                emitter=emitter,
+                action=action,
+                cause=stored if stored is not None else own,
+            ).apply_after_rollback()
 
         return publish
 
-    def _refusal_observation(self, *, run_id: str, run: RunRecord, emitter: SseEventEmitter, action: Any,
-                             cause: BaseException) -> "DeferredRealPaymentEffects":
+    def _refusal_observation(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        emitter: SseEventEmitter,
+        action: Any,
+        cause: BaseException,
+    ) -> "DeferredRealPaymentEffects":
         _status, code, err_details = _classify_refusal(cause, logger=self._logger)
         if code is not None:
             outcome: Literal["committed", "rejected", "error"] = "error"
@@ -1182,7 +1270,9 @@ class RealPaymentsExecutor:
                     sender_pid=str(action.sender_pid),
                     receiver_pid=str(action.receiver_pid),
                     amount=str(getattr(action, "amount", "") or ""),
-                    edges=[{"from": str(action.sender_pid), "to": str(action.receiver_pid)}],
+                    edges=[
+                        {"from": str(action.sender_pid), "to": str(action.receiver_pid)}
+                    ],
                     error_code=error_code,
                     error_details=err_details,
                 )

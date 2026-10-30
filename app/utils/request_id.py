@@ -4,7 +4,9 @@ import contextvars
 import re
 import uuid
 
-request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "request_id", default=None
+)
 
 
 # X-Request-ID validation

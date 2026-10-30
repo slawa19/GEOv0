@@ -177,24 +177,36 @@ class MetricsBottlenecks:
         try:
             async with db_session.AsyncSessionLocal() as session:
                 rows = (
-                    await session.execute(
-                        select(SimulatorRunMetric)
-                        .where(
-                            (SimulatorRunMetric.run_id == run_id)
-                            & (SimulatorRunMetric.equivalent_code == str(equivalent))
-                            & (SimulatorRunMetric.t_ms >= 0)
-                            & (SimulatorRunMetric.t_ms <= int(to_ms))
-                            & (SimulatorRunMetric.key.in_([k for (k, _u) in keys]))
+                    (
+                        await session.execute(
+                            select(SimulatorRunMetric)
+                            .where(
+                                (SimulatorRunMetric.run_id == run_id)
+                                & (
+                                    SimulatorRunMetric.equivalent_code
+                                    == str(equivalent)
+                                )
+                                & (SimulatorRunMetric.t_ms >= 0)
+                                & (SimulatorRunMetric.t_ms <= int(to_ms))
+                                & (SimulatorRunMetric.key.in_([k for (k, _u) in keys]))
+                            )
+                            .order_by(
+                                SimulatorRunMetric.key.asc(),
+                                SimulatorRunMetric.t_ms.asc(),
+                            )
                         )
-                        .order_by(SimulatorRunMetric.key.asc(), SimulatorRunMetric.t_ms.asc())
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
 
             # 2026-08-20 / p007_t715: values stay Decimal from the column to
             # the wire. No float ever touches them here.
             # A stored NULL is a gap ("not measured" at that tick), not a row to skip: skipping it carried the
             # previous value over a tick that was never measured (028 F-028-7).
-            by_key: dict[str, list[tuple[int, Optional[Decimal]]]] = {str(k): [] for (k, _u) in keys}
+            by_key: dict[str, list[tuple[int, Optional[Decimal]]]] = {
+                str(k): [] for (k, _u) in keys
+            }
             for r in rows:
                 by_key.setdefault(str(r.key), []).append((int(r.t_ms), r.value))
 
@@ -213,9 +225,7 @@ class MetricsBottlenecks:
                     while idx < len(timeline) and int(timeline[idx][0]) <= t:
                         last_val = timeline[idx][1]
                         idx += 1
-                    pts.append(
-                        MetricPoint(t_ms=t, v=metric_point_value(last_val))
-                    )
+                    pts.append(MetricPoint(t_ms=t, v=metric_point_value(last_val)))
                 series.append(MetricSeries(key=key, unit=unit, points=pts))
 
             return MetricsResponse(
@@ -237,7 +247,6 @@ class MetricsBottlenecks:
                 cause=exc,
                 counters={"points_count": points_count},
             ) from exc
-
 
     async def build_bottlenecks(
         self,
@@ -265,7 +274,10 @@ class MetricsBottlenecks:
                     await session.execute(
                         select(func.max(SimulatorRunBottleneck.computed_at)).where(
                             (SimulatorRunBottleneck.run_id == run_id)
-                            & (SimulatorRunBottleneck.equivalent_code == str(equivalent))
+                            & (
+                                SimulatorRunBottleneck.equivalent_code
+                                == str(equivalent)
+                            )
                         )
                     )
                 ).scalar_one_or_none()
@@ -301,11 +313,17 @@ class MetricsBottlenecks:
 
                 details = r.details or {}
                 label = details.get("label") if isinstance(details, dict) else None
-                suggested_action = details.get("suggested_action") if isinstance(details, dict) else None
+                suggested_action = (
+                    details.get("suggested_action")
+                    if isinstance(details, dict)
+                    else None
+                )
 
                 items.append(
                     BottleneckItem(
-                        target=BottleneckTargetEdge(kind="edge", **{"from": src}, to=dst),
+                        target=BottleneckTargetEdge(
+                            kind="edge", **{"from": src}, to=dst
+                        ),
                         score=score,
                         reason_code=str(r.reason_code),
                         label=label,
@@ -314,7 +332,11 @@ class MetricsBottlenecks:
                 )
 
             items.sort(
-                key=lambda x: (x.score, getattr(x.target, "from_", ""), getattr(x.target, "to", "")),
+                key=lambda x: (
+                    x.score,
+                    getattr(x.target, "from_", ""),
+                    getattr(x.target, "to", ""),
+                ),
                 reverse=True,
             )
             items = items[: int(limit)]

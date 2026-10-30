@@ -13,17 +13,29 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.balance.service import BalanceService
 from app.schemas.participant import ParticipantCreateRequest
-from app.schemas.participant import ParticipantEquivalentStats, ParticipantStats, ParticipantUpdateRequest
+from app.schemas.participant import (
+    ParticipantEquivalentStats,
+    ParticipantStats,
+    ParticipantUpdateRequest,
+)
 from app.utils.money import to_money_str
 from app.core.auth.crypto import get_pid_from_public_key, verify_signature
 from app.core.auth.canonical import canonical_json
-from app.utils.exceptions import ConflictException, NotFoundException, BadRequestException, InvalidSignatureException
+from app.utils.exceptions import (
+    ConflictException,
+    NotFoundException,
+    BadRequestException,
+    InvalidSignatureException,
+)
+
 
 class ParticipantService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_participant(self, participant_in: ParticipantCreateRequest) -> Participant:
+    async def create_participant(
+        self, participant_in: ParticipantCreateRequest
+    ) -> Participant:
         # 1. Check if public key is valid and derive PID
         try:
             pid = get_pid_from_public_key(participant_in.public_key)
@@ -54,7 +66,9 @@ class ParticipantService:
 
         message = canonical_json(payload)
         try:
-            verify_signature(participant_in.public_key, message, participant_in.signature)
+            verify_signature(
+                participant_in.public_key, message, participant_in.signature
+            )
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
@@ -69,9 +83,16 @@ class ParticipantService:
             # that race is precisely what this handler answers.  Outside the handler it
             # would become an unhandled 500 on the path whose job is to report conflicts.
             participant = await self.insert_participant(
-                pid=pid, display_name=participant_in.display_name, public_key=participant_in.public_key,
+                pid=pid,
+                display_name=participant_in.display_name,
+                public_key=participant_in.public_key,
                 type=participant_in.type,
-                profile=participant_in.profile.model_dump(exclude_unset=True) if participant_in.profile is not None else None)
+                profile=(
+                    participant_in.profile.model_dump(exclude_unset=True)
+                    if participant_in.profile is not None
+                    else None
+                ),
+            )
             await self.db.refresh(participant)
             await self.db.commit()
         except IntegrityError:
@@ -80,21 +101,39 @@ class ParticipantService:
             raise ConflictException("Participant already exists")
         return participant
 
-    async def insert_participant(self, *, pid: str, display_name: str, public_key: str, type: str,
-                                 profile: dict | None, flush: bool = True) -> Participant:
+    async def insert_participant(
+        self,
+        *,
+        pid: str,
+        display_name: str,
+        public_key: str,
+        type: str,
+        profile: dict | None,
+        flush: bool = True,
+    ) -> Participant:
         """The one insert of a participant: ACTIVE, staged and flushed in the caller's transaction, never committed.
 
         030 S3b (F-030-19, `T3000` item 3): the public registration calls it after its key and signature checks; the
-        trusted simulator (seeder, inject) with its pseudo key. Another status is `set_status`, after the lines."""
+        trusted simulator (seeder, inject) with its pseudo key. Another status is `set_status`, after the lines.
+        """
 
-        participant = Participant(pid=pid, display_name=display_name, public_key=public_key, type=type,
-                                  profile=profile, status="active", verification_level=0)
+        participant = Participant(
+            pid=pid,
+            display_name=display_name,
+            public_key=public_key,
+            type=type,
+            profile=profile,
+            status="active",
+            verification_level=0,
+        )
         self.db.add(participant)
         if flush:
             await self.db.flush()
         return participant
 
-    async def set_status(self, pid: str, status: str, *, from_statuses: tuple[str, ...]) -> tuple[Participant, str]:
+    async def set_status(
+        self, pid: str, status: str, *, from_statuses: tuple[str, ...]
+    ) -> tuple[Participant, str]:
         """Set the status in the caller's transaction, flushed, never committed; returns the row and the old status.
 
         028 `F-028-28` (owner В-1): the row `FOR UPDATE` is the freeze's whole lock - a money writer holds its
@@ -104,25 +143,38 @@ class ParticipantService:
         032 A-5: `from_statuses` - the statuses this transition may start from - is REQUIRED, so no caller changes a
         status without saying from what. It is checked against the status read by the locking statement, so two
         concurrent commands cannot both pass it. Any other status is a 409 `status_transition_not_allowed`, nothing
-        changed. The matrix of each caller is in `docs/ru/09-decisions-and-defaults.md`, 1.6."""
+        changed. The matrix of each caller is in `docs/ru/09-decisions-and-defaults.md`, 1.6.
+        """
 
-        participant = (await self.db.execute(select(Participant).where(Participant.pid == pid).with_for_update()
-                                             .execution_options(populate_existing=True))).scalar_one_or_none()
+        participant = (
+            await self.db.execute(
+                select(Participant)
+                .where(Participant.pid == pid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if participant is None:
             raise NotFoundException(f"Participant {pid} not found")
         before = participant.status
         if before not in from_statuses:
             raise ConflictException(
                 f"Participant {pid} is {before}; it cannot be set to {status} from that status",
-                details={"reason": "status_transition_not_allowed", "pid": pid, "status": before,
-                         "requested": status},
+                details={
+                    "reason": "status_transition_not_allowed",
+                    "pid": pid,
+                    "status": before,
+                    "requested": status,
+                },
             )
         participant.status = status
         await self.db.flush()
         return participant, before
 
     async def get_participant(self, pid: str) -> Participant:
-        result = await self.db.execute(select(Participant).where(Participant.pid == pid))
+        result = await self.db.execute(
+            select(Participant).where(Participant.pid == pid)
+        )
         participant = result.scalar_one_or_none()
         if not participant:
             raise NotFoundException(f"Participant {pid} not found")
@@ -163,26 +215,46 @@ class ParticipantService:
             )
         ).all()
         return {
-            code: (int(precision), {"in": Decimal(incoming), "in_lines": int(n_in), "out": Decimal(outgoing)})
+            code: (
+                int(precision),
+                {
+                    "in": Decimal(incoming),
+                    "in_lines": int(n_in),
+                    "out": Decimal(outgoing),
+                },
+            )
             for code, precision, incoming, n_in, outgoing in rows
         }
 
     async def get_participant_stats(self, participant_id) -> ParticipantStats:
         trust = await self._trust_by_equivalent(participant_id)
-        balance = {row.code: row for row in (await BalanceService(self.db).get_summary(participant_id)).equivalents}
+        balance = {
+            row.code: row
+            for row in (
+                await BalanceService(self.db).get_summary(participant_id)
+            ).equivalents
+        }
 
         missing = set(balance) - set(trust)
-        precision_by_code = {code: precision for code, (precision, _sides) in trust.items()}
+        precision_by_code = {
+            code: precision for code, (precision, _sides) in trust.items()
+        }
         if missing:
             rows = await self.db.execute(
-                select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(missing))
+                select(Equivalent.code, Equivalent.precision).where(
+                    Equivalent.code.in_(missing)
+                )
             )
-            precision_by_code.update({code: int(precision) for code, precision in rows.all()})
+            precision_by_code.update(
+                {code: int(precision) for code, precision in rows.all()}
+            )
 
         per_equivalent = []
         for code in sorted(set(trust) | set(balance)):
             precision = precision_by_code[code]
-            sides = trust.get(code, (precision, {"in": Decimal(0), "out": Decimal(0)}))[1]
+            sides = trust.get(code, (precision, {"in": Decimal(0), "out": Decimal(0)}))[
+                1
+            ]
             zero = to_money_str(Decimal(0), precision)
             row = balance.get(code)
             per_equivalent.append(
@@ -198,7 +270,9 @@ class ParticipantService:
             )
         return ParticipantStats(per_equivalent=per_equivalent)
 
-    async def update_participant(self, participant_id, data: ParticipantUpdateRequest) -> Participant:
+    async def update_participant(
+        self, participant_id, data: ParticipantUpdateRequest
+    ) -> Participant:
         participant = await self.db.get(Participant, participant_id)
         if not participant:
             raise NotFoundException("Participant not found")
@@ -237,23 +311,25 @@ class ParticipantService:
         return participant
 
     async def list_participants(
-        self, 
-        query: Optional[str] = None, 
-        type_filter: Optional[str] = None, 
-        limit: int = 20, 
-        offset: int = 0
+        self,
+        query: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
     ) -> List[Participant]:
         stmt = select(Participant).order_by(Participant.id.asc())
-        
+
         if query:
-            stmt = stmt.where(or_(
-                Participant.display_name.ilike(f"%{query}%"),
-                Participant.pid.ilike(f"%{query}%")
-            ))
-        
+            stmt = stmt.where(
+                or_(
+                    Participant.display_name.ilike(f"%{query}%"),
+                    Participant.pid.ilike(f"%{query}%"),
+                )
+            )
+
         if type_filter:
             stmt = stmt.where(Participant.type == type_filter)
-            
+
         stmt = stmt.limit(limit).offset(offset)
 
         result = await self.db.execute(stmt)

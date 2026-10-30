@@ -10,11 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.schemas.common import ErrorEnvelope
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService, public_payment_result, public_refusal_details
+from app.core.payments.service import (
+    PaymentService,
+    public_payment_result,
+    public_refusal_details,
+)
 from app.utils.distributed_lock import redis_distributed_lock
 from app.schemas.payment import (
-    CapacityResponse, MaxFlowResponse,
-    PaymentCreateRequest, PaymentResult, PaymentsList
+    CapacityResponse,
+    MaxFlowResponse,
+    PaymentCreateRequest,
+    PaymentResult,
+    PaymentsList,
 )
 from app.db.models.participant import Participant
 from app.utils.exceptions import BadRequestException, GeoException
@@ -22,47 +29,59 @@ from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter()
 
+
 @router.get(
     "/capacity",
     response_model=CapacityResponse,
     # 054-E-6: declared here as in api/openapi.yaml.
-    responses={504: {"model": ErrorEnvelope, "description": "Routing ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)"}},
+    responses={
+        504: {
+            "model": ErrorEnvelope,
+            "description": "Routing ran past ROUTING_PATH_FINDING_TIMEOUT_MS (E007)",
+        }
+    },
 )
 async def check_capacity(
     to: str,
     equivalent: str,
-    amount: str, # Decimal string
+    amount: str,  # Decimal string
     session: AsyncSession = Depends(deps.get_db),
-    current_participant: Participant = Depends(deps.get_current_participant)
+    current_participant: Participant = Depends(deps.get_current_participant),
 ):
     """
     Check capacity for a concrete payment amount from current user to recipient.
     """
     payment_router = PaymentRouter(session)
     await payment_router.build_graph(equivalent)
-    
+
     # The capacity answer must be given for an amount the payment path would actually
     # accept: otherwise capacity says 'yes' to a value POST /payments then refuses.
     amount_decimal = parse_money_amount(amount, field="amount", require_positive=True)
-    if payment_router.precision is not None:  # 028 `F-028-23`: and in the equivalent's step, as the payment
-        require_money_step(amount_decimal, precision=payment_router.precision, equivalent=equivalent)
+    if (
+        payment_router.precision is not None
+    ):  # 028 `F-028-23`: and in the equivalent's step, as the payment
+        require_money_step(
+            amount_decimal, precision=payment_router.precision, equivalent=equivalent
+        )
 
     return payment_router.check_capacity(current_participant.pid, to, amount_decimal)
+
 
 @router.get("/max-flow", response_model=MaxFlowResponse)
 async def get_max_flow(
     to: str,
     equivalent: str,
     session: AsyncSession = Depends(deps.get_db),
-    current_participant: Participant = Depends(deps.get_current_participant)
+    current_participant: Participant = Depends(deps.get_current_participant),
 ):
     """
     Estimate maximum transferable amount and diagnostics.
     """
     payment_router = PaymentRouter(session)
     await payment_router.build_graph(equivalent)
-    
+
     return payment_router.calculate_max_flow(current_participant.pid, to)
+
 
 @router.post("", response_model=PaymentResult)
 async def create_payment(
@@ -94,14 +113,22 @@ async def create_payment(
     payer_id: uuid.UUID = current_participant.id
     await session.close()
     try:
-        return public_payment_result(await _create_payment(payment_in, payer_id, redis_client, payment_sessions))
+        return public_payment_result(
+            await _create_payment(payment_in, payer_id, redis_client, payment_sessions)
+        )
     except GeoException as exc:
         # A copy: the raised exception may be held elsewhere (a stored refusal is written from it unfiltered).
-        raise GeoException(exc.message, code=exc.code, details=public_refusal_details(exc.details, exc.code),
-                           status_code=exc.status_code) from exc
+        raise GeoException(
+            exc.message,
+            code=exc.code,
+            details=public_refusal_details(exc.details, exc.code),
+            status_code=exc.status_code,
+        ) from exc
 
 
-async def _create_payment(payment_in: dict, payer_id: uuid.UUID, redis_client, payment_sessions):
+async def _create_payment(
+    payment_in: dict, payer_id: uuid.UUID, redis_client, payment_sessions
+):
     try:
         payment_req = PaymentCreateRequest.model_validate(payment_in)
     except ValidationError as exc:
@@ -125,33 +152,37 @@ async def _create_payment(payment_in: dict, payer_id: uuid.UUID, redis_client, p
             payment_req,
         )
 
+
 @router.get("/{tx_id}", response_model=PaymentResult)
 async def get_payment(
     tx_id: str,
     session: AsyncSession = Depends(deps.get_db),
-    current_participant: Participant = Depends(deps.get_current_participant)
+    current_participant: Participant = Depends(deps.get_current_participant),
 ):
     """
     Get payment details by Transaction ID.
     """
     service = PaymentService(session)
-    return public_payment_result(await service.get_payment_for_participant(
-        tx_id,
-        requester_participant_id=current_participant.id,
-        requester_pid=current_participant.pid,
-    ))
+    return public_payment_result(
+        await service.get_payment_for_participant(
+            tx_id,
+            requester_participant_id=current_participant.id,
+            requester_pid=current_participant.pid,
+        )
+    )
+
 
 @router.get("", response_model=PaymentsList)
 async def list_payments(
-    direction: Literal['sent', 'received', 'all'] = Query('all'),
+    direction: Literal["sent", "received", "all"] = Query("all"),
     equivalent: Optional[str] = Query(None),
-    status: Literal['COMMITTED', 'ABORTED', 'all'] = Query('all'),
+    status: Literal["COMMITTED", "ABORTED", "all"] = Query("all"),
     from_date: Optional[datetime] = Query(None),
     to_date: Optional[datetime] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=200),
     session: AsyncSession = Depends(deps.get_db),
-    current_participant: Participant = Depends(deps.get_current_participant)
+    current_participant: Participant = Depends(deps.get_current_participant),
 ):
     """
     List payments for current user.

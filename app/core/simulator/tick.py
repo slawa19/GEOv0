@@ -77,7 +77,11 @@ from app.core.simulator.money_replay import (
     run_money_phase_with_bounded_replay,
 )
 from app.core.simulator.net_balance_utils import to_money_str
-from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult, is_empty_share
+from app.core.simulator.real_payments_executor import (
+    DeferredRealPaymentEffects,
+    RealPaymentsResult,
+    is_empty_share,
+)
 from app.core.simulator.real_scenario_seeder import (
     SCENARIO_TRUSTLINE_REFUSED,
     SIMULATOR_PID_TAKEN,
@@ -148,7 +152,9 @@ class TickPaymentsPhase:
     scripted_event_indexes: frozenset[int] = frozenset()
     # ... and the outcome of every scripted payment of the phase by event index (written when the phase is durable).
     scripted_progress: dict[int, dict[str, Any]] = field(default_factory=dict)
-    on_durable: Callable[[frozenset[int], dict[int, dict[str, Any]]], None] | None = None
+    on_durable: Callable[[frozenset[int], dict[int, dict[str, Any]]], None] | None = (
+        None
+    )
 
     def discard_observations(self) -> bool:
         """Destroy this attempt's observations without publishing them (a superseded attempt)."""
@@ -158,7 +164,8 @@ class TickPaymentsPhase:
 
     async def build_post_commit_patches(self, open_session: Callable[[], Any]) -> None:
         """034 `F-034-2`: the visual patches of the committed payments, read after the commit on `open_session()`.
-        Awaited by the owner of the money phase before `apply_deferred_effects` publishes. Never raises."""
+        Awaited by the owner of the money phase before `apply_deferred_effects` publishes. Never raises.
+        """
         if self.deferred_effects is not None:
             await self.deferred_effects.build_post_commit_patches(open_session)
 
@@ -166,8 +173,11 @@ class TickPaymentsPhase:
         """The money phase is durable: spend the scripted events it carried, publish the observations once.
 
         Both callers (the commit's confirmation and the landing after an unknown commit) come through here, and a
-        second call (the tail's `_commit_and_resolve`) finds the set already spent - adding to it again is a no-op."""
-        if self.on_durable is not None and (self.scripted_event_indexes or self.scripted_progress):
+        second call (the tail's `_commit_and_resolve`) finds the set already spent - adding to it again is a no-op.
+        """
+        if self.on_durable is not None and (
+            self.scripted_event_indexes or self.scripted_progress
+        ):
             self.on_durable(self.scripted_event_indexes, self.scripted_progress)
         if self.deferred_effects is None:
             return False
@@ -191,14 +201,16 @@ class RealTick:
         self._clearing_every_n_ticks = int(runner._clearing_every_n_ticks)
         self._real_clearing_time_budget_ms = int(runner._real_clearing_time_budget_ms)
         self._real_db_metrics_every_n_ticks = int(runner._real_db_metrics_every_n_ticks)
-        self._real_db_bottlenecks_every_n_ticks = int(runner._real_db_bottlenecks_every_n_ticks)
+        self._real_db_bottlenecks_every_n_ticks = int(
+            runner._real_db_bottlenecks_every_n_ticks
+        )
         self._real_last_tick_write_every_ms = int(runner._real_last_tick_write_every_ms)
         self._real_artifacts_sync_every_ms = int(runner._real_artifacts_sync_every_ms)
         # The committed-volume accumulator of each running clearing task, so a tick that finds the previous
         # tick's task still running reports what THAT task has committed.
-        self._clearing_progress: "weakref.WeakKeyDictionary[asyncio.Task, dict[str, Decimal]]" = (
-            weakref.WeakKeyDictionary()
-        )
+        self._clearing_progress: (
+            "weakref.WeakKeyDictionary[asyncio.Task, dict[str, Decimal]]"
+        ) = weakref.WeakKeyDictionary()
 
     # ── callbacks and commits: the one copy ───────────────────────────────────────────────────────────
 
@@ -232,11 +244,17 @@ class RealTick:
         )
 
     @staticmethod
-    def _phase_callbacks(payments_result: Any | None) -> dict[str, Callable[[], Any] | None]:
+    def _phase_callbacks(
+        payments_result: Any | None,
+    ) -> dict[str, Callable[[], Any] | None]:
         return {
             "on_commit": getattr(payments_result, "apply_deferred_effects", None),
-            "on_rollback": getattr(payments_result, "apply_rollback_observations", None),
-            "on_unknown": getattr(payments_result, "apply_unknown_transaction_observations", None),
+            "on_rollback": getattr(
+                payments_result, "apply_rollback_observations", None
+            ),
+            "on_unknown": getattr(
+                payments_result, "apply_unknown_transaction_observations", None
+            ),
         }
 
     # ── run lifecycle ─────────────────────────────────────────────────────────────────────────────────
@@ -251,7 +269,9 @@ class RealTick:
                 return
 
             run.state = "error"
-            run.pause_reason = None  # 054-A-7a: the reason of a pause belongs to the paused state only
+            run.pause_reason = (
+                None  # 054-A-7a: the reason of a pause belongs to the paused state only
+            )
             run.stopped_at = rr._utc_now()
             run.current_phase = None
             run.queue_depth = 0
@@ -273,7 +293,12 @@ class RealTick:
 
         # 054-A-7d: the one log line of a run's stop as failed - the run, the code and the count; never the message, which
         # is public and already sanitised, nor the exception (logged where it was caught, under its own id).
-        rr._logger.error("simulator.run.failed run_id=%s code=%s errors_total=%d", str(run_id), code, errors_total)
+        rr._logger.error(
+            "simulator.run.failed run_id=%s code=%s errors_total=%d",
+            str(run_id),
+            code,
+            errors_total,
+        )
         rr._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
 
@@ -311,7 +336,9 @@ class RealTick:
         rr = self._runner
 
         run: RunRecord = rr._get_run(run_id)
-        scenario = getattr(run, "_scenario_raw", None) or rr._get_scenario_raw(run.scenario_id)
+        scenario = getattr(run, "_scenario_raw", None) or rr._get_scenario_raw(
+            run.scenario_id
+        )
 
         tick_t0 = time.monotonic()
         # NOTE: keep this at DEBUG to avoid log spam; WARNING logs sit around potentially blocking stages.
@@ -328,7 +355,9 @@ class RealTick:
 
         money = None  # read by the failure accounting below: None until the money phase has completed
         try:
-            money = await self._open_money_phase(run_id=run_id, run=run, scenario=scenario)
+            money = await self._open_money_phase(
+                run_id=run_id, run=run, scenario=scenario
+            )
             if money is None:
                 return
 
@@ -352,15 +381,17 @@ class RealTick:
                     # 036 B1: the scenario's scripted clearings run FIRST, so the periodic clearing of this tick cannot take
                     # the cycle an episode is about, and the periodic pass of an equivalent that has just had a scripted pass
                     # does not run on this tick. Their committed volume belongs to the tick's `clearing_volume`.
-                    scripted_volume, scripted_attempted = await self.run_scripted_clearings(
-                        session=session,
-                        run_id=run_id,
-                        run=run,
-                        scenario=scenario,
-                        equivalents=equivalents,
-                        planned_len=len(payments_phase.planned or []),
-                        tick_t0=tick_t0,
-                        payments_result=payments_phase,
+                    scripted_volume, scripted_attempted = (
+                        await self.run_scripted_clearings(
+                            session=session,
+                            run_id=run_id,
+                            run=run,
+                            scenario=scenario,
+                            equivalents=equivalents,
+                            planned_len=len(payments_phase.planned or []),
+                            tick_t0=tick_t0,
+                            payments_result=payments_phase,
+                        )
                     )
 
                     clearing_volume_by_eq = await self.maybe_run_clearing(
@@ -378,9 +409,13 @@ class RealTick:
                         # 054-A-7a: marked once the pass has run (or was skipped by `CLEARING_ENABLED`), not before - a
                         # tick that fails before it leaves no mark, and the next counted tick runs the pass again.
                         with rr._lock:
-                            run._real_stall_clearing_at = int(payments_phase.stall_ticks)
+                            run._real_stall_clearing_at = int(
+                                payments_phase.stall_ticks
+                            )
                     for eq_code, amount in scripted_volume.items():
-                        clearing_volume_by_eq[eq_code] = clearing_volume_by_eq.get(eq_code, Decimal("0")) + amount
+                        clearing_volume_by_eq[eq_code] = (
+                            clearing_volume_by_eq.get(eq_code, Decimal("0")) + amount
+                        )
 
                     await self.apply_trust_decay_and_broadcast(
                         session=session,
@@ -390,7 +425,9 @@ class RealTick:
                         payments_result=payments_phase,
                     )
 
-                    await self.drop_closed_trustlines(run_id=run_id, run=run, equivalents=equivalents)
+                    await self.drop_closed_trustlines(
+                        run_id=run_id, run=run, equivalents=equivalents
+                    )
 
                     await self.populate_per_eq_metric_values(
                         session=session,
@@ -507,7 +544,9 @@ class RealTick:
                     reason,
                 )
                 await rr.fail_run(
-                    run_id, code=SCENARIO_TRUSTLINE_REFUSED, message=f"{e.message} (reason: {reason})"
+                    run_id,
+                    code=SCENARIO_TRUSTLINE_REFUSED,
+                    message=f"{e.message} (reason: {reason})",
                 )
                 return
 
@@ -529,7 +568,9 @@ class RealTick:
                 # A TRANSIENT CONFLICT IS NOT A PROGRAMMATIC FAILURE (programme 015 / P1). The money boundary has
                 # already replayed the phase up to its budget and rolled the last attempt back; nothing of it is
                 # durable. A programmatic failure still takes the branch below and still stops the run.
-                await self._record_money_conflict_tick(run_id, run=run, conflict=conflict, error=e)
+                await self._record_money_conflict_tick(
+                    run_id, run=run, conflict=conflict, error=e
+                )
                 return
 
             with rr._lock:
@@ -542,7 +583,11 @@ class RealTick:
                 # run plans payments) attempted nothing: its failure - only its tail can fail - is not one of the
                 # consecutive ATTEMPTED failures, just as its success does not clear them (`is_empty_share`). A failure
                 # before or inside the money phase counts: the tick may have attempted payments.
-                if not (money is not None and money.phase is not None and is_empty_share(run, len(money.phase.planned))):
+                if not (
+                    money is not None
+                    and money.phase is not None
+                    and is_empty_share(run, len(money.phase.planned))
+                ):
                     run._real_consec_tick_failures += 1
                 # 054-A-7c: a run this tick has already stopped (`fail_run` inside the money phase - an integrity
                 # violation, the timeouts of a tick - and then a failure on the way out) keeps the stop's code: it is
@@ -588,7 +633,10 @@ class RealTick:
                     if not run._real_seeded:
                         try:
                             await rr._seed_scenario_into_db(
-                                setup_session, scenario, run_id=getattr(run, "_identity_run_id", None))
+                                setup_session,
+                                scenario,
+                                run_id=getattr(run, "_identity_run_id", None),
+                            )
                             await setup_session.commit()
                         except Exception:
                             # Programme 021 (T2100 P2-4): the owner of the seeding transaction rolls it back before
@@ -597,13 +645,20 @@ class RealTick:
                             raise
                         # The seed is durable. If refresh fails/cancels, keep the flag false:
                         # a later attempt re-seeds idempotently before retrying the refresh.
-                        await refresh_seeded_routing_after_commit(session=setup_session, scenario=scenario)
+                        await refresh_seeded_routing_after_commit(
+                            session=setup_session, scenario=scenario
+                        )
                         run._real_seeded = True
 
             if run._real_participants is None or run._real_equivalents is None:
                 run._real_participants = await rr._load_real_participants(
-                    setup_session, scenario, run_id=getattr(run, "_identity_run_id", None))
-                eq_set: set[str] = set(str(x).strip().upper() for x in (scenario.get("equivalents") or []))
+                    setup_session,
+                    scenario,
+                    run_id=getattr(run, "_identity_run_id", None),
+                )
+                eq_set: set[str] = set(
+                    str(x).strip().upper() for x in (scenario.get("equivalents") or [])
+                )
                 eq_set.discard("")
 
                 default_eq = scenario_default_equivalent(scenario)
@@ -629,7 +684,9 @@ class RealTick:
             # Due scenario timeline events (note/stress/inject), BEFORE the owner locks of the money phase, not
             # after. Programme 015, phase B step 3: each inject event is a unit of work that takes the owner locks
             # it needs and commits them away, and the phase returns with no transaction open.
-            await rr._apply_due_scenario_events(setup_session, run_id=run_id, run=run, scenario=scenario)
+            await rr._apply_due_scenario_events(
+                setup_session, run_id=run_id, run=run, scenario=scenario
+            )
 
         async def _money_attempt(session):
             """One attempt: the planning inputs, then the boundary - owner locks, planning, staged payments.
@@ -649,7 +706,9 @@ class RealTick:
             # routes are confined to them) in its equivalents, `FOR UPDATE` in `trust_lines.id` order - is this
             # transaction's first statement, before the first payment. A deadlock (40P01) with a later,
             # out-of-order line lock restarts the phase at this outer owner (`money_replay.py`).
-            await owner_service.lock_staged_lines(equivalents, {participant_id for participant_id, _pid in participants})
+            await owner_service.lock_staged_lines(
+                equivalents, {participant_id for participant_id, _pid in participants}
+            )
 
             return await self.run_payments_phase(
                 session=session,
@@ -721,9 +780,13 @@ class RealTick:
                 await planning_session.connection()
                 # Phase 1.4: capacity-aware payment amounts, from the debts as they are AFTER the due events.
                 try:
-                    debt_snapshot = await rr._load_debt_snapshot_by_pid(planning_session, participants, equivalents)
+                    debt_snapshot = await rr._load_debt_snapshot_by_pid(
+                        planning_session, participants, equivalents
+                    )
                 except Exception:
-                    await _end_failed_read(planning_session, "planning_debt_snapshot_failed")
+                    await _end_failed_read(
+                        planning_session, "planning_debt_snapshot_failed"
+                    )
                 # 028 `F-028-32`: amounts in each equivalent's step.
                 try:
                     precision_by_eq = {
@@ -737,7 +800,9 @@ class RealTick:
                         ).all()
                     }
                 except Exception:
-                    await _end_failed_read(planning_session, "planning_precision_failed")
+                    await _end_failed_read(
+                        planning_session, "planning_precision_failed"
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -758,7 +823,9 @@ class RealTick:
         scenario: dict[str, Any],
         participants: list[tuple[Any, str]],
         equivalents: list[str],
-        planning_inputs: tuple[dict[tuple[str, str, str], Decimal], dict[str, int]] | None = None,
+        planning_inputs: (
+            tuple[dict[tuple[str, str, str], Decimal], dict[str, int]] | None
+        ) = None,
     ) -> tuple[TickPaymentsPhase, bool]:
         rr = self._runner
         # The tick reads the planning inputs BEFORE `session` holds anything and hands them in (`_money_attempt`).
@@ -769,10 +836,14 @@ class RealTick:
                 run=run, participants=participants, equivalents=equivalents
             )
         debt_snapshot, precision_by_eq = planning_inputs
-        planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq)
+        planned = rr._plan_real_payments(
+            run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq
+        )
         # 036 B1: the scenario's due `payment` events join the phase as ordinary planned payments (staged under a
         # savepoint, published after the commit, refused by the core like any other) with the event's own key.
-        scripted, scripted_index_by_seq, scripted_epoch = rr.scripted_payments_due(run, scenario, first_seq=len(planned))
+        scripted, scripted_index_by_seq, scripted_epoch = rr.scripted_payments_due(
+            run, scenario, first_seq=len(planned)
+        )
         planned = [*planned, *scripted]
         with rr._lock:
             run.ops_sec = float(len(planned))
@@ -780,34 +851,44 @@ class RealTick:
             run._real_in_flight = 0
             run.current_phase = "payments" if planned else None
 
-        sender_id_by_pid = {pid: participant_id for (participant_id, pid) in participants}
-        per_eq_metric_values: dict[str, dict[str, Any]] = {str(eq): {} for eq in equivalents}
+        sender_id_by_pid = {
+            pid: participant_id for (participant_id, pid) in participants
+        }
+        per_eq_metric_values: dict[str, dict[str, Any]] = {
+            str(eq): {} for eq in equivalents
+        }
 
         # 054-A review FD3: a stop the executor decides (the timeouts of a tick, an integrity violation) and the error
         # budget below are RECORDED here and carried out by `fail_run` only after the stopped phase's rollback has
         # resolved its observations. Called inside the phase, `fail_run` published the terminal `run_status(error)`
         # before the `tx.failed` of its own tick - the live stream returns on `error` and never got them - and that
         # `error` counted none of the tick's errors. The executor stops at once all the same (`stop_requested`).
-        stop: list[tuple[str, str]] = []  # the first stop wins, as the first `fail_run` did
+        stop: list[tuple[str, str]] = (
+            []
+        )  # the first stop wins, as the first `fail_run` did
 
         async def record_stop(_run_id: str, code: str, message: str) -> None:
             if not stop:
                 stop.append((code, message))
 
         try:
-            payments_res: RealPaymentsResult = await rr._real_payments_executor.execute_planned_payments(
-                session=session,
-                run_id=run_id,
-                run=run,
-                planned=planned,
-                equivalents=equivalents,
-                sender_id_by_pid=sender_id_by_pid,
-                max_in_flight=int(run._real_max_in_flight),
-                max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
-                fail_run=record_stop,
+            payments_res: RealPaymentsResult = (
+                await rr._real_payments_executor.execute_planned_payments(
+                    session=session,
+                    run_id=run_id,
+                    run=run,
+                    planned=planned,
+                    equivalents=equivalents,
+                    sender_id_by_pid=sender_id_by_pid,
+                    max_in_flight=int(run._real_max_in_flight),
+                    max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
+                    fail_run=record_stop,
+                )
             )
         except BaseException:
-            if stop:  # a stop already decided is carried out however the phase ends (a conflict, a cancellation)
+            if (
+                stop
+            ):  # a stop already decided is carried out however the phase ends (a conflict, a cancellation)
                 await rr.fail_run(run_id, code=stop[0][0], message=stop[0][1])
             raise
 
@@ -822,15 +903,26 @@ class RealTick:
         # boundary, which replays the phase or records a tick without progress (`money_replay.py`).
         max_errors_total = int(rr._real_max_errors_total_limit)
         projected_errors_total = int(run.errors_total) + int(payments_res.errors)
-        if max_errors_total > 0 and projected_errors_total >= max_errors_total and not should_stop:
-            stop.append(("REAL_MODE_TOO_MANY_ERRORS", f"Too many total errors: {projected_errors_total}"))
+        if (
+            max_errors_total > 0
+            and projected_errors_total >= max_errors_total
+            and not should_stop
+        ):
+            stop.append(
+                (
+                    "REAL_MODE_TOO_MANY_ERRORS",
+                    f"Too many total errors: {projected_errors_total}",
+                )
+            )
             should_stop = True
 
         # `apply_deferred_effects` is reached twice by one durable phase (the commit's confirmation and the tail's
         # `_commit_and_resolve`): the progress of THIS attempt is written once, or `attempts` counts the second visit too.
         durable_reported = False
 
-        def report_durable(indexes: frozenset[int], progress: dict[int, dict[str, Any]]) -> None:
+        def report_durable(
+            indexes: frozenset[int], progress: dict[int, dict[str, Any]]
+        ) -> None:
             nonlocal durable_reported
             if durable_reported:
                 return
@@ -854,10 +946,14 @@ class RealTick:
             # outcome is not established (a timeout, an unexpected error) waits and is run again by the next tick, under the
             # same key (a repeat of a payment that did land is answered with the stored one).
             scripted_event_indexes=frozenset(
-                idx for seq, idx in scripted_index_by_seq.items() if seq not in payments_res.unresolved_seqs
+                idx
+                for seq, idx in scripted_index_by_seq.items()
+                if seq not in payments_res.unresolved_seqs
             ),
             scripted_progress=self._scripted_payment_progress(
-                scripted_index_by_seq, payments_res.unresolved_seqs, payments_res.deferred_effects
+                scripted_index_by_seq,
+                payments_res.unresolved_seqs,
+                payments_res.deferred_effects,
             ),
             on_durable=report_durable,
         )
@@ -870,19 +966,24 @@ class RealTick:
                     on_unknown=res.apply_unknown_transaction_observations,
                 )
             finally:
-                if stop:  # FD3: after the tick's `tx.failed` and counters, whatever the rollback's outcome
+                if (
+                    stop
+                ):  # FD3: after the tick's `tx.failed` and counters, whatever the rollback's outcome
                     await rr.fail_run(run_id, code=stop[0][0], message=stop[0][1])
 
         return res, should_stop
 
     @staticmethod
     def _scripted_payment_progress(
-        index_by_seq: dict[int, int], unresolved_seqs: frozenset[int], deferred_effects: DeferredRealPaymentEffects | None
+        index_by_seq: dict[int, int],
+        unresolved_seqs: frozenset[int],
+        deferred_effects: DeferredRealPaymentEffects | None,
     ) -> dict[int, dict[str, Any]]:
         """The TRUE outcome of each scripted payment of a phase, by event index (036 B2): a committed payment is `done`
         one the core refused is `refused` with the code its `tx.failed` carries, one whose outcome is not established is
         `incomplete` with the code of the failure; each carries what was attempted (from, to, amount, equivalent).
-        Built from the observations the phase already resolves - no second source of truth about a payment."""
+        Built from the observations the phase already resolves - no second source of truth about a payment.
+        """
 
         if not index_by_seq or deferred_effects is None:
             return {}
@@ -898,10 +999,19 @@ class RealTick:
                 status, reason = "incomplete", item.error_code
             else:
                 status, reason = "refused", item.error_code
-            record: dict[str, Any] = {"kind": "payment", "status": status, "equivalent": item.equivalent}
+            record: dict[str, Any] = {
+                "kind": "payment",
+                "status": status,
+                "equivalent": item.equivalent,
+            }
             if reason is not None:
                 record["reason"] = str(reason)
-            record["payment"] = {"from": item.sender_pid, "to": item.receiver_pid, "amount": item.amount, "equivalent": item.equivalent}
+            record["payment"] = {
+                "from": item.sender_pid,
+                "to": item.receiver_pid,
+                "amount": item.amount,
+                "equivalent": item.equivalent,
+            }
             out[index] = record
         return out
 
@@ -924,7 +1034,9 @@ class RealTick:
         with rr._lock:
             run._real_consec_money_no_progress_ticks += 1
             no_progress = int(run._real_consec_money_no_progress_ticks)
-            if run.state != "error":  # 054-A-7c: a run stopped during the phase keeps the stop's code
+            if (
+                run.state != "error"
+            ):  # 054-A-7c: a run stopped during the phase keeps the stop's code
                 run.last_error = {
                     "code": "REAL_MODE_MONEY_CONFLICT_UNRESOLVED",
                     "message": (
@@ -1030,7 +1142,9 @@ class RealTick:
                 if run._real_clearing_task is task:
                     run._real_clearing_task = None
 
-    def _stall_step(self, run_id: str, run: RunRecord, phase: TickPaymentsPhase) -> str | None:
+    def _stall_step(
+        self, run_id: str, run: RunRecord, phase: TickPaymentsPhase
+    ) -> str | None:
         """054-A-7a: "clear", "exhausted" or None - what the run of all-refused attempted ticks asks of this tick.
 
         Read from the counter the committed money phase left (`TickPaymentsPhase.stall_ticks`: +1 for an attempted tick
@@ -1172,7 +1286,11 @@ class RealTick:
         attempted: set[str] = set()
         events = scenario.get("events")
         for idx, evt in enumerate(events if isinstance(events, list) else []):
-            if not isinstance(evt, dict) or evt.get("type") != "clearing" or idx in run._real_fired_scenario_event_indexes:
+            if (
+                not isinstance(evt, dict)
+                or evt.get("type") != "clearing"
+                or idx in run._real_fired_scenario_event_indexes
+            ):
                 continue
             t0 = rr._parse_event_time_ms(evt)
             if t0 is None or int(run.sim_time_ms) < int(t0):
@@ -1183,16 +1301,32 @@ class RealTick:
                 rr._refuse_scripted_event(run, idx, evt, "unresolved_equivalent")
                 continue
             if eq not in {str(x).upper() for x in equivalents}:
-                rr._refuse_scripted_event(run, idx, evt, "equivalent_not_in_the_run", equivalent=eq)
+                rr._refuse_scripted_event(
+                    run, idx, evt, "equivalent_not_in_the_run", equivalent=eq
+                )
                 continue
             if not settings.CLEARING_ENABLED:
-                rr._refuse_scripted_event(run, idx, evt, "clearing_disabled", equivalent=eq)
+                rr._refuse_scripted_event(
+                    run, idx, evt, "clearing_disabled", equivalent=eq
+                )
                 continue
             try:
                 # Before the pass, as `_run_clearing` does: every ending then knows the equivalent's step.
-                precision = await self._equivalent_precision(db_session.AsyncSessionLocal, eq)
+                precision = await self._equivalent_precision(
+                    db_session.AsyncSessionLocal, eq
+                )
             except Exception:
-                self._scripted_event_status(run, idx, int(t0), epoch, eq, "incomplete", "equivalent_unavailable", [], spend=False)
+                self._scripted_event_status(
+                    run,
+                    idx,
+                    int(t0),
+                    epoch,
+                    eq,
+                    "incomplete",
+                    "equivalent_unavailable",
+                    [],
+                    spend=False,
+                )
                 continue
 
             occurrences: list[Any] = []
@@ -1211,19 +1345,38 @@ class RealTick:
             attempted.add(eq)
             volume[eq] = volume.get(eq, Decimal("0")) + volumes.get(eq, Decimal("0"))
             with rr._lock:
-                pid_by_id = {participant_id: str(pid) for (participant_id, pid) in (run._real_participants or [])}
+                pid_by_id = {
+                    participant_id: str(pid)
+                    for (participant_id, pid) in (run._real_participants or [])
+                }
             cycles = []
             for occurrence in occurrences:
                 edges = []
                 for edge in occurrence.edges:
-                    creditor, debtor = pid_by_id.get(edge.creditor_id), pid_by_id.get(edge.debtor_id)
+                    creditor, debtor = pid_by_id.get(edge.creditor_id), pid_by_id.get(
+                        edge.debtor_id
+                    )
                     if creditor and debtor and creditor != debtor:
                         edges.append({"from": creditor, "to": debtor})
-                cycles.append({"cleared_amount": self._cleared_amount_str(precision, occurrence.amount), "edges": edges})
+                cycles.append(
+                    {
+                        "cleared_amount": self._cleared_amount_str(
+                            precision, occurrence.amount
+                        ),
+                        "edges": edges,
+                    }
+                )
             outcome = outcomes.get(eq, "no_outcome")
             self._scripted_event_status(
-                run, idx, int(t0), epoch, eq, "done" if outcome == "complete" else "incomplete",
-                None if outcome == "complete" else outcome, cycles, spend=outcome == "complete",
+                run,
+                idx,
+                int(t0),
+                epoch,
+                eq,
+                "done" if outcome == "complete" else "incomplete",
+                None if outcome == "complete" else outcome,
+                cycles,
+                spend=outcome == "complete",
                 expected_cycle=evt.get("expected_cycle"),
             )
         return volume, frozenset(attempted)
@@ -1246,11 +1399,22 @@ class RealTick:
         was restarted since `epoch`, the cycles cumulative within the epoch, the event spent only for a complete pass, a
         change of status logged once."""
 
-        record: dict[str, Any] = {"kind": "clearing", "status": status, "equivalent": eq}
+        record: dict[str, Any] = {
+            "kind": "clearing",
+            "status": status,
+            "equivalent": eq,
+        }
         if reason is not None:
             record["reason"] = reason
         self._runner._write_story_progress(
-            run, idx, t0, epoch, record, spend=spend, add_cycles=new_cycles, expected_cycle=expected_cycle
+            run,
+            idx,
+            t0,
+            epoch,
+            record,
+            spend=spend,
+            add_cycles=new_cycles,
+            expected_cycle=expected_cycle,
         )
 
     def _should_warn(self, run: RunRecord, key: str) -> bool:
@@ -1282,7 +1446,9 @@ class RealTick:
         """
         async with session_local() as precision_session:
             row = (
-                await precision_session.execute(select(Equivalent.precision).where(Equivalent.code == eq))
+                await precision_session.execute(
+                    select(Equivalent.precision).where(Equivalent.code == eq)
+                )
             ).one_or_none()
         if row is None:
             raise ValueError(f"Equivalent {eq} not found")
@@ -1350,14 +1516,19 @@ class RealTick:
         emitter = SseEventEmitter(sse=rr._sse, utc_now=rr._utc_now, logger=rr._logger)
         session_local = db_session.AsyncSessionLocal
         with rr._lock:
-            pid_by_id = {participant_id: str(pid) for (participant_id, pid) in (run._real_participants or [])}
+            pid_by_id = {
+                participant_id: str(pid)
+                for (participant_id, pid) in (run._real_participants or [])
+            }
 
         for eq in equivalents:
             eq = str(eq)
             plan_id = f"plan_{secrets.token_hex(6)}"
             cleared_cycles = 0
             cleared_amount = Decimal("0")
-            precision: Any = None  # read before the pass; nothing is committed, so nothing published, before that
+            precision: Any = (
+                None  # read before the pass; nothing is committed, so nothing published, before that
+            )
             touched_nodes: set[str] = set()
             touched_edges: set[tuple[str, str]] = set()
             done_emitted = False
@@ -1369,18 +1540,33 @@ class RealTick:
                 with rr._lock:
                     run.last_event_type = "clearing.done"
                     run.current_phase = None
-                done_emitted = emitter.emit_clearing_done(
-                    run_id=run_id, run=run, equivalent=eq, plan_id=plan_id,
-                    cleared_cycles=cleared_cycles,
-                    cleared_amount=self._cleared_amount_str(precision, cleared_amount),
-                    cycle_edges=self._done_cycle_edges(run, eq, touched_edges) if touched_edges else None,
-                    node_patch=node_patch, edge_patch=edge_patch,
-                ) is not None
+                done_emitted = (
+                    emitter.emit_clearing_done(
+                        run_id=run_id,
+                        run=run,
+                        equivalent=eq,
+                        plan_id=plan_id,
+                        cleared_cycles=cleared_cycles,
+                        cleared_amount=self._cleared_amount_str(
+                            precision, cleared_amount
+                        ),
+                        cycle_edges=(
+                            self._done_cycle_edges(run, eq, touched_edges)
+                            if touched_edges
+                            else None
+                        ),
+                        node_patch=node_patch,
+                        edge_patch=edge_patch,
+                    )
+                    is not None
+                )
 
             def _on_committed(occurrence, eq: str = eq) -> None:
                 nonlocal cleared_cycles, cleared_amount
                 if on_occurrence is not None:
-                    on_occurrence(eq, occurrence)  # 036 B1: a scripted clearing keeps the exact cycles; records only
+                    on_occurrence(
+                        eq, occurrence
+                    )  # 036 B1: a scripted clearing keeps the exact cycles; records only
                 committed[eq] = committed.get(eq, Decimal("0")) + occurrence.amount
                 cleared_cycles += 1
                 cleared_amount += occurrence.amount
@@ -1398,7 +1584,10 @@ class RealTick:
             try:
                 eq_t0 = time.monotonic()
                 rr._logger.info(
-                    "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s", str(run.run_id), int(run.tick_index), eq
+                    "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s",
+                    str(run.run_id),
+                    int(run.tick_index),
+                    eq,
                 )
                 with rr._lock:
                     run.current_phase = "clearing"
@@ -1412,7 +1601,11 @@ class RealTick:
                         eq,
                         allowed_participant_pids=run_perimeter_pids(run),
                         on_committed=_on_committed,
-                        deadline=asyncio.get_running_loop().time() + budget_ms / 1000.0 if budget_ms > 0 else None,
+                        deadline=(
+                            asyncio.get_running_loop().time() + budget_ms / 1000.0
+                            if budget_ms > 0
+                            else None
+                        ),
                     )
                 except clearing_runner.ClearingPassCancelled as cancelled:
                     # A cancellation during planning does NOT stop the planner worker; the result says so
@@ -1441,7 +1634,8 @@ class RealTick:
                     # not infer success from the fact that this method returned: it swallows every ending below.
                     if outcomes is not None:
                         outcomes[eq] = (
-                            "complete" if result.status == "complete"
+                            "complete"
+                            if result.status == "complete"
                             else f"interrupted:{'unknown' if result.reason is None else result.reason.value}"
                         )
                     rr._logger.info(
@@ -1469,12 +1663,24 @@ class RealTick:
                 # nothing left to change and never stated the clearing's "was -> now" after an automatic clearing.
                 async with session_local() as clearing_session:
                     node_patch, edge_patch = await self._clearing_patches(
-                        run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles, closed
+                        run,
+                        eq,
+                        clearing_session,
+                        touched_nodes,
+                        touched_edges,
+                        cleared_cycles,
+                        closed,
                     )
                     _emit_done(node_patch, edge_patch)
                     # 026 `T2603.2`: the patches were read after the occurrences committed (`on_committed`).
-                    await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
-                                                    equivalent=eq, pairs=closed)
+                    await publish_closed_trustlines(
+                        emitter=emitter,
+                        lock=rr._lock,
+                        run_id=run_id,
+                        run=run,
+                        equivalent=eq,
+                        pairs=closed,
+                    )
                     closed_published = True
                     rr._logger.info(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
@@ -1487,7 +1693,9 @@ class RealTick:
                 if touched_edges:
                     # Its own session and transaction (the growth commits or rolls back itself), after the event.
                     async with session_local() as growth_session:
-                        await self._grow_trust_after_clearing(run_id, run, eq, growth_session, touched_edges)
+                        await self._grow_trust_after_clearing(
+                            run_id, run, eq, growth_session, touched_edges
+                        )
                 if execution_error is not None:
                     raise execution_error
             except asyncio.CancelledError:
@@ -1498,34 +1706,58 @@ class RealTick:
                         async with asyncio.timeout(2.0):
                             if not done_emitted:
                                 async with session_local() as recovery_session:
-                                    node_patch, edge_patch = await self._clearing_patches(
-                                        run, eq, recovery_session, touched_nodes, touched_edges, cleared_cycles, closed
+                                    node_patch, edge_patch = (
+                                        await self._clearing_patches(
+                                            run,
+                                            eq,
+                                            recovery_session,
+                                            touched_nodes,
+                                            touched_edges,
+                                            cleared_cycles,
+                                            closed,
+                                        )
                                     )
                                     if node_patch is None and edge_patch is None:
                                         rr._logger.warning(
                                             "simulator.real.clearing_cancel_recovery_failed run_id=%s tick=%s eq=%s "
-                                            "reason=patches_unavailable", str(run.run_id), int(run.tick_index), eq,
+                                            "reason=patches_unavailable",
+                                            str(run.run_id),
+                                            int(run.tick_index),
+                                            eq,
                                         )
                                     _emit_done(node_patch, edge_patch)
                             if not closed_published:
                                 # The owner rechecks liveness/epochs and removes only still-held pairs, once.
                                 await publish_closed_trustlines(
-                                    emitter=emitter, lock=rr._lock, run_id=run_id, run=run, equivalent=eq, pairs=closed
+                                    emitter=emitter,
+                                    lock=rr._lock,
+                                    run_id=run_id,
+                                    run=run,
+                                    equivalent=eq,
+                                    pairs=closed,
                                 )
                                 closed_published = True
                     except (Exception, asyncio.CancelledError):
                         rr._logger.warning(
                             "simulator.real.clearing_cancel_recovery_failed run_id=%s tick=%s eq=%s",
-                            str(run.run_id), int(run.tick_index), eq, exc_info=True,
+                            str(run.run_id),
+                            int(run.tick_index),
+                            eq,
+                            exc_info=True,
                         )
                     if not done_emitted:
                         _emit_done()
                 raise
             except Exception as exc:
-                refusal_reason = (exc.details or {}).get("reason") if isinstance(exc, ConflictException) else None
+                refusal_reason = (
+                    (exc.details or {}).get("reason")
+                    if isinstance(exc, ConflictException)
+                    else None
+                )
                 if outcomes is not None and eq not in outcomes:
                     outcomes[eq] = (
-                        f"equivalent_stopped:{refusal_reason}" if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS
+                        f"equivalent_stopped:{refusal_reason}"
+                        if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS
                         else "clearing_error"  # 054-A review FD6: the class is logged below, not published
                     )
                 if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
@@ -1562,8 +1794,12 @@ class RealTick:
                     # finer than the step and is reseeded; every other failure stays sanitised.
                     step_refused = refusal_reason == OCCURRENCE_AMOUNT_NOT_IN_STEP
                     run.last_error = {
-                        "code": "CLEARING_REFUSED" if step_refused else "CLEARING_ERROR",
-                        "message": exc.message if step_refused else GeoException().message,
+                        "code": (
+                            "CLEARING_REFUSED" if step_refused else "CLEARING_ERROR"
+                        ),
+                        "message": (
+                            exc.message if step_refused else GeoException().message
+                        ),
                         "at": rr._utc_now().isoformat(),
                     }
                     run.current_phase = None
@@ -1599,10 +1835,17 @@ class RealTick:
                         include_width_keys=True,
                     )
                     rr._broadcast_topology_edge_patch(
-                        run_id=run_id, run=run, equivalent=eq, edge_patch=edge_patch, reason="trust_drift_growth"
+                        run_id=run_id,
+                        run=run,
+                        equivalent=eq,
+                        edge_patch=edge_patch,
+                        reason="trust_drift_growth",
                     )
                 except Exception:
-                    rr._logger.warning("simulator.real.trust_drift.growth_edge_patch_failed", exc_info=True)
+                    rr._logger.warning(
+                        "simulator.real.trust_drift.growth_edge_patch_failed",
+                        exc_info=True,
+                    )
         except Exception:
             rr._logger.warning(
                 "simulator.real.trust_drift.growth_failed run_id=%s tick=%s eq=%s",
@@ -1644,31 +1887,47 @@ class RealTick:
                 helper = await VizPatchHelper.create(
                     clearing_session,
                     equivalent_code=eq,
-                    refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
+                    refresh_every_ticks=int(
+                        settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10
+                    ),
                 )
                 with rr._lock:
                     run._real_viz_by_eq[eq] = helper
 
-            participant_ids: list[uuid.UUID] = [pid for (pid, _) in (run._real_participants or [])]
+            participant_ids: list[uuid.UUID] = [
+                pid for (pid, _) in (run._real_participants or [])
+            ]
             await helper.maybe_refresh_quantiles(
-                clearing_session, tick_index=int(run.tick_index), participant_ids=participant_ids
+                clearing_session,
+                tick_index=int(run.tick_index),
+                participant_ids=participant_ids,
             )
 
             pids = sorted({str(x).strip() for x in touched_nodes if str(x).strip()})
             if pids:
-                res = await clearing_session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                res = await clearing_session.execute(
+                    select(Participant).where(Participant.pid.in_(pids))
+                )
                 pid_to_participant = {p.pid: p for p in res.scalars().all()}
-                node_patch = await helper.compute_node_patches(
-                    clearing_session, pid_to_participant=pid_to_participant, pids=pids
-                ) or None
-                edge_patch = await rr._edge_patch_builder.build_edge_patch_for_pairs(
-                    session=clearing_session,
-                    helper=helper,
-                    edges_pairs=sorted(touched_edges),
-                    pid_to_participant=pid_to_participant,
-                    closed=closed,
-                    include_closed_zero_debt=True,
-                ) or None
+                node_patch = (
+                    await helper.compute_node_patches(
+                        clearing_session,
+                        pid_to_participant=pid_to_participant,
+                        pids=pids,
+                    )
+                    or None
+                )
+                edge_patch = (
+                    await rr._edge_patch_builder.build_edge_patch_for_pairs(
+                        session=clearing_session,
+                        helper=helper,
+                        edges_pairs=sorted(touched_edges),
+                        pid_to_participant=pid_to_participant,
+                        closed=closed,
+                        include_closed_zero_debt=True,
+                    )
+                    or None
+                )
         except Exception as exc:
             # 054-A-8: `clearing.done` still goes out, without patches - the clearing is committed - but the loss of
             # its patches is a warning, not a debug line nobody sees (AGENTS.md §9/§12).
@@ -1725,7 +1984,9 @@ class RealTick:
         # written since; clearing runs in sessions of its own and must not queue behind this one. The observation
         # callbacks are no-ops after a successful money commit: the buffer resolves once.
         commit_t0 = time.monotonic()
-        await self._commit_and_resolve(session, **self._phase_callbacks(payments_result))
+        await self._commit_and_resolve(
+            session, **self._phase_callbacks(payments_result)
+        )
         commit_ms = (time.monotonic() - commit_t0) * 1000.0
         if commit_ms > 500.0:
             rr._logger.warning(
@@ -1755,11 +2016,18 @@ class RealTick:
             clearing_task = existing
 
         if clearing_task is None:
-            committed: dict[str, Decimal] = {str(eq): Decimal("0") for eq in equivalents}
+            committed: dict[str, Decimal] = {
+                str(eq): Decimal("0") for eq in equivalents
+            }
             clearing_task = asyncio.create_task(
                 self._run_clearing(
-                    session=session, run_id=run_id, run=run, equivalents=equivalents, committed=committed,
-                    on_occurrence=on_occurrence, outcomes=outcomes,
+                    session=session,
+                    run_id=run_id,
+                    run=run,
+                    equivalents=equivalents,
+                    committed=committed,
+                    on_occurrence=on_occurrence,
+                    outcomes=outcomes,
                 )
             )
             self._clearing_progress[clearing_task] = committed
@@ -1772,7 +2040,9 @@ class RealTick:
                 str(run.run_id),
                 tick_index,
             )
-            if outcomes is not None:  # the pass in flight is not ours: its outcome is not ours to report
+            if (
+                outcomes is not None
+            ):  # the pass in flight is not ours: its outcome is not ours to report
                 for eq in equivalents:
                     outcomes.setdefault(str(eq), "clearing_already_running")
 
@@ -1900,7 +2170,9 @@ class RealTick:
         def apply_committed_effects() -> None:
             self._apply_callback(on_commit, kind="post_commit")
             self._apply_callback(
-                lambda: trust_drift_engine.apply_committed_effects(scenario=scenario, result=decay_res),
+                lambda: trust_drift_engine.apply_committed_effects(
+                    scenario=scenario, result=decay_res
+                ),
                 kind="trust_drift_post_commit",
             )
 
@@ -1909,9 +2181,15 @@ class RealTick:
         await commit_trust_drift(
             session=session,
             result=decay_res,
-            on_commit=lambda: self._apply_callback(apply_committed_effects, kind="post_commit"),
-            on_rollback=lambda: self._apply_callback(callbacks["on_rollback"], kind="rollback"),
-            on_unknown=lambda: self._apply_callback(callbacks["on_unknown"], kind="unknown"),
+            on_commit=lambda: self._apply_callback(
+                apply_committed_effects, kind="post_commit"
+            ),
+            on_rollback=lambda: self._apply_callback(
+                callbacks["on_rollback"], kind="rollback"
+            ),
+            on_unknown=lambda: self._apply_callback(
+                callbacks["on_unknown"], kind="unknown"
+            ),
             logger=rr._logger,
         )
 
@@ -1947,20 +2225,32 @@ class RealTick:
 
     # ── metrics and the persistence tail: their own commit ────────────────────────────────────────────
 
-    async def drop_closed_trustlines(self, *, run_id: str, run: RunRecord, equivalents: list[str]) -> None:
+    async def drop_closed_trustlines(
+        self, *, run_id: str, run: RunRecord, equivalents: list[str]
+    ) -> None:
         """029 `F-029-11`: once a tick, per equivalent, the pairs the run's edge cache holds are re-read and those
         with no live line leave the run (`publish_closed_trustlines`: cache, scenario, one `removed_edges`). A
         line the ledger closed past every patch of this run - another session's payment, an API close - was
         otherwise counted by `active_trustlines` and offered to the planner until a patch happened to cover it.
-        One SELECT per equivalent; never raises (a failed re-read removes nothing and is logged there)."""
+        One SELECT per equivalent; never raises (a failed re-read removes nothing and is logged there).
+        """
 
         rr = self._runner
         emitter = SseEventEmitter(sse=rr._sse, utc_now=rr._utc_now, logger=rr._logger)
         with rr._lock:
-            held = {str(eq): list((run._edges_by_equivalent or {}).get(str(eq)) or ()) for eq in equivalents}
+            held = {
+                str(eq): list((run._edges_by_equivalent or {}).get(str(eq)) or ())
+                for eq in equivalents
+            }
         for eq, pairs in held.items():
-            await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run, equivalent=eq,
-                                            pairs=pairs)
+            await publish_closed_trustlines(
+                emitter=emitter,
+                lock=rr._lock,
+                run_id=run_id,
+                run=run,
+                equivalent=eq,
+                pairs=pairs,
+            )
 
     async def populate_per_eq_metric_values(
         self,
@@ -1980,7 +2270,9 @@ class RealTick:
         total_debt_by_eq: dict[str, Decimal] = {}
 
         metrics_every_n = int(self._real_db_metrics_every_n_ticks)
-        should_refresh_total_debt = metrics_every_n <= 1 or (int(run.tick_index) % int(metrics_every_n) == 0)
+        should_refresh_total_debt = metrics_every_n <= 1 or (
+            int(run.tick_index) % int(metrics_every_n) == 0
+        )
 
         if should_refresh_total_debt:
             try:
@@ -1991,12 +2283,17 @@ class RealTick:
                 async with session.begin_nested():
                     eq_rows = (
                         await session.execute(
-                            select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents)))
+                            select(Equivalent.id, Equivalent.code).where(
+                                Equivalent.code.in_(list(equivalents))
+                            )
                         )
                     ).all()
                     eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
                     with rr._lock:
-                        perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
+                        perimeter_ids = [
+                            participant_id
+                            for participant_id, _pid in (run._real_participants or [])
+                        ]
                     for eq_code, eq_id in eq_id_by_code.items():
                         # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
                         # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
@@ -2010,7 +2307,9 @@ class RealTick:
                             )
                         ).scalar_one()
                         # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
-                        total_debt_by_eq[str(eq_code)] = total if isinstance(total, Decimal) else Decimal(str(total))
+                        total_debt_by_eq[str(eq_code)] = (
+                            total if isinstance(total, Decimal) else Decimal(str(total))
+                        )
 
                 with rr._lock:
                     run._real_total_debt_by_eq = dict(total_debt_by_eq)
@@ -2040,7 +2339,9 @@ class RealTick:
             # Clearing volume is money too; keep it exact instead of re-narrowing.
             raw_volume = clearing_volume_by_eq.get(str(eq)) or 0
             per_eq_metric_values[str(eq)]["clearing_volume"] = (
-                raw_volume if isinstance(raw_volume, Decimal) else Decimal(str(raw_volume))
+                raw_volume
+                if isinstance(raw_volume, Decimal)
+                else Decimal(str(raw_volume))
             )
 
         # Network topology metrics (Phase 3): active participants from the in-memory scenario (no DB).
@@ -2049,7 +2350,8 @@ class RealTick:
             sum(
                 1
                 for _p in _scenario_parts
-                if isinstance(_p, dict) and str(_p.get("status") or "active").strip().lower() == "active"
+                if isinstance(_p, dict)
+                and str(_p.get("status") or "active").strip().lower() == "active"
             )
         )
 
@@ -2058,8 +2360,12 @@ class RealTick:
             _edges_snapshot = dict(run._edges_by_equivalent or {})
 
         for eq in equivalents:
-            per_eq_metric_values[str(eq)]["active_participants"] = _active_participants_count
-            per_eq_metric_values[str(eq)]["active_trustlines"] = float(len(_edges_snapshot.get(str(eq), [])))
+            per_eq_metric_values[str(eq)][
+                "active_participants"
+            ] = _active_participants_count
+            per_eq_metric_values[str(eq)]["active_trustlines"] = float(
+                len(_edges_snapshot.get(str(eq), []))
+            )
 
     async def persist_tick_tail(
         self,
@@ -2097,8 +2403,12 @@ class RealTick:
         metrics_every_n = int(self._real_db_metrics_every_n_ticks)
         bottlenecks_every_n = int(self._real_db_bottlenecks_every_n_ticks)
 
-        should_write_metrics = metrics_every_n <= 1 or (int(run.tick_index) % int(metrics_every_n) == 0)
-        should_write_bottlenecks = bottlenecks_every_n <= 1 or (int(run.tick_index) % int(bottlenecks_every_n) == 0)
+        should_write_metrics = metrics_every_n <= 1 or (
+            int(run.tick_index) % int(metrics_every_n) == 0
+        )
+        should_write_bottlenecks = bottlenecks_every_n <= 1 or (
+            int(run.tick_index) % int(bottlenecks_every_n) == 0
+        )
 
         # 2026-08-22 / p009: the writers swallow their own failures by design, so their return value is the only
         # signal that the tick actually reached storage. Only an explicit False means "not written".
@@ -2164,7 +2474,11 @@ class RealTick:
         tick_write_every_ms = int(self._real_last_tick_write_every_ms)
         artifacts_sync_every_ms = int(self._real_artifacts_sync_every_ms)
 
-        if tick_write_every_ms > 0 and (now_ms - int(run._artifact_last_tick_written_at_ms or 0)) >= tick_write_every_ms:
+        if (
+            tick_write_every_ms > 0
+            and (now_ms - int(run._artifact_last_tick_written_at_ms or 0))
+            >= tick_write_every_ms
+        ):
             rr._artifacts.write_real_tick_artifact(
                 run,
                 {
@@ -2179,7 +2493,11 @@ class RealTick:
             )
             run._artifact_last_tick_written_at_ms = now_ms
 
-        if artifacts_sync_every_ms > 0 and (now_ms - int(run._artifact_last_sync_at_ms or 0)) >= artifacts_sync_every_ms:
+        if (
+            artifacts_sync_every_ms > 0
+            and (now_ms - int(run._artifact_last_sync_at_ms or 0))
+            >= artifacts_sync_every_ms
+        ):
             await simulator_storage.sync_artifacts(run)
             run._artifact_last_sync_at_ms = now_ms
 
@@ -2199,7 +2517,10 @@ class RealTick:
             return
 
         # 029 `F-029-12`: `is None`, not `or -1` - tick 0 is a tick, and a mark of 0 says it was flushed.
-        raw_tick, raw_flushed = payload.get("tick_index"), run._real_last_tick_storage_flushed_tick
+        raw_tick, raw_flushed = (
+            payload.get("tick_index"),
+            run._real_last_tick_storage_flushed_tick,
+        )
         last_tick = -1 if raw_tick is None else int(raw_tick)
         if last_tick < 0:
             return
@@ -2217,15 +2538,25 @@ class RealTick:
                             run_id=str(payload.get("run_id") or run.run_id),
                             t_ms=int(payload.get("t_ms") or 0),
                             per_equivalent=payload.get("per_equivalent") or {},
-                            metric_values_by_eq=payload.get("metric_values_by_eq") or {},
+                            metric_values_by_eq=payload.get("metric_values_by_eq")
+                            or {},
                             session=session,
                         )
                         is not False
                     )
-                    if rr._db_enabled() and isinstance(payload.get("bottlenecks"), dict):
-                        computed_at = payload.get("bottlenecks", {}).get("computed_at") or rr._utc_now()
-                        edge_stats_by_eq = payload.get("bottlenecks", {}).get("edge_stats_by_eq") or {}
-                        equivalents = payload.get("bottlenecks", {}).get("equivalents") or []
+                    if rr._db_enabled() and isinstance(
+                        payload.get("bottlenecks"), dict
+                    ):
+                        computed_at = (
+                            payload.get("bottlenecks", {}).get("computed_at")
+                            or rr._utc_now()
+                        )
+                        edge_stats_by_eq = (
+                            payload.get("bottlenecks", {}).get("edge_stats_by_eq") or {}
+                        )
+                        equivalents = (
+                            payload.get("bottlenecks", {}).get("equivalents") or []
+                        )
                         for eq in equivalents:
                             wrote_everything &= (
                                 await simulator_storage.write_tick_bottlenecks(

@@ -73,7 +73,9 @@ class SimulatorGraphLink(BaseModel):
 
     @field_validator("trust_limit", "used", "available")
     @classmethod
-    def _money_is_a_decimal_string(cls, value: Optional[NumberOrString]) -> Optional[str]:
+    def _money_is_a_decimal_string(
+        cls, value: Optional[NumberOrString]
+    ) -> Optional[str]:
         """054-A-15: money is a decimal string (AGENTS.md §8) - a JSON number is refused, not converted.
 
         The declared type stays `NumberOrString` because the canon (`api/openapi.yaml`) still admits a number and is
@@ -83,7 +85,9 @@ class SimulatorGraphLink(BaseModel):
         """
 
         if value is not None and not isinstance(value, str):
-            raise ValueError(f"money must be a decimal string, not {type(value).__name__}")
+            raise ValueError(
+                f"money must be a decimal string, not {type(value).__name__}"
+            )
         return value
 
 
@@ -120,7 +124,10 @@ class SimulatorEventEdgeRef(BaseModel):
     to: str
 
     # Use 'from' (not 'from_') when serializing to JSON — frontend expects this key
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, serialize_by_alias=True
+    )
+
 
 class SimulatorEventEdgeStyle(BaseModel):
     viz_width_key: Optional[str] = None
@@ -135,7 +142,9 @@ class SimulatorTxUpdatedEventEdge(BaseModel):
     style: Optional[SimulatorEventEdgeStyle] = None
 
     # Use 'from' (not 'from_') when serializing to JSON — frontend expects this key
-    model_config = ConfigDict(extra="allow", populate_by_name=True, serialize_by_alias=True)
+    model_config = ConfigDict(
+        extra="allow", populate_by_name=True, serialize_by_alias=True
+    )
 
 
 class SimulatorTxUpdatedNodeBadge(BaseModel):
@@ -367,7 +376,8 @@ class LocalizedText(BaseModel):
     """A text of the scenario in both languages (036): the content lives in the scenario, not in the UI dictionary.
 
     Both languages are non-empty text; the model is as strict as the upload schema (`localizedText`), so a damaged
-    stored scenario cannot be served in a weaker shape than it could have been uploaded in."""
+    stored scenario cannot be served in a weaker shape than it could have been uploaded in.
+    """
 
     ru: constr(strict=True, min_length=1)  # type: ignore[valid-type]
     en: constr(strict=True, min_length=1)  # type: ignore[valid-type]
@@ -414,7 +424,8 @@ def scenario_amount_is_well_formed(value: Any) -> bool:
 class ScenarioFocusEdge(BaseModel):
     """An edge the camera is pointed at. Its own model, not the SSE `SimulatorEventEdgeRef` (a protected wire shape that
     accepts empty ends): both ends are non-empty, and the Python spelling `from_` is NOT accepted as input - the wire and
-    the scenario schema have only `from`, and a spelling the reference check does not read must not be one the model takes."""
+    the scenario schema have only `from`, and a spelling the reference check does not read must not be one the model takes.
+    """
 
     from_: ScenarioPid = Field(alias="from")
     to: ScenarioPid
@@ -449,24 +460,41 @@ class ScenarioEpisodeAnchor(BaseModel):
 
     @field_validator("amount")
     @classmethod
-    def _amount_is_the_scenario_money_grammar(cls, value: Optional[str]) -> Optional[str]:
+    def _amount_is_the_scenario_money_grammar(
+        cls, value: Optional[str]
+    ) -> Optional[str]:
         if value is not None and not scenario_amount_is_well_formed(value):
-            raise ValueError("amount must be a plain decimal string: digits, at most 18 fraction digits, 50 digits in all")
+            raise ValueError(
+                "amount must be a plain decimal string: digits, at most 18 fraction digits, 50 digits in all"
+            )
         return value
 
     @model_validator(mode="after")
     def _the_fields_the_event_is_matched_on(self) -> "ScenarioEpisodeAnchor":
         if self.event == "tx.updated":
-            required = {"from": self.from_, "to": self.to, "amount": self.amount, "equivalent": self.equivalent}
+            required = {
+                "from": self.from_,
+                "to": self.to,
+                "amount": self.amount,
+                "equivalent": self.equivalent,
+            }
         elif self.event == "tx.failed":
-            required = {"from": self.from_, "to": self.to, "equivalent": self.equivalent}
+            required = {
+                "from": self.from_,
+                "to": self.to,
+                "equivalent": self.equivalent,
+            }
             if self.amount is not None:
-                raise ValueError("a tx.failed anchor has no amount (the event carries none)")
+                raise ValueError(
+                    "a tx.failed anchor has no amount (the event carries none)"
+                )
         else:
             return self
         missing = [name for name, value in required.items() if value is None]
         if missing:
-            raise ValueError(f"a {self.event} anchor names {', '.join(required)}; missing: {', '.join(missing)}")
+            raise ValueError(
+                f"a {self.event} anchor names {', '.join(required)}; missing: {', '.join(missing)}"
+            )
         return self
 
 
@@ -515,12 +543,15 @@ class ScenariosListResponse(BaseModel):
 # spelled as OpenAPI 3.0.3 can say it, an enum of one (`api/openapi.yaml`); pydantic's own spelling, `const`, is 3.1.
 class _EnumOfOne:
     """The JSON schema of a one-value Literal as OpenAPI 3.0.3 spells it; a fresh dict per use, so the `default` a field
-    adds to its own copy (`RunCreateRequest.mode`) does not leak into another field's."""
+    adds to its own copy (`RunCreateRequest.mode`) does not leak into another field's.
+    """
 
     def __init__(self, value: str) -> None:
         self._value = value
 
-    def __get_pydantic_json_schema__(self, _core_schema: Any, _handler: Any) -> Dict[str, Any]:
+    def __get_pydantic_json_schema__(
+        self, _core_schema: Any, _handler: Any
+    ) -> Dict[str, Any]:
         return {"type": "string", "enum": [self._value]}
 
 
@@ -580,7 +611,8 @@ class EpisodeProgress(BaseModel):
     Tracked: a scripted `payment` or `clearing` event and an `inject` that was skipped. `status` is the TRUTH about the event:
     `done` (a payment committed; a clearing pass that completed, an empty one included), `incomplete` (not finished - the
     event is still pending and the next tick runs it again; `reason` says why) or `refused` (it was not, and will not be,
-    attempted or the core refused it for good; `reason` is the code). `epoch` is the launch (a restart starts a new one)."""
+    attempted or the core refused it for good; `reason` is the code). `epoch` is the launch (a restart starts a new one).
+    """
 
     index: int = Field(ge=0)
     epoch: int = Field(ge=0)
@@ -880,7 +912,11 @@ class SimulatorActionPaymentRealRequest(BaseModel):
     # handler's `tx_id` derivation (`manual_payment_tx_id`), and the grammar is the one `tx_id` itself has so that
     # nothing the handler derives from it can be refused later by the core.
     idempotency_key: Optional[str] = Field(
-        default=None, strict=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"
+        default=None,
+        strict=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
     )
 
     model_config = ConfigDict(extra="forbid")

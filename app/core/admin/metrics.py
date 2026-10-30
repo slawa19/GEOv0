@@ -19,7 +19,10 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.schemas.metrics import AdminParticipantBalanceRow, AdminParticipantMetricsResponse
+from app.schemas.metrics import (
+    AdminParticipantBalanceRow,
+    AdminParticipantMetricsResponse,
+)
 from app.utils.exceptions import NotFoundException
 
 
@@ -41,13 +44,20 @@ async def compute_participant_metrics(
 
     eq_code = canonical_code(equivalent) if equivalent is not None else None
 
-    all_codes = [str(code) for code in (await db.execute(select(Equivalent.code))).scalars().all()]
+    all_codes = [
+        str(code)
+        for code in (await db.execute(select(Equivalent.code))).scalars().all()
+    ]
 
     if eq_code is not None and eq_code not in all_codes:
         raise NotFoundException(f"Equivalent {eq_code} not found")
 
-    balance_rows = await _compute_balance_rows(db, participant_id=participant.id, eq_code=eq_code, all_codes=all_codes)
-    return AdminParticipantMetricsResponse(pid=pid, equivalent=eq_code, balance_rows=balance_rows)
+    balance_rows = await _compute_balance_rows(
+        db, participant_id=participant.id, eq_code=eq_code, all_codes=all_codes
+    )
+    return AdminParticipantMetricsResponse(
+        pid=pid, equivalent=eq_code, balance_rows=balance_rows
+    )
 
 
 async def _compute_balance_rows(
@@ -119,22 +129,36 @@ async def _compute_balance_rows(
     role_debts_stmt = (
         select(eq.code, Debt.debtor_id, Debt.creditor_id, Debt.amount)
         .join(eq, eq.id == Debt.equivalent_id)
-        .where(or_(Debt.debtor_id == participant_id, Debt.creditor_id == participant_id))
+        .where(
+            or_(Debt.debtor_id == participant_id, Debt.creditor_id == participant_id)
+        )
     )
     if eq_code is not None:
         role_debts_stmt = role_debts_stmt.where(eq.code == eq_code)
 
     debt_by_eq: dict[str, Decimal] = {}
     credit_by_eq: dict[str, Decimal] = {}
-    for row_code, debtor_id, creditor_id, amount in (await db.execute(role_debts_stmt)).all():
+    for row_code, debtor_id, creditor_id, amount in (
+        await db.execute(role_debts_stmt)
+    ).all():
         key = str(row_code)
         if debtor_id == participant_id:
-            debt_by_eq[key] = debt_by_eq.get(key, Decimal("0")) + (amount or Decimal("0"))
+            debt_by_eq[key] = debt_by_eq.get(key, Decimal("0")) + (
+                amount or Decimal("0")
+            )
         if creditor_id == participant_id:
-            credit_by_eq[key] = credit_by_eq.get(key, Decimal("0")) + (amount or Decimal("0"))
+            credit_by_eq[key] = credit_by_eq.get(key, Decimal("0")) + (
+                amount or Decimal("0")
+            )
 
-    out_by_eq: dict[str, tuple[Decimal, Decimal]] = {str(code): (lim or Decimal("0"), used or Decimal("0")) for code, lim, used in out_rows}
-    in_by_eq: dict[str, tuple[Decimal, Decimal]] = {str(code): (lim or Decimal("0"), used or Decimal("0")) for code, lim, used in in_rows}
+    out_by_eq: dict[str, tuple[Decimal, Decimal]] = {
+        str(code): (lim or Decimal("0"), used or Decimal("0"))
+        for code, lim, used in out_rows
+    }
+    in_by_eq: dict[str, tuple[Decimal, Decimal]] = {
+        str(code): (lim or Decimal("0"), used or Decimal("0"))
+        for code, lim, used in in_rows
+    }
 
     codes: list[str]
     if eq_code is not None:
