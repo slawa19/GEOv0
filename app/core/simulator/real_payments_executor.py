@@ -25,12 +25,17 @@ from app.db.models.participant import Participant
 from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import (
     GeoException,
+    IntegrityViolationException,
     RetryablePaymentConflictException,
     TimeoutException,
 )
 from app.utils.request_id import request_id_var
 
 _logger = logging.getLogger(__name__)
+
+#: 054-A-7b: the `tx.failed.error.code` and `last_error.code` of a payment the core refused because a protocol or data
+#: integrity invariant was violated (`IntegrityViolationException`) - an ERROR of the run, never a business refusal.
+INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
 
 
 @dataclass(frozen=True)
@@ -352,8 +357,15 @@ def _classify_refusal(
     """(status, code, err_details) of a refused staged payment - one rule for a raised refusal and for
     a refusal returned as a structured `ABORTED` result (`StagedPaymentResult.refusal`, 019 `T1905`).
 
-    `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT or
-    INTERNAL_ERROR is an error of the run. An internal failure gets sanitised details (`_internal_error_details`).
+    `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT,
+    INTEGRITY_VIOLATION or INTERNAL_ERROR is an error of the run. An internal failure gets sanitised details
+    (`_internal_error_details`).
+
+    054-A-7b: an `IntegrityViolationException` answers 409 like a conflict, and until 054-A-7b it was classified by that
+    status - a REJECTED payment with the generic code `PAYMENT_REJECTED`, counted as a refusal of the scenario. A
+    violated invariant is not an outcome of the scenario: it is the error `INTEGRITY_VIOLATION`, and the executor stops
+    the run on it (`execute_planned_payments`). Its details (the invariant and its violations) are the ones the refusal
+    always published.
     """
 
     code: str | None = "INTERNAL_ERROR"
@@ -362,6 +374,15 @@ def _classify_refusal(
 
     if not isinstance(e, GeoException):
         err_details = _internal_error_details(e, logger=logger or _logger)
+    elif isinstance(e, IntegrityViolationException):
+        code = INTEGRITY_VIOLATION
+        err_details = {
+            "exc": type(e).__name__,
+            "geo_code": getattr(e, "code", None),
+            "message": getattr(e, "message", str(e)),
+            "details": getattr(e, "details", None),
+            "status_code": int(getattr(e, "status_code", 409) or 409),
+        }
     elif isinstance(e, TimeoutException):
         code = "PAYMENT_TIMEOUT"
         err_details = {
@@ -417,6 +438,20 @@ class RealPaymentsExecutor:
         self._edge_patch_builder = edge_patch_builder
         self._should_warn_this_tick = should_warn_this_tick
         self._sim_idempotency_key = sim_idempotency_key
+
+    def _log_integrity_violation(self, *, run: RunRecord, tx_id: str, code: str | None, details: Any) -> None:
+        """054-A-7b: one ERROR line per payment refused for a violated invariant - the run, the payment and the invariant."""
+
+        if code != INTEGRITY_VIOLATION:
+            return
+        inner = (details or {}).get("details") if isinstance(details, dict) else None
+        self._logger.error(
+            "simulator.real.payment_integrity_violation run_id=%s tick=%s tx_id=%s invariant=%s",
+            str(run.run_id),
+            int(run.tick_index or 0),
+            tx_id,
+            (inner or {}).get("invariant") if isinstance(inner, dict) else None,
+        )
 
     async def execute_planned_payments(
         self,
@@ -575,6 +610,7 @@ class RealPaymentsExecutor:
                         # A definitive refusal recorded ABORTED in this savepoint (019 `T1905`): durable
                         # with the tick, and classified exactly as the same refusal raised used to be.
                         refused_status, refused_code, refused_details = _classify_refusal(staged.refusal, logger=self._logger)
+                        self._log_integrity_violation(run=run, tx_id=tx_id or idem, code=refused_code, details=refused_details)
                         return (
                             int(action.seq),
                             str(action.equivalent),
@@ -647,6 +683,7 @@ class RealPaymentsExecutor:
                     raise
                 except Exception as e:
                     status, code, err_details = _classify_refusal(e, logger=self._logger)
+                    self._log_integrity_violation(run=run, tx_id=idem, code=code, details=err_details)
                     if status is None:
                         # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
                         # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
@@ -702,7 +739,7 @@ class RealPaymentsExecutor:
             d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
         def _record_if_ready() -> None:
-            nonlocal next_seq, committed, rejected, errors, timeouts
+            nonlocal next_seq, committed, rejected, errors, timeouts, integrity_violation
             while True:
                 item = ready.get(next_seq)
                 if item is None:
@@ -727,6 +764,10 @@ class RealPaymentsExecutor:
                 if err_code is not None:
                     errors += 1
                     _inc(eq, "errors")
+                    if err_code == INTEGRITY_VIOLATION and integrity_violation is None:
+                        inner = (err_details or {}).get("details") if isinstance(err_details, dict) else None
+                        integrity_violation = str((inner or {}).get("invariant") or "unnamed") if isinstance(
+                            inner, dict) else "unnamed"
                     for a, b in edges_pairs:
                         _edge_inc(eq, a, b, "attempts")
                         _edge_inc(eq, a, b, "errors")
@@ -822,6 +863,10 @@ class RealPaymentsExecutor:
 
         stop_requested = False
         timeout_stop_triggered = False
+        # 054-A-7b: the invariant of the first payment refused for a violated invariant, once it is recorded; the run is
+        # stopped on it (`INTEGRITY_VIOLATION`, terminal for `resume`), and the tick's money phase is rolled back whole.
+        integrity_violation: str | None = None
+        integrity_stop_triggered = False
 
         try:
             if tasks:
@@ -880,6 +925,23 @@ class RealPaymentsExecutor:
                         except Exception:
                             self._logger.warning(
                                 "simulator.real.fail_run_after_timeout_failed run_id=%s",
+                                str(run_id),
+                                exc_info=True,
+                            )
+                        stop_requested = True
+
+                    if integrity_violation is not None and not integrity_stop_triggered:
+                        integrity_stop_triggered = True
+                        try:
+                            await fail_run(
+                                run_id,
+                                INTEGRITY_VIOLATION,
+                                f"A payment was refused because the integrity invariant {integrity_violation} was "
+                                f"violated; the run is stopped",
+                            )
+                        except Exception:
+                            self._logger.warning(
+                                "simulator.real.fail_run_after_integrity_violation_failed run_id=%s",
                                 str(run_id),
                                 exc_info=True,
                             )

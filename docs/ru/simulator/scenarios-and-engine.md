@@ -530,6 +530,11 @@ sequenceDiagram
   - потенциальный баг, транзакционное состояние “aborted”, проблемы с сессией/локами,
   - нужно смотреть backend logs по времени события и `error.details`.
 
+**F2) `tx.failed.error.code=INTEGRITY_VIOLATION` (с 2026-10-30, 054-A-7b)**
+- Что это: ядро отказало в платеже тика, потому что нарушен инвариант протокола или данных (`IntegrityViolationException`: `TRUST_LIMIT_VIOLATION`, `PAYMENT_DELTA_DRIFT`, `PENDING_CLOSE_PAIR_NOT_REDUCED` и т. п.; имя — в `error.details.details.invariant`). Это **ошибка**, а не отказ сюжета: считается в `errors_total`, не в `rejected_total`, и прогон останавливается сразу — `state="error"`, `last_error.code=INTEGRITY_VIOLATION`; денежная фаза тика откатывается целиком. На каждый такой платёж — строка лога ERROR `simulator.real.payment_integrity_violation run_id=… tick=… tx_id=… invariant=…`.
+- До 054-A-7b такой отказ (ответ 409) считался обычным отказом с кодом `PAYMENT_REJECTED`, и прогон продолжал тикать.
+- Что говорит: дефект писателя денег или повреждённые данные; разбор — по строке лога с тем же `tx_id`.
+
 **G) `tx.failed.error.code=PAYMENT_REJECTED`**
 - Что это: “обобщённый” отказ, когда детали не удалось стабильно промаппить в более конкретный код.
 - Что говорит:
