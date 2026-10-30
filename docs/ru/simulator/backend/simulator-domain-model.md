@@ -95,9 +95,9 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 3) `clearing.done`
 - Назначение: завершение клиринга + (опционально) статистика и патчи для обновления графа без локальных расчётов.
 - Обязательные поля (OpenAPI):
-  - `event_id`, `ts`, `type="clearing.done"`, `equivalent`
- - Опциональные поля (OpenAPI, can be omitted):
-  - `plan_id`
+  - `event_id`, `ts`, `type="clearing.done"`, `equivalent`, `plan_id` (идентификатор партии клиринга,
+    уникален на каждое событие)
+- Опциональные поля (OpenAPI, can be omitted):
   - `cleared_cycles`, `cleared_amount` (amount в major units, строка)
   - `cycle_edges[]` — список затронутых рёбер (edge refs `{from,to}`) для FX-подсветки
   - `node_patch[]`, `edge_patch[]`

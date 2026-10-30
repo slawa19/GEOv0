@@ -189,7 +189,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminConfigResponse'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -787,7 +787,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminTrustLinesListResponse'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '422':
@@ -1019,6 +1019,17 @@ paths:
         Server-Sent Events stream. Each message contains one JSON event.
 
         This endpoint is modeled as `text/event-stream` in OpenAPI.
+
+        Framing (054-E-18): every event is one SSE record `id: <event_id>`,
+        `event: simulator.event`, `data: <one SimulatorEvent as compact JSON on one line>`,
+        then a blank line; `id` equals the payload's `event_id`. A comment record
+        `: keep-alive` follows 15 s without an event. A run's stream ends after a
+        `run_status` whose `state` is `stopped` or `error`, and when the subscriber's
+        queue overflows (reconnect with `Last-Event-ID`; nothing is dropped silently).
+
+        Without an active run of the caller (and without `Last-Event-ID`) the stream is
+        finite: one record (a comment line and a `retry: 15000` field), then the response ends, and
+        `EventSource` reconnects after that delay.
       parameters:
         - in: query
           name: equivalent
@@ -1395,7 +1406,7 @@ paths:
                   offset:
                     type: integer
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '401':
@@ -1447,7 +1458,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '401':
@@ -1725,6 +1736,13 @@ paths:
         Server-Sent Events stream. Each message contains one JSON event.
 
         This endpoint is modeled as `text/event-stream` in OpenAPI.
+
+        Framing (054-E-18): every event is one SSE record `id: <event_id>`,
+        `event: simulator.event`, `data: <one SimulatorEvent as compact JSON on one line>`,
+        then a blank line; `id` equals the payload's `event_id`. A comment record
+        `: keep-alive` follows 15 s without an event. A run's stream ends after a
+        `run_status` whose `state` is `stopped` or `error`, and when the subscriber's
+        queue overflows (reconnect with `Last-Event-ID`; nothing is dropped silently).
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
         - $ref: '#/components/parameters/EquivalentQuery'
@@ -3748,7 +3766,11 @@ components:
     ServiceUnavailable:
       description: >-
         Measured data is unavailable and the endpoint refuses to substitute
-        synthetic data (real-mode simulator analytics).
+        synthetic data (real-mode simulator analytics). The envelope carries code
+        `E010`, so its `message` is the generic internal-error text like every `E010`
+        (the specific text is logged under `request_id`, 028 `F-028-42`); the cause is
+        `details.reason` - `db_read_failed` or `storage_disabled` - beside
+        `details.run_id` and `details.equivalent` (054-E-18).
       content:
         application/json:
           schema:
@@ -6751,7 +6773,10 @@ components:
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
             patch always carries it, null when no close is requested (a re-created line clears an earlier
-            request). A closed line is not patched: it is removed (`removed_edges`).
+            request). A closed line leaves the graph through `topology.changed.removed_edges`. The one
+            patch it still gets is the final one of a committed clearing that brought its supported debt
+            to 0 (053-1): `used` 0 in `clearing.done.edge_patch`, sent before the removal. A payment
+            never patches a closed line.
         viz_color_key:
           type: string
           nullable: true
@@ -6906,7 +6931,10 @@ components:
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
             patch always carries it, null when no close is requested (a re-created line clears an earlier
-            request). A closed line is not patched: it is removed (`removed_edges`).
+            request). A closed line leaves the graph through `topology.changed.removed_edges`. The one
+            patch it still gets is the final one of a committed clearing that brought its supported debt
+            to 0 (053-1): `used` 0 in `clearing.done.edge_patch`, sent before the removal. A payment
+            never patches a closed line.
         viz_color_key:
           type: string
           nullable: true
