@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -113,29 +113,28 @@ async def _compute_balance_rows(
     out_rows = (await db.execute(outgoing_stmt)).all()
     in_rows = (await db.execute(incoming_stmt)).all()
 
-    total_debt_stmt = (
-        select(eq.code, func.sum(Debt.amount).label("total_debt"))
+    # 054-D-1: both roles from ONE statement snapshot under READ COMMITTED (as OMR-2 in
+    # `app/core/balance/service.py`): a payment can reverse a pair's debt between two separate
+    # SELECTs, and the response would then show the old debt and the new credit at once.
+    role_debts_stmt = (
+        select(eq.code, Debt.debtor_id, Debt.creditor_id, Debt.amount)
         .join(eq, eq.id == Debt.equivalent_id)
-        .where(Debt.debtor_id == participant_id)
-        .group_by(eq.code)
-    )
-    total_credit_stmt = (
-        select(eq.code, func.sum(Debt.amount).label("total_credit"))
-        .join(eq, eq.id == Debt.equivalent_id)
-        .where(Debt.creditor_id == participant_id)
-        .group_by(eq.code)
+        .where(or_(Debt.debtor_id == participant_id, Debt.creditor_id == participant_id))
     )
     if eq_code is not None:
-        total_debt_stmt = total_debt_stmt.where(eq.code == eq_code)
-        total_credit_stmt = total_credit_stmt.where(eq.code == eq_code)
+        role_debts_stmt = role_debts_stmt.where(eq.code == eq_code)
 
-    debt_rows = (await db.execute(total_debt_stmt)).all()
-    credit_rows = (await db.execute(total_credit_stmt)).all()
+    debt_by_eq: dict[str, Decimal] = {}
+    credit_by_eq: dict[str, Decimal] = {}
+    for row_code, debtor_id, creditor_id, amount in (await db.execute(role_debts_stmt)).all():
+        key = str(row_code)
+        if debtor_id == participant_id:
+            debt_by_eq[key] = debt_by_eq.get(key, Decimal("0")) + (amount or Decimal("0"))
+        if creditor_id == participant_id:
+            credit_by_eq[key] = credit_by_eq.get(key, Decimal("0")) + (amount or Decimal("0"))
 
     out_by_eq: dict[str, tuple[Decimal, Decimal]] = {str(code): (lim or Decimal("0"), used or Decimal("0")) for code, lim, used in out_rows}
     in_by_eq: dict[str, tuple[Decimal, Decimal]] = {str(code): (lim or Decimal("0"), used or Decimal("0")) for code, lim, used in in_rows}
-    debt_by_eq: dict[str, Decimal] = {str(code): (amt or Decimal("0")) for code, amt in debt_rows}
-    credit_by_eq: dict[str, Decimal] = {str(code): (amt or Decimal("0")) for code, amt in credit_rows}
 
     codes: list[str]
     if eq_code is not None:
