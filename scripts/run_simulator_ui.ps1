@@ -209,6 +209,7 @@ if (Test-PortExcluded $selectedPort) {
 
 if (Test-TcpOpen $HostName $selectedPort) {
   $url = "http://${HostName}:$selectedPort/"
+  $stoppedOwnVite = $false
   if (Test-SimulatorUiServing $url) {
     if (-not $RestartIfRunning) {
       if ($Mode -eq 'fixtures') {
@@ -265,6 +266,7 @@ if (Test-TcpOpen $HostName $selectedPort) {
 
     Stop-Process -Id $listenerPid -Force
     Start-Sleep -Milliseconds 250
+    $stoppedOwnVite = $true
   }
 
   # Port is occupied by something else. Pick the next free one (skipping excluded ranges).
@@ -272,7 +274,9 @@ if (Test-TcpOpen $HostName $selectedPort) {
   if (-not $alt) {
     throw "Port $selectedPort is in use and no usable port found in range [$selectedPort..$($selectedPort + $MaxPortTries)]."
   }
-  Write-Host "Port $selectedPort is in use by something that is not the GEO Simulator UI; using $alt instead." -ForegroundColor Yellow
+  if (-not $stoppedOwnVite) {
+    Write-Host "Port $selectedPort is in use by something that is not the GEO Simulator UI; using $alt instead." -ForegroundColor Yellow
+  }
   $selectedPort = $alt
 }
 
