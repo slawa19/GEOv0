@@ -294,7 +294,7 @@ The easiest way to run the GEO Hub is using Docker Compose:
 ```bash
 # 1. Clone the repo
 git clone https://github.com/slawa19/GEOv0.git
-cd GEOv0-PROJECT
+cd GEOv0
 
 # 2. Start services (DB, Redis, API)
 #
