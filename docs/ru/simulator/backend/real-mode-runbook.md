@@ -91,6 +91,8 @@ Simulator UI v2 — отдельный Vite‑прототип.
 
 Скрипт аккуратно обходит «зарезервированные» Windows порты (excludedportrange) и подбирает альтернативный, если надо.
 
+Для Interact (действия участников) backend поднимайте через `./scripts/run_full_stack.ps1`, а не через `run_local.ps1`: только он выставляет `SIMULATOR_ACTIONS_ENABLE=1`, а также `SIMULATOR_MAX_ACTIVE_RUNS=10` и `SIMULATOR_REAL_AMOUNT_CAP=500`, если они не заданы (`scripts/run_full_stack.ps1:1368-1382`). `run_local.ps1` их не выставляет, и backend работает на кодовых умолчаниях `app/config.py`: действия выключены (`403 ACTIONS_DISABLED`), один активный прогон на процесс, без потолка суммы.
+
 ---
 
 ## 4) Real Mode семантика: Postgres + Redis через Docker Compose
