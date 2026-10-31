@@ -91,11 +91,20 @@ _UNSIGNED = "__internal__"
 
 SCENARIO_TRUSTLINE_REFUSED = "SCENARIO_TRUSTLINE_REFUSED"
 
+#: `details.reason` of a refused scenario line (MiniMax pilot M2, 2026-10-31): an end that is not a participant of the
+#: scenario (MM2-MM-A), a limit that is not a decimal string - a JSON number included (MM2-MM-B) - and a negative limit
+#: (MM2-SOL-2). Until then the seeder skipped the three without a word.
+TRUST_LINE_END_NOT_A_PARTICIPANT = "trust_line_end_not_a_participant"
+LIMIT_NOT_A_DECIMAL_STRING = "limit_not_a_decimal_string"
+LIMIT_NEGATIVE = "limit_negative"
+
 
 class ScenarioTrustLineRefused(ConflictException):
     """028 `F-028-3`/`F-028-24`: a scenario line the trust-line doors would refuse - its policy breaks the policy
     grammar, its limit is finer than the equivalent's step, or (030 S3b) the service refuses it: a suspended end, a
-    stopped or held equivalent, a self-line. Seeding stops naming the line; it is never skipped (the policy decides
+    stopped or held equivalent, a self-line; or (MM2, 2026-10-31) an end is not a participant of the scenario, or the
+    limit is not a decimal string (a JSON number included) or is negative - the plain-digits grammar itself is the
+    registry's check at load. Seeding stops naming the line; it is never skipped (the policy decides
     who mediates) and never rounded (owner В-4)."""
 
     #: The named reasons that are NOT the scenario's fault and that a later seeding does not meet: another seeding of
@@ -366,18 +375,34 @@ class RealScenarioSeeder:
                     continue
                 from_pid = str(tl.get("from") or "").strip()
                 to_pid = str(tl.get("to") or "").strip()
-                if not from_pid or not to_pid:
-                    continue
                 p_from = p_by_pid.get(from_pid)
                 p_to = p_by_pid.get(to_pid)
                 if p_from is None or p_to is None:
-                    continue
+                    # MM2-MM-A (2026-10-31): every pid of `participants` is in the database by now (inserted above or
+                    # adopted), so a missing end is not a participant of the scenario - an empty or undeclared pid, or
+                    # one only an inject introduces (injects run after the seeding). Skipped silently, the line vanished
+                    # while the planner kept planning payments along it. The registry refuses it at load
+                    # (`scenario_story`); this is the second line for a scenario that did not come through it.
+                    raise ScenarioTrustLineRefused(
+                        f"{from_pid}->{to_pid} {eq}",
+                        TRUST_LINE_END_NOT_A_PARTICIPANT,
+                        "an end of the line is not a participant of the scenario",
+                    )
 
                 raw_limit = tl.get("limit")
+                # MM2-MM-B (section 8): a limit is a decimal string. A JSON number is a binary float by now, and
+                # `Decimal(str(float))` stored `123456789012.12345678` as `123456789012.12346`; a value that does not
+                # parse was skipped without a word (MM2-SOL-2). Both are refused by name.
                 try:
-                    limit = Decimal(str(raw_limit))
+                    if not isinstance(raw_limit, str):
+                        raise InvalidOperation
+                    limit = Decimal(raw_limit)
                 except (InvalidOperation, ValueError):
-                    continue
+                    raise ScenarioTrustLineRefused(
+                        f"{from_pid}->{to_pid} {eq}",
+                        LIMIT_NOT_A_DECIMAL_STRING,
+                        "the limit is not a decimal string",
+                    ) from None
                 if not limit.is_finite():
                     # 054-A-13 (brother of 034 S4b): `NaN` and `Infinity` parse, and ordering `NaN` RAISES - the
                     # comparison below left the seeding with an unnamed `InvalidOperation`. A non-finite limit is
@@ -388,13 +413,21 @@ class RealScenarioSeeder:
                         "the limit is not a finite number",
                     )
                 if limit < 0:
-                    continue
+                    # MM2-SOL-2: a negative limit was skipped without a word; the trust-line door refuses it
+                    # (`require_non_negative`), and so does the seeding, by name. Zero is a limit.
+                    raise ScenarioTrustLineRefused(
+                        f"{from_pid}->{to_pid} {eq}",
+                        LIMIT_NEGATIVE,
+                        "the limit is negative",
+                    )
                 # Storage-capacity door (012 / F-012-1).  A scenario limit that does not fit
                 # `Numeric(20, 8)` would be silently rounded on write, or abort the whole
                 # seeding transaction with `numeric field overflow`.  Skipping the single
                 # trustline keeps the blast radius of a bad config entry where the rest of
                 # this loop already puts it -- one edge missing, not a scenario that will not
-                # load -- and matches how every other malformed field here is handled. A limit finer
+                # load. (Written when every other malformed field here was skipped too; since 028 E4,
+                # 054-A-13 and MM2 (2026-10-31) the others are refused by name, and this skip is the
+                # last one - kept pending a decision, BACKLOG MM2-SOL-2.) A limit finer
                 # than 1E-8 is finer than any step: the step check below refuses it by name (028 E4).
                 if money_storability_violation(limit) not in (None, MONEY_QUANTIZATION):
                     continue

@@ -16,7 +16,7 @@ equivalent for the whole seeding transaction.
 
 THE CHARACTERIZATION (green before and after, the half that must NOT move): the initial statuses
 `active`/`closed` (028 `F-028-29`: `frozen` is refused, below) and the fallback of anything else to `active`, the policy default, the skips (no
-equivalent, unknown participant, negative, non-numeric and too-large limits - 028 E4: a limit finer than 1E-8 is refused by name instead, a live line already there) and
+equivalent, too-large limits, a live line already there - 028 E4: a limit finer than 1E-8 is refused by name instead, and since MM2 2026-10-31 so are an unknown participant and a negative or non-numeric limit) and
 repeated seeding - including the one surprising property found while pinning it: a `closed` scenario line is
 NOT found by the live-line lookup, so every repeated seeding imports it once more as a new closed row.
 
@@ -68,11 +68,9 @@ def _world() -> dict:
              "policy": "not-a-dict"},
             {"from": pid["B"], "to": pid["D"], "equivalent": e1, "limit": "7", "status": "weird"},
             {"from": pid["D"], "to": pid["B"], "equivalent": e2, "limit": "20"},
-            # skipped
-            {"from": pid["C"], "to": pid["D"], "equivalent": e1, "limit": "-1"},
-            {"from": pid["C"], "to": pid["A"], "equivalent": e1, "limit": "abc"},
+            # skipped (MM2, 2026-10-31: a negative or non-numeric limit and a line to an undeclared participant are
+            # refused by name now - `tests/integration/test_mm_m2_scenario_load_refusals_postgres.py`)
             {"from": pid["D"], "to": pid["A"], "equivalent": e1, "limit": "1000000000000"},  # too large to store (028 E4: 1E-9 now refuses)
-            {"from": pid["A"], "to": f"P21S_GHOST_{n}", "equivalent": e1, "limit": "5"},
             {"from": pid["A"], "to": pid["D"], "equivalent": "", "limit": "5"},
             {"from": pid["C"], "to": pid["B"], "equivalent": e1, "limit": "99"},  # a live line exists
         ],

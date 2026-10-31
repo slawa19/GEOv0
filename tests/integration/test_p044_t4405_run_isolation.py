@@ -28,7 +28,7 @@ from app.config import settings
 from app.core.payments.service import PaymentService
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, RunIdentityUnbound
 from app.core.simulator.runtime import runtime
-from app.core.simulator.scenario_registry import ScenarioRegistry
+from app.core.simulator.scenario_registry import ScenarioRegistry, scenario_to_record
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from tests.conftest import MODE_B, sessionmaker_of
@@ -303,10 +303,15 @@ async def test_a_reference_to_an_undeclared_participant_refuses_the_run_before_i
 ) -> None:
     _reg, added, _tmp = registry
     bad, good = f"p044-stranger-{uuid.uuid4().hex[:8]}", f"p044-declared-{uuid.uuid4().hex[:8]}"
-    for scenario_id, stranger in ((bad, True), (good, False)):
-        r = await client.post(f"{API}/scenarios", headers=ADMIN, json=_upload_body(scenario_id, stranger=stranger))
-        added.append(scenario_id)
-        assert r.status_code == 200, r.text
+    # MM2-MM-A (2026-10-31): the upload itself refuses a line to an undeclared participant now
+    # (`test_mm_m2_scenario_load_refusals_postgres.py`), so the scenario reaches the registry as a stored one does - by
+    # `scenario_to_record`, which does not run the story check - and the run is still refused before it exists.
+    runtime._scenarios[bad] = scenario_to_record(_upload_body(bad, stranger=True)["scenario"], source_path=None,
+                                                 created_at=None)
+    added.append(bad)
+    r = await client.post(f"{API}/scenarios", headers=ADMIN, json=_upload_body(good, stranger=False))
+    added.append(good)
+    assert r.status_code == 200, r.text
 
     runs_before = set(runtime._runs)
     r = await _start(client, ADMIN, started, bad)

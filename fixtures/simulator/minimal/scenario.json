@@ -7,6 +7,6 @@
     { "id": "p2", "name": "Coffee Shop", "type": "business" }
   ],
   "trustlines": [
-    { "from": "p1", "to": "p2", "limit": 1000, "equivalent": "UAH" }
+    { "from": "p1", "to": "p2", "limit": "1000", "equivalent": "UAH" }
   ]
 }
