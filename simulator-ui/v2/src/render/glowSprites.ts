@@ -145,6 +145,34 @@ function createSpriteCanvas(pxW: number, pxH: number): HTMLCanvasElement {
   return c
 }
 
+/**
+ * Paints ONLY the blurred shadow of a shape (MM1-S1, 2026-10-31).
+ *
+ * A canvas shadow is built from the alpha of the shape that casts it: a shape filled with alpha 0 casts nothing, and
+ * until MM1-S1 the `bloom` sprite was filled that way, so it was empty in a real browser (0 lit pixels in Chromium
+ * against 588 of `rim`). The `fx-dot` halo (pass 1 below) is still filled with alpha 0, ON PURPOSE for now: the beam
+ * contract of 039 slice C (the QA stand's "nothing painted off the route" and head-motion oracles) was measured and
+ * accepted with that halo empty, and a visible halo breaks it (MM1 report, 2026-10-31) - a decision, not this helper's. Here the shape is filled opaque but laid out one sprite width
+ * to the left, outside the canvas, and the shadow is offset back by the same distance: the sprite receives the shadow
+ * and nothing of the shape. `shadowOffsetX` is in device pixels and ignores the transform; a sprite context has the
+ * identity transform, so the offset and the shift agree. `path(dx)` must build the shape shifted by `dx` along x.
+ */
+function fillShadowOnly(
+  ctx: CanvasRenderingContext2D,
+  spriteW: number,
+  color: string,
+  path: (dx: number) => void,
+): void {
+  const off = Math.max(1, spriteW) * 2
+  ctx.save()
+  ctx.shadowOffsetX = off
+  ctx.shadowOffsetY = 0
+  ctx.fillStyle = withAlpha(color, 1)
+  path(-off)
+  ctx.fill()
+  ctx.restore()
+}
+
 function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   const o = sanitizeGlowOpts(opts)
   const key = keyFor(o)
@@ -227,20 +255,18 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   }
 
   if (o.kind === 'bloom') {
-    // Only shadow: transparent fill.
-    ctx.fillStyle = withAlpha(o.color, 0)
-
-    if (o.shape === 'circle') {
-      ctx.beginPath()
-      ctx.arc(cx, cy, Math.max(0.1, o.r * 0.8), 0, Math.PI * 2)
-      ctx.fill()
-    } else {
-      const w = Math.max(0.1, o.w - 4)
-      const h = Math.max(0.1, o.h - 4)
-      const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
-      roundedRectPath(ctx, cx - w / 2, cy - h / 2, w, h, rr)
-      ctx.fill()
-    }
+    // Only shadow (the shape itself stays off the sprite).
+    fillShadowOnly(ctx, cw, o.color, (dx) => {
+      if (o.shape === 'circle') {
+        ctx.beginPath()
+        ctx.arc(cx + dx, cy, Math.max(0.1, o.r * 0.8), 0, Math.PI * 2)
+      } else {
+        const w = Math.max(0.1, o.w - 4)
+        const h = Math.max(0.1, o.h - 4)
+        const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
+        roundedRectPath(ctx, cx + dx - w / 2, cy - h / 2, w, h, rr)
+      }
+    })
   }
 
   if (o.kind === 'rim') {
