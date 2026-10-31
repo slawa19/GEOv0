@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+import functools
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -64,6 +66,22 @@ def _dependencies():
     from app.core.simulator.scenario_equivalent import effective_equivalent
 
     return RealPaymentPlanner, pair_rules, route_breaks_policy, effective_equivalent
+
+
+@functools.cache
+def _replay_equivalent():
+    """The runtime's own `effective_equivalent` (`app/core/simulator/scenario_equivalent.py`) for the replay.
+
+    MM2-SOL-3: the runtime resolves a scenario's equivalent with it (`strip().upper()`, falling back to the scenario
+    default) and records the resolved code, so the replay reads the scenario by the same rule. The module is loaded by
+    its file: importing it through `app.core.simulator` would construct the simulator runtime, and the replay needs no
+    runtime imports or environment (module docstring). The module imports nothing from `app`.
+    """
+    path = ROOT / "app" / "core" / "simulator" / "scenario_equivalent.py"
+    spec = importlib.util.spec_from_file_location("_measure_replay_scenario_equivalent", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.effective_equivalent
 
 
 def _ratio(numerator, denominator):
@@ -608,7 +626,7 @@ def _measure_live_launch(scenario, launch, roles, intended):
         (
             _live_money(e["amount"])
             for e in payments.values()
-            if e.get("equivalent", scenario.get("baseEquivalent")) == eq
+            if _replay_equivalent()(scenario, e) == eq
             and type(e.get("time")) is int
             and e["time"] <= 20000
         ),
@@ -748,7 +766,7 @@ def _measure_live_launch(scenario, launch, roles, intended):
                 "from": event["from"],
                 "to": event["to"],
                 "amount": event["amount"],
-                "equivalent": event.get("equivalent", scenario.get("baseEquivalent")),
+                "equivalent": _replay_equivalent()(scenario, event),
             }
             actual_payment = record.get("payment")
             if (
@@ -936,7 +954,7 @@ def measure_live(bound_scenario, recording):
         }
         intended = {
             (
-                str(line.get("equivalent", bound_scenario.get("baseEquivalent"))),
+                _replay_equivalent()(bound_scenario, line),
                 str(line["to"]),
                 str(line["from"]),
             )
