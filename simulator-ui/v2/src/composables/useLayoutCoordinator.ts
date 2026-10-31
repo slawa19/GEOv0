@@ -22,11 +22,6 @@ type UseLayoutCoordinatorDeps<M extends string, S extends { generated_at: string
 
   getSourcePath: () => string
   computeLayout: (snapshot: S, w: number, h: number, mode: M) => void
-  /**
-   * MM1-M7: which node is in which group of the layout `mode` (split layouts; '' for the others). Part of the layout
-   * key: a node moving to another group lays out again, a change inside its group does not.
-   */
-  getLayoutGroupsKey?: (snapshot: S, mode: M) => string
   clampCameraPan?: () => void
 
   // Optional: notify render loop that visible state changed (e.g. after resize).
@@ -278,10 +273,6 @@ export function useLayoutCoordinator<
 		return changed
 	}
 
-  function layoutGroupsKeyOf(snap: S): string {
-    return deps.getLayoutGroupsKey?.(snap, deps.layoutMode.value) ?? ''
-  }
-
   function recomputeLayout() {
     const snap = deps.snapshot.value
     if (!snap) return
@@ -293,11 +284,8 @@ export function useLayoutCoordinator<
     //
     // topologyFingerprint covers ALL node IDs and ALL edge source→target pairs, so edge swaps
     // at stable counts correctly invalidate the layout cache (ITEM-2+7, NOTE C-1).
-    //
-    // MM1-M7: in a split layout the group composition is part of the key - a participant whose `net_sign` /
-    // status / type moves it to another group is laid out again; nothing else a patch changes is.
     const snapKey = `${deps.getSourcePath()}|${snap.nodes.length}|${snap.links.length}|${topologyFingerprint(snap)}`
-    const key = `${snapKey}|${deps.layoutMode.value}|${layout.w}x${layout.h}|${layoutGroupsKeyOf(snap)}`
+    const key = `${snapKey}|${deps.layoutMode.value}|${layout.w}x${layout.h}`
     if (key === lastLayoutKey) return
     lastLayoutKey = key
 
@@ -599,12 +587,11 @@ export function useLayoutCoordinator<
 
   // Snapshot structural changes (nodes/links) must trigger a relayout.
   // This also supports incremental topology patches that mutate snapshot in-place.
-  // MM1-M7: so must a change of the group composition of a split layout (a node patch, a freeze, a new snapshot).
   watch(
     () => {
       const s = deps.snapshot.value
       // Relayout should be driven by topology (node/link composition), not timestamps.
-      return `${computeSnapshotStructuralKey(s)}|${s ? layoutGroupsKeyOf(s) : ''}`
+      return computeSnapshotStructuralKey(s)
     },
     () => {
       if (!deps.snapshot.value) return
