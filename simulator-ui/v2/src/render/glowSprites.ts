@@ -152,8 +152,9 @@ function createSpriteCanvas(pxW: number, pxH: number): HTMLCanvasElement {
  * until MM1-S1 the `bloom` sprite was filled that way, so it was empty in a real browser (0 lit pixels in Chromium
  * against 588 of `rim`). The `fx-dot` halo (pass 1 below) is still filled with alpha 0, ON PURPOSE for now: the beam
  * contract of 039 slice C (the QA stand's "nothing painted off the route" and head-motion oracles) was measured and
- * accepted with that halo empty, and a visible halo breaks it (MM1 report, 2026-10-31) - a decision, not this helper's. Here the shape is filled opaque but laid out one sprite width
- * to the left, outside the canvas, and the shadow is offset back by the same distance: the sprite receives the shadow
+ * accepted with that halo empty, and a visible halo breaks it (MM1 report, 2026-10-31) - a decision, not this helper's.
+ * Here the shape is filled opaque but laid out two sprite widths to the left, outside the canvas, and the shadow is
+ * offset back by the same distance: the sprite receives the shadow
  * and nothing of the shape. `shadowOffsetX` is in device pixels and ignores the transform; a sprite context has the
  * identity transform, so the offset and the shift agree. `path(dx)` must build the shape shifted by `dx` along x.
  */

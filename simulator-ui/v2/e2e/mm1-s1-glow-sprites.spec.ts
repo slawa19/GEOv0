@@ -56,4 +56,7 @@ test('MM1-S1: the bloom glow sprite rasterises visible halo pixels in Chromium',
   expect(stats.rim.lit, 'rim (reference) lit pixels').toBeGreaterThan(0)
   expect(stats.bloomCircle.lit, 'bloom circle lit pixels').toBeGreaterThan(0)
   expect(stats.bloomRect.lit, 'bloom rounded-rect lit pixels').toBeGreaterThan(0)
+  // Shadow only: the opaque casting shape must stay off the sprite (an opaque body would read 255 here).
+  expect(stats.bloomCircle.maxAlpha, 'bloom circle is a soft halo, not the opaque shape').toBeLessThan(255)
+  expect(stats.bloomRect.maxAlpha, 'bloom rounded-rect is a soft halo, not the opaque shape').toBeLessThan(255)
 })

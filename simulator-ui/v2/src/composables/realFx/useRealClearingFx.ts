@@ -202,7 +202,9 @@ export function useRealClearingFx(deps: {
   // One Interact clearing arrives on both paths, in either order: the backend publishes clearing.done inside the HTTP
   // handler (`app/api/v1/simulator.py`), so the SSE event may come before the HTTP result (MM1-M16, 2026-10-31).
   // - HTTP path (Interact clearing-real) has no plan_id -> suppressed if the same edge signature was processed within
-  //   the window by EITHER path (an earlier HTTP, or the clearing.done of the same clearing);
+  //   the window by EITHER path (an earlier HTTP, or ANY clearing.done - the HTTP result cannot tell its own event
+  //   from another one over the same lines). Accepted narrow loss: a tick clearing and an Interact clearing over the
+  //   same edge set and equivalent within the window, with the Interact clearing.done lost, draw one effect, not two;
   // - SSE path (clearing.done) has plan_id -> dedup by plan_id, and suppressed if the same edge signature was just
   //   processed by the HTTP path. It does NOT check its own edge signatures: two plan ids over the same lines are two
   //   clearings. That is why the SSE signatures live in a map of their own, read only by the HTTP path.
