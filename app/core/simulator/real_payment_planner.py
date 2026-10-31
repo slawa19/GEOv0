@@ -9,6 +9,7 @@ from fractions import Fraction
 from typing import Any, Callable
 
 from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
+from app.core.simulator.real_scenario_seeder import scenario_participant_status
 from app.core.simulator.scenario_equivalent import effective_equivalent
 
 
@@ -123,6 +124,18 @@ class RealPaymentPlanner:
         self, scenario: dict[str, Any]
     ) -> list[dict[str, Any]]:
         tls = scenario.get("trustlines") or []
+        # MM2-SOL-1: a line with an end the scenario has taken out of circulation - `frozen` in the file, `suspended`
+        # as the freeze inject leaves the run's dict (`cache_invalidator.py`, step 7), `left`, `deleted` - is no
+        # candidate: every payment over it is refused (the router: `ROUTING_NO_ROUTE`, which the 054-A-7a stall counts
+        # as the scenario's own; the money boundary: 409 `participant_suspended`). Both lines of a pair share its two
+        # ends, so the pair drops out whole and `pair_rules` never sees half of it. The status is read by the seeder's
+        # one rule; a pid the scenario does not declare is not judged here.
+        inactive = {
+            str(p.get("id") or "").strip()
+            for p in scenario.get("participants") or []
+            if isinstance(p, dict)
+            and scenario_participant_status(p.get("status")) != "active"
+        }
         out: list[dict[str, Any]] = []
         active_pair_lines: dict[tuple[str, str, str], list[tuple[str, dict | None]]] = (
             {}
@@ -133,7 +146,7 @@ class RealPaymentPlanner:
             eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
             frm = str(tl.get("from") or "").strip()
             to = str(tl.get("to") or "").strip()
-            if eq and frm and to:
+            if eq and frm and to and frm not in inactive and to not in inactive:
                 pair = (eq, *sorted((frm, to)))
                 active_pair_lines.setdefault(pair, []).append((frm, tl.get("policy")))
         rules_by_pair = {
@@ -147,7 +160,7 @@ class RealPaymentPlanner:
             eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
             frm = str(tl.get("from") or "").strip()
             to = str(tl.get("to") or "").strip()
-            if not eq or not frm or not to:
+            if not eq or not frm or not to or frm in inactive or to in inactive:
                 continue
 
             try:

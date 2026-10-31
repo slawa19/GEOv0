@@ -126,9 +126,10 @@ def test_active_population_and_line_status_orientation_and_hop_bound():
     s["participants"][1]["status"] = "frozen"
     report = measure(s, ticks=20, intensity=100)
     assert report["population"]["excluded_nonactive"] == ["b"]
-    assert (
-        report["planned_nonactive_endpoint_actions"] > 0
-    )  # actual planner output retained
+    # MM2-SOL-1 (2026-10-31): the planner no longer plans over a line with a frozen end, and every line here touches
+    # b, so the real planner's output is empty. That the measurement counts every returned action, a nonactive endpoint
+    # too, is held with a planner that returns them (`test_pair_counts_cover_actual_plans_including_frozen_and_indirect` above).
+    assert (report["planned_actions"], report["planned_nonactive_endpoint_actions"]) == (0, 0)
     assert report["equivalents"]["UAH"]["eligible_ordered_pair_coverage"] == {
         "numerator": 0,
         "denominator": 6,
