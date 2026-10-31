@@ -199,10 +199,19 @@ export function useRealClearingFx(deps: {
   // IMPORTANT: dedup policy must NOT suppress distinct clearing.done events that happen to
   // share the same edge set (common in small graphs / debug "clearing-once" loops).
   //
-  // - HTTP path (Interact clearing-real) has no plan_id -> dedup by edge signature
-  // - SSE path (clearing.done) has plan_id -> dedup by plan_id, but also suppress if
-  //   a matching edge signature was just processed by the HTTP path (double-fire)
+  // One Interact clearing arrives on both paths, in either order: the backend publishes clearing.done inside the HTTP
+  // handler (`app/api/v1/simulator.py`), so the SSE event may come before the HTTP result (MM1-M16, 2026-10-31).
+  // - HTTP path (Interact clearing-real) has no plan_id -> suppressed if the same edge signature was processed within
+  //   the window by EITHER path (an earlier HTTP, or ANY clearing.done - the HTTP result cannot tell its own event
+  //   from another one over the same lines). Accepted narrow loss: a tick clearing and an Interact clearing over the
+  //   same edge set and equivalent within the window, with the Interact clearing.done lost, draw one effect, not two;
+  // - SSE path (clearing.done) has plan_id -> dedup by plan_id, and suppressed if the same edge signature was just
+  //   processed by the HTTP path. It does NOT check its own edge signatures: two plan ids over the same lines are two
+  //   clearings. That is why the SSE signatures live in a map of their own, read only by the HTTP path.
+  // - A suppression across paths CONSUMES the partner's signature: one HTTP result pairs with one clearing.done, so a
+  //   second real clearing over the same lines inside the window still draws (Codex fix-delta review, 2026-10-31).
   const _clearingFxDedupByEdgeSig = new Map<string, number>() // edgeSig → timestamp (HTTP)
+  const _clearingFxDedupBySseEdgeSig = new Map<string, number>() // edgeSig → timestamp (SSE; read by HTTP only)
   const _clearingFxDedupByPlanId = new Map<string, number>() // planId → timestamp (SSE)
   const CLEARING_FX_DEDUP_WINDOW_MS = 3000
 
@@ -326,13 +335,28 @@ export function useRealClearingFx(deps: {
       if (prevPlan !== undefined && now - prevPlan < CLEARING_FX_DEDUP_WINDOW_MS) return
 
       const prevHttp = _clearingFxDedupByEdgeSig.get(edgeSig)
-      if (prevHttp !== undefined && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) return
+      if (prevHttp !== undefined && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) {
+        // The partner of that HTTP result: consume the pairing (a later plan id over the same lines is another
+        // clearing) and remember the plan id (its replay stays suppressed).
+        _clearingFxDedupByEdgeSig.delete(edgeSig)
+        _clearingFxDedupByPlanId.set(planId, now)
+        gcClearingFxDedup(_clearingFxDedupByPlanId, now)
+        return
+      }
 
       _clearingFxDedupByPlanId.set(planId, now)
       gcClearingFxDedup(_clearingFxDedupByPlanId, now)
+      _clearingFxDedupBySseEdgeSig.set(edgeSig, now)
+      gcClearingFxDedup(_clearingFxDedupBySseEdgeSig, now)
     } else {
       const prev = _clearingFxDedupByEdgeSig.get(edgeSig)
       if (prev !== undefined && now - prev < CLEARING_FX_DEDUP_WINDOW_MS) return
+      const prevSse = _clearingFxDedupBySseEdgeSig.get(edgeSig)
+      if (prevSse !== undefined && now - prevSse < CLEARING_FX_DEDUP_WINDOW_MS) {
+        // The partner of that clearing.done: consume the pairing, one HTTP result per clearing.done.
+        _clearingFxDedupBySseEdgeSig.delete(edgeSig)
+        return
+      }
       _clearingFxDedupByEdgeSig.set(edgeSig, now)
       gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
     }
@@ -412,6 +436,7 @@ export function useRealClearingFx(deps: {
 
   function resetDedup(): void {
     _clearingFxDedupByEdgeSig.clear()
+    _clearingFxDedupBySseEdgeSig.clear()
     _clearingFxDedupByPlanId.clear()
     // A pending step of a loop of the run (or playback) that is reset does nothing.
     generation += 1
