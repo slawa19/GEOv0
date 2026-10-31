@@ -162,7 +162,9 @@ describe('MM1-M16: one Interact clearing, HTTP result and clearing.done in eithe
     h.http()
     h.advance(100)
     h.http()
-    h.advance(100)
+    // The second HTTP itself draws (the first one consumed p1's signature) - not p2 later (Codex fix-delta F2).
+    h.advance(1500)
+    expect(h.counts()).toEqual({ edgePulses: 6, amountLabels: 2 })
     h.sse('p2')
     h.advance(5000)
     expect(h.counts()).toEqual({ edgePulses: 6, amountLabels: 2 })
