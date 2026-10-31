@@ -750,11 +750,56 @@ function computeLayoutConstellations(
   })
 }
 
+type SplitLayoutMode = Extract<LayoutMode, 'balance-split' | 'type-split' | 'status-split'>
+
+function isSplitLayoutMode(mode: string): mode is SplitLayoutMode {
+  return mode === 'balance-split' || mode === 'type-split' || mode === 'status-split'
+}
+
+/**
+ * MM1-M7 (owner decision 2026-10-31): the group of a node in a split layout - the ONE rule the split layouts below
+ * group by and `splitLayoutGroupsKey` keys on, so the relayout key and the layout cannot disagree. `null`: the node
+ * falls in no group (a non-numeric `net_sign`, as before).
+ */
+function splitLayoutGroupOf(mode: SplitLayoutMode, n: Pick<GraphNode, 'net_sign' | 'status' | 'type'>): string | null {
+  if (mode === 'balance-split') {
+    // `null` / absent count as zero here (the neutral group), unlike the node's look (`vizMapping.ts`: `?`).
+    const sign = Number(n.net_sign ?? 0)
+    if (sign < 0) return 'debtors'
+    if (sign === 0) return 'neutral'
+    if (sign > 0) return 'creditors'
+    return null
+  }
+  if (mode === 'type-split') return String(n.type ?? '') === 'business' ? 'business' : 'other'
+  const s = String(n.status ?? '')
+  if (s === 'suspended') return 'suspended'
+  if (s === 'left' || s === 'deleted') return 'inactive'
+  return 'active'
+}
+
+/**
+ * MM1-M7: which node is in which group of the shown split layout, for the layout key (`useLayoutCoordinator.ts`).
+ * A node that changes its group changes the key (relayout); a change inside its group does not. The ordinary
+ * layouts return '' without reading any node attribute: a `net_sign` patch there changes the picture without a
+ * relayout (spec 039, decision 9).
+ */
+export function splitLayoutGroupsKey(snapshot: Pick<GraphSnapshot, 'nodes'>, mode: LayoutMode): string {
+  if (!isSplitLayoutMode(mode)) return ''
+  return snapshot.nodes
+    .map((n) => `${n.id}=${splitLayoutGroupOf(mode, n) ?? ''}`)
+    .sort()
+    .join('|')
+}
+
+function nodesOfGroup(nodesSorted: GraphNode[], mode: SplitLayoutMode, key: string): GraphNode[] {
+  return nodesSorted.filter((n) => splitLayoutGroupOf(mode, n) === key)
+}
+
 function computeLayoutTypeSplit(snapshot: GraphSnapshot, w: number, h: number, isTestMode: boolean) {
   // “Constellations by type”: institutions vs people.
   const nodesSorted = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const business = nodesSorted.filter((n) => String(n.type ?? '') === 'business')
-  const other = nodesSorted.filter((n) => String(n.type ?? '') !== 'business')
+  const business = nodesOfGroup(nodesSorted, 'type-split', 'business')
+  const other = nodesOfGroup(nodesSorted, 'type-split', 'other')
   return computeLayoutConstellations(
     snapshot,
     w,
@@ -771,15 +816,9 @@ function computeLayoutTypeSplit(snapshot: GraphSnapshot, w: number, h: number, i
 function computeLayoutStatusSplit(snapshot: GraphSnapshot, w: number, h: number, isTestMode: boolean) {
   // “Constellations by status”: active vs suspended vs left/deleted.
   const nodesSorted = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const statusKey = (n: GraphNode) => {
-    const s = String(n.status ?? '')
-    if (s === 'suspended') return 'suspended'
-    if (s === 'left' || s === 'deleted') return 'inactive'
-    return 'active'
-  }
-  const active = nodesSorted.filter((n) => statusKey(n) === 'active')
-  const suspended = nodesSorted.filter((n) => statusKey(n) === 'suspended')
-  const inactive = nodesSorted.filter((n) => statusKey(n) === 'inactive')
+  const active = nodesOfGroup(nodesSorted, 'status-split', 'active')
+  const suspended = nodesOfGroup(nodesSorted, 'status-split', 'suspended')
+  const inactive = nodesOfGroup(nodesSorted, 'status-split', 'inactive')
 
   return computeLayoutConstellations(
     snapshot,
@@ -798,9 +837,9 @@ function computeLayoutStatusSplit(snapshot: GraphSnapshot, w: number, h: number,
 function computeLayoutBalanceSplit(snapshot: GraphSnapshot, w: number, h: number, isTestMode: boolean) {
   // “Constellations by balance”: debtors / neutral / creditors.
   const nodesSorted = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const debtors = nodesSorted.filter((n) => Number(n.net_sign ?? 0) < 0)
-  const neutral = nodesSorted.filter((n) => Number(n.net_sign ?? 0) === 0)
-  const creditors = nodesSorted.filter((n) => Number(n.net_sign ?? 0) > 0)
+  const debtors = nodesOfGroup(nodesSorted, 'balance-split', 'debtors')
+  const neutral = nodesOfGroup(nodesSorted, 'balance-split', 'neutral')
+  const creditors = nodesOfGroup(nodesSorted, 'balance-split', 'creditors')
 
   return computeLayoutConstellations(
     snapshot,

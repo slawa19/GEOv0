@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
 
-import type { LayoutMode } from '../layout/forceLayout'
+import { splitLayoutGroupsKey, type LayoutMode } from '../layout/forceLayout'
 import type { GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 
@@ -59,6 +59,8 @@ export function useAppLayoutWiring(opts: {
     isTestMode: opts.isTestMode,
     getSourcePath: opts.getSourcePath,
     computeLayout,
+    // MM1-M7: the group rule of the split layouts themselves (`forceLayout.ts`), so key and layout agree.
+    getLayoutGroupsKey: splitLayoutGroupsKey,
     wakeUp: opts.wakeUp,
   })
 
