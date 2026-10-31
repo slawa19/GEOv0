@@ -131,4 +131,40 @@ describe('MM1-M16: one Interact clearing, HTTP result and clearing.done in eithe
     h.advance(5000)
     expect(h.counts()).toEqual({ edgePulses: 6, amountLabels: 2 })
   })
+
+  // Codex fix-delta review (2026-10-31, F1): a suppressed partner is CONSUMED - one HTTP result pairs with one
+  // clearing.done and the other way round - so a second real clearing over the same lines within the window still draws.
+  it('(g) HTTP first, its clearing.done, then a second plan id over the same lines: two effects', () => {
+    const h = harness()
+    h.http()
+    h.advance(100)
+    h.sse('p1')
+    h.advance(100)
+    h.sse('p2')
+    h.advance(5000)
+    expect(h.counts()).toEqual({ edgePulses: 6, amountLabels: 2 })
+  })
+
+  it('(h) HTTP first, its clearing.done, then the same plan id replayed: still one effect', () => {
+    const h = harness()
+    h.http()
+    h.advance(100)
+    h.sse('p1')
+    h.advance(100)
+    h.sse('p1')
+    h.advance(5000)
+    expect(h.counts()).toEqual({ edgePulses: 3, amountLabels: 1 })
+  })
+
+  it('(i) SSE p1, its HTTP, then another Interact clearing (HTTP, then its SSE p2) over the same lines: two effects', () => {
+    const h = harness()
+    h.sse('p1')
+    h.http()
+    h.advance(100)
+    h.http()
+    h.advance(100)
+    h.sse('p2')
+    h.advance(5000)
+    expect(h.counts()).toEqual({ edgePulses: 6, amountLabels: 2 })
+  })
 })

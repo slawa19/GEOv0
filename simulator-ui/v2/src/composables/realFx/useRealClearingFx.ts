@@ -208,6 +208,8 @@ export function useRealClearingFx(deps: {
   // - SSE path (clearing.done) has plan_id -> dedup by plan_id, and suppressed if the same edge signature was just
   //   processed by the HTTP path. It does NOT check its own edge signatures: two plan ids over the same lines are two
   //   clearings. That is why the SSE signatures live in a map of their own, read only by the HTTP path.
+  // - A suppression across paths CONSUMES the partner's signature: one HTTP result pairs with one clearing.done, so a
+  //   second real clearing over the same lines inside the window still draws (Codex fix-delta review, 2026-10-31).
   const _clearingFxDedupByEdgeSig = new Map<string, number>() // edgeSig → timestamp (HTTP)
   const _clearingFxDedupBySseEdgeSig = new Map<string, number>() // edgeSig → timestamp (SSE; read by HTTP only)
   const _clearingFxDedupByPlanId = new Map<string, number>() // planId → timestamp (SSE)
@@ -333,7 +335,14 @@ export function useRealClearingFx(deps: {
       if (prevPlan !== undefined && now - prevPlan < CLEARING_FX_DEDUP_WINDOW_MS) return
 
       const prevHttp = _clearingFxDedupByEdgeSig.get(edgeSig)
-      if (prevHttp !== undefined && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) return
+      if (prevHttp !== undefined && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) {
+        // The partner of that HTTP result: consume the pairing (a later plan id over the same lines is another
+        // clearing) and remember the plan id (its replay stays suppressed).
+        _clearingFxDedupByEdgeSig.delete(edgeSig)
+        _clearingFxDedupByPlanId.set(planId, now)
+        gcClearingFxDedup(_clearingFxDedupByPlanId, now)
+        return
+      }
 
       _clearingFxDedupByPlanId.set(planId, now)
       gcClearingFxDedup(_clearingFxDedupByPlanId, now)
@@ -343,7 +352,11 @@ export function useRealClearingFx(deps: {
       const prev = _clearingFxDedupByEdgeSig.get(edgeSig)
       if (prev !== undefined && now - prev < CLEARING_FX_DEDUP_WINDOW_MS) return
       const prevSse = _clearingFxDedupBySseEdgeSig.get(edgeSig)
-      if (prevSse !== undefined && now - prevSse < CLEARING_FX_DEDUP_WINDOW_MS) return
+      if (prevSse !== undefined && now - prevSse < CLEARING_FX_DEDUP_WINDOW_MS) {
+        // The partner of that clearing.done: consume the pairing, one HTTP result per clearing.done.
+        _clearingFxDedupBySseEdgeSig.delete(edgeSig)
+        return
+      }
       _clearingFxDedupByEdgeSig.set(edgeSig, now)
       gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
     }
