@@ -266,6 +266,16 @@ export function renderFxFrame(opts: {
       const b = pos.get(p.to)
       if (!a || !b) continue
 
+      // From the border of one node to the border of the other, as the payment beam (MM1-M2, 2026-10-31): the FX canvas
+      // is above the base canvas, so a centre-to-centre stroke was drawn over the bodies of both nodes. Copied out:
+      // `getLinkTermination` returns pooled points.
+      const startPt = getLinkTermination(a, b, invZ)
+      const ax = startPt.x
+      const ay = startPt.y
+      const endPt = getLinkTermination(b, a, invZ)
+      const bx = endPt.x
+      const by = endPt.y
+
       const th = p.thickness * invZ
       const inOrangeDuration = age < p.durationMs
 
@@ -296,19 +306,19 @@ export function renderFxFrame(opts: {
           ctx.globalAlpha = alpha * 0.12
           ctx.strokeStyle = p.color
           ctx.lineWidth = Math.max(spx(1.2), th * 2.4)
-          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
 
           // Mid glow.
           ctx.globalAlpha = alpha * 0.28
           ctx.strokeStyle = p.color
           ctx.lineWidth = Math.max(spx(0.7), th * 1.3)
-          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
 
           // Core line.
           ctx.globalAlpha = alpha * 0.55
           ctx.strokeStyle = withAlpha(p.color, 1.0)
           ctx.lineWidth = Math.max(spx(0.35), th * 0.6)
-          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
         }
 
         // Afterglow seed: start fading in the base-blue line during the tail of the orange phase
@@ -319,7 +329,7 @@ export function renderFxFrame(opts: {
           ctx.globalAlpha = blueAlpha
           ctx.strokeStyle = mapping.link.color.default
           ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
-          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
         }
       } else {
         // --- Afterglow phase: soft blue-gray line fading out ---
@@ -331,7 +341,7 @@ export function renderFxFrame(opts: {
           ctx.globalAlpha = afterAlpha
           ctx.strokeStyle = mapping.link.color.default
           ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
-          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
         }
       }
 
