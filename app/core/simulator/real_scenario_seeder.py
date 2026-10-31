@@ -103,7 +103,8 @@ class ScenarioTrustLineRefused(ConflictException):
     """028 `F-028-3`/`F-028-24`: a scenario line the trust-line doors would refuse - its policy breaks the policy
     grammar, its limit is finer than the equivalent's step, or (030 S3b) the service refuses it: a suspended end, a
     stopped or held equivalent, a self-line; or (MM2, 2026-10-31) an end is not a participant of the scenario, or the
-    limit is not a non-negative decimal string. Seeding stops naming the line; it is never skipped (the policy decides
+    limit is not a decimal string (a JSON number included) or is negative - the plain-digits grammar itself is the
+    registry's check at load. Seeding stops naming the line; it is never skipped (the policy decides
     who mediates) and never rounded (owner В-4)."""
 
     #: The named reasons that are NOT the scenario's fault and that a later seeding does not meet: another seeding of

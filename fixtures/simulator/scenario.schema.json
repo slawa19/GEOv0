@@ -407,7 +407,7 @@
     "scenarioAmount": {
       "type": "string",
       "pattern": "^(?!(?:\\.?[0-9]){51})[0-9]+(?:\\.[0-9]{1,18})?(?![\\s\\S])",
-      "description": "A money amount as the product's money door reads it: plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent, space or text after the last digit (`(?![\\s\\S])` is the end of the string; `$` would let a terminal newline through). Leading zeros are allowed, as everywhere. Upload additionally checks that the value is storable (Numeric(20, 8)) and positive."
+      "description": "A money amount as the product's money door reads it: plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent, space or text after the last digit (`(?![\\s\\S])` is the end of the string; `$` would let a terminal newline through). Leading zeros are allowed, as everywhere. For a payment amount, upload additionally checks that the value is storable (Numeric(20, 8)) and positive; a trust line limit may be zero, and its storability and step are checked when it is seeded."
     },
 
     "injectEffectAddParticipant": {
@@ -456,7 +456,7 @@
         },
         "limit": {
           "$ref": "#/$defs/scenarioAmount",
-          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31); zero is allowed by the grammar. Storability and the equivalent's step are checked when the inject runs."
+          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31). The grammar admits zero, but the inject skips a line whose limit is not positive; storability and the equivalent's step are checked when the inject runs."
         },
         "direction": {
           "type": "string",
@@ -490,7 +490,7 @@
         },
         "limit": {
           "$ref": "#/$defs/scenarioAmount",
-          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31); zero is allowed by the grammar. Storability and the equivalent's step are checked when the inject runs."
+          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31). The grammar admits zero, but the inject skips a line whose limit is not positive; storability and the equivalent's step are checked when the inject runs."
         }
       }
     },

@@ -189,7 +189,9 @@ async def test_control_an_inject_with_string_limits_and_its_own_lines_uploads(cl
 @pytest.mark.parametrize("store", ["uploaded", "fixture"])
 def test_mm_b_a_stored_scenario_with_a_number_limit_is_not_loaded(registry, store) -> None:
     root = registry._local_state_dir / "scenarios" if store == "uploaded" else registry._fixtures_dir
-    cases = [7, 7.5, "-1", "8"]
+    # The registry alone judges a stored or shipped scenario (no schema at load): a number, a sign, an exponent, a space
+    # and a non-finite value are each refused by it (review F4, 2026-10-31), the plain string loads.
+    cases = [7, 7.5, "-1", "1e3", " 100", "NaN", "8"]
     for i, limit in enumerate(cases):
         name = f"disk-{store}-{i}"
         directory = root / (PREFIX + name)
