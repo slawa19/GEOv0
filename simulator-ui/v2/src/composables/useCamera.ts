@@ -91,7 +91,22 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     rafId: null as ReturnType<typeof setTimeout> | number | null,
   })
 
+  /** Cancels the wheel frame scheduled by `onWheel`, by the scheduler that scheduled it (frame or timeout fallback). */
+  let cancelWheelFrame: (() => void) | null = null
+
+  /**
+   * Drops a pending wheel batch: its frame and its accumulated delta. The batch was aimed at the camera as it was
+   * before the caller changed it; applied one frame later it would zoom the reset camera (MM1-M10, 2026-10-31).
+   */
+  function cancelPendingWheel() {
+    cancelWheelFrame?.()
+    cancelWheelFrame = null
+    wheelState.rafId = null
+    wheelState.pendingDeltaY = 0
+  }
+
   function resetCamera() {
+    cancelPendingWheel()
     camera.panX = 0
     camera.panY = 0
     camera.zoom = 1
@@ -327,6 +342,8 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     // so that axis asks for the maximum zoom instead of producing Infinity.
     const fitZoom = Math.min(spanX > 0 ? availW / spanX : ZOOM_MAX, spanY > 0 ? availH / spanY : ZOOM_MAX)
 
+    // A wheel batch scheduled before the framing would zoom the framed camera one frame later (MM1-M10 sibling).
+    cancelPendingWheel()
     camera.zoom = clamp(fitZoom, ZOOM_MIN, ZOOM_MAX)
     camera.panX = layoutW / 2 - ((minX + maxX) / 2) * camera.zoom
     camera.panY = layoutH / 2 - ((minY + maxY) / 2) * camera.zoom
@@ -482,13 +499,14 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
     if (wheelState.rafId !== null) return
 
-    const raf: (cb: (t: number) => void) => ReturnType<typeof setTimeout> | number =
-      typeof requestAnimationFrame !== 'undefined'
-        ? requestAnimationFrame
-        : (cb) => setTimeout(() => cb(performance.now()), 0)
+    const useFrame = typeof requestAnimationFrame !== 'undefined'
+    const raf: (cb: (t: number) => void) => ReturnType<typeof setTimeout> | number = useFrame
+      ? requestAnimationFrame
+      : (cb) => setTimeout(() => cb(performance.now()), 0)
 
-    wheelState.rafId = raf(() => {
+    const id = raf(() => {
       wheelState.rafId = null
+      cancelWheelFrame = null
 
       const dy = wheelState.pendingDeltaY
       wheelState.pendingDeltaY = 0
@@ -513,6 +531,10 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
       deps.onCameraChanged?.()
     })
+    wheelState.rafId = id
+    cancelWheelFrame = useFrame
+      ? () => { if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(id as number) }
+      : () => clearTimeout(id as ReturnType<typeof setTimeout>)
   }
 
   return {
