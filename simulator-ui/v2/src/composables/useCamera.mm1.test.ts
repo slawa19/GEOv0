@@ -109,8 +109,8 @@ describe('MM1-M10: resetCamera cancels the pending wheel frame', () => {
   it('focusOnEdge inside the frame: the framing is not zoomed by the earlier wheel (sibling of the reset path)', () => {
     const frames = stubFrames()
     const { cameraSystem } = makeCamera()
-    const a = { id: 'a', __x: 100, __y: 100 }
-    const b = { id: 'b', __x: 300, __y: 200 }
+    const a = { __x: 100, __y: 100 }
+    const b = { __x: 300, __y: 200 }
 
     // Zoom OUT: the framing of a short edge sits at or near ZOOM_MAX, where a zoom-in would be clamped away and the
     // test would pass without the fix.
@@ -128,7 +128,7 @@ describe('MM1-M10: resetCamera cancels the pending wheel frame', () => {
     const { cameraSystem } = makeCamera()
 
     cameraSystem.onWheel(wheelEvent(-200))
-    expect(cameraSystem.focusOnEdge(null, { id: 'b', __x: 1, __y: 1 })).toBe(false)
+    expect(cameraSystem.focusOnEdge(null, { __x: 1, __y: 1 })).toBe(false)
     frames.flush()
 
     expect(cameraSystem.camera.zoom).toBeCloseTo(Math.exp(0.2), 12)
