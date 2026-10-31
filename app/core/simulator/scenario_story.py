@@ -18,6 +18,9 @@ was uploaded (review of `1afe0b09`, findings 1-5).
   therefore still depends on WHICH field of a stored scenario is damaged (review of `c2d84180`, N1; BACKLOG).
 * `story_errors` - the upload check: the same collection, nothing else. It reads no database.
 
+The ends of every `trustlines[]` line must be participants of `participants[]` (MM2-MM-A, 2026-10-31); the line's
+limit is the registry's (`scenario_registry._validate_scenario_trustline_limits`).
+
 WHAT THIS DOES NOT SEE. Whether a participant exists in the DATABASE, is active, or was introduced before the moment an
 episode names it; whether the equivalent exists; whether a scripted payment is a multiple of its equivalent's accounting
 step (`require_money_step` with the precision read from the database) - upload deliberately reads no database, so storage
@@ -283,6 +286,33 @@ def _reference_and_money_errors(
         cycle = event.get("expected_cycle")
         for i, pid in enumerate(cycle if isinstance(cycle, list) else []):
             known(f"{base}/expected_cycle/{i}", pid)
+
+    # MM2-MM-A (2026-10-31): the ends of a `trustlines[]` line are participants of `participants[]` - stricter than
+    # `known()`. The seeder runs BEFORE the first inject (`tick.py`: seeding, then the due events) and resolves a line's
+    # ends among `participants[]` only, so a line to a participant an `add_participant` inject introduces is never
+    # created (an inject's own lines are its `initial_trustlines` / `create_trustline`); a line to an undeclared pid was
+    # skipped silently while the planner kept planning payments to it.
+    participants = raw.get("participants")
+    members = {
+        p["id"]
+        for p in (participants if isinstance(participants, list) else [])
+        if isinstance(p, dict) and isinstance(p.get("id"), str)
+    }
+    trustlines = raw.get("trustlines")
+    for index, line in enumerate(trustlines if isinstance(trustlines, list) else []):
+        if not isinstance(line, dict):
+            continue
+        for key in ("from", "to"):
+            pid = line.get(key)
+            if not isinstance(pid, str) or not pid or pid not in members:
+                errors.append(
+                    {
+                        "path": f"trustlines/{index}/{key}",
+                        "message": f"participant {pid} is not a participant of the scenario (`participants`); a "
+                        "trust line of `trustlines` is seeded before any inject, so a participant an "
+                        "add_participant inject introduces cannot be its end",
+                    }
+                )
 
 
 def _distinct(errors: list[dict[str, str]]) -> list[dict[str, str]]:

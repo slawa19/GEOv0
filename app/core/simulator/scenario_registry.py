@@ -7,7 +7,6 @@ import re
 import shutil
 from collections.abc import Iterator
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,6 +18,7 @@ from app.core.simulator.scenario_equivalent import (
     scenario_default_equivalent,
 )
 from app.core.simulator.scenario_story import normalize_integral_numbers, story_errors
+from app.schemas.simulator import scenario_amount_is_well_formed
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import validate_equivalent_code
 
@@ -159,13 +159,21 @@ def _validate_scenario_equivalent_codes(raw: dict[str, Any]) -> None:
 
 
 def _validate_scenario_trustline_limits(raw: dict[str, Any]) -> None:
-    """054-A review FD1: a line's limit must parse as a finite decimal.
+    """A line's limit is a plain non-negative decimal STRING (054-A review FD1; MM2-SOL-2, MM2-MM-B, 2026-10-31).
 
-    The schema types `limit` as any string or number, and Python's `json` parses a bare `NaN`/`Infinity`; the scenario
-    picture renders the limit through `to_money_str`, which RAISES on a non-finite value - an accepted `"NaN"` made the
-    preview, the run snapshot and `trustlines-list` of the scenario answer 500. Refused here, where every scenario
-    enters the registry (upload, stored upload, shipped fixture), as the other scenario errors. Only the finiteness is
-    judged: sign, step and storability stay the seeder's named doors (054-A-13, 012)."""
+    Refused here, where every scenario enters the registry (upload, stored upload, shipped fixture), as the other
+    scenario errors:
+
+    * not finite (FD1) - the scenario picture renders the limit through `to_money_str`, which RAISES on a non-finite
+      value: an accepted `"NaN"` (or a bare JSON `NaN`) made the preview, the run snapshot and `trustlines-list` 500;
+    * a JSON number (MM2-MM-B, section 8) - `json` makes it a binary float, and the seeder read it through `str(float)`:
+      `123456789012.12345678` was stored as `123456789012.12346000` without a refusal;
+    * negative, or not the money grammar (MM2-SOL-2) - the seeder skipped such a line without a word.
+
+    The grammar is the scenario schema's `scenarioAmount` (`SCENARIO_AMOUNT_PATTERN`: digits, at most 18 fraction digits,
+    50 digits in all, no sign, exponent or space); zero is a limit. The equivalent's step and the storability in
+    `Numeric(20, 8)` stay the seeder's doors (028 E4, 012): the step needs the precision from the database, which the
+    registry does not read."""
 
     errors = []
     trustlines = raw.get("trustlines")
@@ -174,16 +182,12 @@ def _validate_scenario_trustline_limits(raw: dict[str, Any]) -> None:
     ):
         if not isinstance(trustline, dict) or "limit" not in trustline:
             continue
-        value = trustline["limit"]
-        try:
-            finite = not isinstance(value, bool) and Decimal(str(value)).is_finite()
-        except (InvalidOperation, ValueError):
-            finite = False
-        if not finite:
+        if not scenario_amount_is_well_formed(trustline["limit"]):
             errors.append(
                 {
                     "path": f"trustlines/{index}/limit",
-                    "message": "limit must be a finite decimal number",
+                    "message": "limit must be a plain non-negative decimal string (digits, at most 18 fraction "
+                    "digits, 50 digits in all); a JSON number is refused",
                 }
             )
             if len(errors) == 50:

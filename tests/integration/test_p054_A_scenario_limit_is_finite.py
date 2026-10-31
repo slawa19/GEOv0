@@ -96,7 +96,9 @@ async def test_a_non_finite_limit_is_refused_at_upload_by_name(client, registry,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("limit", ["7", 7, 7.5, "0"])
+# MM2-MM-B (2026-10-31): a JSON-number limit is refused now (`test_mm_m2_scenario_load_refusals_postgres.py`); the
+# controls are its decimal-string spellings.
+@pytest.mark.parametrize("limit", ["7", "7.00", "7.5", "0"])
 async def test_control_a_finite_limit_is_accepted_and_previewed(client, registry, limit) -> None:
     name = f"ok-{str(limit).replace('.', '-')}-{type(limit).__name__}"
     response = await _upload(client, _scenario(name, limit))

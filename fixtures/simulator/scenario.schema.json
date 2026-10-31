@@ -253,11 +253,8 @@
         "to": { "$ref": "#/$defs/id", "description": "Debtor" },
         "equivalent": { "type": "string" },
         "limit": {
-          "anyOf": [
-            { "type": "integer" },
-            { "type": "number" },
-            { "type": "string" }
-          ]
+          "$ref": "#/$defs/scenarioAmount",
+          "description": "A decimal string, never a JSON number: a number would be read through a binary float (MM2-MM-B, 2026-10-31). Zero is a limit. The registry checks the same grammar where every scenario enters it (upload, stored upload, shipped fixture); storability and the equivalent's step are the seeder's named refusals."
         },
         "policy": { "type": "object", "additionalProperties": true }
       }
@@ -458,10 +455,8 @@
           "description": "Equivalent code (e.g. 'HOUR', 'UAH')"
         },
         "limit": {
-          "anyOf": [
-            { "type": "number" },
-            { "type": "string" }
-          ]
+          "$ref": "#/$defs/scenarioAmount",
+          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31); zero is allowed by the grammar. Storability and the equivalent's step are checked when the inject runs."
         },
         "direction": {
           "type": "string",
@@ -494,10 +489,8 @@
           "description": "Equivalent code (e.g. 'HOUR', 'UAH')"
         },
         "limit": {
-          "anyOf": [
-            { "type": "number" },
-            { "type": "string" }
-          ]
+          "$ref": "#/$defs/scenarioAmount",
+          "description": "A decimal string, never a number (MM2-MM-B, 2026-10-31); zero is allowed by the grammar. Storability and the equivalent's step are checked when the inject runs."
         }
       }
     },

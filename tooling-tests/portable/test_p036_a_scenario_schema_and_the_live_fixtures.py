@@ -9,8 +9,9 @@ silently never fire. The new episode fields of 036 (`caption`, `pause_after`, `f
 
 WHY ONLY THE LIVE SET. `fixtures/simulator/_archive/golden-7_2-like` carries `time: "day_10"` (measured 2026-10-08).
 The runtime skips `_` directories and the archive is read-only (AGENTS.md §3), so after F-036-1 that file does not
-validate; `test_the_archive_exception_is_exactly_the_string_time` pins that it is the ONLY reason, so the exception
-cannot grow unnoticed.
+validate; since MM2-MM-B (2026-10-31) a trust line limit is a decimal string only, and both archived scenarios carry
+integer limits. `test_the_archive_exception_is_exactly_the_string_time_and_the_number_limits` pins that these are the
+ONLY reasons, so the exception cannot grow unnoticed.
 
 ANTI-VACUUM. A guard that cannot fail proves nothing: the validator is shown to refuse a broken live fixture, every
 refusal case is the VALID story scenario with exactly one mutation, and that story scenario is shown to validate.
@@ -96,12 +97,17 @@ def test_the_validator_refuses_a_broken_community_story() -> None:
     ]), paths
 
 
-def test_the_archive_exception_is_exactly_the_string_time() -> None:
+def test_the_archive_exception_is_exactly_the_string_time_and_the_number_limits() -> None:
     failing = {
         p.parent.name: _errors(_load(p)) for p in ARCHIVED if _errors(_load(p))
     }
-    assert list(failing) == ["golden-7_2-like"], failing
-    assert [path for path, _ in failing["golden-7_2-like"]] == ["events/0/time"], failing
+    assert list(failing) == ["clearing-demo-manual", "golden-7_2-like"], failing
+    # MM2-MM-B (2026-10-31): the archive is read-only (AGENTS.md section 3) and keeps its integer limits.
+    assert [path for path, _ in failing["clearing-demo-manual"]] == [f"trustlines/{i}/limit" for i in range(6)], failing
+    assert [path for path, _ in failing["golden-7_2-like"]] == [
+        *(f"trustlines/{i}/limit" for i in range(5)),
+        "events/0/time",
+    ], failing
 
 
 # ----------------------------------------------------------------------------------------------- the new fields
